@@ -10,6 +10,7 @@
         "inertiajs/inertia-laravel": "*",
         "laravel/ai": "*",
         "laravel/framework": "^13.17",
+        "laravel/sanctum": "*",
         "laravel/tinker": "^3.0",
         "stancl/tenancy": "^3.10"
     },
