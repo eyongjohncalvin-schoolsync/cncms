@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
 // Central model — always lives in the `public` schema, regardless of which
 // tenant schema is currently active on the default connection (see
@@ -23,7 +24,7 @@ use Illuminate\Notifications\Notifiable;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasUuid, Notifiable;
+    use HasApiTokens, HasFactory, HasUuid, Notifiable;
 
     /**
      * Get the attributes that should be cast.

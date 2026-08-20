@@ -28,8 +28,9 @@
             PostgreSQL-only (Stancl schema-per-tenant tenancy requires real Postgres
             schemas). Point tests at the same local Postgres database as .env; feature
             tests that touch tenant data use DatabaseTransactions (see
-            tests/Feature/ManuscriptCalculateTest.php) to roll back instead of
-            migrating/refreshing, so the shared dev database is never destructively reset.
+            tests/Feature/ManuscriptCalculateTest.php, tests/Feature/Api/AuthTest.php)
+            to roll back instead of migrating/refreshing, so the shared dev database
+            is never destructively reset.
         -->
         <env name="DB_CONNECTION" value="pgsql"/>
         <env name="MAIL_MAILER" value="array"/>
