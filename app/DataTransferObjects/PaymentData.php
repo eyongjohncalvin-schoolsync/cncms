@@ -1,0 +1,59 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\DataTransferObjects;
+
+/**
+ * Validated input for creating/updating a Payment. Built from a Form
+ * Request's validated array.
+ *
+ * `customerUuid` carries the external-facing customer reference; resolving
+ * it to an internal `customer_id` is the Service's job. `expiration_date`
+ * and `verification_status` are deliberately NOT represented here — both
+ * are computed server-side by App\Services\PaymentService (expiration from
+ * frequency/months, verification_status from the caller's tenant role), not
+ * supplied directly by the client, per api-spec.md section 3.2.
+ */
+final readonly class PaymentData
+{
+    public function __construct(
+        public ?string $customerUuid = null,
+        public ?string $amount = null,
+        public ?string $credit = null,
+        public ?string $frequency = null,
+        public ?int $months = null,
+        public ?bool $recordedOffline = null,
+        public ?string $recordedByDevice = null,
+    ) {}
+
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            customerUuid: $data['customer_uuid'] ?? null,
+            amount: array_key_exists('amount', $data) && $data['amount'] !== null ? (string) $data['amount'] : null,
+            credit: array_key_exists('credit', $data) && $data['credit'] !== null ? (string) $data['credit'] : null,
+            frequency: $data['frequency'] ?? null,
+            months: array_key_exists('months', $data) && $data['months'] !== null ? (int) $data['months'] : null,
+            recordedOffline: array_key_exists('recorded_offline', $data) ? (bool) $data['recorded_offline'] : null,
+            recordedByDevice: $data['recorded_by_device'] ?? null,
+        );
+    }
+
+    /**
+     * Only the attributes that were actually provided (excluding
+     * customer_id, expiration_date and verification_status, which the
+     * Service resolves/computes and injects separately).
+     */
+    public function toAttributes(): array
+    {
+        return array_filter([
+            'amount' => $this->amount,
+            'credit' => $this->credit,
+            'frequency' => $this->frequency,
+            'months' => $this->months,
+            'recorded_offline' => $this->recordedOffline,
+            'recorded_by_device' => $this->recordedByDevice,
+        ], static fn (mixed $value): bool => $value !== null);
+    }
+}
