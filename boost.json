@@ -1,0 +1,33 @@
+{
+    "agents": [
+        "claude_code",
+        "codex",
+        "gpt-4",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo",
+        "cursor",
+        "llama-2",
+        "mistral",
+        "wizardlm",
+        "falcon",
+        "gpt-neo",
+        "kiro"
+    ],
+    "cloud": true,
+    "skills": [
+        "infer-conventions",
+        "ai-sdk-development",
+        "laravel-best-practices",
+        "tailwindcss-development",
+        "deploying-laravel-cloud",
+        "inertia-react-development",
+        "pest-testing",
+        "laravel-eloquent-optimization",
+        "laravel-queue-optimization",
+        "laravel-redis-optimization",
+        "laravel-phpunit-testing",
+        "laravel-phpunit-optimization",
+        "laravel-phpunit-debugging",
+        "tailwindcss-development"
+    ]
+}
