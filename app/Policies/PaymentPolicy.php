@@ -47,4 +47,21 @@ class PaymentPolicy
     {
         return $this->context->isAnyOf('super', 'admin');
     }
+
+    public function verify(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    /**
+     * Attaching receipt evidence is evidence-gathering, not an edit to the
+     * payment record itself — the same roles that may record a payment
+     * (business-rules.md section 5: "Agent optionally attaches receipt
+     * photo") may attach a receipt to it, unlike update()/delete() which
+     * stay office-only.
+     */
+    public function attachReceipt(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+    }
 }

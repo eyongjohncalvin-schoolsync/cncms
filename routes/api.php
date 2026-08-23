@@ -2,11 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\CustomerController;
-use App\Http\Controllers\Api\PaymentController;
-use App\Http\Controllers\Api\ZoneController;
 use App\Http\Middleware\ResolveTenant;
 use Illuminate\Support\Facades\Route;
 
@@ -28,15 +24,18 @@ Route::prefix('v1')->group(function () {
             // downstream (see AuthController::me() and TenantContext).
             Route::get('auth/me', [AuthController::class, 'me']);
 
-            // CRUD workstreams register their routes here (customers,
-            // payments, agents, zones, manuscripts, resources, etc.).
+            // Each resource area owns its own route file under routes/api/
+            // (zones.php, customers.php, payments.php, ...) so independent
+            // workstreams never collide on this one file.
             // {zone}/{customer}/{payment}/{agent} route-model-bind by uuid
             // automatically — see the #[RouteKey('uuid')] attribute on each
             // model.
-            Route::apiResource('zones', ZoneController::class);
-            Route::apiResource('customers', CustomerController::class);
-            Route::apiResource('payments', PaymentController::class);
-            Route::apiResource('agents', AgentController::class);
+            require __DIR__.'/api/zones.php';
+            require __DIR__.'/api/customers.php';
+            require __DIR__.'/api/payments.php';
+            require __DIR__.'/api/agents.php';
+            require __DIR__.'/api/manuscripts.php';
+            require __DIR__.'/api/bills.php';
         });
     });
 });

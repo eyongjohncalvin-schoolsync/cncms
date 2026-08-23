@@ -43,4 +43,14 @@ class CustomerPolicy
     {
         return $this->context->isAnyOf('super', 'admin', 'manager');
     }
+
+    /**
+     * Printing a customer's bill slip (business-rules.md section 3 /
+     * api-spec.md section 9.1): role table row "Print bills" allows
+     * super/admin/manager/agent — workers cannot print.
+     */
+    public function printBill(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+    }
 }

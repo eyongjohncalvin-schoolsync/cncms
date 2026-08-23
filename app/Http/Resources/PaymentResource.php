@@ -29,6 +29,7 @@ class PaymentResource extends JsonResource
             'recorded_offline' => $this->recorded_offline,
             'created_at' => $this->created_at,
             'processed_at' => $this->processed_at,
+            'verification' => $this->whenLoaded('verification', fn () => new PaymentVerificationResource($this->verification)),
         ];
     }
 }

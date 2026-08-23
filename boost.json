@@ -18,16 +18,9 @@
         "infer-conventions",
         "ai-sdk-development",
         "laravel-best-practices",
-        "tailwindcss-development",
-        "deploying-laravel-cloud",
         "inertia-react-development",
-        "pest-testing",
-        "laravel-eloquent-optimization",
-        "laravel-queue-optimization",
-        "laravel-redis-optimization",
-        "laravel-phpunit-testing",
-        "laravel-phpunit-optimization",
-        "laravel-phpunit-debugging",
-        "tailwindcss-development"
+        "tailwindcss-development",
+        "cncms-context",
+        "deploying-laravel-cloud"
     ]
 }

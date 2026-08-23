@@ -1,7 +1,6 @@
 <?php
 
 use Illuminate\Support\Str;
-use Pdo\Mysql;
 
 return [
 
@@ -31,9 +30,6 @@ return [
     */
 
     'connections' => [
-
-
-
 
         'pgsql' => [
             'driver' => 'pgsql',
