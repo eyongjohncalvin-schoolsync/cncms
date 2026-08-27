@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { FlatList, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { fetchEligibleForDisconnection } from '../src/api/customers';
 import { isNetworkError, extractErrorMessage } from '../src/api/client';
@@ -125,9 +125,9 @@ export default function DisconnectionsScreen() {
 
     if (phase === 'loading') {
         return (
-            <View style={styles.flex}>
+            <View style={styles.center}>
                 <Stack.Screen options={{ title: 'Disconnections', headerShown: true }} />
-                <EmptyState title="Loading…" />
+                <ActivityIndicator size="large" color={colors.danger} />
             </View>
         );
     }
@@ -188,6 +188,7 @@ export default function DisconnectionsScreen() {
 
 const styles = StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
     header: { padding: spacing.lg, paddingBottom: spacing.md, gap: spacing.xs },
     headerTitle: { fontSize: fontSize.lg, fontWeight: '800', color: colors.textPrimary },
     headerSubtitle: { fontSize: fontSize.sm, color: colors.textSecondary },

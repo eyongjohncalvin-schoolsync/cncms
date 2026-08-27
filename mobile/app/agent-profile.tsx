@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { Card } from '../src/components/ui/Card';
 import { Badge, type BadgeTone } from '../src/components/ui/Badge';
@@ -75,8 +75,9 @@ export default function AgentProfileScreen() {
 
     if (state === 'loading') {
         return (
-            <View style={styles.flex}>
+            <View style={styles.center}>
                 <Stack.Screen options={{ title: 'My Profile' }} />
+                <ActivityIndicator size="large" color={colors.accent.home} />
             </View>
         );
     }
@@ -175,6 +176,7 @@ const AVATAR_SIZE = 72;
 
 const styles = StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
     content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
     headerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
     avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2, backgroundColor: colors.surfaceMuted },
