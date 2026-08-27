@@ -594,3 +594,117 @@ including both PDF-export tests, run directly via `phpunit` with a raised `-d me
 around the same pre-existing dompdf environment ceiling stage 4's addendum already noted (15 tests,
 134 assertions); `PaymentTest.php` (Web + Api) for the `PaymentVerificationService` fix (61 tests, 367
 assertions). 143 tests / 1045 assertions total, all passing.
+
+## Addendum (2026-08-27): closing the real-swecom-fixture-corruption gap in `ManuscriptGenerationBatchServiceTest`/`ManuscriptPublishStaleRaceTest`
+
+**The incident.** Earlier the same day, 1,509 bogus manuscript rows for nonsense future periods
+(`2031-01`/`2031-02`) were found permanently committed against all 446 real `swecom` customers,
+created in one 16-second window, with **zero trace in `command_runs`** — proving it bypassed every
+normal tracked path. Traced to `tests/Feature/ManuscriptGenerationBatchServiceTest.php` and
+`tests/Feature/ManuscriptPublishStaleRaceTest.php`: unlike every other feature test in this suite
+(which wraps fixtures in `DatabaseTransactions`/`RefreshDatabase` and rolls back), these two
+**committed real, uncommitted-by-transaction fixtures straight into the live `swecom` tenant
+schema**, relying entirely on a bare `finally { ... }` block to manually delete them again. A killed
+test process, a timeout, or an exception thrown mid-cleanup skipped that `finally` entirely — which
+is exactly what happened.
+
+**Why these two files couldn't just use the normal transaction pattern.** Stancl's
+`DatabaseManager::connectToTenant()` unconditionally purges and recreates the `tenant` PDO
+connection on every `tenancy()->initialize()` call — including the ones Stancl's
+`QueueTenancyBootstrapper` triggers automatically for **every queued job**, confirmed to fire even
+under `QUEUE_CONNECTION=sync` in tests (`Illuminate\Queue\SyncQueue` still emits
+`JobProcessing`/`JobProcessed`). That purge silently disconnects/rolls back an open outer
+transaction's uncommitted fixtures before a `Bus::batch()` chunk job (§4.1) ever gets to read them —
+a real, load-bearing constraint, not a shortcut someone forgot to fix. This is genuinely a different
+problem from the ordinary tests in this file's neighborhood.
+
+**Options considered, in the order the investigation actually weighed them:**
+
+1. **A more crash-resistant PHPUnit lifecycle hook** (e.g. something that runs even after a fatal
+   error) — investigated and **ruled out as insufficient on its own**: PHPUnit's `tearDown()` does
+   not run after a truly fatal PHP error, a `SIGKILL`, an OS-level process kill, or a hard crash
+   either — only after a normal return, a caught exception, or an assertion failure. Any fix relying
+   solely on a better-behaved `tearDown()` would still have a gap for the exact "process killed"
+   scenario this incident represents.
+2. **A safety-net sweep/cleanup command** (`debug:check-babila`-shaped tooling: detect and remove
+   rows tagged as belonging to this test pattern) — **deliberately not built**. This is exactly the
+   shape of tooling that just caused a separate incident (`debug:check-babila`, removed the same day)
+   — a blanket "delete anything matching a pattern" tool touching a real tenant schema is a standing
+   risk even when scoped carefully, and the option below removes the *need* for any such tool rather
+   than adding one more piece of code trusted to run correctly.
+3. **A dedicated, disposable tenant SCHEMA per test, instead of the real `swecom` schema — chosen.**
+   Implemented via a new `Tests\Feature\Concerns\UsesDisposableTenant` trait, reusing a pattern
+   already proven safe elsewhere in this exact codebase
+   (`tests/Feature/Web/LandlordTest.php::test_store_provisions_a_working_tenant`): `Tenant::create()`
+   runs Stancl's `CreateDatabase -> MigrateDatabase -> SeedDatabase` pipeline **synchronously**
+   (`TenancyServiceProvider` pins `shouldBeQueued(false)` on `TenantCreated`), and `$tenant->delete()`
+   runs `DeleteDatabase` synchronously too — a real `DROP SCHEMA "..." CASCADE` on Postgres. Both test
+   classes' `setUp()`/`tearDown()` now provision a uniquely-named, throwaway tenant per test method
+   (`zmgb<timestamp><random>` / `zpsr<timestamp><random>`) and drop its schema in `tearDown()`. Every
+   fixture these tests commit now lives in a schema unique to that one test invocation — never in
+   `swecom` or any other real tenant. This also let the per-test `finally { cleanUp(...) }`
+   boilerplate in both files be deleted entirely: dropping the whole schema is total, unconditional
+   cleanup regardless of what a test created or how far it got, so there is nothing left for a
+   `finally` block to do.
+
+**The actual safety property.** If the test process is killed, times out, or crashes mid-test, the
+worst case is now an orphaned `tenant<id>` schema sitting unused in the test database — harmless
+clutter, not corrupted real customer data. This does **not** depend on any cleanup code successfully
+running; the data was simply never written to a real tenant in the first place. Orphaned schemas from
+this exact pattern already existed in this database before this fix (`tenantzreg2026...`, from
+unrelated self-service-onboarding tests dated 2026-08-25/26) — confirming "occasional schema
+pruning" is an already-accepted, already-occurring cost in this codebase, not a new one introduced
+here.
+
+**Empirical proof (not just code review).** A scratch test deliberately called `exit(1)` mid-test,
+immediately after committing real fixtures (zone, customer, payment, a full `dispatch()`/publish
+cycle) to a disposable tenant, but before `tearDown()` could run — the closest reproduction of "a
+killed test process" achievable from inside PHP (PHPUnit reported `Fatal error: Premature end of PHP
+process`, confirming `tearDown()` never executed). A separate verification pass then confirmed:
+the disposable schema was left orphaned and **did** contain the real fixture (proving the kill
+happened after a real commit, not before); and `swecom` showed **zero** manuscripts and **zero**
+`command_runs` for the test's period, with its customer count unchanged at exactly 446. This directly
+demonstrates the failure mode this incident represents no longer touches real tenant data, rather
+than just reasoning that it shouldn't.
+
+**Cost accepted.** Provisioning (`CreateDatabase`+`MigrateDatabase`+`SeedDatabase`, ~62 tenant
+migrations) plus dropping a schema measured at ~4.3s per cycle. Both files now provision one
+disposable tenant per test method (13 methods total between the two files), adding roughly
+20–30s to their combined run time versus the old real-`swecom` approach — verified: both files
+together now run in ~28s stand-alone. A shared-tenant-per-class optimization was considered (to pay
+that cost once per file instead of once per method) but not built: Laravel's `TestCase` tears down
+and rebuilds the entire application container between every test method, so cheaply sharing one
+provisioned tenant across a class's methods would require manually re-bootstrapping the framework
+outside its normal per-test lifecycle in `tearDownAfterClass()` — exactly the kind of nonstandard,
+easy-to-get-subtly-wrong mechanism this fix is deliberately avoiding elsewhere. The simple,
+already-proven, per-method pattern was preferred over a faster but novel one.
+
+**What this preserves.** Both files still exercise the real thing they were written to prove:
+`ManuscriptGenerationBatchServiceTest` still runs real `Bus::batch()` chunked jobs (job_batches rows,
+real chunk counts, real per-chunk isolation) against a real, fully-migrated tenant schema — not a
+mock or an in-memory substitute — so the queued-job/tenancy-purge interaction is still genuinely
+exercised, just against a disposable schema instead of `swecom`. `ManuscriptPublishStaleRaceTest`
+still exercises the real `recalculateOne()`-vs-`publish()` race with real writes. No test assertions
+were weakened or removed to make this fix — the far-future test periods (`2031-01`..`2032-02`) were
+originally chosen to avoid colliding with real historical demo data in `swecom`; that reasoning is
+now moot (a disposable schema has no history to collide with) but the periods were left as-is since
+changing them carried no benefit and some risk of an unrelated typo.
+
+**Residual risk: substantially mitigated, not zero, and the remaining gap is a different one.**
+Real customer/tenant data (`swecom`) can no longer be corrupted by a killed/crashed run of either of
+these two test files — that specific incident is closed. What remains, and is out of scope for this
+fix: (1) an orphaned disposable schema from a killed run is genuinely harmless but does require
+occasional manual pruning (`DROP SCHEMA "tenant<id>" CASCADE` for `tenantz*` schemas older than any
+real tenant) — no tooling was built for this per the reasoning in option 2 above; a landlord-only
+admin script could be added later if the clutter becomes a real problem, scoped narrowly to schemas
+matching this test-fixture naming convention only. (2) This fix covers exactly the two files
+identified in this incident. Any *future* test that needs to commit real, transaction-unsafe fixtures
+for the same tenancy-purge reason should use `Tests\Feature\Concerns\UsesDisposableTenant` from the
+start — the trait is written to be reused, but nothing enforces that a future author won't reach for
+the old real-tenant-plus-`finally` pattern again by copying an old test as a template. (3) Four
+pre-existing `command_runs` rows were found in `swecom` during this investigation (ids 807/769/865/
+1266, periods matching this file's old far-future convention, `metadata.trigger = "unspecified"` with
+a single `customer_id`) — audit-log-only residue (zero associated manuscripts, customer count exactly
+446), left over from **before** this fix, not created by it. Not deleted as part of this task —
+touching real `swecom` rows autonomously is exactly the category of action this fix exists to
+prevent; flagged here for the product owner to review and remove if confirmed safe.
