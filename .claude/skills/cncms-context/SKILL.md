@@ -493,6 +493,7 @@ All mutations are audit-logged. All responses use UUIDs for entity references.
 - **In-app notification system:** `references/in-app-notifications.md`
 - **Complaint Desk (web + mobile):** `references/complaint-desk.md`
 - **Prepaid-time preservation across suspend/disconnect:** `references/prepaid-pause-handling.md`
+- **Arrears Adjustment (write-off) — maker-checker workflow, where to find it in the UI:** `references/arrears-adjustment.md`
 - **Backup & restore process (design, not yet implemented):** `references/backup-strategy.md`
 
 Note: this file and `.ai/skills/cncms-context/SKILL.md` are kept byte-identical; a third,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Services\ArrearsAdjustmentService;
 use App\Services\ManuscriptService;
 use App\Services\PaymentService;
 use App\Support\TenantContext;
@@ -18,6 +19,7 @@ class DashboardController extends Controller
     public function __construct(
         private readonly ManuscriptService $manuscripts,
         private readonly PaymentService $payments,
+        private readonly ArrearsAdjustmentService $arrearsAdjustments,
     ) {}
 
     public function index(Request $request): Response
@@ -54,6 +56,17 @@ class DashboardController extends Controller
                 'monthly_income' => $summary['total_collected'],
                 'total_arrears' => $summary['total_arrears'],
                 'collection_rate' => $summary['collection_rate'],
+                // Same "maker-checker pending count" idea as
+                // pending_verifications above, for the Arrears Adjustment
+                // feature (App\Services\ArrearsAdjustmentService::dashboard()
+                // — previously computed but never actually surfaced
+                // anywhere outside the Audit Log page's "Arrears
+                // Adjustments" sub-tab, which meant there was no top-level
+                // signal pointing anyone toward that review queue at all).
+                // Not role-gated, matching pending_verifications' existing
+                // convention of showing the same raw count to every
+                // dashboard viewer regardless of who can actually act on it.
+                'pending_arrears_adjustments' => $this->arrearsAdjustments->dashboard()['pending_approval'],
             ],
         ]);
     }

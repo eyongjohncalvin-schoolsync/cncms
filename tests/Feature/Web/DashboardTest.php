@@ -35,6 +35,7 @@ class DashboardTest extends TestCase
                 ->component('Dashboard')
                 ->has('stats.total_customers')
                 ->has('stats.pending_verifications')
-                ->has('stats.monthly_income'));
+                ->has('stats.monthly_income')
+                ->has('stats.pending_arrears_adjustments'));
     }
 }

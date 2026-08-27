@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -143,49 +144,62 @@ class ArrearsAdjustmentService
      */
     public function approve(ArrearsAdjustment $adjustment, User $actor): ArrearsAdjustment
     {
-        if (! $adjustment->isPending()) {
-            throw ValidationException::withMessages([
-                'status' => ['This adjustment has already been decided and cannot be approved again.'],
-            ]);
-        }
+        return DB::transaction(function () use ($adjustment, $actor): ArrearsAdjustment {
+            // Re-fetch under a row lock rather than trusting the caller's
+            // in-memory copy: two requests that both loaded the same
+            // 'pending' row before either committed a decision must not
+            // both be able to approve it (or double-apply the ledger
+            // effect). Checking isPending() on the object the caller
+            // handed in would silently pass on a stale copy whose status
+            // was still 'pending' in memory even though the DB row had
+            // already moved on — see ArrearsAdjustmentTest's stale-read
+            // guard test, which caught exactly this.
+            $adjustment = ArrearsAdjustment::query()->lockForUpdate()->findOrFail($adjustment->id);
 
-        $customer = Customer::query()->findOrFail($adjustment->customer_id);
-        $currentArrears = $this->arrearsFor($customer, $adjustment->target_period);
+            if (! $adjustment->isPending()) {
+                throw ValidationException::withMessages([
+                    'status' => ['This adjustment has already been decided and cannot be approved again.'],
+                ]);
+            }
 
-        if (bccomp($currentArrears, (string) $adjustment->arrears_snapshot, 2) !== 0) {
-            throw ValidationException::withMessages([
-                'status' => [
-                    "This customer's arrears figure for {$adjustment->target_period} has changed since this ".
-                    "request was made (was {$adjustment->arrears_snapshot} FCFA, now {$currentArrears} FCFA). ".
-                    'Reject this request and have a fresh one submitted against the current figure rather than applying it blindly.',
-                ],
-            ]);
-        }
+            $customer = Customer::query()->findOrFail($adjustment->customer_id);
+            $currentArrears = $this->arrearsFor($customer, $adjustment->target_period);
 
-        if ($adjustment->status === 'pending' && $this->requiresSecondApproval($adjustment)) {
-            return $this->adjustments->update($adjustment, [
-                'approved_by' => $actor->id,
-                'approved_at' => Carbon::now(),
-                'status' => 'pending_second_approval',
-            ]);
-        }
+            if (bccomp($currentArrears, (string) $adjustment->arrears_snapshot, 2) !== 0) {
+                throw ValidationException::withMessages([
+                    'status' => [
+                        "This customer's arrears figure for {$adjustment->target_period} has changed since this ".
+                        "request was made (was {$adjustment->arrears_snapshot} FCFA, now {$currentArrears} FCFA). ".
+                        'Reject this request and have a fresh one submitted against the current figure rather than applying it blindly.',
+                    ],
+                ]);
+            }
 
-        $adjustment = $adjustment->status === 'pending'
-            ? $this->adjustments->update($adjustment, [
-                'approved_by' => $actor->id,
-                'approved_at' => Carbon::now(),
-                'status' => 'approved',
-            ])
-            : $this->adjustments->update($adjustment, [
-                'second_approved_by' => $actor->id,
-                'second_approved_at' => Carbon::now(),
-                'status' => 'approved',
-            ]);
+            if ($adjustment->status === 'pending' && $this->requiresSecondApproval($adjustment)) {
+                return $this->adjustments->update($adjustment, [
+                    'approved_by' => $actor->id,
+                    'approved_at' => Carbon::now(),
+                    'status' => 'pending_second_approval',
+                ]);
+            }
 
-        $this->applyLedgerEffect($adjustment, $customer);
-        $this->notifyApproved($adjustment);
+            $adjustment = $adjustment->status === 'pending'
+                ? $this->adjustments->update($adjustment, [
+                    'approved_by' => $actor->id,
+                    'approved_at' => Carbon::now(),
+                    'status' => 'approved',
+                ])
+                : $this->adjustments->update($adjustment, [
+                    'second_approved_by' => $actor->id,
+                    'second_approved_at' => Carbon::now(),
+                    'status' => 'approved',
+                ]);
 
-        return $adjustment->fresh(['customer.zone', 'requestedBy', 'approvedBy', 'secondApprovedBy']);
+            $this->applyLedgerEffect($adjustment, $customer);
+            $this->notifyApproved($adjustment);
+
+            return $adjustment->fresh(['customer.zone', 'requestedBy', 'approvedBy', 'secondApprovedBy']);
+        });
     }
 
     /**
@@ -196,20 +210,26 @@ class ArrearsAdjustmentService
      */
     public function reject(ArrearsAdjustment $adjustment, RejectArrearsAdjustmentData $data): ArrearsAdjustment
     {
-        if (! $adjustment->isPending()) {
-            throw ValidationException::withMessages([
-                'status' => ['This adjustment has already been decided and cannot be rejected.'],
+        return DB::transaction(function () use ($adjustment, $data): ArrearsAdjustment {
+            // Same stale-read close as approve() above — re-fetch under a
+            // row lock rather than trusting the caller's in-memory copy.
+            $adjustment = ArrearsAdjustment::query()->lockForUpdate()->findOrFail($adjustment->id);
+
+            if (! $adjustment->isPending()) {
+                throw ValidationException::withMessages([
+                    'status' => ['This adjustment has already been decided and cannot be rejected.'],
+                ]);
+            }
+
+            $adjustment = $this->adjustments->update($adjustment, [
+                'status' => 'rejected',
+                'rejection_reason' => $data->rejectionReason,
             ]);
-        }
 
-        $adjustment = $this->adjustments->update($adjustment, [
-            'status' => 'rejected',
-            'rejection_reason' => $data->rejectionReason,
-        ]);
+            $this->notifyRejected($adjustment);
 
-        $this->notifyRejected($adjustment);
-
-        return $adjustment;
+            return $adjustment;
+        });
     }
 
     /**

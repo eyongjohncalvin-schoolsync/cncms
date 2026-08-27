@@ -1,4 +1,4 @@
-import { Head } from '@inertiajs/react';
+import { Head, Link } from '@inertiajs/react';
 import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
@@ -7,6 +7,7 @@ import {
     IconClockExclamation,
     IconPercentage,
     IconReceipt2,
+    IconScale,
     IconUserCheck,
     IconUsers,
 } from '@tabler/icons-react';
@@ -24,6 +25,7 @@ interface DashboardProps {
         monthly_income: string;
         total_arrears: string;
         collection_rate: number;
+        pending_arrears_adjustments: number;
     };
 }
 
@@ -37,6 +39,7 @@ export default function Dashboard({ period, stats }: DashboardProps) {
     }, [stats.active_customers, stats.total_customers]);
 
     const hasPending = stats.pending_verifications > 0;
+    const hasPendingArrearsAdjustments = stats.pending_arrears_adjustments > 0;
 
     // Built entirely from the stats payload already sent to this page
     // (monthly_income / total_arrears) — no new backend data required.
@@ -110,6 +113,31 @@ export default function Dashboard({ period, stats }: DashboardProps) {
                         tone="purple"
                     />
                 </div>
+                {/*
+                    Pending Arrears Adjustments — the maker-checker review
+                    queue's only top-level pointer anywhere in the app (the
+                    "Adjust Arrears" request modal lives on each customer's
+                    own page, and the approve/reject queue itself lives on
+                    the Audit Log page's "Arrears Adjustments" sub-tab; this
+                    card is the thing that tells someone that queue exists
+                    at all, and links straight to it). Same
+                    "pending-count-as-a-nudge" idea as "Pending Verification"
+                    above, for the same maker-checker shape
+                    (App\Services\ArrearsAdjustmentService::dashboard()).
+                */}
+                <Link
+                    href="/audit/logs?view=arrears_adjustments"
+                    className="animate-fade-up rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600"
+                    style={{ animationDelay: '360ms' }}
+                >
+                    <StatCard
+                        label="Pending Arrears Adjustments"
+                        value={stats.pending_arrears_adjustments.toLocaleString()}
+                        hint={hasPendingArrearsAdjustments ? 'Awaiting review' : undefined}
+                        icon={<IconScale size={20} stroke={1.75} />}
+                        tone={hasPendingArrearsAdjustments ? 'red' : 'purple'}
+                    />
+                </Link>
             </div>
 
             <Card className="mt-4 animate-fade-up p-0" style={{ animationDelay: '380ms' }}>
