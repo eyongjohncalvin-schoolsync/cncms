@@ -40,13 +40,28 @@ class TenantDatabaseSeeder extends Seeder
         ];
 
         $now = now();
+        $branchId = $this->mainBranchId();
 
         DB::table('zones')->insert(array_map(static fn (string $name): array => [
+            'branch_id' => $branchId,
             'name' => $name,
             'town' => 'KUMBA 3',
             'created_at' => $now,
             'updated_at' => $now,
         ], $names));
+    }
+
+    /**
+     * `zones.branch_id` is NOT NULL (see
+     * database/migrations/tenant/2026_08_24_160010_add_branch_id_to_zones_table.php),
+     * and the "Main Branch" row this seeder's zones/company belong to is
+     * seeded by the branches table's own creation migration
+     * (2026_08_24_160000_create_branches_table.php), which always runs
+     * before seeding in the tenant provisioning pipeline.
+     */
+    private function mainBranchId(): int
+    {
+        return (int) DB::table('branches')->where('name', 'Main Branch')->value('id');
     }
 
     private function seedExpenseCategories(): void
@@ -84,6 +99,7 @@ class TenantDatabaseSeeder extends Seeder
         $now = now();
 
         DB::table('companies')->insert([
+            'branch_id' => $this->mainBranchId(),
             'name' => 'SWECOM PLC',
             'location' => '3/CORNERS',
             'email' => 'shalomtech@gmail.com',
@@ -91,7 +107,6 @@ class TenantDatabaseSeeder extends Seeder
             'tech_number' => null,
             'momo_number' => '676876509/672528022',
             'momo_name' => 'MUNGWAN HANS/KELVIN MEKUME',
-            'logo' => null,
             'created_at' => $now,
             'updated_at' => $now,
         ]);

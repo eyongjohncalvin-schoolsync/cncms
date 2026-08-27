@@ -14,6 +14,19 @@ namespace App\DataTransferObjects;
  * are computed server-side by App\Services\PaymentService (expiration from
  * frequency/months, verification_status from the caller's tenant role), not
  * supplied directly by the client, per api-spec.md section 3.2.
+ *
+ * `localUuid` is the client-generated idempotency key for offline sync (see
+ * App\Services\SyncService::pushPayment()) — only ever populated by that
+ * caller; a regular (non-sync) StorePaymentRequest payload has no
+ * `local_uuid` field, so this stays null for every other create() call
+ * site.
+ *
+ * `collectedAt` is the field agent's actual offline-collection timestamp,
+ * likewise only ever populated by SyncService::pushPayment() (from the
+ * client's `created_at` wire field — see that method's doc comment for why
+ * it is renamed on the way in) and stored as `payments.collected_at`,
+ * deliberately NOT as `created_at` itself, which keeps its existing
+ * server-arrival meaning for every caller.
  */
 final readonly class PaymentData
 {
@@ -25,6 +38,8 @@ final readonly class PaymentData
         public ?int $months = null,
         public ?bool $recordedOffline = null,
         public ?string $recordedByDevice = null,
+        public ?string $localUuid = null,
+        public ?string $collectedAt = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -37,6 +52,8 @@ final readonly class PaymentData
             months: array_key_exists('months', $data) && $data['months'] !== null ? (int) $data['months'] : null,
             recordedOffline: array_key_exists('recorded_offline', $data) ? (bool) $data['recorded_offline'] : null,
             recordedByDevice: $data['recorded_by_device'] ?? null,
+            localUuid: $data['local_uuid'] ?? null,
+            collectedAt: $data['collected_at'] ?? null,
         );
     }
 
@@ -54,6 +71,8 @@ final readonly class PaymentData
             'months' => $this->months,
             'recorded_offline' => $this->recordedOffline,
             'recorded_by_device' => $this->recordedByDevice,
+            'local_uuid' => $this->localUuid,
+            'collected_at' => $this->collectedAt,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

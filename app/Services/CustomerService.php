@@ -8,40 +8,85 @@ use App\DataTransferObjects\CustomerData;
 use App\Models\Customer;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class CustomerService
 {
+    /**
+     * Deliberately does NOT constructor-inject App\Support\TenantContext,
+     * even though several methods below need the caller's branch fence for
+     * cache-key isolation — this Service is resolved directly via
+     * app(CustomerService::class) (through CustomerImportService) by at
+     * least one test (CustomerImportSeedsManuscriptArrearsTest) outside any
+     * tenant HTTP request, where no TenantContext has been bound. A hard
+     * constructor dependency there throws instead of importing. Methods use
+     * TenantContext::currentBranchId() instead, which resolves defensively
+     * and falls back to "unrestricted" — see that method's doc comment.
+     */
     public function __construct(
         private readonly CustomerRepositoryInterface $customers,
         private readonly ZoneRepositoryInterface $zones,
     ) {}
 
+    /**
+     * Customers are written frequently (new customers, payments/manuscripts
+     * affecting derived fields), so precise invalidation of every
+     * filter/page combination isn't practical. A short TTL is the pragmatic
+     * tradeoff: results can be up to ~30s stale, which is acceptable for a
+     * list view.
+     */
     public function list(array $filters, int $perPage): LengthAwarePaginator
     {
         if (! empty($filters['zone_uuid'])) {
             $filters['zone_id'] = $this->resolveZoneId($filters['zone_uuid']);
         }
 
-        return $this->customers->paginate($filters, $perPage);
+        // The branch fence (App\Support\TenantContext::$branchId) is baked
+        // into every key below rather than left out — App\Repositories\
+        // Eloquent\CustomerRepository's queries are branch-scoped, so two
+        // callers with identical $filters but different branch fences can
+        // legitimately get different rows. Without this, whichever caller's
+        // request lands first would poison the cache for every caller after
+        // it (a cross-branch super's result served back to a branch-fenced
+        // manager, or vice versa) — a real cross-branch data leak, not just
+        // staleness.
+        $cacheKey = 'customers:list:'.(TenantContext::currentBranchId() ?? 'all').':'
+            .md5(json_encode([$filters, $perPage, request()->query('page', 1)]));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(30),
+            fn (): LengthAwarePaginator => $this->customers->paginate($filters, $perPage),
+        );
     }
 
     public function findOrFail(string $uuid): Customer
     {
-        $customer = $this->customers->findByUuid($uuid, ['zone', 'latestManuscript']);
+        return Cache::remember(
+            "customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all'),
+            now()->addSeconds(60),
+            function () use ($uuid): Customer {
+                $customer = $this->customers->findByUuid($uuid, ['zone', 'latestManuscript']);
 
-        if (! $customer) {
-            throw new ModelNotFoundException("Customer [{$uuid}] not found.");
-        }
+                if (! $customer) {
+                    throw new ModelNotFoundException("Customer [{$uuid}] not found.");
+                }
 
-        $customer->setRelation(
-            'payments',
-            $customer->payments()->latest('created_at')->limit(5)->get()
+                $customer->setRelation(
+                    'payments',
+                    $customer->payments()->latest('created_at')->limit(5)->get()
+                );
+
+                return $customer;
+            },
         );
-
-        return $customer;
     }
 
     public function create(CustomerData $data): Customer
@@ -59,12 +104,80 @@ class CustomerService
 
         $customer = $this->customers->update($customer, $data, $zoneId);
 
+        $this->forgetShowCache($customer->uuid);
+
         return $customer->load('zone');
     }
 
+    /**
+     * `payments.customer_id` has always used restrictOnDelete(), and
+     * `manuscripts.customer_id`/`messages.customer_id` were fixed to match
+     * (2026_08_26_030000_restrict_delete_on_manuscripts_and_messages_
+     * customer_id.php) — the database now refuses to delete a customer with
+     * any payment, manuscript, or message history. That refusal surfaces
+     * here as a QueryException; translate it into a friendly
+     * ValidationException instead of a raw SQL error reaching the
+     * controller/user, mirroring App\Services\BranchService::delete()'s
+     * established pattern for the same restrictOnDelete() situation on
+     * zones.branch_id.
+     *
+     * The delete is wrapped in DB::transaction() for the same reason as
+     * BranchService::delete(): Postgres refuses every further statement on a
+     * transaction after an unhandled error until it's rolled back, which
+     * would otherwise break the ->count() lookups below (and, in tests, the
+     * outer per-test transaction).
+     *
+     * A customer with zero history (no payments, manuscripts, or messages —
+     * e.g. a freshly-imported or test record never billed) still deletes
+     * normally: no constraint is ever violated for that case, so this
+     * doesn't block legitimate deletions.
+     */
     public function delete(Customer $customer): void
     {
-        $this->customers->delete($customer);
+        try {
+            DB::transaction(fn () => $this->customers->delete($customer));
+        } catch (QueryException $e) {
+            if (! $this->isForeignKeyViolation($e)) {
+                throw $e;
+            }
+
+            $paymentCount = $customer->payments()->count();
+            $manuscriptCount = $customer->manuscripts()->count();
+            $messageCount = $customer->messages()->count();
+
+            $parts = array_filter([
+                $paymentCount > 0 ? "{$paymentCount} payment(s)" : null,
+                $manuscriptCount > 0 ? "{$manuscriptCount} manuscript(s)" : null,
+                $messageCount > 0 ? "{$messageCount} message(s)" : null,
+            ]);
+
+            $detail = $parts === [] ? 'billing history' : implode(', ', $parts);
+
+            throw ValidationException::withMessages([
+                'customer' => ["Cannot delete {$customer->name} — this customer has billing history ({$detail}) and cannot be deleted."],
+            ]);
+        }
+
+        $this->forgetShowCache($customer->uuid);
+    }
+
+    private function isForeignKeyViolation(QueryException $e): bool
+    {
+        return in_array($e->getCode(), ['23001', '23503'], true);
+    }
+
+    /**
+     * findOrFail()'s cache key is branch-suffixed (see its doc comment), so
+     * a single uuid can be cached under several keys — one per distinct
+     * branch fence that has looked it up. Only this actor's own key and the
+     * unrestricted ('all') key are explicitly forgotten here; any other
+     * branch-fenced caller's cached copy is bounded by findOrFail()'s 60s
+     * TTL instead, the same staleness tradeoff already accepted for list().
+     */
+    private function forgetShowCache(string $uuid): void
+    {
+        Cache::forget("customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all'));
+        Cache::forget("customers:show:{$uuid}:all");
     }
 
     private function resolveZoneId(?string $zoneUuid): int
@@ -80,5 +193,214 @@ class CustomerService
         }
 
         return $zone->id;
+    }
+
+    /**
+     * Dry-run counterpart of bulkUpdateBill() — computes what WOULD change
+     * for every matched customer without writing anything, so the office
+     * worker can see a real current->new table before committing an annual
+     * price adjustment across dozens of customers. Both this method and
+     * bulkUpdateBill() delegate to the same planBulkBillUpdate() (and, in
+     * turn, the same computeAdjustedBill() bcmath), so the number a manager
+     * previews is guaranteed to be the exact number that gets saved — the
+     * two code paths cannot drift apart.
+     *
+     * @param  string[]|null  $customerUuids  Explicit selection. When present
+     *                                        and non-empty, takes priority
+     *                                        over $filters entirely.
+     * @param  array<string, mixed>  $filters  Filter-descriptor selection
+     *                                         (zone_uuid/level/status/search —
+     *                                         the same shape list() accepts),
+     *                                         used only when $customerUuids
+     *                                         is null/empty.
+     * @param  string  $mode  One of: set, increase_fixed, increase_percent.
+     * @param  string  $value  Decimal amount (set/increase_fixed) or
+     *                         percentage (increase_percent) — may be
+     *                         negative for a decrease.
+     * @return array{
+     *     preview: list<array{customer_uuid: string, name: string, current_bill: string, new_bill: string}>,
+     *     skipped: array<string, string>,
+     * }
+     */
+    public function previewBulkBillUpdate(?array $customerUuids, array $filters, string $mode, string $value): array
+    {
+        $plan = $this->planBulkBillUpdate($customerUuids, $filters, $mode, $value);
+
+        return [
+            'preview' => $plan->filter(fn (array $row): bool => $row['new_bill'] !== null)
+                ->map(fn (array $row): array => [
+                    'customer_uuid' => $row['customer']->uuid,
+                    'name' => $row['customer']->name,
+                    'current_bill' => (string) $row['customer']->bill,
+                    'new_bill' => $row['new_bill'],
+                ])
+                ->values()
+                ->all(),
+            'skipped' => $plan->filter(fn (array $row): bool => $row['new_bill'] === null)
+                ->mapWithKeys(fn (array $row): array => [$row['customer']->uuid => $row['reason']])
+                ->all(),
+        ];
+    }
+
+    /**
+     * Commits a bulk bill adjustment — "increase every customer in Zone
+     * THR01 by 500 FCFA" / "set every VIP customer to 5,000 FCFA" — the
+     * annual price-adjustment tool office staff use instead of editing each
+     * customer one at a time through update(). Uses the exact same
+     * planBulkBillUpdate() (and computeAdjustedBill() bcmath) as
+     * previewBulkBillUpdate() above; nothing about the computation is
+     * duplicated between the two.
+     *
+     * One bad row (a computed new bill that would be non-positive or over
+     * the max) is skipped with a reason rather than failing the whole
+     * batch, matching the {succeeded|updated, failed|skipped} partial-
+     * success shape used throughout this session's bulk features
+     * (PaymentService::createBulk(), CustomerStatusService's *Many()
+     * methods). Each write goes through the repository's update() (via
+     * Customer::class's Auditable trait), so every bill change is
+     * automatically captured in audit_logs with its old/new value — no
+     * separate audit trail needed here.
+     *
+     * @param  string[]|null  $customerUuids
+     * @param  array<string, mixed>  $filters
+     * @return array{updated: string[], skipped: array<string, string>}
+     */
+    public function bulkUpdateBill(?array $customerUuids, array $filters, string $mode, string $value): array
+    {
+        $plan = $this->planBulkBillUpdate($customerUuids, $filters, $mode, $value);
+
+        $updated = [];
+        $skipped = [];
+
+        foreach ($plan as $row) {
+            $customer = $row['customer'];
+
+            if ($row['new_bill'] === null) {
+                $skipped[$customer->uuid] = $row['reason'];
+
+                continue;
+            }
+
+            $this->customers->update($customer, new CustomerData(bill: $row['new_bill']));
+            $this->forgetShowCache($customer->uuid);
+
+            $updated[] = $customer->uuid;
+        }
+
+        return ['updated' => $updated, 'skipped' => $skipped];
+    }
+
+    /**
+     * Resolves the target customer set, then computes each one's adjusted
+     * bill (or a skip reason) WITHOUT persisting anything — the single
+     * shared computation both previewBulkBillUpdate() and bulkUpdateBill()
+     * call, so preview and commit can never disagree.
+     *
+     * @param  string[]|null  $customerUuids
+     * @param  array<string, mixed>  $filters
+     * @return Collection<int, array{customer: Customer, new_bill: ?string, reason: ?string}>
+     */
+    private function planBulkBillUpdate(?array $customerUuids, array $filters, string $mode, string $value): Collection
+    {
+        $customers = $this->resolveCustomersForBulkBillUpdate($customerUuids, $filters);
+
+        return $customers->map(function (Customer $customer) use ($mode, $value): array {
+            $newBill = $this->computeAdjustedBill((string) $customer->bill, $mode, $value);
+
+            try {
+                $this->assertValidBill($newBill);
+
+                return ['customer' => $customer, 'new_bill' => $newBill, 'reason' => null];
+            } catch (ValidationException $e) {
+                $reason = collect($e->errors())->flatten()->implode(' ');
+
+                return ['customer' => $customer, 'new_bill' => null, 'reason' => "{$customer->name} {$reason}"];
+            }
+        });
+    }
+
+    /**
+     * Explicit customer_uuids selection always wins when given and
+     * non-empty; otherwise falls back to the filter descriptor
+     * (zone_uuid/level/status/search). At least one of the two must
+     * actually narrow the selection — an empty/all-null $filters with no
+     * $customerUuids would otherwise silently mean "every customer in the
+     * tenant", which is never what a blank form submission intends, so
+     * that combination is rejected defensively here (on top of
+     * BulkUpdateCustomerBillRequest's own withValidator() check) rather
+     * than trusted to the caller.
+     *
+     * @param  string[]|null  $customerUuids
+     * @param  array<string, mixed>  $filters
+     * @return Collection<int, Customer>
+     */
+    private function resolveCustomersForBulkBillUpdate(?array $customerUuids, array $filters): Collection
+    {
+        if ($customerUuids !== null && count($customerUuids) > 0) {
+            return $this->customers->findManyByUuids($customerUuids);
+        }
+
+        $hasFilter = collect($filters)->filter(fn (mixed $value): bool => $value !== null && $value !== '')->isNotEmpty();
+
+        if (! $hasFilter) {
+            throw ValidationException::withMessages([
+                'customer_uuids' => ['Select customers explicitly or provide at least one filter (zone, level, status, or search).'],
+            ]);
+        }
+
+        if (! empty($filters['zone_uuid'])) {
+            $filters['zone_id'] = $this->resolveZoneId($filters['zone_uuid']);
+        }
+
+        return $this->customers->allMatching($filters);
+    }
+
+    /**
+     * The one bcmath computation shared by preview and commit. All money
+     * math uses bcadd/bcmul/bcdiv string arithmetic, never native float
+     * operators, matching ManuscriptCalculator's established convention
+     * since this is money.
+     *
+     * - set: the new bill IS $value.
+     * - increase_fixed: $value FCFA added to the current bill (a negative
+     *   $value decreases it).
+     * - increase_percent: current bill adjusted by $value percent (a
+     *   negative $value decreases it). The percentage multiply/divide is
+     *   carried at 6 decimal places internally and only rounded down to the
+     *   final 2-decimal-place FCFA amount at the very end, so a small
+     *   percentage on a small bill doesn't get truncated away prematurely.
+     */
+    private function computeAdjustedBill(string $currentBill, string $mode, string $value): string
+    {
+        $currentBill = bcadd($currentBill, '0.00', 2);
+        $value = bcadd($value, '0.00', 2);
+
+        return match ($mode) {
+            'set' => $value,
+            'increase_fixed' => bcadd($currentBill, $value, 2),
+            'increase_percent' => bcadd($currentBill, bcdiv(bcmul($currentBill, $value, 6), '100', 6), 2),
+            default => throw ValidationException::withMessages(['mode' => ['Unsupported bill adjustment mode.']]),
+        };
+    }
+
+    /**
+     * The computed new bill must satisfy the exact same constraints as
+     * StoreCustomerRequest/UpdateCustomerRequest's `bill` rule (positive,
+     * within the DECIMAL(12,2) column's max) — checked via bccomp() string
+     * comparison, never a float comparison.
+     */
+    private function assertValidBill(string $bill): void
+    {
+        if (bccomp($bill, '0.00', 2) <= 0) {
+            throw ValidationException::withMessages([
+                'bill' => ["would result in a non-positive bill ({$bill} FCFA)."],
+            ]);
+        }
+
+        if (bccomp($bill, '999999999.99', 2) > 0) {
+            throw ValidationException::withMessages([
+                'bill' => ["would exceed the maximum allowed bill ({$bill} FCFA)."],
+            ]);
+        }
     }
 }

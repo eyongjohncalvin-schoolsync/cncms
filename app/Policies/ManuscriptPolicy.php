@@ -9,11 +9,12 @@ use App\Support\TenantContext;
 
 /**
  * Manuscripts are read-only over the API — the manuscript:calculate command
- * is the only writer (see App\Services\ManuscriptCalculator). Everyone with
- * tenant access can view, matching Zone/Customer's viewing rules. Exporting
- * the full register (business-rules.md section 4 / api-spec.md section 9.2)
- * is restricted per the role table's "Export data" row: super/admin/manager
- * only — agents cannot export.
+ * is the only writer (see App\Services\ManuscriptCalculator). Viewing is
+ * restricted per the role table's "View manuscripts" row: super/admin/
+ * manager/agent — workers are excluded (unlike Zone/Customer, which are
+ * open to everyone). Exporting the full register (business-rules.md
+ * section 4 / api-spec.md section 9.2) is restricted per the role table's
+ * "Export data" row: super/admin/manager only — agents cannot export.
  */
 class ManuscriptPolicy
 {
@@ -23,12 +24,12 @@ class ManuscriptPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
     }
 
     public function export(User $user): bool
@@ -44,5 +45,16 @@ class ManuscriptPolicy
     public function calculate(User $user): bool
     {
         return $this->context->isAnyOf('super', 'admin');
+    }
+
+    /**
+     * "Send Bill" (manual WhatsApp reminder — bill-notifications.md section
+     * 6.2) is a per-customer action on the same page manuscripts are
+     * viewed on, so it's gated to the same roles as view()/viewAny()
+     * rather than a stricter set.
+     */
+    public function sendBill(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
     }
 }

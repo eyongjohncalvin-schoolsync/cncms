@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Customer;
 use App\Models\User;
 use App\Support\TenantContext;
 
@@ -52,5 +53,94 @@ class CustomerPolicy
     public function printBill(User $user): bool
     {
         return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+    }
+
+    /**
+     * Disconnect (App\Services\CustomerStatusService): 2026-08 mobile
+     * field-ops widening — takes the target $customer (unlike suspend()/
+     * reconnect() below) so an agent's grant can be scoped to their own
+     * zone rather than a blanket role widening, exactly mirroring
+     * PaymentPolicy::verify()'s "agent may act only within their own zone"
+     * shape. super/admin/manager stay unrestricted, same as before.
+     * business-rules.md section 1 now reads "admin, manager, super roles
+     * (agent, zone-scoped, for disconnect only)". DisconnectCustomerRequest::
+     * authorize() already resolves the route-bound Customer before calling
+     * this, so it's a no-op change on the request side.
+     *
+     * Disconnect specifically (not suspend/reconnect) is the one status
+     * action an agent needs to execute in the field — a non-paying
+     * customer visited door-to-door, cut on the spot, recorded
+     * immediately. Reconnect stays office-only because it also moves money
+     * (arrears/fine collection — see reconnect()'s doc comment); suspend
+     * stays office-only because its reasons are non-payment-unrelated
+     * (tv_problem, customer_request, etc.) and carry the prepaid-pause
+     * admin choice (prepaid-pause-handling.md section 5), neither of which
+     * is a field-triggered decision.
+     */
+    public function disconnect(User $user, Customer $customer): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager')
+            || ($this->context->role === 'agent'
+                && $this->context->zoneId !== null
+                && $customer->zone_id === $this->context->zoneId);
+    }
+
+    public function suspend(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    public function reconnect(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    /**
+     * Gates the dedicated /disconnections bulk-status-action page
+     * (App\Http\Controllers\DisconnectionsController) as a whole — same
+     * super/admin/manager roles as the individual status actions, since the
+     * page exists specifically to drive them in bulk.
+     */
+    public function viewStatusBoard(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    /**
+     * The arrears-based "flagged for non-payment" eligibility view on
+     * /disconnections?eligible=1 (App\Services\CustomerEligibilityService)
+     * — deliberately broader than viewStatusBoard(): a field `agent` needs
+     * to see which of THEIR OWN zone's customers have crossed the 3x-bill
+     * arrears threshold so they can act on it in the field
+     * (DisconnectionsController scopes an agent's view to their own zone
+     * via Agent::zone_id; office roles see every zone with a filter).
+     * Executing the disconnect itself still goes through
+     * disconnect()/bulkDisconnect(), which stay super/admin/manager-only —
+     * agents can SEE the list, only office staff pulls the trigger.
+     */
+    public function viewEligibilityBoard(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+    }
+
+    /**
+     * Deliberately NOT widened alongside disconnect() above — bulk-select
+     * is an office-workboard interaction (DisconnectionsController), not a
+     * mobile one; an agent has no route to this endpoint from the app and
+     * stays office/manager-gated here, same as suspend()/reconnect().
+     */
+    public function bulkDisconnect(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    public function bulkSuspend(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    public function bulkReconnect(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
     }
 }

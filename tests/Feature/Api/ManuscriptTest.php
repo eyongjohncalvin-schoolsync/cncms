@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api;
 
+use App\Models\Manuscript;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
 use Database\Factories\PaymentFactory;
@@ -35,6 +36,14 @@ class ManuscriptTest extends TestCase
     public function test_index_lists_manuscripts_for_the_current_period_with_a_summary(): void
     {
         $period = Carbon::now()->format('Y-m');
+
+        // This runs against the real tenant schema, which may already carry
+        // manuscripts for the current period (e.g. real imported/calculated
+        // billing data) — so assert the count grew by exactly one rather
+        // than assuming a pristine period, matching how the other tests in
+        // this file scope/filter around ambient data.
+        $baseline = Manuscript::query()->where('period', $period)->count();
+
         $customer = CustomerFactory::new()->create();
         ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id, 'bill' => 2500, 'total_bill' => 2500]);
 
@@ -45,7 +54,7 @@ class ManuscriptTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('period', $period)
-            ->assertJsonPath('summary.total_customers', 1)
+            ->assertJsonPath('summary.total_customers', $baseline + 1)
             ->assertJsonStructure([
                 'data' => [['customer_uuid', 'customer_name', 'zone_name', 'bill', 'total_arrears', 'credit', 'total_bill', 'period']],
                 'summary' => ['total_customers', 'total_bill', 'total_arrears', 'total_credit', 'total_collected', 'collection_rate'],
@@ -81,7 +90,8 @@ class ManuscriptTest extends TestCase
     public function test_index_counts_verified_payments_recorded_this_period_as_collected(): void
     {
         $period = Carbon::now()->format('Y-m');
-        $customer = CustomerFactory::new()->create();
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
         ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
 
         PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 2500, 'verification_status' => 'verified']);
@@ -89,8 +99,15 @@ class ManuscriptTest extends TestCase
 
         $token = $this->tokenForRole('super');
 
+        // Scoped to this customer's own (fresh, factory-created) zone —
+        // the real swecom tenant this test runs against may already carry
+        // its own verified payments recorded this calendar month
+        // (ambient production data), which an unfiltered query would sum
+        // into total_collected alongside this test's own payment. Filtering
+        // by zone_uuid, like test_index_filters_by_zone_and_status() above,
+        // isolates the assertion to just this test's fixtures.
         $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->getJson('/api/v1/manuscripts');
+            ->getJson("/api/v1/manuscripts?zone_uuid={$zone->uuid}");
 
         $response->assertOk()->assertJsonPath('summary.total_collected', '2500.00');
     }

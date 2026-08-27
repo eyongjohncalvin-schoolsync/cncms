@@ -9,12 +9,22 @@ use App\Models\Agent;
 use App\Models\User;
 use App\Repositories\Contracts\AgentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 
 class AgentService
 {
+    /**
+     * Deliberately does NOT constructor-inject App\Support\TenantContext —
+     * see App\Services\CustomerService's identical constructor doc comment
+     * for why (a Service in this same layer is resolved outside any tenant
+     * HTTP request by at least one test). list() below uses
+     * TenantContext::currentBranchId() instead.
+     */
     public function __construct(
         private readonly AgentRepositoryInterface $agents,
         private readonly ZoneRepositoryInterface $zones,
@@ -26,7 +36,17 @@ class AgentService
             $filters['zone_id'] = $this->resolveZoneId($filters['zone_uuid']);
         }
 
-        return $this->agents->paginate($filters, $perPage);
+        $page = Paginator::resolveCurrentPage() ?: 1;
+
+        // Branch fence baked into the key — see the identical note on
+        // App\Services\CustomerService::list().
+        $cacheKey = 'agents:list:'.(TenantContext::currentBranchId() ?? 'all').':'.md5(json_encode([$filters, $perPage, $page]));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(60),
+            fn (): LengthAwarePaginator => $this->agents->paginate($filters, $perPage)
+        );
     }
 
     public function findOrFail(string $uuid): Agent
@@ -47,6 +67,8 @@ class AgentService
 
         $agent = $this->agents->create($zoneId, $userId, $data);
 
+        Cache::forget('agents:all');
+
         return $agent->load(['zone', 'user']);
     }
 
@@ -57,12 +79,16 @@ class AgentService
 
         $agent = $this->agents->update($agent, $data, $zoneId, $userId);
 
+        Cache::forget('agents:all');
+
         return $agent->load(['zone', 'user']);
     }
 
     public function delete(Agent $agent): void
     {
         $this->agents->delete($agent);
+
+        Cache::forget('agents:all');
     }
 
     private function resolveZoneId(?string $zoneUuid): int

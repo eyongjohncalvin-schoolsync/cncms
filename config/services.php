@@ -35,4 +35,25 @@ return [
         ],
     ],
 
+    // Self-service Google sign-up/sign-in (Laravel Socialite) — see
+    // .ai/skills/cncms/cncms-context/references/self-service-onboarding.md
+    // section 7. Real credentials must be provisioned in Google Cloud
+    // Console before this works end-to-end; not something an agent in this
+    // environment can do.
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+    ],
+
+    // Expo push notification service (mobile-push-notifications build
+    // notes) — App\Services\ExpoPushService. `access_token` is OPTIONAL:
+    // Expo's push send/getReceipts endpoints work unauthenticated; setting
+    // this enables Expo's "Enhanced Security" mode (rejects push requests
+    // not carrying this project's own access token), which is not required
+    // for v1 to function. Left unset here on purpose.
+    'expo' => [
+        'access_token' => env('EXPO_ACCESS_TOKEN'),
+    ],
+
 ];

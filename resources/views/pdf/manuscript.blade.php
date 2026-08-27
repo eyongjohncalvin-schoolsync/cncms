@@ -55,11 +55,43 @@
         table.register td.paid {
             width: 40px;
         }
+        .letterhead {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+        .letterhead .logo {
+            max-height: 44px;
+            max-width: 140px;
+        }
+        .registration {
+            font-size: 8px;
+            color: #444;
+        }
     </style>
 </head>
 <body>
+    @if ($company?->logoDataUri())
+        <table class="letterhead">
+            <tr>
+                <td><img src="{{ $company->logoDataUri() }}" class="logo" alt="{{ $company->name }} logo"></td>
+            </tr>
+        </table>
+    @endif
+
     <div class="title">{{ $company?->name }} -- Manuscript Register</div>
-    <div class="subtitle">Period: {{ $period }}</div>
+    <div class="subtitle">
+        Period: {{ $period }}
+        @if ($company?->head_office)
+            &nbsp;|&nbsp; {{ $company->head_office }}
+        @endif
+        @if ($company?->rccm_number || $company?->niu)
+            <div class="registration">
+                @if ($company->rccm_number) RCCM: {{ $company->rccm_number }} @endif
+                @if ($company->rccm_number && $company->niu) &nbsp;|&nbsp; @endif
+                @if ($company->niu) NIU: {{ $company->niu }} @endif
+            </div>
+        @endif
+    </div>
 
     <table class="summary">
         <tr>

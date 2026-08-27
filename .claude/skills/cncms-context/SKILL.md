@@ -16,7 +16,7 @@ description: >
 **Product name:** CNCMS (ShalomTech branding)
 **Operator:** SWECOM PLC
 **Location:** 3/Corners, Kumba 3, South West Region, Cameroon
-**Stack:** Laravel 11 (PHP 8.3) · PostgreSQL 16 · Stancl Tenancy (multi-tenant) · React + TypeScript + Inertia.js · RESTful API (Sanctum) · Capacitor (mobile) · runs locally at `127.0.0.1:8000`
+**Stack:** Laravel 13 (PHP 8.3) · PostgreSQL 16 · Stancl Tenancy (schema-per-tenant, single physical DB) · React + TypeScript + Inertia.js (web) · React Native/Expo (mobile, design stage — see `references/mobile-app-react-native.md`) · RESTful API (Sanctum) · runs locally at `127.0.0.1:8000`
 **Payment channel:** MTN/Orange Mobile Money (MOMO) — numbers `676876509 / 672528022`
 **Reconnection fine:** 2,000 FCFA for late payers
 **Currency:** FCFA (Central African Franc)
@@ -35,9 +35,9 @@ expansion, and robust financial auditing. Key changes:
 |---|---|---|
 | Database | MariaDB 10.4 | PostgreSQL 16 |
 | Primary keys | Auto-increment INT | UUID (external) + bigserial (internal) |
-| Frontend | Blade only | Inertia.js/React (web admin) + Capacitor/React (mobile agent) |
+| Frontend | Blade only | Inertia.js/React (web admin) + React Native/Expo (mobile agent, design stage) |
 | API | None | RESTful (Laravel Sanctum) |
-| Multi-tenancy | None | Stancl tenancy (database-per-tenant) |
+| Multi-tenancy | None | Stancl tenancy (schema-per-tenant, single physical DB) |
 | Offline support | None | SQLite local cache + sync queue |
 | Audit trail | Basic activity log | Comprehensive event-sourced audit |
 | Payment verification | None | Receipt-based verification + MOMO cross-check |
@@ -299,33 +299,47 @@ giving the owner a clear monthly P&L view without needing a separate accounting 
 
 ## Multi-Tenancy (Stancl Tenancy)
 
-CNCMS uses **Stancl/tenancy** (database-per-tenant model) to prepare for future expansion
-when SWECOM may manage cable networks in additional towns or when ShalomTech onboards
-other LCO clients.
+CNCMS uses **Stancl/tenancy** in **schema-per-tenant** mode (single physical PostgreSQL
+database, one Postgres schema per tenant) to prepare for future expansion when SWECOM may
+manage cable networks in additional towns or when ShalomTech onboards other LCO clients —
+without paying the operational cost of database-per-tenant (per-tenant connection pools,
+cross-database joins) while a single physical database still provides real, engine-level
+isolation per tenant.
 
 ### Tenant model
 
-- **Tenant identifier:** Each tenant gets its own PostgreSQL database (e.g. `cncms_swecom`,
-  `cncms_buea_operator`).
-- **Central database:** `cncms_landlord` stores the `tenants` table, global `users` (super admins),
-  and platform-level settings.
-- **Tenant-specific data:** customers, payments, manuscripts, expenditures, agents, zones,
-  messages — all live inside the tenant database.
-- **Shared data:** users (with role per-tenant via pivot), audit_logs (federated view), companies.
+- **Single physical database:** `cncms` (PostgreSQL). Stancl's `PostgreSQLSchemaManager` gives
+  each tenant its own Postgres schema inside that one database (e.g. `tenant_swecom`), rather
+  than a separate database.
+- **Central/`public` schema:** stores the `tenants` table, `domains`, the global `users` table,
+  `personal_access_tokens` (Sanctum), and platform-level settings.
+- **Tenant schema:** customers, payments, manuscripts, expenditures, agents, zones, messages,
+  audit_logs, and every other domain table live inside the tenant's own schema, set via Postgres
+  `search_path` when tenancy is initialized.
+- **Shared data:** `users` is central (`public` schema) — not duplicated per-tenant. Role
+  assignment is per-tenant via a `tenant_users` pivot table that lives inside each tenant's
+  schema (referencing the central `users.id`). Because everything is one database, joining
+  `public.users` to `tenant_swecom.tenant_users` is an ordinary cross-schema join, not a
+  cross-database query.
+- **Why central users:** Sanctum's `personal_access_tokens` table must live alongside `users`, so
+  a single central table avoids a "which schema do I check this token against" problem on every
+  authenticated request — also required for the mobile agent app, which hits one API URL with no
+  subdomain/tenant context; tenancy is resolved server-side from the authenticated user's
+  `tenant_users` membership, not from the request domain.
 
 ### Tenant provisioning
 
 ```bash
-php artisan tenant:create {name} --database=cncms_{slug}
+php artisan tenants:migrate --force
 ```
 
-Creates the tenant record and runs all tenant migrations to set up the full schema
-in the new database.
+Runs all tenant migrations (`database/migrations/tenant/`) against every provisioned tenant
+schema. Central migrations (`database/migrations/`) run via the normal `php artisan migrate`.
 
 ### Current setup
 
-For SWECOM (single tenant currently), the system runs in single-tenant mode by default.
-The tenancy infrastructure is in place but dormant until a second tenant is provisioned.
+Two real tenants exist today: `swecom` (SWECOM PLC) and `multimedia-digital-cable-network`.
+Both run in the same physical database, in their own schemas.
 
 ---
 
@@ -357,11 +371,13 @@ for web pages.
 **Responsive:** The web panel is fully responsive for tablet use in the office, but
 is NOT designed for offline field use (that is the mobile app's job).
 
-### Mobile Agent App (Capacitor + React + TypeScript)
+### Mobile Agent App (React Native + Expo) — design stage, not yet built
 
 Offline-first field app used by agents to collect payments and record expenditures
-while walking their zones. Built with React 18 + TypeScript (shared components with web)
-wrapped in Capacitor for native Android (and optionally iOS).
+while walking their zones. Built with React Native (Expo, EAS Build), Android-first.
+Not a Capacitor WebView wrapper — React Native has no DOM, so the UI layer is a native
+rewrite; only TypeScript API-shape interfaces are shared with the web app, not components.
+Full design in `references/mobile-app-react-native.md`.
 
 **Used by:** agent (primary), manager (supervisory view)
 
@@ -447,8 +463,9 @@ All mutations are audit-logged. All responses use UUIDs for entity references.
 - Laravel Artisan commands follow the pattern `namespace:action` (e.g. `manuscript:calculate`,
   `expenditure:monthly-summary`).
 - The web admin panel uses Inertia.js + React + TypeScript (SSR with SPA feel, no separate API needed for page loads).
-  The mobile agent app uses Capacitor + React + TypeScript (shared component library) and calls the REST API
-  directly for data operations, with local SQLite for offline storage.
+  The mobile agent app (design stage) will use React Native + Expo and call the REST API
+  directly for data operations, with local SQLite (`expo-sqlite`) for offline storage — see
+  `references/mobile-app-react-native.md`.
 - React packages: `@inertiajs/react`, `@headlessui/react`, `@tanstack/react-query` (server state),
   `zustand` (client state), `axios`, `recharts` (charting), `react-hot-toast` (notifications).
 - PostgreSQL extensions enabled: `uuid-ossp` (for UUID generation), `pgcrypto` (for hashing),
@@ -460,8 +477,24 @@ All mutations are audit-logged. All responses use UUIDs for entity references.
 
 - **Full schema (PostgreSQL DDL):** `references/database-schema.md`
 - **Billing calculation logic:** `references/business-rules.md`
-- **Resources module spec:** `references/resources-module.md`
 - **Offline sync strategy:** `references/offline-sync-strategy.md`
 - **Audit trail design:** `references/audit-strategy.md`
 - **RESTful API specification:** `references/api-spec.md`
 - **Web admin panel design:** `references/web-admin-spec.md`
+- **Company settings (logo, head office, RCCM/NIU):** `references/company-settings.md`
+- **Multi-branch / multi-location support:** `references/branches-and-locations.md`
+- **French/English language support:** `references/language-support.md`
+- **Bill notifications (SMS/Email/WhatsApp):** `references/bill-notifications.md`
+- **Frontend design system:** `references/frontend-design-system.md`
+- **Self-service tenant onboarding:** `references/self-service-onboarding.md`
+- **Fine-grained payment permissions (RBAC), including the Investor tier:** `references/rbac-permissions.md`
+- **Mobile field-agent app (React Native):** `references/mobile-app-react-native.md`
+- **Task scheduler (manuscript/bill scheduling, chunked jobs):** `references/task-scheduler.md`
+- **In-app notification system:** `references/in-app-notifications.md`
+- **Complaint Desk (web + mobile):** `references/complaint-desk.md`
+- **Prepaid-time preservation across suspend/disconnect:** `references/prepaid-pause-handling.md`
+- **Backup & restore process (design, not yet implemented):** `references/backup-strategy.md`
+
+Note: this file and `.ai/skills/cncms-context/SKILL.md` are kept byte-identical; a third,
+older copy at `.ai/skills/cncms/cncms-context/` has drifted (different tenancy-model wording, a
+stray incorrect operator line) and should be treated as superseded, not a second source of truth.

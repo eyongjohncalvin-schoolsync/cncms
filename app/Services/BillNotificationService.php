@@ -1,0 +1,146 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Manuscript;
+use Illuminate\Support\Carbon;
+
+/**
+ * Manual (free, no-Twilio) WhatsApp bill reminders — see
+ * .ai/skills/cncms/cncms-context/references/bill-notifications.md sections
+ * 1-2 and 6.2. Composes a plain-text bill reminder and a wa.me deep link
+ * that a staff member opens to send it themselves from their own WhatsApp
+ * session. No Twilio call, no template-approval requirement — that's
+ * exactly what makes this "manual mode" free and frictionless per the
+ * design doc; bulk/Twilio sending is a later phase and is NOT built here.
+ *
+ * English only for this pass — French comes later once the in-progress
+ * language-support infrastructure has translatable strings ready
+ * (see bill-notifications.md's scope note; not integrated prematurely).
+ */
+final class BillNotificationService
+{
+    /**
+     * Plain-text bill reminder for $customer, built from a Manuscript
+     * (defaults to $customer->latestManuscript — see that relation's doc
+     * comment on App\Models\Customer for why it's ordered by `period`, not
+     * `created_at`) and the tenant's Company record. Returns null when the
+     * customer has no manuscript yet — nothing real to remind them about.
+     *
+     * $manuscript can be passed explicitly by a caller that already has one
+     * loaded (e.g. Manuscripts/Index's per-row listing, which is scoped to
+     * a specific period) to avoid re-querying latestManuscript for every
+     * row.
+     */
+    public function composeMessage(Customer $customer, ?Manuscript $manuscript = null): ?string
+    {
+        $manuscript ??= $customer->latestManuscript;
+
+        if (! $manuscript instanceof Manuscript) {
+            return null;
+        }
+
+        $company = Company::cached();
+        $periodLabel = Carbon::createFromFormat('Y-m', $manuscript->period)->format('F Y');
+        $deadline = '05 '.$periodLabel;
+
+        // total_bill (bill + total_arrears - credit, clamped to 0 — see
+        // App\Services\ManuscriptCalculator's doc comment) is "what the
+        // customer currently owes right now", i.e. this period's bill plus
+        // any carried-forward arrears net of credit. total_arrears alone
+        // would omit the current period's own bill and understate what's
+        // actually due.
+        $amount = number_format((float) $manuscript->total_bill, 0, '.', ',');
+
+        $lines = [
+            "Hello {$customer->name}, this is a reminder from ".($company?->name ?? 'us').'.',
+            "Your current bill for {$periodLabel} is {$amount} FCFA, due by {$deadline}.",
+        ];
+
+        if ($company?->momo_number) {
+            $lines[] = 'Pay via MOMO: '.$company->momo_number.($company->momo_name ? " ({$company->momo_name})" : '');
+        }
+
+        $lines[] = 'Thank you for staying connected.';
+
+        return implode(' ', $lines);
+    }
+
+    /**
+     * wa.me deep link for $customer, pre-filled with composeMessage()'s
+     * text, or null when:
+     *  - they have no phone number on file (business-rules.md notes ~78%
+     *    of customers have none — this must be handled explicitly, not
+     *    silently produce a broken link), or
+     *  - their phone number doesn't normalize to a plausible Cameroon
+     *    mobile number (see normalizePhoneForWhatsapp()), or
+     *  - they have no manuscript yet (composeMessage() returned null).
+     *
+     * See composeMessage() for the optional $manuscript parameter.
+     */
+    public function waLink(Customer $customer, ?Manuscript $manuscript = null): ?string
+    {
+        $phone = $this->normalizePhoneForWhatsapp($customer->phone);
+
+        if ($phone === null) {
+            return null;
+        }
+
+        $message = $this->composeMessage($customer, $manuscript);
+
+        if ($message === null) {
+            return null;
+        }
+
+        return "https://wa.me/{$phone}?text=".rawurlencode($message);
+    }
+
+    /**
+     * Public wrapper around normalizePhoneForWhatsapp() for callers that
+     * need the normalized phone number by itself rather than a single
+     * collapsed wa.me link — specifically Api\BillController::
+     * whatsappMessage() (the mobile "Send Bill via WhatsApp" endpoint),
+     * which needs to tell "no phone on file" apart from "no manuscript
+     * yet" instead of getting one undifferentiated null back from waLink().
+     */
+    public function normalizedPhone(Customer $customer): ?string
+    {
+        return $this->normalizePhoneForWhatsapp($customer->phone);
+    }
+
+    /**
+     * Normalizes a raw customers.phone value (formats vary wildly in real
+     * data — '677440670', '(67) 321-7927', etc., per
+     * cncms-context/references/database-schema.md's known-issues list)
+     * into the digits-only, country-code-prefixed form wa.me requires.
+     * Cameroon mobile numbers are 9 local digits; returns null rather than
+     * guessing when the digit count doesn't match that shape — a wrong
+     * number is worse than no link.
+     */
+    private function normalizePhoneForWhatsapp(?string $phone): ?string
+    {
+        if ($phone === null || trim($phone) === '') {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+
+        if ($digits === '') {
+            return null;
+        }
+
+        if (str_starts_with($digits, '237') && strlen($digits) === 12) {
+            return $digits;
+        }
+
+        if (str_starts_with($digits, '0')) {
+            $digits = substr($digits, 1);
+        }
+
+        return strlen($digits) === 9 ? '237'.$digits : null;
+    }
+}

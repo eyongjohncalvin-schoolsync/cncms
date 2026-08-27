@@ -164,6 +164,45 @@ class ManuscriptTest extends TestCase
         }
     }
 
+    /**
+     * Regression test for the bug found in production: an unvalidated
+     * `period` reaching ManuscriptController::calculate() was passed
+     * straight to ManuscriptGenerationBatchService::dispatch() with
+     * autoPublish=true and no $customerIds — which recalculates and
+     * publishes EVERY customer in the tenant for that literal period
+     * string. A stray future period ("2031-02") fabricated real,
+     * non-frozen manuscript rows for the whole tenant, which then
+     * surfaced as each customer's "current bill" in
+     * BillNotificationService (it reads the latest manuscript by period).
+     * The fix rejects malformed/future periods before dispatch() ever runs.
+     */
+    public function test_a_future_period_is_rejected_and_never_dispatched(): void
+    {
+        $this->actingAsRole('admin');
+
+        $futurePeriod = Carbon::now()->addYears(5)->format('Y-m');
+
+        $response = $this->post('/manuscripts/calculate', ['period' => $futurePeriod]);
+
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+
+        $this->assertDatabaseMissing('command_runs', ['command' => 'manuscript:calculate', 'period' => $futurePeriod]);
+        $this->assertDatabaseMissing('manuscripts', ['period' => $futurePeriod]);
+    }
+
+    public function test_a_malformed_period_is_rejected_and_never_dispatched(): void
+    {
+        $this->actingAsRole('admin');
+
+        $response = $this->post('/manuscripts/calculate', ['period' => 'not-a-period']);
+
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+
+        $this->assertDatabaseMissing('command_runs', ['command' => 'manuscript:calculate', 'period' => 'not-a-period']);
+    }
+
     public function test_manager_cannot_run_the_manuscript_calculation(): void
     {
         $period = Carbon::now()->format('Y-m');
@@ -173,5 +212,189 @@ class ManuscriptTest extends TestCase
         $response = $this->post('/manuscripts/calculate', ['period' => $period]);
 
         $response->assertStatus(403);
+    }
+
+    /**
+     * ManuscriptRepository::aggregates() scopes total_bill/total_arrears to
+     * `customers.status = 'active'` (2026-08 owner decision) — a
+     * disconnected/passive/suspended customer's manuscript row still exists
+     * (ManuscriptCalculator freezes their billing rather than skipping the
+     * row entirely) but its total_bill/total_arrears must NOT be counted
+     * into the summary, because that balance is frozen/dormant, not
+     * currently-collectible money. These three tests cover each frozen
+     * status; total_credit/total_collected/collection_rate are scoped the
+     * same way and exercised together with total_arrears below since they
+     * share the same query/reasoning.
+     */
+    public function test_disconnected_customers_manuscript_is_excluded_from_the_summary_totals(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        // Filtered to a dedicated, freshly-created zone (via zone_uuid) so
+        // this test's totals aren't polluted by the tenant's real seeded
+        // customers/manuscripts, which also exist for the current period.
+        $zone = ZoneFactory::new()->create();
+
+        $active = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        // Explicit total_bill/total_arrears rather than withArrears() —
+        // withArrears() derives total_bill from the factory's own random
+        // default `bill`, not an explicit override passed to create(),
+        // which would make this assertion flaky.
+        ManuscriptFactory::new()->forPeriod($period)->create([
+            'customer_id' => $active->id,
+            'bill' => 2500,
+            'total_arrears' => 500,
+            'credit' => 0,
+            'total_bill' => 3000,
+        ]);
+
+        $disconnected = CustomerFactory::new()->disconnected()->create(['zone_id' => $zone->id, 'bill' => 3000]);
+        // Frozen customers still get a manuscript row (total_bill forced to
+        // 0 by ManuscriptCalculator) carrying forward a real but dormant
+        // arrears balance — this is exactly the figure that must NOT leak
+        // into the summary's total_arrears.
+        ManuscriptFactory::new()->forPeriod($period)->create([
+            'customer_id' => $disconnected->id,
+            'bill' => 3000,
+            'total_arrears' => 9000,
+            'credit' => 0,
+            'total_bill' => 0,
+        ]);
+
+        $this->actingAsRole('manager');
+
+        $response = $this->get('/manuscripts?period='.$period.'&zone_uuid='.$zone->uuid);
+
+        $response->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.total_bill', '3000.00')
+                ->where('summary.total_arrears', '500.00'));
+    }
+
+    public function test_suspended_customers_manuscript_is_excluded_from_the_summary_totals(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        $zone = ZoneFactory::new()->create();
+
+        $active = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $active->id, 'bill' => 2500, 'total_bill' => 2500]);
+
+        $suspended = CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'suspended', 'bill' => 3000]);
+        ManuscriptFactory::new()->forPeriod($period)->create([
+            'customer_id' => $suspended->id,
+            'bill' => 3000,
+            'total_arrears' => 6000,
+            'credit' => 0,
+            'total_bill' => 0,
+        ]);
+
+        $this->actingAsRole('manager');
+
+        $response = $this->get('/manuscripts?period='.$period.'&zone_uuid='.$zone->uuid);
+
+        $response->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.total_bill', '2500.00')
+                ->where('summary.total_arrears', '0.00'));
+    }
+
+    public function test_passive_customers_manuscript_is_excluded_from_the_summary_totals(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        $zone = ZoneFactory::new()->create();
+
+        $active = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $active->id, 'bill' => 2500, 'total_bill' => 2500]);
+
+        $passive = CustomerFactory::new()->passive()->create(['zone_id' => $zone->id, 'bill' => 2000]);
+        ManuscriptFactory::new()->forPeriod($period)->create([
+            'customer_id' => $passive->id,
+            'bill' => 2000,
+            'total_arrears' => 4000,
+            'credit' => 0,
+            'total_bill' => 0,
+        ]);
+
+        $this->actingAsRole('manager');
+
+        $response = $this->get('/manuscripts?period='.$period.'&zone_uuid='.$zone->uuid);
+
+        $response->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.total_bill', '2500.00')
+                ->where('summary.total_arrears', '0.00'));
+    }
+
+    public function test_active_customers_manuscript_is_included_in_the_summary_totals(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        $zone = ZoneFactory::new()->create();
+
+        $active = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        ManuscriptFactory::new()->forPeriod($period)->create([
+            'customer_id' => $active->id,
+            'bill' => 2500,
+            'total_arrears' => 1000,
+            'credit' => 0,
+            'total_bill' => 3500,
+        ]);
+
+        $this->actingAsRole('manager');
+
+        $response = $this->get('/manuscripts?period='.$period.'&zone_uuid='.$zone->uuid);
+
+        $response->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.total_customers', 1)
+                ->where('summary.total_bill', '3500.00')
+                ->where('summary.total_arrears', '1000.00'));
+    }
+
+    /**
+     * The same customer/manuscript pair moving between an active period and
+     * a frozen (disconnected) period must move in and out of the summary
+     * totals accordingly — this is the scenario the freeze-then-reconnect
+     * business flow actually produces (business-rules.md #6/#7).
+     */
+    public function test_summary_totals_change_correctly_when_a_customers_status_changes_between_periods(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+
+        $activePeriod = '2024-01';
+        ManuscriptFactory::new()->forPeriod($activePeriod)->create([
+            'customer_id' => $customer->id,
+            'bill' => 2500,
+            'total_arrears' => 500,
+            'credit' => 0,
+            'total_bill' => 3000,
+        ]);
+
+        $this->actingAsRole('manager');
+
+        $activeResponse = $this->get('/manuscripts?period='.$activePeriod.'&zone_uuid='.$zone->uuid);
+        $activeResponse->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.total_bill', '3000.00')
+                ->where('summary.total_arrears', '500.00'));
+
+        // Customer is disconnected, and the next period's manuscript run
+        // freezes their billing (total_bill forced to 0, arrears carried
+        // forward) — exactly ManuscriptCalculator's documented behavior.
+        $customer->update(['status' => 'disconnected']);
+
+        $frozenPeriod = '2024-02';
+        ManuscriptFactory::new()->forPeriod($frozenPeriod)->create([
+            'customer_id' => $customer->id,
+            'bill' => 2500,
+            'total_arrears' => 3000,
+            'credit' => 0,
+            'total_bill' => 0,
+        ]);
+
+        $frozenResponse = $this->get('/manuscripts?period='.$frozenPeriod.'&zone_uuid='.$zone->uuid);
+        $frozenResponse->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('summary.total_bill', '0.00')
+                ->where('summary.total_arrears', '0.00'));
     }
 }

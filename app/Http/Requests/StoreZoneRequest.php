@@ -22,6 +22,7 @@ class StoreZoneRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:25', 'unique:zones,name'],
             'town' => ['nullable', 'string', 'max:25'],
+            'branch_uuid' => ['nullable', 'uuid', 'exists:branches,uuid'],
         ];
     }
 }

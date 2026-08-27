@@ -6,18 +6,18 @@ namespace App\Http\Middleware;
 
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use App\Models\TenantUserIndex;
 use App\Support\TenantContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Session-auth equivalent of App\Http\Middleware\ResolveTenant, for the
- * Inertia web panel. Same single-tenant ("swecom") scope note applies —
- * see that class's doc comment. Kept as a separate, small middleware
- * rather than sharing code with the API version because the failure
- * modes differ: this one redirects/aborts for a browser session instead
- * of returning a JSON error body.
+ * Session-auth equivalent of App\Http\Middleware\ResolveTenant — see that
+ * class's doc comment for the TenantUserIndex-based resolution this now
+ * uses (replacing the previous hard-coded single-tenant lookup, no longer
+ * viable once self-service workspace registration can create more than
+ * one tenant).
  */
 class ResolveTenantWeb
 {
@@ -29,9 +29,17 @@ class ResolveTenantWeb
             return redirect()->route('login');
         }
 
-        $tenant = Tenant::find('swecom');
+        $indexEntry = TenantUserIndex::query()->where('user_id', $user->id)->first();
+
+        abort_if(! $indexEntry, 403, 'You do not have access to any tenant yet.');
+
+        $tenant = Tenant::find($indexEntry->tenant_id);
 
         abort_if(! $tenant, 500, 'Tenant not found.');
+
+        if (! $tenant->isApproved()) {
+            return redirect()->route('workspace.pending');
+        }
 
         tenancy()->initialize($tenant);
 
@@ -42,7 +50,7 @@ class ResolveTenantWeb
 
         abort_if(! $tenantUser, 403, 'You do not have access to this tenant.');
 
-        $context = new TenantContext($tenantUser, $tenantUser->role);
+        $context = TenantContext::resolve($tenantUser);
 
         app()->instance(TenantContext::class, $context);
 

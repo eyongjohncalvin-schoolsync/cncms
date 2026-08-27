@@ -5,16 +5,17 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
+use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['customer_id', 'content', 'sid', 'status', 'type'])]
+#[Fillable(['customer_id', 'content', 'sid', 'status', 'type', 'channel'])]
 #[RouteKey('uuid')]
 class Message extends Model
 {
-    use HasUuid;
+    use Auditable, HasUuid;
 
     public function customer(): BelongsTo
     {

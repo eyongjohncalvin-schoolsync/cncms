@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
+use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
@@ -12,12 +13,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'category_id', 'user_id', 'amount', 'description', 'receipt_path', 'spent_at',
-    'notes', 'recorded_offline', 'recorded_by_device',
+    'notes', 'recorded_offline', 'recorded_by_device', 'local_uuid',
 ])]
 #[RouteKey('uuid')]
 class Expenditure extends Model
 {
-    use HasUuid;
+    use Auditable, HasUuid;
 
     protected function casts(): array
     {

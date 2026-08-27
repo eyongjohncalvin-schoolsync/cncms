@@ -24,7 +24,7 @@ class UpdateAgentRequest extends FormRequest
             'name' => ['sometimes', 'required', 'string', 'max:50'],
             'location' => ['sometimes', 'required', 'string', 'max:50'],
             'phone' => ['sometimes', 'required', 'string', 'max:20'],
-            'salary' => ['sometimes', 'required', 'numeric', 'min:0', 'decimal:0,2'],
+            'salary' => ['sometimes', 'required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'email' => ['sometimes', 'nullable', 'email', 'max:50'],
             'dob' => ['sometimes', 'nullable', 'date'],
             'marital_status' => ['sometimes', 'nullable', 'string', 'in:yes,no'],

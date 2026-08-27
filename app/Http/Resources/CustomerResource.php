@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Models\Company;
 use App\Models\Customer;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -26,8 +27,25 @@ class CustomerResource extends JsonResource
             'others' => $this->others,
             'level' => $this->level,
             'status' => $this->status,
+            'status_reason' => $this->status_reason,
+            'status_note' => $this->status_note,
             'location' => $this->location,
             'created_at' => $this->created_at,
+            // Sent for either 'disconnected' or 'suspended' (2026-08 owner
+            // decision, business-rules.md section 6): the reconnection fine
+            // is admin-discretion opt-in for BOTH statuses now via
+            // CustomerStatusService::reconnectOne()'s $includeFine
+            // parameter — there is no status-based distinction on the fine
+            // anymore, so this figure represents what WOULD be charged if
+            // the office chooses to include it, not an automatic charge.
+            // Sourced from Company::cached()->reconnection_fine
+            // (admin-configurable, defaulting to 2000.00) so the mobile
+            // Reconnect & Pay screen shows a real, current figure instead of
+            // a hardcoded 2,000 FCFA that could drift from what
+            // Settings > Company Info has configured.
+            'reconnection_fine' => in_array($this->status, ['disconnected', 'suspended'], true)
+                ? (string) (Company::cached()?->reconnection_fine ?? '2000.00')
+                : null,
             'manuscript' => $this->whenLoaded('latestManuscript', fn () => $this->latestManuscript ? [
                 'uuid' => $this->latestManuscript->uuid,
                 'bill' => $this->latestManuscript->bill,

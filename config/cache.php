@@ -1,5 +1,17 @@
 <?php
 
+use App\Models\Agent;
+use App\Models\AuditLog;
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Expenditure;
+use App\Models\ExpenseCategory;
+use App\Models\Manuscript;
+use App\Models\Payment;
+use App\Models\User;
+use App\Models\Zone;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 
 return [
@@ -129,8 +141,50 @@ return [
     | storage. By default, no PHP classes will be unserialized from your
     | cache to prevent gadget chain attacks if your APP_KEY is leaked.
     |
+    | app/Services/*.php cache several Service methods that return Eloquent
+    | models/collections/paginators directly (e.g. ZoneService::all(),
+    | CustomerService::findOrFail(), PaymentService::list()). With this left
+    | at `false`, every cache HIT for those keys unserializes as
+    | __PHP_Incomplete_Class instead of the real model, which throws a
+    | TypeError against the method's declared return type on the very next
+    | request within the TTL (confirmed by reproducing it directly via
+    | `php artisan tinker` — the first, cache-populating call always works,
+    | only the second, cache-hit call fails, which is why this doesn't show
+    | up under CACHE_STORE=array in tests). Explicitly allow-listing just the
+    | models/collection/paginator classes those cached methods actually
+    | return (rather than `true`, which would allow unserializing ANY class)
+    | keeps the gadget-chain protection this default exists for while making
+    | the caching actually work.
+    |
+    | Company::class was originally missed here even though
+    | App\Models\Company::cached() caches a Company instance the exact same
+    | way (`Cache::remember(self::CACHE_KEY, ..., fn () =>
+    | static::query()->first())`) — that's the actual root cause of the
+    | "Return value must be of type ?App\Models\Company,
+    | __PHP_Incomplete_Class returned" production error: the class allow-list
+    | mechanism itself was working correctly (it's Laravel core's
+    | Illuminate\Cache\CacheManager::getSerializableClasses(), read straight
+    | from this config key and passed to DatabaseStore's unserialize(...,
+    | ['allowed_classes' => ...])), Company was simply the one cached model
+    | not yet on the list. Any new model added to a Cache::remember() closure
+    | anywhere in app/Services must be added here too, or it will fail the
+    | same way on its first cache hit.
+    |
     */
 
-    'serializable_classes' => false,
+    'serializable_classes' => [
+        Agent::class,
+        AuditLog::class,
+        Company::class,
+        Customer::class,
+        Expenditure::class,
+        ExpenseCategory::class,
+        Manuscript::class,
+        Payment::class,
+        User::class,
+        Zone::class,
+        Collection::class,
+        LengthAwarePaginator::class,
+    ],
 
 ];

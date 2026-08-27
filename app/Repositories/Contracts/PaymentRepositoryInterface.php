@@ -13,7 +13,11 @@ interface PaymentRepositoryInterface
      * @param  array<string, mixed>  $filters  Supported keys: 'customer_id',
      *                                         'zone_id', 'verification_status',
      *                                         'frequency', 'recorded_offline',
-     *                                         'from', 'to'.
+     *                                         'from', 'to', 'search' (matches
+     *                                         the payment's customer's name
+     *                                         or phone — see
+     *                                         CustomerRepository::paginate()'s
+     *                                         identical 'search' clause).
      */
     public function paginate(array $filters, int $perPage): LengthAwarePaginator;
 

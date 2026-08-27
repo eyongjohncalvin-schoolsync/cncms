@@ -6,13 +6,18 @@ namespace App\Http\Controllers;
 
 use App\DataTransferObjects\PaymentData;
 use App\DataTransferObjects\VerifyPaymentData;
+use App\Http\Requests\BulkVerifyPaymentRequest;
+use App\Http\Requests\StoreBulkPaymentRequest;
 use App\Http\Requests\StorePaymentRequest;
+use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
+use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
+use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -38,6 +43,8 @@ class PaymentController extends Controller
     public function __construct(
         private readonly PaymentService $payments,
         private readonly PaymentVerificationService $verifications,
+        private readonly CustomerRepositoryInterface $customers,
+        private readonly TenantContext $context,
     ) {}
 
     public function index(Request $request): Response
@@ -47,8 +54,28 @@ class PaymentController extends Controller
         $perPage = (int) $request->integer('per_page', 20);
 
         $filters = $request->only([
-            'customer_uuid', 'zone_uuid', 'verification_status', 'frequency', 'recorded_offline', 'from', 'to',
+            'customer_uuid', 'zone_uuid', 'verification_status', 'frequency', 'recorded_offline', 'from', 'to', 'search',
         ]);
+
+        // Default view = current calendar month only. Payments accumulate
+        // forever and this table has no archival/retention step, so with no
+        // date filter this query paginated over EVERY payment this tenant
+        // has ever recorded, on every single page load — the exact
+        // performance/UX complaint this scoping fixes. `?scope=all` is the
+        // explicit, deliberate opt-in for audit/historical lookup (see the
+        // "All time" control on Payments/Index.tsx) and bypasses the month
+        // default entirely, restoring the old "everything" behavior on
+        // request rather than by default. A caller who already supplies
+        // their OWN from/to (e.g. picking a specific past month, or a saved
+        // link/bookmark) is left untouched by both checks below — this only
+        // fills the gap when NEITHER an explicit range NOR scope=all was
+        // given, so nothing about today's explicit-range behavior changes.
+        $isAllTimeScope = $request->query('scope') === 'all';
+
+        if (! $isAllTimeScope && ! isset($filters['from']) && ! isset($filters['to'])) {
+            $filters['from'] = now()->startOfMonth()->toDateString();
+            $filters['to'] = now()->endOfMonth()->toDateString();
+        }
 
         $payments = $this->payments->list($filters, $perPage);
         $payments->getCollection()->load(['customer.zone', 'verification.verifier']);
@@ -72,13 +99,37 @@ class PaymentController extends Controller
             'filters' => [
                 'verification_status' => $filters['verification_status'] ?? null,
                 'frequency' => $filters['frequency'] ?? null,
+                'search' => $filters['search'] ?? null,
+                // Echoed back so the page can render an accurate "Showing:
+                // <Month Year>" / "Showing: All time" label and pre-fill the
+                // month picker — reflects the EFFECTIVE range actually
+                // applied above (including the current-month default), not
+                // just whatever the request happened to send.
+                'from' => $filters['from'] ?? null,
+                'to' => $filters['to'] ?? null,
+                'scope' => $isAllTimeScope ? 'all' : null,
             ],
-            // Tab badge counts — deliberately unfiltered by the current
-            // query (each tab always shows the total in that status,
-            // regardless of which tab is currently selected).
+            // Tab badge counts — deliberately GLOBAL, i.e. NOT scoped to the
+            // list's own from/to window (including the new current-month
+            // default above). Two options were considered: (a) scope these
+            // to the same month as the list, for visual consistency with
+            // what's on screen, or (b) keep them global as an
+            // always-accurate admin TODO signal. Went with (b): "pending"
+            // in particular exists to answer "do I have any unresolved
+            // payments anywhere, full stop" — scoping it to "this month"
+            // would make a pending payment from last month invisible the
+            // moment the calendar rolls over, silently hiding exactly the
+            // kind of stale, unresolved item this badge exists to surface.
+            // A viewer scoped to "this month" seeing a "Pending: 3" badge
+            // that doesn't match the 1 pending row on screen is an
+            // acceptable, explainable mismatch; a pending payment nobody
+            // is ever nudged to look at again is not. If this table grows
+            // large enough that these four COUNT queries become the
+            // bottleneck, the fix is a maintained cache/aggregate, not
+            // silently narrowing the signal to "this month".
             'statusCounts' => [
                 'all' => Payment::query()->count(),
-                'pending' => Payment::query()->where('verification_status', 'pending')->count(),
+                'pending' => $this->payments->pendingVerificationCount(),
                 'verified' => Payment::query()->where('verification_status', 'verified')->count(),
                 'rejected' => Payment::query()->where('verification_status', 'rejected')->count(),
             ],
@@ -92,11 +143,19 @@ class PaymentController extends Controller
         // ~549 customers total — small enough to hand the whole list to the
         // page for a client-side searchable dropdown rather than building a
         // server-side type-ahead endpoint (see PaymentController spec:
-        // "don't over-engineer").
-        $customers = Customer::query()
-            ->with('zone')
-            ->orderBy('name')
-            ->get()
+        // "don't over-engineer"). Goes through CustomerRepositoryInterface
+        // (like every other customer-listing call site) rather than a raw
+        // Customer::query() specifically so this picker is branch-scoped —
+        // a raw query here was a real data leak: a branch-fenced caller
+        // (including a flag-granted worker, see PaymentPolicy::create())
+        // would otherwise see and be able to record a payment against every
+        // customer in every branch, even though the POST is correctly
+        // scoped via PaymentService::resolveCustomerId() ->
+        // CustomerRepository::findByUuid().
+        $customers = $this->customers->allMatching([]);
+        $customers->load('zone');
+
+        $customers = $customers
             ->map(fn (Customer $customer): array => [
                 'uuid' => $customer->uuid,
                 'name' => $customer->name,
@@ -123,6 +182,55 @@ class PaymentController extends Controller
         return redirect()->route('payments.index')->with('success', 'Payment recorded successfully.');
     }
 
+    /**
+     * Records one payment per selected customer, each at that customer's
+     * own bill — see PaymentService::createBulk(). Reports a partial
+     * success (some created, some skipped) rather than treating any
+     * failure as fatal for the whole batch.
+     */
+    public function storeBulk(StoreBulkPaymentRequest $request): RedirectResponse
+    {
+        $result = $this->payments->createBulk(
+            $request->validated('customer_uuids'),
+            $request->validated('frequency'),
+            $request->validated('months'),
+        );
+
+        $createdCount = count($result['created']);
+        $failedCount = count($result['failed']);
+
+        $message = $createdCount === 1 ? '1 payment recorded.' : "{$createdCount} payments recorded.";
+
+        if ($failedCount > 0) {
+            $message .= ' '.($failedCount === 1 ? '1 was skipped: ' : "{$failedCount} were skipped: ")
+                .implode(' ', $result['failed']);
+        }
+
+        return redirect()->route('payments.index')
+            ->with($createdCount > 0 ? 'success' : 'error', $message);
+    }
+
+    /**
+     * Approves many pending payments at once — see
+     * PaymentVerificationService::verifyMany(). Only exact bill matches are
+     * ever eligible; anything skipped stays pending for individual review.
+     */
+    public function bulkVerify(BulkVerifyPaymentRequest $request): RedirectResponse
+    {
+        $result = $this->verifications->verifyMany($request->validated('payment_uuids'), $request->user());
+
+        $verifiedCount = count($result['verified']);
+        $skippedCount = count($result['skipped']);
+
+        $message = $verifiedCount === 1 ? '1 payment verified.' : "{$verifiedCount} payments verified.";
+
+        if ($skippedCount > 0) {
+            $message .= ' '.($skippedCount === 1 ? '1 was skipped (no longer eligible).' : "{$skippedCount} were skipped (no longer eligible).");
+        }
+
+        return back()->with($verifiedCount > 0 ? 'success' : 'error', $message);
+    }
+
     public function show(Payment $payment): Response
     {
         $this->authorize('view', $payment);
@@ -132,7 +240,65 @@ class PaymentController extends Controller
 
         return Inertia::render('Payments/Show', [
             'payment' => $this->formatPayment($payment),
+            // Mirrors PaymentPolicy::update()'s own role check exactly (that
+            // policy method takes no target Payment — it's a pure
+            // class-level role gate) — same "compute the flag the page
+            // needs, controller-side" idiom ComplaintController::show() uses
+            // for its own can_manage prop.
+            'can_manage' => $this->context->isAnyOf('super', 'admin', 'manager'),
+            // Same idiom as can_manage above, but mirroring PaymentPolicy::
+            // delete()'s stricter super/admin-only role check instead of
+            // update()'s super/admin/manager.
+            'can_delete' => $this->context->isAnyOf('super', 'admin'),
         ]);
+    }
+
+    /**
+     * Correcting a previously recorded payment's amount/frequency/months/
+     * credit — distinct from verify() above, which only approves/rejects a
+     * pending payment and never touches these fields. Gated to super/admin/
+     * manager by PaymentPolicy::update(), same roles as the class doc
+     * comment's "only admin/super edit" convention.
+     */
+    public function edit(Payment $payment): Response
+    {
+        $this->authorize('update', $payment);
+
+        $payment = $this->payments->findOrFail($payment->uuid);
+        $payment->load(['customer.zone', 'verification.verifier']);
+
+        return Inertia::render('Payments/Edit', [
+            'payment' => $this->formatPayment($payment),
+        ]);
+    }
+
+    public function update(UpdatePaymentRequest $request, Payment $payment): RedirectResponse
+    {
+        $this->payments->update($payment, PaymentData::fromArray($request->validated()));
+
+        return redirect()->route('payments.show', $payment)->with('success', 'Payment updated successfully.');
+    }
+
+    /**
+     * Permanently removes a recorded payment — gated to super/admin only by
+     * PaymentPolicy::delete() (stricter than update()'s super/admin/
+     * manager), per the "only admin/super edit or delete" convention that
+     * policy's class doc comment documents. Like update() above,
+     * PaymentPolicy::delete() is a pure class-level check (no $payment
+     * parameter) — passing $payment to authorize() here just matches
+     * update()'s own call above and PHP happily ignores the unused extra
+     * argument. PaymentService::delete() -> PaymentRepository::delete() is
+     * a hard delete (Payment has no SoftDeletes); its
+     * payment_verifications row cascades on delete at the DB level (see
+     * that table's migration), so no separate cleanup is needed here.
+     */
+    public function destroy(Payment $payment): RedirectResponse
+    {
+        $this->authorize('delete', $payment);
+
+        $this->payments->delete($payment);
+
+        return redirect()->route('payments.index')->with('success', 'Payment deleted successfully.');
     }
 
     public function verify(VerifyPaymentRequest $request, Payment $payment): RedirectResponse
@@ -173,6 +339,7 @@ class PaymentController extends Controller
             'uuid' => $payment->uuid,
             'customer_uuid' => $payment->customer->uuid,
             'customer_name' => $payment->customer->name,
+            'customer_bill' => (string) $payment->customer->bill,
             'zone_name' => $payment->customer->zone?->name,
             'amount' => (string) $payment->amount,
             'credit' => (string) $payment->credit,
@@ -183,6 +350,7 @@ class PaymentController extends Controller
             'recorded_offline' => $payment->recorded_offline,
             'recorded_by_device' => $payment->recorded_by_device,
             'created_at' => $payment->created_at?->toIso8601String(),
+            'collected_at' => $payment->collected_at?->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),
             'verification' => $payment->verification ? $this->formatVerification($payment->verification) : null,
         ];

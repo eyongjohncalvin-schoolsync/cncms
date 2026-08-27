@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
+use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
@@ -17,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class PaymentVerification extends Model
 {
-    use HasUuid;
+    use Auditable, HasUuid;
 
     protected function casts(): array
     {

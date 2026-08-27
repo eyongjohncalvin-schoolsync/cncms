@@ -10,7 +10,12 @@ use App\Models\PaymentVerification;
 use App\Models\User;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\PaymentVerificationRepositoryInterface;
+use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Owns the payment verification/approval workflow described in
@@ -24,6 +29,7 @@ class PaymentVerificationService
     public function __construct(
         private readonly PaymentVerificationRepositoryInterface $verifications,
         private readonly PaymentRepositoryInterface $payments,
+        private readonly TenantContext $context,
     ) {}
 
     public function verify(Payment $payment, VerifyPaymentData $data, User $actor): Payment
@@ -54,13 +60,123 @@ class PaymentVerificationService
             }
         });
 
+        Cache::forget("payments:show:{$payment->uuid}");
+
+        // Extends the same forget-on-write to /reports: an approve/reject
+        // flip changes the Daily tier's "verifications actioned today" and
+        // "pending queue" figures, and the Weekly tier's verification-SLA
+        // block, immediately — see ReportService::forgetCache()'s doc
+        // comment for the "own key + 'all' key" tradeoff this follows.
+        // verified_at is effectively "now", so today's WAT calendar day is
+        // always the right period to invalidate.
+        ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());
+
         return $payment->fresh(['customer', 'verification.verifier']);
     }
 
+    /**
+     * Approves many pending payments in one pass — the "10 customers each
+     * paid exactly their monthly bill, don't make me click Approve 10
+     * times" workflow. Each payment still goes through verify() and its
+     * own transaction individually (rather than one large transaction
+     * wrapping the whole batch), so one failure can't roll back approvals
+     * that already succeeded, and no single transaction holds locks across
+     * the whole batch.
+     *
+     * Only a payment that is (a) still pending and (b) paid at *exactly*
+     * the customer's current bill is approved — this is re-checked here
+     * even though the frontend only ever offers exact matches for
+     * selection, because an approval action can't rely solely on
+     * client-supplied selection as its safety gate. Anything else is
+     * skipped, not rejected: a skipped payment is untouched and still
+     * available for the normal single-payment review.
+     *
+     * (c) A third, per-item check for an `agent`-role actor specifically:
+     * PaymentPolicy::bulkVerify() only gates whether this actor may call
+     * bulk-verify AT ALL — it has no target Payment to zone-check against
+     * (unlike verify()/PaymentPolicy::verify(), which zone-fences an agent
+     * to their own zone via TenantContext::zoneId). Without this loop-level
+     * re-check, an agent could bypass that zone fence entirely by simply
+     * submitting UUIDs of payments outside their own zone to this bulk
+     * endpoint. A payment outside the actor's zone is skipped (added to
+     * $skipped), never silently dropped, exactly like the pending/exact-
+     * match checks above.
+     *
+     * @param  string[]  $paymentUuids
+     * @return array{verified: string[], skipped: array<string, string>}
+     */
+    public function verifyMany(array $paymentUuids, User $actor): array
+    {
+        $verified = [];
+        $skipped = [];
+        $isAgent = $this->context->role === 'agent';
+        $zoneId = $this->context->zoneId;
+
+        foreach ($paymentUuids as $uuid) {
+            $payment = $this->payments->findByUuid($uuid, ['customer']);
+
+            if (! $payment) {
+                $skipped[$uuid] = 'Payment not found.';
+
+                continue;
+            }
+
+            if ($payment->verification_status !== 'pending') {
+                $skipped[$uuid] = 'No longer pending.';
+
+                continue;
+            }
+
+            if (bccomp((string) $payment->amount, (string) $payment->customer->bill, 2) !== 0) {
+                $skipped[$uuid] = "Amount does not exactly match {$payment->customer->name}'s bill.";
+
+                continue;
+            }
+
+            if ($isAgent && ($zoneId === null || $payment->customer->zone_id !== $zoneId)) {
+                $skipped[$uuid] = 'Outside your zone.';
+
+                continue;
+            }
+
+            $this->verify($payment, new VerifyPaymentData(
+                action: 'approve',
+                notes: "Bulk-verified — amount matches {$payment->customer->name}'s standard monthly bill.",
+            ), $actor);
+
+            $verified[] = $uuid;
+        }
+
+        return ['verified' => $verified, 'skipped' => $skipped];
+    }
+
+    /**
+     * Guarded against replacing evidence on an already-approved payment: once
+     * a payment is `verified`, its receipt is the evidence an admin/manager
+     * relied on to approve it, and silently swapping it afterwards would be
+     * an invisible tamper vector on the approved chain of custody
+     * (audit-strategy.md section 6). Rejected/pending payments remain
+     * re-uploadable — business-rules.md section 2 explicitly allows a
+     * rejected payment to be "re-submitted by an agent with new evidence",
+     * which requires attaching a new receipt before the next verify() call.
+     * To correct evidence on a verified payment, reject then re-approve
+     * through verify() so the change goes through the audited state machine
+     * instead of an unaudited in-place file swap.
+     */
     public function attachReceipt(Payment $payment, string $storedPath): PaymentVerification
     {
+        if ($payment->verification_status === 'verified') {
+            throw ValidationException::withMessages([
+                'receipt' => ['This payment is already verified; its receipt evidence cannot be replaced. Reject the payment to attach new evidence.'],
+            ]);
+        }
+
         $verification = $this->verifications->firstOrCreateForPayment($payment->id);
 
-        return $this->verifications->update($verification, ['receipt_photo_path' => $storedPath]);
+        $verification = $this->verifications->update($verification, ['receipt_photo_path' => $storedPath]);
+
+        Cache::forget("payments:show:{$payment->uuid}");
+
+        return $verification;
     }
 }

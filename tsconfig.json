@@ -13,9 +13,8 @@
         "isolatedModules": true,
         "noEmit": true,
         "allowImportingTsExtensions": true,
-        "baseUrl": ".",
         "paths": {
-            "@/*": ["resources/tsx/*"]
+            "@/*": ["./resources/tsx/*"]
         },
         "types": ["vite/client"]
     },

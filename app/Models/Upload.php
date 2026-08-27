@@ -9,9 +9,16 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['file_name', 'file_path', 'status'])]
+#[Fillable(['file_name', 'file_path', 'status', 'type', 'imported_by', 'total_rows', 'succeeded_count', 'failed_count', 'errors'])]
 #[RouteKey('uuid')]
 class Upload extends Model
 {
     use HasUuid;
+
+    protected function casts(): array
+    {
+        return [
+            'errors' => 'array',
+        ];
+    }
 }

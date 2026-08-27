@@ -51,12 +51,22 @@ trait InteractsWithTenantRoles
      * Authenticates as the real seeded owner (kelvin@shalomtech.dev),
      * with their tenant_users role temporarily switched to $role for the
      * rest of this test. Returns the Bearer Authorization header value.
+     *
+     * $branchId optionally also sets tenant_users.branch_id for the same
+     * seeded owner row — the multi-branch RBAC fence (see
+     * .ai/skills/cncms/cncms-context/references/branches-and-locations.md
+     * section 4 and App\Support\TenantContext::resolve()). Omitted/null
+     * clears it back to the default "unrestricted" (sees every branch),
+     * matching what every existing caller of this method already implies.
+     * This mirrors the exact same "flip a column on the one committed,
+     * reusable owner row" strategy as $role above, for the same
+     * cross-connection-visibility reason documented on this trait.
      */
-    protected function tokenForRole(string $role): string
+    protected function tokenForRole(string $role, ?int $branchId = null): string
     {
         $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
 
-        TenantUser::query()->where('user_id', $user->id)->update(['role' => $role]);
+        TenantUser::query()->where('user_id', $user->id)->update(['role' => $role, 'branch_id' => $branchId]);
 
         return $user->createToken('api')->plainTextToken;
     }

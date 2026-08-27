@@ -13,7 +13,7 @@ export function Pagination({ links }: { links: PaginationLink[] }) {
 
                 if (!link.url) {
                     return (
-                        <span key={index} className="rounded-md px-3 py-1.5 text-sm text-slate-300">
+                        <span key={index} className="rounded-lg px-3 py-1.5 text-sm text-slate-300">
                             {label}
                         </span>
                     );
@@ -24,9 +24,9 @@ export function Pagination({ links }: { links: PaginationLink[] }) {
                         key={index}
                         href={link.url}
                         preserveScroll
-                        className={`rounded-md px-3 py-1.5 text-sm ${
+                        className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150 ${
                             link.active
-                                ? 'bg-blue-600 text-white'
+                                ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20'
                                 : 'text-slate-600 hover:bg-slate-100'
                         }`}
                     >

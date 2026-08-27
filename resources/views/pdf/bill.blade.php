@@ -60,9 +60,32 @@
             padding-top: 6px;
             font-size: 13px;
         }
+        .letterhead {
+            width: 100%;
+            margin-bottom: 12px;
+        }
+        .letterhead .logo {
+            max-height: 60px;
+            max-width: 160px;
+        }
+        .registration {
+            font-size: 9px;
+            color: #444;
+            margin-top: 12px;
+            border-top: 1px solid #ccc;
+            padding-top: 6px;
+        }
     </style>
 </head>
 <body>
+    @if ($company?->logoDataUri())
+        <table class="letterhead">
+            <tr>
+                <td><img src="{{ $company->logoDataUri() }}" class="logo" alt="{{ $company->name }} logo"></td>
+            </tr>
+        </table>
+    @endif
+
     <div class="title">BILL: {{ $period_label }}</div>
 
     <table class="fields">
@@ -70,6 +93,12 @@
             <td class="label">From:</td>
             <td>{{ $company?->name }} -- {{ $company?->location }} -- Phone: {{ $company?->tech_number }}</td>
         </tr>
+        @if ($company?->head_office)
+        <tr>
+            <td class="label">Head Office:</td>
+            <td>{{ $company->head_office }}</td>
+        </tr>
+        @endif
         <tr>
             <td class="label">To:</td>
             <td>{{ $customer->name }}</td>
@@ -97,7 +126,13 @@
     </table>
 
     <div class="warning">
-        Warning: Pay before the due date's done, skip the 2000 FCFA reconnect fine!
+        {{-- Was hardcoded to "2000 FCFA" even though the reconnection fine
+             became admin-configurable (Company::cached()->reconnection_fine)
+             earlier this cycle — fixed to read the real configured value.
+             This view is superseded by resources/views/pdf/bills/*.blade.php
+             (see CustomerController::printBill()/Api\BillController::print()),
+             kept here only in case anything still references it directly. --}}
+        Warning: Pay before the due date's done, skip the {{ number_format((float) ($company?->reconnection_fine ?? 0), 2) }} FCFA reconnect fine!
     </div>
 
     <table class="fields">
@@ -131,5 +166,13 @@
             <td class="value">{{ number_format((float) $manuscript->total_bill, 2) }} FCFA</td>
         </tr>
     </table>
+
+    @if ($company?->rccm_number || $company?->niu)
+        <div class="registration">
+            @if ($company->rccm_number) RCCM: {{ $company->rccm_number }} @endif
+            @if ($company->rccm_number && $company->niu) &nbsp;|&nbsp; @endif
+            @if ($company->niu) NIU: {{ $company->niu }} @endif
+        </div>
+    @endif
 </body>
 </html>

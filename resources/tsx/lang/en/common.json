@@ -1,0 +1,29 @@
+{
+    "common": {
+        "dashboard": "Dashboard",
+        "customers": "Customers",
+        "zones": "Zones",
+        "branches": "Branches",
+        "payments": "Payments",
+        "manuscripts": "Manuscripts",
+        "agents": "Agents",
+        "complaints": "Complaints",
+        "disconnections": "Disconnections",
+        "flagged_customers": "Flagged Customers",
+        "reports": "Reports",
+        "resources": "Resources",
+        "audit_log": "Audit Log",
+        "settings": "Settings",
+        "landlord": "Landlord",
+        "log_out": "Log out",
+        "save": "Save",
+        "cancel": "Cancel",
+        "language": "Language",
+        "notifications": "Notifications",
+        "mark_all_read": "Mark all read",
+        "no_notifications": "No notifications yet",
+        "acknowledge": "Acknowledge",
+        "acknowledged": "Acknowledged",
+        "footer_copyright": "© {{year}} ShalomTech — CNCMS"
+    }
+}

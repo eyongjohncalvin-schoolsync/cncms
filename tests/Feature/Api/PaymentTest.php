@@ -35,7 +35,14 @@ class PaymentTest extends TestCase
     {
         $zone = ZoneFactory::new()->create();
 
-        return CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        // Explicitly 'active': CustomerFactory's default state picks status
+        // randomly (including a 20% chance of 'disconnected'), which would
+        // make every test relying on this helper intermittently fail now
+        // that disconnected customers are blocked from payment (see
+        // StorePaymentRequest). Tests that specifically exercise the block
+        // create their own customer with an explicit status instead of
+        // using this helper.
+        return CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'active']);
     }
 
     public function test_index_lists_payments_filtered_by_customer(): void

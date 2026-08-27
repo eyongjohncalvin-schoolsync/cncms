@@ -1,5 +1,6 @@
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
 import { Fragment, ReactNode } from 'react';
+import { IconX } from '@tabler/icons-react';
 
 interface ModalProps {
     open: boolean;
@@ -21,7 +22,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
                     leaveFrom="opacity-100"
                     leaveTo="opacity-0"
                 >
-                    <div className="fixed inset-0 bg-slate-900/40" aria-hidden="true" />
+                    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" aria-hidden="true" />
                 </TransitionChild>
 
                 <div className="fixed inset-0 flex items-center justify-center p-4">
@@ -34,11 +35,19 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
                         leaveFrom="opacity-100 scale-100"
                         leaveTo="opacity-0 scale-95"
                     >
-                        <DialogPanel className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+                        <DialogPanel className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/5">
                             {title && (
-                                <DialogTitle className="mb-3 text-base font-semibold text-slate-900">
-                                    {title}
-                                </DialogTitle>
+                                <div className="mb-3 flex items-center justify-between gap-4">
+                                    <DialogTitle className="text-base font-semibold text-slate-900">{title}</DialogTitle>
+                                    <button
+                                        type="button"
+                                        onClick={onClose}
+                                        aria-label="Close"
+                                        className="-m-1.5 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                                    >
+                                        <IconX size={18} stroke={1.75} />
+                                    </button>
+                                </div>
                             )}
                             {children}
                         </DialogPanel>

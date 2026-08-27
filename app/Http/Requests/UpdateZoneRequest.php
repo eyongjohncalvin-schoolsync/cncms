@@ -25,6 +25,7 @@ class UpdateZoneRequest extends FormRequest
                 Rule::unique('zones', 'name')->ignore($this->route('zone')),
             ],
             'town' => ['sometimes', 'nullable', 'string', 'max:25'],
+            'branch_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:branches,uuid'],
         ];
     }
 }

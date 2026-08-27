@@ -7,6 +7,7 @@ namespace Tests\Feature\Web;
 use App\Models\TenantUser;
 use App\Models\User;
 use Database\Factories\AgentFactory;
+use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -110,6 +111,75 @@ class AgentTest extends TestCase
                 ->component('Agents/Edit')
                 ->where('agent.uuid', $agent->uuid)
                 ->has('zones'));
+    }
+
+    public function test_a_manager_can_change_an_agents_zone_via_the_quick_action(): void
+    {
+        $oldZone = ZoneFactory::new()->create();
+        $newZone = ZoneFactory::new()->create();
+        $agent = AgentFactory::new()->create(['zone_id' => $oldZone->id, 'user_id' => null, 'status' => 'active']);
+
+        $this->actingAsRole('manager');
+
+        // The quick action sends only zone_uuid — verifying the existing
+        // FormRequest/DTO/Service chain treats that as a valid partial
+        // update without requiring every other Agent field.
+        $response = $this->patch("/agents/{$agent->uuid}", ['zone_uuid' => $newZone->uuid]);
+
+        $response->assertRedirect(route('agents.index'));
+        $this->assertDatabaseHas('agents', ['id' => $agent->id, 'zone_id' => $newZone->id]);
+    }
+
+    public function test_the_index_page_reports_per_zone_customer_and_agent_counts(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $agent = AgentFactory::new()->create(['zone_id' => $zone->id, 'user_id' => null, 'status' => 'active']);
+        CustomerFactory::new()->create(['zone_id' => $zone->id]);
+
+        $this->actingAsRole('manager');
+
+        $response = $this->get('/agents');
+
+        $response->assertOk();
+
+        // Real tenant data means other zones already exist alongside the
+        // ones this test just created, so locate ours by uuid rather than
+        // assuming its position in the (name-ordered) zones array.
+        $page = json_decode(json_encode($response->viewData('page')), true);
+        $zoneProps = collect($page['props']['zones'])->firstWhere('uuid', $zone->uuid);
+
+        $this->assertNotNull($zoneProps, 'The zone created for this test was not present in the zones prop.');
+        $this->assertSame(1, $zoneProps['customer_count']);
+        $this->assertSame(1, $zoneProps['agent_count']);
+        $this->assertSame([$agent->name], $zoneProps['agent_names']);
+    }
+
+    public function test_an_agent_role_user_cannot_change_an_agents_zone(): void
+    {
+        $oldZone = ZoneFactory::new()->create();
+        $newZone = ZoneFactory::new()->create();
+        $agent = AgentFactory::new()->create(['zone_id' => $oldZone->id, 'user_id' => null]);
+
+        $this->actingAsRole('agent');
+
+        $response = $this->patch("/agents/{$agent->uuid}", ['zone_uuid' => $newZone->uuid]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('agents', ['id' => $agent->id, 'zone_id' => $oldZone->id]);
+    }
+
+    public function test_a_worker_role_user_cannot_change_an_agents_zone(): void
+    {
+        $oldZone = ZoneFactory::new()->create();
+        $newZone = ZoneFactory::new()->create();
+        $agent = AgentFactory::new()->create(['zone_id' => $oldZone->id, 'user_id' => null]);
+
+        $this->actingAsRole('worker');
+
+        $response = $this->patch("/agents/{$agent->uuid}", ['zone_uuid' => $newZone->uuid]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('agents', ['id' => $agent->id, 'zone_id' => $oldZone->id]);
     }
 
     public function test_an_agent_role_user_cannot_create_an_agent(): void

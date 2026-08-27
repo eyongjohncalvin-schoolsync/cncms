@@ -14,6 +14,14 @@ export default defineConfig({
                 bunny('Instrument Sans', {
                     weights: [400, 500, 600],
                 }),
+                // Paired display face for page titles / hero numbers —
+                // same type family as the body font, so the pairing reads
+                // as deliberate rather than mismatched. Used sparingly
+                // (headings only), never for body copy or dense table text.
+                bunny('Instrument Serif', {
+                    weights: [400],
+                    styles: ['normal', 'italic'],
+                }),
             ],
         }),
         react(),
@@ -21,7 +29,7 @@ export default defineConfig({
     ],
     resolve: {
         alias: {
-            '@': path.resolve(__dirname, 'resources/tsx'),
+            '@': path.resolve(import.meta.dirname, 'resources/tsx'),
         },
     },
     server: {

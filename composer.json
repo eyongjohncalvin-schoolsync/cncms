@@ -12,7 +12,10 @@
         "laravel/ai": "*",
         "laravel/framework": "^13.17",
         "laravel/sanctum": "*",
+        "laravel/socialite": "*",
         "laravel/tinker": "^3.0",
+        "maatwebsite/excel": "^4.0",
+        "spatie/laravel-medialibrary": "^11.23",
         "stancl/tenancy": "^3.10"
     },
     "require-dev": {

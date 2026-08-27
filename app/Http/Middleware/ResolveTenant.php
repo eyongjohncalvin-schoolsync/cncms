@@ -6,6 +6,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use App\Models\TenantUserIndex;
 use App\Support\TenantContext;
 use Closure;
 use Illuminate\Http\Request;
@@ -13,18 +14,16 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Resolves the tenant for an authenticated API request and verifies the
- * authenticated user actually belongs to it.
+ * authenticated user actually belongs to it, via the central
+ * TenantUserIndex table (see its migration's docblock). Previously this
+ * hard-coded a single tenant ("swecom") as documented tech debt; replaced
+ * now that self-service workspace registration means more than one tenant
+ * can exist and a user's tenant can no longer be assumed.
  *
- * SCOPE NOTE: CNCMS currently has exactly one tenant ("swecom"). This
- * middleware hard-codes that tenant rather than doing a general
- * "which tenant does this user belong to" lookup, because there is no
- * central users->tenant lookup table yet, and scanning every tenant
- * schema's `tenant_users` table for every request would be impractical
- * once there's more than a handful of tenants. Once a second tenant is
- * provisioned, this needs to be replaced with a real central lookup
- * (e.g. a central `tenant_user_index` table keyed by user_id, populated
- * whenever a `tenant_users` row is created/deleted) so the correct
- * tenant can be resolved without hard-coding a slug here.
+ * A user belonging to more than one tenant (not yet possible via any UI
+ * path — self-service registration creates exactly one) would resolve to
+ * whichever index row is returned first; that's an acceptable simplification
+ * until multi-tenant-membership-per-user becomes a real product need.
  */
 class ResolveTenant
 {
@@ -39,13 +38,29 @@ class ResolveTenant
             ], 401);
         }
 
-        $tenant = Tenant::find('swecom');
+        $indexEntry = TenantUserIndex::query()->where('user_id', $user->id)->first();
+
+        if (! $indexEntry) {
+            return response()->json([
+                'message' => 'You do not have access to any tenant.',
+                'code' => 'FORBIDDEN',
+            ], 403);
+        }
+
+        $tenant = Tenant::find($indexEntry->tenant_id);
 
         if (! $tenant) {
             return response()->json([
                 'message' => 'Tenant not found.',
                 'code' => 'NOT_FOUND',
             ], 500);
+        }
+
+        if (! $tenant->isApproved()) {
+            return response()->json([
+                'message' => 'This workspace is awaiting landlord approval.',
+                'code' => 'WORKSPACE_PENDING',
+            ], 403);
         }
 
         tenancy()->initialize($tenant);
@@ -62,7 +77,7 @@ class ResolveTenant
             ], 403);
         }
 
-        $context = new TenantContext($tenantUser, $tenantUser->role);
+        $context = TenantContext::resolve($tenantUser);
 
         app()->instance(TenantContext::class, $context);
 

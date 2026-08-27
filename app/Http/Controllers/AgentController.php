@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateAgentRequest;
 use App\Models\Agent;
 use App\Models\Zone;
 use App\Services\AgentService;
+use App\Services\ZoneService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -25,6 +26,7 @@ class AgentController extends Controller
 {
     public function __construct(
         private readonly AgentService $agents,
+        private readonly ZoneService $zones,
     ) {}
 
     public function index(Request $request): Response
@@ -54,7 +56,7 @@ class AgentController extends Controller
         return Inertia::render('Agents/Index', [
             'filters' => $filters,
             'agents' => $this->paginatorProps($paginated),
-            'zones' => Zone::query()->orderBy('name')->get(['uuid', 'name', 'town']),
+            'zones' => $this->zonesWithStats(),
         ]);
     }
 
@@ -63,7 +65,7 @@ class AgentController extends Controller
         $this->authorize('create', Agent::class);
 
         return Inertia::render('Agents/Create', [
-            'zones' => Zone::query()->orderBy('name')->get(['uuid', 'name', 'town']),
+            'zones' => $this->zones->all(),
         ]);
     }
 
@@ -96,7 +98,7 @@ class AgentController extends Controller
                 'status' => $agent->status,
                 'last_sync_at' => $agent->last_sync_at,
             ],
-            'zones' => Zone::query()->orderBy('name')->get(['uuid', 'name', 'town']),
+            'zones' => $this->zones->all(),
         ]);
     }
 
@@ -114,6 +116,41 @@ class AgentController extends Controller
         $this->agents->delete($agent);
 
         return redirect()->route('agents.index')->with('success', 'Agent deleted.');
+    }
+
+    /**
+     * Zone list for the Agents/Index "Change Zone" quick action, enriched
+     * beyond ZoneService::all()'s bare uuid/name/town with the per-zone
+     * customer/active-agent counts the office needs to judge a reassignment
+     * before confirming it — workload (customer_count) and whether the
+     * destination/source zone would end up over- or under-covered
+     * (agent_count + agent_names, active agents only, since an inactive
+     * agent isn't really "covering" a zone). Queried directly against the
+     * Zone model here rather than via ZoneService/ZoneRepository, which are
+     * being touched concurrently elsewhere this session — this keeps the
+     * change isolated to this controller.
+     *
+     * @return array<int, array{uuid: string, name: string, town: string, customer_count: int, agent_count: int, agent_names: array<int, string>}>
+     */
+    private function zonesWithStats(): array
+    {
+        return Zone::query()
+            ->withCount([
+                'customers',
+                'agents as agent_count' => fn ($query) => $query->where('status', 'active'),
+            ])
+            ->with(['agents' => fn ($query) => $query->where('status', 'active')->orderBy('name')->select('id', 'zone_id', 'name')])
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Zone $zone): array => [
+                'uuid' => $zone->uuid,
+                'name' => $zone->name,
+                'town' => $zone->town,
+                'customer_count' => $zone->customers_count,
+                'agent_count' => $zone->agent_count,
+                'agent_names' => $zone->agents->pluck('name')->all(),
+            ])
+            ->all();
     }
 
     /**

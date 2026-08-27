@@ -26,6 +26,15 @@ interface ManuscriptRepositoryInterface
     public function all(array $filters): Collection;
 
     /**
+     * total_customers counts every customer matching the filters regardless
+     * of status. total_bill/total_arrears/total_credit/total_collected are
+     * scoped to `customers.status = 'active'` ONLY — a disconnected/passive/
+     * suspended customer's frozen, non-accruing balance is real but not
+     * currently-collectible money, so it's excluded from these four figures
+     * (and therefore from collection_rate, derived from total_collected/
+     * total_bill by the caller). See the Eloquent implementation's doc
+     * comment for the full reasoning.
+     *
      * @param  array<string, mixed>  $filters  Same keys as paginate().
      * @return array{total_customers: int, total_bill: string, total_arrears: string, total_credit: string, total_collected: string}
      */

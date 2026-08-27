@@ -6,4 +6,42 @@
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /* Paired display face for page titles / hero numbers only — never body
+       copy or table text. Use via `font-display` (see utility below). */
+    --font-display: 'Instrument Serif', ui-serif, Georgia, serif;
+}
+
+/* `font-display` utility — Tailwind only auto-generates a utility for a
+   `--font-*` theme token named exactly `--font-sans`/`--font-serif`/etc.;
+   `--font-display` isn't one of those reserved names, so the class is
+   defined explicitly here rather than relying on Tailwind to infer it. */
+@utility font-display {
+    font-family: var(--font-display);
+}
+
+/* Reusable entrance/hover motion, shared by every page instead of each
+   reinventing its own keyframes. Respects prefers-reduced-motion per
+   frontend-design-system.md section 5/8 — motion here is a subtle staged
+   reveal, never required to understand the page. */
+@keyframes fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@utility animate-fade-up {
+    animation: fade-up 0.4s ease-out backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-fade-up {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
 }

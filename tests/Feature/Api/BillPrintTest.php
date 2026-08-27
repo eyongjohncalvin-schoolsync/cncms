@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api;
 
+use App\Models\Company;
 use App\Models\Customer;
 use Database\Factories\CompanyFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -93,6 +96,31 @@ class BillPrintTest extends TestCase
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")
             ->get("/api/v1/bills/{$customer->uuid}/print?period=2026-06");
+
+        $response->assertOk();
+        $response->assertHeader('content-type', 'application/pdf');
+    }
+
+    /**
+     * Exercises Company::logoDataUri() end-to-end through a real dompdf
+     * render (resources/views/pdf/bill.blade.php's `@if ($company?->
+     * logoDataUri())` branch) — not just that a logo can be uploaded, but
+     * that a real Company row with a real stored logo file renders to a
+     * PDF without error, matching resources/views/pdf/bill.blade.php's
+     * letterhead <img> markup.
+     */
+    public function test_bill_pdf_renders_with_a_company_logo(): void
+    {
+        Storage::fake('public');
+
+        $company = Company::query()->first();
+        $company->addMedia(UploadedFile::fake()->image('logo.png', 200, 200))->toMediaCollection('logo');
+
+        $customer = $this->customerWithManuscript();
+        $token = $this->tokenForRole('manager');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->get("/api/v1/bills/{$customer->uuid}/print");
 
         $response->assertOk();
         $response->assertHeader('content-type', 'application/pdf');

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Payment;
 use App\Models\User;
 use App\Support\TenantContext;
 
@@ -15,7 +16,11 @@ use App\Support\TenantContext;
  * only super/admin may delete one, mirroring the "agents record, only
  * admin/super edit or delete" convention SKILL.md documents for the
  * analogous Resources/Expenditures module. Workers cannot record payments
- * at all ("workers are limited").
+ * at all by role — EXCEPT the narrow, explicit per-user grant below
+ * (tenant_users.can_record_payments), for the one real "Secretary"
+ * front-desk case a worker legitimately needs to take payments. This is
+ * deliberately NOT a general permission-grant system — see that column's
+ * migration doc comment — it is exactly one flag for exactly one case.
  */
 class PaymentPolicy
 {
@@ -33,9 +38,33 @@ class PaymentPolicy
         return true;
     }
 
+    /**
+     * The worker branch here is an explicit per-user grant, not a role
+     * widening — a plain `'worker'` added to isAnyOf(...) below would open
+     * payment-recording to EVERY worker, which is not what was asked for.
+     * Only a worker whose own tenant_users.can_record_payments flag is true
+     * (settable only by super/admin — see UpdateTenantUserRequest) may
+     * record a payment; every other worker still cannot. The actual branch
+     * fence on WHICH customers they can pay is still enforced separately
+     * and incidentally by CustomerRepository's ScopesByBranch (defense in
+     * depth) — this check is the real "can this worker record a payment AT
+     * ALL" authorization decision.
+     */
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent')
+            || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
+    }
+
+    /**
+     * Same roles as create(), including the worker+flag grant — bulk entry
+     * is the same "record a payment" action repeated per customer, not a
+     * distinct capability.
+     */
+    public function bulkCreate(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent')
+            || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
     }
 
     public function update(User $user): bool
@@ -48,20 +77,49 @@ class PaymentPolicy
         return $this->context->isAnyOf('super', 'admin');
     }
 
-    public function verify(User $user): bool
+    /**
+     * Takes the target $payment (unlike the class-level checks above) so an
+     * agent's grant can be scoped to their own zone rather than being a
+     * blanket role widening: an agent may verify a payment only for a
+     * customer in the same zone as their own Agent row
+     * (TenantContext::zoneId). super/admin/manager are unrestricted, same
+     * as before. VerifyPaymentRequest::authorize() already resolves the
+     * route-bound Payment before calling this.
+     */
+    public function verify(User $user, Payment $payment): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->isAnyOf('super', 'admin', 'manager')
+            || ($this->context->role === 'agent'
+                && $this->context->zoneId !== null
+                && $payment->customer->zone_id === $this->context->zoneId);
+    }
+
+    /**
+     * Widened to include `agent` alongside verify() above — but ONLY the
+     * class-level "may this actor use bulk-verify at all" gate. The actual
+     * per-payment zone fence for an agent is NOT expressible here (bulk
+     * approval has no single target model) and MUST be re-checked per item
+     * inside App\Services\PaymentVerificationService::verifyMany()'s loop —
+     * see that method's doc comment. Without that per-item check, an agent
+     * could otherwise bypass verify()'s zone fence entirely by hitting the
+     * bulk-verify endpoint with UUIDs of payments outside their own zone;
+     * this class-level check alone does NOT protect against that.
+     */
+    public function bulkVerify(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
     }
 
     /**
      * Attaching receipt evidence is evidence-gathering, not an edit to the
      * payment record itself — the same roles that may record a payment
      * (business-rules.md section 5: "Agent optionally attaches receipt
-     * photo") may attach a receipt to it, unlike update()/delete() which
-     * stay office-only.
+     * photo"), including the worker+flag grant, may attach a receipt to it,
+     * unlike update()/delete() which stay office-only.
      */
     public function attachReceipt(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent')
+            || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
     }
 }

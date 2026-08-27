@@ -36,7 +36,14 @@ class PaymentVerificationTest extends TestCase
     {
         $zone = ZoneFactory::new()->create();
 
-        return CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        // Explicitly 'active': CustomerFactory's default state picks status
+        // randomly (including a 20% chance of 'disconnected'), which would
+        // make every test relying on this helper intermittently fail now
+        // that disconnected customers are blocked from payment (see
+        // StorePaymentRequest). Tests that specifically exercise the block
+        // create their own customer with an explicit status instead of
+        // using this helper.
+        return CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'active']);
     }
 
     private function pendingPayment(): Payment
@@ -151,6 +158,53 @@ class PaymentVerificationTest extends TestCase
         $verification = $payment->fresh()->verification;
         $this->assertNotNull($verification);
         $this->assertNotNull($verification->receipt_photo_path);
+    }
+
+    public function test_receipt_cannot_be_replaced_once_a_payment_is_verified(): void
+    {
+        $payment = $this->pendingPayment();
+        $token = $this->tokenForRole('manager');
+
+        $original = UploadedFile::fake()->image('receipt-original.jpg');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/payments/{$payment->uuid}/receipt", ['receipt' => $original])
+            ->assertOk();
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/payments/{$payment->uuid}/verify", ['action' => 'approve'])
+            ->assertOk();
+
+        $originalPath = $payment->fresh()->verification->receipt_photo_path;
+
+        $replacement = UploadedFile::fake()->image('receipt-swapped.jpg');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/payments/{$payment->uuid}/receipt", ['receipt' => $replacement]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['receipt']);
+
+        $this->assertSame($originalPath, $payment->fresh()->verification->receipt_photo_path);
+    }
+
+    public function test_receipt_can_be_replaced_after_a_rejected_payment_is_resubmitted(): void
+    {
+        $payment = $this->pendingPayment();
+        $token = $this->tokenForRole('manager');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/payments/{$payment->uuid}/verify", [
+                'action' => 'reject',
+                'notes' => 'Receipt illegible, please resubmit.',
+            ])->assertOk();
+
+        $newEvidence = UploadedFile::fake()->image('receipt-resubmitted.jpg');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/payments/{$payment->uuid}/receipt", ['receipt' => $newEvidence]);
+
+        $response->assertOk();
+        $this->assertNotNull($payment->fresh()->verification->receipt_photo_path);
     }
 
     public function test_manager_can_re_approve_a_previously_rejected_payment(): void

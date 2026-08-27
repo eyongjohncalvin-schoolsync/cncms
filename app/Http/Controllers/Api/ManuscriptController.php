@@ -63,6 +63,12 @@ class ManuscriptController extends Controller
 
         $data = $this->manuscripts->exportData($filters);
 
+        // See BillController::print()'s comment — dompdf's memory overhead
+        // exceeds PHP's default 128M limit; this export can span hundreds
+        // of customer rows in one document, so give it more headroom than
+        // the single-record bill print.
+        ini_set('memory_limit', '1024M');
+
         return Pdf::loadView('pdf.manuscript', $data)
             ->setPaper('a4', 'landscape')
             ->stream('manuscript-'.$data['period'].'.pdf');

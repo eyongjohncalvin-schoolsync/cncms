@@ -31,7 +31,6 @@ class CompanyFactory extends Factory
             // can exceed the momo_name column's varchar(50) limit and fail
             // the insert intermittently depending on the faker seed.
             'momo_name' => 'MUNGWAN HANS/KELVIN MEKUME',
-            'logo' => null,
         ];
     }
 }

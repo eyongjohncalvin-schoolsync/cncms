@@ -6,14 +6,18 @@ namespace App\Repositories\Eloquent;
 
 use App\DataTransferObjects\CustomerData;
 use App\Models\Customer;
+use App\Repositories\Concerns\ScopesByBranch;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 
 class CustomerRepository implements CustomerRepositoryInterface
 {
+    use ScopesByBranch;
+
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
-        return Customer::query()
+        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
             ->with('zone')
             ->when($filters['zone_id'] ?? null, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
@@ -36,7 +40,10 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function findByUuid(string $uuid, array $with = []): ?Customer
     {
-        return Customer::query()->with($with)->where('uuid', $uuid)->first();
+        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->with($with)
+            ->where('uuid', $uuid)
+            ->first();
     }
 
     public function create(int $zoneId, CustomerData $data): Customer
@@ -60,5 +67,45 @@ class CustomerRepository implements CustomerRepositoryInterface
     public function delete(Customer $customer): bool
     {
         return (bool) $customer->delete();
+    }
+
+    public function updateStatus(Customer $customer, array $attributes): Customer
+    {
+        $customer->update($attributes);
+
+        return $customer;
+    }
+
+    public function activeWithLatestManuscript(?int $zoneId = null): Collection
+    {
+        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->with(['zone', 'latestManuscript'])
+            ->where('status', 'active')
+            ->when($zoneId, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
+            ->orderBy('name')
+            ->get();
+    }
+
+    public function findManyByUuids(array $uuids): Collection
+    {
+        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->whereIn('uuid', $uuids)
+            ->get();
+    }
+
+    public function allMatching(array $filters): Collection
+    {
+        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->when($filters['zone_id'] ?? null, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
+            ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
+            ->when($filters['level'] ?? null, fn ($query, $level) => $query->where('level', $level))
+            ->when($filters['search'] ?? null, function ($query, string $search) {
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('name', 'ILIKE', "%{$search}%")
+                        ->orWhere('phone', 'LIKE', "%{$search}%");
+                });
+            })
+            ->orderBy('name')
+            ->get();
     }
 }

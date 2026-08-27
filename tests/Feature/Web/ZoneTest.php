@@ -6,6 +6,7 @@ namespace Tests\Feature\Web;
 
 use App\Models\TenantUser;
 use App\Models\User;
+use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -121,6 +122,28 @@ class ZoneTest extends TestCase
 
         $response->assertRedirect('/zones');
         $this->assertDatabaseMissing('zones', ['id' => $zone->id]);
+    }
+
+    /**
+     * Regression test: deleting a zone still referenced by a customer used
+     * to raise a raw, unhandled Postgres RESTRICT-violation QueryException
+     * straight to the user (customers.zone_id/agents.zone_id are both
+     * restrictOnDelete()). App\Services\ZoneService::delete() now checks
+     * up front and ZoneController::destroy() converts it to this app's
+     * normal flash('error') redirect instead.
+     */
+    public function test_deleting_a_zone_with_customers_fails_with_a_friendly_error(): void
+    {
+        $this->actingAsRole('super');
+
+        $zone = ZoneFactory::new()->create();
+        CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'active']);
+
+        $response = $this->delete("/zones/{$zone->uuid}");
+
+        $response->assertRedirect('/zones');
+        $response->assertSessionHas('error');
+        $this->assertDatabaseHas('zones', ['id' => $zone->id]);
     }
 
     public function test_agent_cannot_create_a_zone(): void

@@ -1,9 +1,10 @@
 import { Form, Head, Link } from '@inertiajs/react';
 import { AppLayout } from '@/layouts/AppLayout';
-import { Card, CardBody } from '@/components/ui/Card';
+import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { Button } from '@/components/ui/Button';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { Agent, Zone } from '@/types';
 
 interface AgentsEditProps {
@@ -13,17 +14,19 @@ interface AgentsEditProps {
 
 export default function AgentsEdit({ agent, zones }: AgentsEditProps) {
     return (
-        <AppLayout title="Edit Agent">
+        <AppLayout title="Edit Agent" breadcrumbs={[{ label: 'Agents', href: '/agents' }, { label: agent.name }]}>
             <Head title={`Edit ${agent.name}`} />
 
-            <div className="mb-4 flex items-center justify-between">
-                <h1 className="text-xl font-semibold text-slate-900">Edit Agent</h1>
-                <Link href="/agents" className="text-sm text-slate-600 hover:underline">
-                    Back to Agents
-                </Link>
+            <div className="mb-6 animate-fade-up">
+                <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-900">Edit Agent</h1>
+                <p className="mt-1 text-sm text-slate-500">Update {agent.name}&apos;s details, zone assignment, and status.</p>
             </div>
 
-            <Card className="max-w-2xl">
+            <Card className="max-w-2xl animate-fade-up" style={{ animationDelay: '0.08s' }}>
+                <CardHeader>
+                    <h2 className="font-display text-base font-semibold text-slate-900">Agent details</h2>
+                    <p className="mt-0.5 text-xs text-slate-500">Fields marked required must be filled in.</p>
+                </CardHeader>
                 <CardBody>
                     <Form action={`/agents/${agent.uuid}`} method="put" className="flex flex-col gap-4">
                         {({ errors, processing }) => (
@@ -113,14 +116,29 @@ export default function AgentsEdit({ agent, zones }: AgentsEditProps) {
                                     Last synced: {agent.last_sync_at ?? 'Never'}
                                 </p>
 
-                                <div className="mt-2 flex justify-end gap-2">
-                                    <Link href="/agents">
-                                        <Button type="button" variant="secondary">
+                                <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-end">
+                                    <Link href="/agents" className="w-full sm:w-auto">
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
+                                        >
                                             Cancel
                                         </Button>
                                     </Link>
-                                    <Button type="submit" disabled={processing}>
-                                        {processing ? 'Saving…' : 'Save Changes'}
+                                    <Button
+                                        type="submit"
+                                        disabled={processing}
+                                        className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
+                                    >
+                                        {processing ? (
+                                            <>
+                                                <LoadingSpinner />
+                                                Saving…
+                                            </>
+                                        ) : (
+                                            'Save Changes'
+                                        )}
                                     </Button>
                                 </div>
                             </>

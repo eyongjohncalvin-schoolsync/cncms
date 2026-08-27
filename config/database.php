@@ -44,6 +44,19 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Without this, Laravel leaves the Postgres session on whatever
+            // timezone the server/OS defaults to (verified locally as
+            // 'Africa/Lagos', i.e. UTC+1) while every Carbon::now() call in
+            // the app assumes config('app.timezone') = 'UTC'. Since Eloquent
+            // sends naive "Y-m-d H:i:s" strings (no offset) for timestamptz
+            // columns, the PG session was silently reinterpreting UTC
+            // wall-clock strings as if they were already Africa/Lagos local
+            // time — shifting every created_at/updated_at/verified_at/etc.
+            // exactly 1 hour into the past relative to the real event. This
+            // pins the session to the same timezone the app already assumes,
+            // so writes and reads agree. See business-rules.md #12 and the
+            // financial-precision audit that found this.
+            'timezone' => 'UTC',
         ],
 
         'sqlsrv' => [

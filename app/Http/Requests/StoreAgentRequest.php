@@ -25,7 +25,7 @@ class StoreAgentRequest extends FormRequest
             'name' => ['required', 'string', 'max:50'],
             'location' => ['required', 'string', 'max:50'],
             'phone' => ['required', 'string', 'max:20'],
-            'salary' => ['required', 'numeric', 'min:0', 'decimal:0,2'],
+            'salary' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'email' => ['nullable', 'email', 'max:50'],
             'dob' => ['nullable', 'date'],
             'marital_status' => ['nullable', 'string', 'in:yes,no'],

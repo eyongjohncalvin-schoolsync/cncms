@@ -20,6 +20,13 @@ class SyncQueue extends Model
 
     const UPDATED_AT = null;
 
+    // Eloquent's default pluralization guesses "sync_queues", but the
+    // migrated table (database/migrations/tenant/*_create_sync_queue_table)
+    // is named "sync_queue" (singular, matching database-schema.md) — must
+    // be declared explicitly or every query 500s with "relation sync_queues
+    // does not exist".
+    protected $table = 'sync_queue';
+
     protected function casts(): array
     {
         return [

@@ -30,6 +30,16 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
+        // is_landlord is deliberately excluded from User's #[Fillable] list
+        // (see the model's docblock) — grant it via direct property
+        // assignment, not mass-assignment, self-granted here only because
+        // this seeder represents the platform's actual real-world owner.
+        if (! $owner->is_landlord) {
+            $owner->is_landlord = true;
+            $owner->landlord_granted_at = now();
+            $owner->save();
+        }
+
         $tenant = Tenant::firstOrCreate(['id' => 'swecom'], [
             'name' => 'SWECOM PLC',
             'slug' => 'swecom',

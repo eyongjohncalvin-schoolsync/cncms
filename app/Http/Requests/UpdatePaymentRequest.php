@@ -19,8 +19,8 @@ class UpdatePaymentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'amount' => ['sometimes', 'required', 'numeric', 'gt:0', 'decimal:0,2'],
-            'credit' => ['sometimes', 'nullable', 'numeric', 'min:0', 'decimal:0,2'],
+            'amount' => ['sometimes', 'required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
+            'credit' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'],
             'frequency' => ['sometimes', 'required', 'string', 'in:monthly,yearly,months'],
             'months' => ['required_if:frequency,months', 'nullable', 'integer', 'min:1'],
             'recorded_offline' => ['sometimes', 'nullable', 'boolean'],

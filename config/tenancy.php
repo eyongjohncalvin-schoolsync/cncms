@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Tenant;
-use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
+use App\Tenancy\CacheTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;

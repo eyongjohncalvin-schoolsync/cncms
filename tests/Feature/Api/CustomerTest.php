@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api;
 
+use App\Models\User;
+use Database\Factories\AgentFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -73,6 +75,7 @@ class CustomerTest extends TestCase
             ->postJson('/api/v1/customers', [
                 'zone_uuid' => $zone->uuid,
                 'name' => 'JANE DOE',
+                'phone' => '677123456',
                 'bill' => 2500,
                 'level' => 'normal',
                 'status' => 'active',
@@ -131,6 +134,21 @@ class CustomerTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors(['level']);
     }
 
+    public function test_store_fails_validation_when_phone_is_missing(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $token = $this->tokenForRole('manager');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/customers', [
+                'zone_uuid' => $zone->uuid,
+                'name' => 'NO PHONE DOE',
+                'bill' => 2500,
+            ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['phone']);
+    }
+
     public function test_agent_cannot_create_a_customer(): void
     {
         $zone = ZoneFactory::new()->create();
@@ -158,5 +176,80 @@ class CustomerTest extends TestCase
             ->getJson("/api/v1/customers/{$customer->uuid}");
 
         $response->assertOk()->assertJsonPath('data.uuid', $customer->uuid);
+    }
+
+    /**
+     * 2026-08 mobile field-ops widening — App\Policies\CustomerPolicy::
+     * disconnect() now admits an `agent` scoped to their own zone (own
+     * Agent row's zone_id), unlike suspend/reconnect which stay
+     * office-only. See that policy method's doc comment.
+     */
+    public function test_agent_can_disconnect_a_customer_in_their_own_zone(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'active']);
+
+        $token = $this->tokenForRole('agent');
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        AgentFactory::new()->create(['zone_id' => $zone->id, 'user_id' => $user->id]);
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/customers/{$customer->uuid}/disconnect", [
+                'note' => 'Non-payment, visited in field.',
+            ]);
+
+        $response->assertOk()->assertJsonPath('data.status', 'disconnected');
+        $this->assertDatabaseHas('customers', ['id' => $customer->id, 'status' => 'disconnected']);
+    }
+
+    public function test_agent_cannot_disconnect_a_customer_outside_their_own_zone(): void
+    {
+        $ownZone = ZoneFactory::new()->create();
+        $otherZone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $otherZone->id, 'status' => 'active']);
+
+        $token = $this->tokenForRole('agent');
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        AgentFactory::new()->create(['zone_id' => $ownZone->id, 'user_id' => $user->id]);
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/customers/{$customer->uuid}/disconnect", [
+                'note' => 'Should not be allowed.',
+            ]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('customers', ['id' => $customer->id, 'status' => 'active']);
+    }
+
+    public function test_agent_without_an_agent_row_cannot_disconnect_a_customer(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'active']);
+
+        $token = $this->tokenForRole('agent');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/customers/{$customer->uuid}/disconnect", [
+                'note' => 'No agent row at all.',
+            ]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('customers', ['id' => $customer->id, 'status' => 'active']);
+    }
+
+    public function test_worker_cannot_disconnect_a_customer(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'active']);
+
+        $token = $this->tokenForRole('worker');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/customers/{$customer->uuid}/disconnect", [
+                'note' => 'Should not be allowed.',
+            ]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('customers', ['id' => $customer->id, 'status' => 'active']);
     }
 }
