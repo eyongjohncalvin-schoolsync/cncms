@@ -135,7 +135,9 @@ class BillBatchService
 
     /**
      * Flips a still-`queued` batch to `processing` (first job to run wins);
-     * a no-op afterwards. Called at the top of every job's handle().
+     * a no-op afterwards (including for a `cancelled` batch — the `queued`
+     * guard means a cancelled run is never dragged back to `processing`).
+     * Called at the top of every job's handle().
      */
     public function markProcessing(int $billBatchId): void
     {
@@ -143,6 +145,58 @@ class BillBatchService
             ->where('id', $billBatchId)
             ->where('status', 'queued')
             ->update(['status' => 'processing', 'started_at' => now()]);
+    }
+
+    /**
+     * Cancel an in-flight run (owner's ask — "there's no cancel, because I
+     * made an error"). Cancels the underlying Bus batch so any not-yet-run
+     * job no-ops (each job already guards on `batch()?->cancelled()`), flips
+     * the row to `cancelled`, and discards whatever partial artifacts landed
+     * before the cancel took effect. A no-op on an already-terminal run.
+     */
+    public function cancel(BillBatch $billBatch): void
+    {
+        if ($billBatch->isTerminal()) {
+            return;
+        }
+
+        if ($billBatch->batch_id !== null) {
+            Bus::findBatch($billBatch->batch_id)?->cancel();
+        }
+
+        $billBatch->update(['status' => 'cancelled', 'completed_at' => now()]);
+
+        $this->discardArtifacts($billBatch);
+    }
+
+    /**
+     * Clear a run entirely — deletes its stored PDF/ZIP artifacts and the
+     * bill_batches row (bill_batch_files cascade). Cancels first if it is
+     * somehow still in flight. Used for "I want to regenerate": clear the
+     * bad run, then start a fresh one.
+     */
+    public function delete(BillBatch $billBatch): void
+    {
+        if (! $billBatch->isTerminal() && $billBatch->batch_id !== null) {
+            Bus::findBatch($billBatch->batch_id)?->cancel();
+        }
+
+        $this->discardArtifacts($billBatch);
+
+        $billBatch->delete();
+    }
+
+    /**
+     * Removes every stored artifact for a run (the whole per-batch
+     * directory) and its bill_batch_files rows. Idempotent — safe to call
+     * from both cancel() and finalize() for a cancelled run regardless of
+     * which runs last.
+     */
+    private function discardArtifacts(BillBatch $billBatch): void
+    {
+        Storage::disk(self::DISK)->deleteDirectory($this->basePath($billBatch));
+
+        $billBatch->files()->delete();
     }
 
     /**
@@ -245,6 +299,15 @@ class BillBatchService
         $billBatch = BillBatch::with('files')->find($billBatchId);
 
         if (! $billBatch) {
+            return;
+        }
+
+        // The run was cancelled mid-flight — don't resurrect it as
+        // failed/partial. Just make sure no half-rendered artifact lingers
+        // (cancel() also does this; whichever runs last wins).
+        if ($billBatch->status === 'cancelled') {
+            $this->discardArtifacts($billBatch);
+
             return;
         }
 

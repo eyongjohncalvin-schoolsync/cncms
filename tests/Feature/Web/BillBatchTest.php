@@ -113,6 +113,11 @@ class BillBatchTest extends TestCase
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'disconnected']);
         ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
 
+        // Scoped to this test's own fixture, not `period` globally — the
+        // shared tenant may already carry a real bill_batches row for the
+        // current period.
+        $before = BillBatch::query()->count();
+
         $this->actingAsRole('manager');
 
         $this->post('/manuscripts/bills/generate', ['period' => $period, 'zone_uuid' => $zone->uuid])
@@ -120,7 +125,7 @@ class BillBatchTest extends TestCase
             ->assertSessionHas('error');
 
         Bus::assertNothingBatched();
-        $this->assertFalse(BillBatch::query()->where('period', $period)->exists());
+        $this->assertSame($before, BillBatch::query()->count());
     }
 
     public function test_zone_job_writes_a_real_pdf_artifact(): void
@@ -224,6 +229,110 @@ class BillBatchTest extends TestCase
         app(BillBatchService::class)->finalize($batch->id, failedJobs: 1, totalJobs: 2);
 
         $this->assertSame('failed', $batch->fresh()->status);
+    }
+
+    public function test_cancel_stops_an_in_flight_run_and_discards_its_artifacts(): void
+    {
+        Storage::fake('local');
+        [$zone, $period] = $this->seedZoneWithRecipients(['Ada', 'Ben']);
+        $customerIds = $zone->customers()->pluck('id')->all();
+
+        $batch = BillBatch::create([
+            'period' => $period, 'status' => 'processing', 'density' => 1, 'template' => 'classic',
+            'total_bills' => 2, 'total_zones' => 1,
+        ]);
+        // A zone PDF that landed before the cancel took effect.
+        app(BillBatchService::class)->renderZoneFile($batch->id, $period, $zone->id, $zone->name, $customerIds);
+        $file = BillBatchFile::query()->where('bill_batch_id', $batch->id)->firstOrFail();
+        Storage::disk('local')->assertExists($file->path);
+
+        $this->actingAsRole('manager');
+        $this->post(route('manuscripts.bills.cancel', $batch->uuid))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $batch->refresh();
+        $this->assertSame('cancelled', $batch->status);
+        $this->assertNotNull($batch->completed_at);
+        $this->assertSame(0, $batch->files()->count());
+        Storage::disk('local')->assertMissing($file->path);
+    }
+
+    public function test_cancel_is_a_noop_on_an_already_finished_run(): void
+    {
+        Storage::fake('local');
+        [$zone, $period] = $this->seedZoneWithRecipients(['Ada']);
+        $customerIds = $zone->customers()->pluck('id')->all();
+
+        $batch = BillBatch::create([
+            'period' => $period, 'status' => 'completed', 'density' => 1, 'template' => 'classic',
+            'total_bills' => 1, 'total_zones' => 1,
+        ]);
+        app(BillBatchService::class)->renderZoneFile($batch->id, $period, $zone->id, $zone->name, $customerIds);
+
+        $this->actingAsRole('manager');
+        $this->post(route('manuscripts.bills.cancel', $batch->uuid))->assertRedirect();
+
+        $this->assertSame('completed', $batch->fresh()->status);
+        $this->assertSame(1, $batch->files()->count());
+    }
+
+    public function test_finalize_leaves_a_cancelled_run_cancelled(): void
+    {
+        Storage::fake('local');
+        [$zone, $period] = $this->seedZoneWithRecipients(['Ada']);
+
+        $batch = BillBatch::create([
+            'period' => $period, 'status' => 'cancelled', 'density' => 1, 'template' => 'classic',
+            'total_bills' => 1, 'total_zones' => 1,
+        ]);
+
+        app(BillBatchService::class)->finalize($batch->id, failedJobs: 0, totalJobs: 2);
+
+        $this->assertSame('cancelled', $batch->fresh()->status);
+    }
+
+    public function test_destroy_deletes_the_run_and_every_artifact(): void
+    {
+        Storage::fake('local');
+        [$zone, $period] = $this->seedZoneWithRecipients(['Ada', 'Ben']);
+        $customerIds = $zone->customers()->pluck('id')->all();
+
+        $batch = BillBatch::create([
+            'period' => $period, 'status' => 'completed', 'density' => 1, 'template' => 'classic',
+            'total_bills' => 2, 'total_zones' => 1,
+        ]);
+        $service = app(BillBatchService::class);
+        $service->renderZoneFile($batch->id, $period, $zone->id, $zone->name, $customerIds);
+        $service->renderBulkFile($batch->id, $period, $customerIds);
+        $paths = $batch->files()->pluck('path');
+        $this->assertGreaterThan(0, $paths->count());
+
+        $this->actingAsRole('manager');
+        $this->delete(route('manuscripts.bills.destroy', $batch->uuid))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertNull(BillBatch::find($batch->id));
+        $this->assertSame(0, BillBatchFile::query()->where('bill_batch_id', $batch->id)->count());
+        foreach ($paths as $path) {
+            Storage::disk('local')->assertMissing($path);
+        }
+    }
+
+    public function test_cancel_and_destroy_are_denied_to_a_worker(): void
+    {
+        [$zone, $period] = $this->seedZoneWithRecipients(['Ada']);
+        $batch = BillBatch::create([
+            'period' => $period, 'status' => 'processing', 'density' => 1, 'template' => 'classic',
+            'total_bills' => 1, 'total_zones' => 1,
+        ]);
+
+        $this->actingAsRole('worker');
+        $this->post(route('manuscripts.bills.cancel', $batch->uuid))->assertForbidden();
+        $this->delete(route('manuscripts.bills.destroy', $batch->uuid))->assertForbidden();
+
+        $this->assertNotNull(BillBatch::find($batch->id));
     }
 
     public function test_download_streams_a_stored_artifact_and_denies_a_worker(): void

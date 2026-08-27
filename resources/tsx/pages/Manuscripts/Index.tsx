@@ -18,6 +18,7 @@ import {
     IconLayoutGrid,
     IconClock,
     IconCircleCheck,
+    IconTrash,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -223,6 +224,20 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                 onFinish: () => setGeneratingBills(false),
             },
         );
+    }
+
+    // Cancel an in-flight run (owner made an error and wants to start over);
+    // clear a finished/cancelled run's artifacts so a fresh Generate starts
+    // from nothing.
+    function cancelBillBatch(uuid: string) {
+        router.post(`/manuscripts/bills/batches/${uuid}/cancel`, {}, { preserveScroll: true });
+    }
+
+    function clearBillBatch(uuid: string) {
+        if (!window.confirm('Delete this run and its generated PDFs? This cannot be undone.')) {
+            return;
+        }
+        router.delete(`/manuscripts/bills/batches/${uuid}`, { preserveScroll: true });
     }
 
     // Recomputed only when the period/filters actually change, not on every
@@ -468,6 +483,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                     </CardHeader>
                     <CardBody className="flex flex-col gap-4">
                         {billBatches.map((batch) => {
+                            const working = batch.status === 'queued' || batch.status === 'processing';
                             const tone =
                                 batch.status === 'completed'
                                     ? 'green'
@@ -475,12 +491,14 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                       ? 'yellow'
                                       : batch.status === 'failed'
                                         ? 'red'
-                                        : 'blue';
+                                        : batch.status === 'cancelled'
+                                          ? 'slate'
+                                          : 'blue';
                             return (
                                 <div key={batch.uuid} className="rounded-lg border border-slate-200 p-3">
                                     <div className="mb-2 flex flex-wrap items-center gap-2">
                                         <Badge tone={tone}>
-                                            {batch.status === 'queued' || batch.status === 'processing' ? (
+                                            {working ? (
                                                 <IconClock size={12} className="mr-1 inline" stroke={2} />
                                             ) : batch.status === 'completed' ? (
                                                 <IconCircleCheck size={12} className="mr-1 inline" stroke={2} />
@@ -492,15 +510,39 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                         <span className="text-xs text-slate-500">
                                             {batch.total_bills} bills · {batch.total_zones} zones · {batch.template} ×{batch.density}
                                         </span>
+                                        <div className="ml-auto flex items-center gap-1">
+                                            {working ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => cancelBillBatch(batch.uuid)}
+                                                    className="rounded-md px-2 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-50"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => clearBillBatch(batch.uuid)}
+                                                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50"
+                                                >
+                                                    <IconTrash size={13} stroke={1.75} />
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {batch.error_message && (
                                         <p className="mb-2 text-xs text-red-600">{batch.error_message}</p>
                                     )}
 
-                                    {batch.status === 'queued' || batch.status === 'processing' ? (
+                                    {working ? (
                                         <p className="text-xs text-slate-400">
                                             The PDFs are being rendered in the background. This panel refreshes itself.
+                                        </p>
+                                    ) : batch.status === 'cancelled' ? (
+                                        <p className="text-xs text-slate-400">
+                                            Run cancelled — its PDFs were discarded. Start a new generation when ready.
                                         </p>
                                     ) : batch.files.length === 0 ? (
                                         <p className="text-xs text-slate-400">No artifacts were produced.</p>

@@ -28,3 +28,12 @@ Route::post('manuscripts/bills/generate', [BillBatchController::class, 'generate
 Route::get('manuscripts/bills/batches/{billBatch}/files/{billBatchFile}', [BillBatchController::class, 'download'])
     ->name('manuscripts.bills.download')
     ->middleware('throttle:exports');
+
+// Cancel an in-flight run; clear (delete) a run's artifacts to regenerate.
+Route::post('manuscripts/bills/batches/{billBatch}/cancel', [BillBatchController::class, 'cancel'])
+    ->name('manuscripts.bills.cancel')
+    ->middleware('throttle:exports');
+
+Route::delete('manuscripts/bills/batches/{billBatch}', [BillBatchController::class, 'destroy'])
+    ->name('manuscripts.bills.destroy')
+    ->middleware('throttle:exports');

@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * App\Services\BillBatchService). Its child bill_batch_files rows are the
  * downloadable PDF artifacts.
  *
- * @property string $status queued|processing|completed|partial|failed
+ * @property string $status queued|processing|completed|partial|failed|cancelled
  */
 #[Fillable([
     'period', 'status', 'density', 'template', 'filters', 'total_bills', 'total_zones',
@@ -46,7 +46,7 @@ class BillBatch extends Model
 
     public function isTerminal(): bool
     {
-        return in_array($this->status, ['completed', 'partial', 'failed'], true);
+        return in_array($this->status, ['completed', 'partial', 'failed', 'cancelled'], true);
     }
 
     public function isDownloadable(): bool

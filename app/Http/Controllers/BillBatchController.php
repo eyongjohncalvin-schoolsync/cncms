@@ -66,6 +66,34 @@ class BillBatchController extends Controller
     }
 
     /**
+     * Cancels an in-flight run (owner's ask — "there's no cancel, because I
+     * made an error"). Stops any pending jobs and discards partial
+     * artifacts. No-op (still a friendly redirect) if it already finished.
+     */
+    public function cancel(BillBatch $billBatch): RedirectResponse
+    {
+        $this->authorize('export', Manuscript::class);
+
+        $this->batches->cancel($billBatch);
+
+        return back()->with('success', 'Bill generation cancelled.');
+    }
+
+    /**
+     * Clears a run — deletes its stored PDF/ZIP artifacts and the row — so
+     * the owner can regenerate from a clean slate. Cancels first if it is
+     * somehow still running.
+     */
+    public function destroy(BillBatch $billBatch): RedirectResponse
+    {
+        $this->authorize('export', Manuscript::class);
+
+        $this->batches->delete($billBatch);
+
+        return back()->with('success', 'Generated bills cleared.');
+    }
+
+    /**
      * Streams one stored artifact PDF/ZIP. {billBatch} and {billBatchFile}
      * both route-model-bind by uuid; the file is verified to belong to the
      * batch before anything is streamed.

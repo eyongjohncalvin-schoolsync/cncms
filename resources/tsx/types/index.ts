@@ -535,7 +535,7 @@ export interface BillBatchFile {
 /** An asynchronous (queued) bill-generation run for a period (owner's 2026-08-30 ask). */
 export interface BillBatch {
     uuid: string;
-    status: 'queued' | 'processing' | 'completed' | 'partial' | 'failed';
+    status: 'queued' | 'processing' | 'completed' | 'partial' | 'failed' | 'cancelled';
     period: string;
     density: number;
     template: string;
