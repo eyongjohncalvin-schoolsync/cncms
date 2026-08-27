@@ -685,3 +685,73 @@ future pass covers Home's actual feature set, not silently dropped.
 6. **Still AAA (7:1), still amber-never-red-for-offline, still 56dp/48dp touch targets, still no dark
    mode.** None of this pass's changes loosened any of those — verify new colors the same way this
    pass did (a real contrast calculation, not eyeballing) before introducing any new token value.
+
+## 11. Seven new screens + a 5th tab — 2026-08-27 (post-rebrand)
+
+Seven agents, each scoped to exactly one new top-level screen file (plus, where genuinely needed, a
+small owned backend endpoint), built in parallel immediately after §10's rebrand landed — using the
+new design system from the start rather than needing a second retrofit pass. A dedicated orchestration
+step (this section) wired navigation afterward, deliberately kept out of the parallel agents' hands
+since a shared nav file is exactly the kind of file two agents editing at once would conflict on.
+
+**Screens added** (each is a standalone `Stack.Screen`, `presentation: 'modal'`, registered in
+`app/_layout.tsx` alongside the existing `notifications`/`sync-status`/`log-complaint` entries):
+
+- **`settings.tsx`** — profile display (from the already-cached `/auth/me`), app version, sync-aware
+  logout. Notification preferences and a language picker were deliberately left out: `NotificationSetting`
+  is a single per-tenant row (admin-only, not per-user), and `language-support.md` has no real
+  endpoint yet — building either would mean a form that silently does nothing.
+- **`reports.tsx`** — plain-numeral (no charts, per §6) collection totals and zone snapshot, backed by
+  local SQLite only. `ReportController` has no REST route reachable from mobile's Sanctum client at
+  all today (web/Inertia only) — this doesn't fake one; a real API endpoint is a real future gap, not
+  solved here.
+- **`resources.tsx`** — the agent's own recorded-expenditure history (period total, category filters,
+  sync-status badges). Deliberately excludes the office-only P&L/budget-vs-actual dashboard —
+  `ExpenditurePolicy::viewDashboard()` explicitly admits `super/admin/manager` only, never `agent`.
+- **`zones.tsx`** — read-only: the agent's own zone (derived from the already-synced local customers
+  cache, since every cached row shares one `zone_uuid`) plus a live `GET /api/v1/zones` list for
+  looking up any other zone by name. No management UI — `ZonePolicy` keeps create/update/delete
+  office-only.
+- **`agent-profile.tsx`** ("My Profile") — the logged-in agent's own record only, *never* a roster,
+  even though `AgentPolicy::view()`/`viewAny()` technically permit any authenticated role to view any
+  agent. A lost/borrowed field phone showing every other agent's salary and marital status has no
+  product justification, so this is scoped narrower than the raw policy allows on purpose. Backed by
+  a new `GET /api/v1/agents/me` (registered ahead of the `apiResource`'s `{agent}` route so it isn't
+  swallowed), which resolves strictly from `$request->user()->id` — no uuid parameter exists on this
+  endpoint at all, so there is no way to redirect it at another agent's data regardless of role. A new
+  `AgentMeResource` is kept separate from the existing roster `AgentResource` so `index()`/`show()`'s
+  shape isn't widened.
+- **`disconnections.tsx`** — the zone-scoped "flagged for non-payment" eligibility list (not the
+  office bulk workboard), tapping through to the existing `disconnect/[uuid].tsx` flow. Backed by a
+  new `GET /api/v1/customers/eligible-for-disconnection`, reusing `CustomerEligibilityService`
+  directly (no duplicated query logic), gated by `CustomerPolicy::viewEligibilityBoard()` (already
+  admitted `agent`, scoped to their own zone). Zone-scoping is server-enforced exactly like the web
+  `DisconnectionsController`: for an `agent` caller the zone id comes from `TenantContext::zoneId`
+  regardless of any `zone_uuid` query param sent — covered by a dedicated regression test
+  (`test_agent_cannot_view_another_zone_via_query_param`).
+- **`complaints.tsx`** — this device's own submitted complaints, rendering instantly from local
+  SQLite (offline-first, never blocks). A real data gap surfaced here: complaint sync is genuinely
+  push/create-only (`SyncService::pull()` never returns complaints), so the local cache alone can
+  never carry the office's real open/in_progress/resolved status. Closed with a best-effort,
+  online-only enrichment call to the already-existing `GET /api/v1/complaints`, matched back to local
+  rows by `server_uuid` — not-yet-synced rows show the existing "Saved · will sync" amber badge,
+  synced-but-unconfirmed rows show a distinct neutral "Submitted," and a successful live fetch shows
+  the real status plus resolution note. No resolve/reopen/assign UI — stays office-only.
+
+**Common thread across all seven:** every screen mirrors the *exact* role/ability gate its
+corresponding web `Policy` class already enforces — nothing here invents a new permission or widens
+what an `agent` could already do server-side. Two of the seven (Agent Profile, Disconnections) needed
+a small new backend endpoint since none existed for mobile to call; both were kept minimal (one method
+each, reusing existing services, no new service classes) and covered by dedicated new feature tests,
+independently re-run and confirmed passing before landing (not just trusted from each agent's own report).
+
+**Navigation — the 5th tab.** §4 originally settled on 4 tabs specifically so a single feature
+(Log a Complaint) wouldn't get its own dedicated tab. That reasoning doesn't extend to a genuine
+grab-bag of 7+ secondary destinations landing in one session — a single **More** tab
+(`(tabs)/more.tsx`) is the standard resolution once an app outgrows what 4 top-level destinations can
+hold (the same shape most mobile-money apps use once they mature past a single core loop). It's a
+plain two-section list (Field tools: Disconnections/Zones/Complaints/Resources/Reports; Account: My
+Profile/Settings/Notifications/Sync Status) — a real UX improvement on its own, since Notifications and
+Sync Status previously had no consistent home beyond ad-hoc `Card` links scattered on Home. Home's
+existing "Quick actions"/"Get around" sections and its own inline "Sign out" button were left
+untouched — More is additive, not a replacement for any existing entry point.

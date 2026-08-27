@@ -38,6 +38,11 @@ function TabGlyph({
  * Record Payment, History — Record Payment gets its own tab despite being
  * customer-scoped, since it's the single highest-frequency field action.
  *
+ * A 5th tab, More (`more.tsx`), was added 2026-08-27 once 7 new secondary
+ * screens landed in one session — see that file's own doc comment for why
+ * a single grab-bag tab is the right call now, where it wasn't for a single
+ * feature (Log a Complaint) when §4 originally settled on 4.
+ *
  * The sync-status strip (§5) is mounted here, once, above <Tabs> — so it
  * stays visible across every tab AND every nested screen pushed within a
  * tab's own stack (e.g. a future customer detail screen), rather than
@@ -103,6 +108,15 @@ export default function TabsLayout() {
                         title: 'History',
                         tabBarIcon: ({ focused }) => (
                             <TabGlyph letter="T" color={colors.accent.history} focused={focused} />
+                        ),
+                    }}
+                />
+                <Tabs.Screen
+                    name="more"
+                    options={{
+                        title: 'More',
+                        tabBarIcon: ({ focused }) => (
+                            <TabGlyph letter="•••" color={colors.accent.complaint} focused={focused} />
                         ),
                     }}
                 />

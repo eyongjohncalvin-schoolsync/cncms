@@ -138,6 +138,32 @@ function RootNavigation() {
                 options={{ presentation: 'modal', headerShown: true, title: 'Disconnect' }}
             />
             {/*
+              2026-08-27: 7 new screens landed in parallel this session (see
+              (tabs)/more.tsx's doc comment for the full IA reasoning), each
+              reachable from the new More tab. Every one already sets its own
+              in-screen title via its own <Stack.Screen options> where it
+              needs one, matching this app's existing per-screen-title
+              convention (see reconnect/disconnect above) — headerShown:true
+              here just guarantees the native back arrow every modal screen
+              in this app already gets.
+            */}
+            <Stack.Screen name="settings" options={{ presentation: 'modal', headerShown: true, title: 'Settings' }} />
+            <Stack.Screen name="reports" options={{ presentation: 'modal', headerShown: true, title: 'Reports' }} />
+            <Stack.Screen name="resources" options={{ presentation: 'modal', headerShown: true, title: 'Resources' }} />
+            <Stack.Screen name="zones" options={{ presentation: 'modal', headerShown: true, title: 'Zones' }} />
+            <Stack.Screen
+                name="agent-profile"
+                options={{ presentation: 'modal', headerShown: true, title: 'My Profile' }}
+            />
+            <Stack.Screen
+                name="disconnections"
+                options={{ presentation: 'modal', headerShown: true, title: 'Disconnections' }}
+            />
+            <Stack.Screen
+                name="complaints"
+                options={{ presentation: 'modal', headerShown: true, title: 'Complaints' }}
+            />
+            {/*
               complaint-desk.md section 7: the one screen in this app that
               deliberately blocks. fullScreenModal (not 'modal') + no
               header + gestureEnabled:false means no swipe-down-to-dismiss
