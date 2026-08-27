@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { login as apiLogin, logout as apiLogout, fetchMe } from '../api/auth';
-import { setUnauthorizedHandler, isNetworkError } from '../api/client';
+import { setUnauthorizedHandler } from '../api/client';
 import { getCurrentToken, setCurrentToken } from './tokenState';
 import { clearStoredToken, getStoredToken, setStoredToken } from './tokenStorage';
 import type { TenantRole } from '../types/api';
@@ -122,17 +122,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setRoleConfirmed(true);
                 setStatus('authenticated');
                 await writeCachedProfile({ user: me.user, role: me.role });
-            } catch (error) {
-                if (isNetworkError(error)) {
-                    // Can't confirm right now — if we had a cached profile
-                    // we're already showing it; if not, there is nothing
-                    // safe to show, so fall back to the login screen.
-                    if (!cached) {
-                        setStatus('unauthenticated');
-                    }
-                }
-                // A genuine 401 already routed through handleUnauthorized
-                // via the response interceptor — nothing else to do here.
+            } catch {
+                // A genuine 401 is already fully handled by
+                // handleUnauthorized(), invoked synchronously by the
+                // response interceptor before this catch runs — nothing
+                // else to do here for that case.
+            } finally {
+                // Guarantee `status` never gets stuck on 'loading', no
+                // matter what shape the failure took: a network error, a
+                // non-401 server error (5xx, 403, 422...), a malformed
+                // response, a timeout, or any other exception `fetchMe()`
+                // can throw — not just the ones we explicitly recognize.
+                // If a cached profile is already on screen (status was set
+                // above), keep trusting it rather than downgrading on an
+                // unconfirmed failure. Otherwise there is nothing safe to
+                // show, so send the agent to the login screen.
+                setStatus((prev) => (prev === 'loading' ? 'unauthenticated' : prev));
             }
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
