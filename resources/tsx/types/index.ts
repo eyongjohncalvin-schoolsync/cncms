@@ -209,6 +209,16 @@ export interface Payment {
     customer_name: string;
     customer_bill: string;
     zone_name?: string | null;
+    /**
+     * The customer's current `total_arrears`, from `customer.latestManuscript`
+     * — only populated on Payments/Show.tsx (App\Http\Controllers\
+     * PaymentController::show() eager-loads that relation specifically for
+     * this); always null on Payments/Index.tsx's list rows. Feeds the
+     * "Adjust Arrears" entry point on the detail page — see
+     * .claude/skills/cncms-context/references/arrears-adjustment.md's
+     * 2026-08-27 addendum.
+     */
+    customer_total_arrears?: string | null;
     amount: string;
     credit: string;
     frequency: PaymentFrequency;

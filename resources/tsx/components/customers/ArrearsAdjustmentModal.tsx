@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useMemo, useState } from 'react';
 import { useForm } from '@inertiajs/react';
 import { IconScale } from '@tabler/icons-react';
 import { Modal } from '@/components/ui/Modal';
@@ -37,14 +37,29 @@ function currentPeriod(): string {
 
 /**
  * The Arrears Adjustment request modal — reached from Customers/Show.tsx's
- * action row, alongside Print Bill/Edit. Structurally a Modal, never a page:
- * no customer picker (context is already the customer), no frequency
- * selector — nothing here can be mistaken for the Payment form. Purple
- * accent throughout (this feature's design doc: "confirmed as the one
- * genuinely unclaimed color on that page") since blue/red/amber/slate/green
- * already mean specific things on Customers/Show.tsx.
+ * action row (alongside Print Bill/Edit), and, as of the 2026-08-27
+ * addendum in this feature's design doc, also from Manuscripts/Index.tsx's
+ * per-row actions and Payments/Show.tsx's header actions. Structurally a
+ * Modal, never a page: no customer picker (context is already the
+ * customer), no frequency selector — nothing here can be mistaken for the
+ * Payment form. Purple accent throughout (this feature's design doc:
+ * "confirmed as the one genuinely unclaimed color on that page") since
+ * blue/red/amber/slate/green already mean specific things on
+ * Customers/Show.tsx.
+ *
+ * `trigger` is an optional render prop letting a caller swap in its own
+ * button while reusing everything else here unchanged — e.g. Manuscripts/
+ * Index.tsx needs a compact per-row pill, not this component's own
+ * full-size purple button. Omitting it (Customers/Show.tsx, Payments/
+ * Show.tsx) renders that original button exactly as before.
  */
-export function ArrearsAdjustmentModal({ customer }: { customer: CustomerForAdjustment }) {
+export function ArrearsAdjustmentModal({
+    customer,
+    trigger,
+}: {
+    customer: CustomerForAdjustment;
+    trigger?: (open: () => void) => ReactNode;
+}) {
     const [open, setOpen] = useState(false);
 
     const { data, setData, post, processing, errors, reset } = useForm({
@@ -94,14 +109,18 @@ export function ArrearsAdjustmentModal({ customer }: { customer: CustomerForAdju
 
     return (
         <>
-            <button
-                type="button"
-                onClick={() => setOpen(true)}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-purple-600/20 transition-all duration-150 hover:bg-purple-700 hover:shadow-purple-600/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600 active:scale-[0.98]"
-            >
-                <IconScale size={16} stroke={1.75} />
-                Adjust Arrears
-            </button>
+            {trigger ? (
+                trigger(() => setOpen(true))
+            ) : (
+                <button
+                    type="button"
+                    onClick={() => setOpen(true)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-purple-600/20 transition-all duration-150 hover:bg-purple-700 hover:shadow-purple-600/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600 active:scale-[0.98]"
+                >
+                    <IconScale size={16} stroke={1.75} />
+                    Adjust Arrears
+                </button>
+            )}
 
             <Modal open={open} onClose={close} title="Request Arrears Adjustment">
                 <form onSubmit={submit} className="flex flex-col gap-4">

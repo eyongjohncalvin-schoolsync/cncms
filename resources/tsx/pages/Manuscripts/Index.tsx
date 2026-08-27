@@ -7,6 +7,7 @@ import {
     IconCash,
     IconDownload,
     IconReceipt2,
+    IconScale,
     IconUsers,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -20,6 +21,8 @@ import { Modal } from '@/components/ui/Modal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { StatusBadge } from '@/components/shared/StatusBadge';
+import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
+import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
 import type { Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
 
@@ -131,6 +134,15 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                 formattedArrears: formatCurrency(manuscript.total_arrears),
                 formattedCredit: formatCurrency(manuscript.credit),
                 formattedTotalBill: formatCurrency(manuscript.total_bill),
+                // Mapped into the `{uuid, name, manuscript: {total_arrears}}`
+                // shape ArrearsAdjustmentModal expects (same shape
+                // Customers/Show.tsx already passes it) — trivial reshaping
+                // of fields this row already carries, not a new fetch.
+                arrearsCustomer: {
+                    uuid: manuscript.customer_uuid,
+                    name: manuscript.customer_name,
+                    manuscript: { total_arrears: manuscript.total_arrears },
+                },
             })),
         [manuscripts.data],
     );
@@ -253,10 +265,10 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                 <Th>Expiry</Th>
                                 <Th>Total Bill</Th>
                                 <Th>Status</Th>
-                                {canSendBill && <Th>Bill Reminder</Th>}
+                                <Th>Actions</Th>
                             </TableHead>
                             <TableBody>
-                                {rows.map(({ manuscript, formattedBill, formattedArrears, formattedCredit, formattedTotalBill }, index) => (
+                                {rows.map(({ manuscript, formattedBill, formattedArrears, formattedCredit, formattedTotalBill, arrearsCustomer }, index) => (
                                     <tr key={manuscript.customer_uuid} className="transition-colors hover:bg-slate-50">
                                         <Td>{(manuscripts.meta.current_page - 1) * manuscripts.meta.per_page + index + 1}</Td>
                                         <Td>{manuscript.customer_name}</Td>
@@ -272,26 +284,49 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                         <Td>
                                             <StatusBadge status={manuscript.status} />
                                         </Td>
-                                        {canSendBill && (
-                                            <Td>
-                                                {manuscript.wa_link ? (
-                                                    <a
-                                                        href={manuscript.wa_link}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        onClick={() => recordBillSent(manuscript.customer_uuid)}
-                                                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
-                                                    >
-                                                        <IconBrandWhatsapp size={14} stroke={1.75} />
-                                                        Send Bill
-                                                    </a>
-                                                ) : (
-                                                    <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                                                        No phone on file
-                                                    </span>
+                                        <Td>
+                                            {/* Same Dropdown/DropdownItem/DropdownDivider kebab-menu pattern
+                                                Customers/Index.tsx's Actions column uses — regroups this row's
+                                                pre-existing Send Bill action alongside the new Adjust Arrears
+                                                entry, one dropdown per row, distinctly labeled. */}
+                                            <Dropdown label={`Actions for ${manuscript.customer_name}`}>
+                                                <ArrearsAdjustmentModal
+                                                    customer={arrearsCustomer}
+                                                    trigger={(open) => (
+                                                        <DropdownItem onClick={open} icon={<IconScale size={16} stroke={1.75} />}>
+                                                            Adjust Arrears
+                                                        </DropdownItem>
+                                                    )}
+                                                />
+                                                {canSendBill && (
+                                                    <>
+                                                        <DropdownDivider />
+                                                        {manuscript.wa_link ? (
+                                                            // DropdownItem's `href` branch always renders through
+                                                            // Inertia's <Link> (router.visit()), which would wrongly
+                                                            // intercept this external wa.me URL instead of letting the
+                                                            // browser open it in a new tab — the exact reason the
+                                                            // original markup used a plain <a>. window.open() here
+                                                            // preserves that same "opens in a new tab" behavior while
+                                                            // still composing as a plain onClick DropdownItem.
+                                                            <DropdownItem
+                                                                onClick={() => {
+                                                                    window.open(manuscript.wa_link!, '_blank', 'noopener,noreferrer');
+                                                                    recordBillSent(manuscript.customer_uuid);
+                                                                }}
+                                                                icon={<IconBrandWhatsapp size={16} stroke={1.75} />}
+                                                            >
+                                                                Send Bill
+                                                            </DropdownItem>
+                                                        ) : (
+                                                            <DropdownItem disabled icon={<IconBrandWhatsapp size={16} stroke={1.75} />}>
+                                                                No phone on file
+                                                            </DropdownItem>
+                                                        )}
+                                                    </>
                                                 )}
-                                            </Td>
-                                        )}
+                                            </Dropdown>
+                                        </Td>
                                     </tr>
                                 ))}
                             </TableBody>

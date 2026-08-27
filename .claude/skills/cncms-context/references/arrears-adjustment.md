@@ -14,7 +14,10 @@ document was never actually committed to this repo — this file is now the clos
 
 - **Request a write-off / adjustment**: open any customer's detail page (`/customers/{uuid}`) and
   click the purple **"Adjust Arrears"** button in the action row, next to Suspend/Disconnect/
-  Reconnect/Print Bill/Edit. Every one of the 5 roles can do this.
+  Reconnect/Print Bill/Edit. Every one of the 5 roles can do this. As of §8 (2026-08-27), the same
+  request form is also one click away from `/manuscripts` (each row's Actions dropdown — "Adjust
+  Arrears") and from `/payments/{uuid}` (a header button next to Edit/Delete Payment) — no need to
+  navigate to the customer's own page first.
 - **Approve / reject pending requests**: the **Audit Log** nav item (sidebar, cyan icon — visible to
   `super`/`admin`/`manager` only) → the **"Arrears Adjustments"** sub-tab at the top of that page
   (`/audit/logs?view=arrears_adjustments`).
@@ -201,3 +204,48 @@ straight to the review queue.
   of a UI restructure.
 - **No `legacy_import_cohort` flag.** See §2's note on the `legacy_migration_error` second-approval
   rule — flagged as a known follow-up, not built here.
+
+## 8. Addendum, 2026-08-27: two more entry points
+
+The modal (`ArrearsAdjustmentModal`) is now reachable from two more places staff
+already are, without navigating to the customer's page first — still no new nav
+item, still the same maker-checker workflow and policy above, purely more
+launch points for the identical component:
+
+- **`Manuscripts/Index.tsx`** — the monthly billing register's per-row
+  **Actions** column. That column already existed as a bare "Send Bill"
+  WhatsApp pill (visible only to `canSendBill` roles); it's now a proper
+  `Dropdown`/`DropdownItem`/`DropdownDivider` kebab menu (the same pattern
+  `Customers/Index.tsx`'s Actions column uses) so "Adjust Arrears" (always
+  present — `ArrearsAdjustmentPolicy::create()` is ungated) and "Send Bill"
+  (still role-gated, still opens `wa.me` in a new tab) both live under one
+  menu per row. Each `Manuscript` row already carries `customer_uuid`/
+  `customer_name`/`total_arrears`, mapped trivially into the modal's
+  `{uuid, name, manuscript: {total_arrears}}` shape.
+- **`Payments/Show.tsx`** — a plain "Adjust Arrears" button in the header
+  actions row, next to Edit/Delete Payment but (unlike those two) rendered
+  unconditionally, matching the policy's ungated `create()`. This page's
+  `Payment` prop didn't carry the customer's current arrears figure, so
+  `PaymentController::show()` now also eager-loads `customer.latestManuscript`
+  (alongside the `customer.zone`/`verification.verifier` it already loaded)
+  and `formatPayment()` exposes it as one extra field, `customer_total_arrears`
+  — null wherever that relation isn't loaded (e.g. `Payments/Index.tsx`'s list
+  rows, `edit()`), by design.
+
+**How `ArrearsAdjustmentModal` was widened, not forked**: it gained one
+optional prop, `trigger?: (open: () => void) => ReactNode` — a render prop
+letting a caller swap in its own trigger element while every other line of
+the component (state, form, the actual `Modal`) stays exactly as it was.
+Omit it and the component renders its original full-size purple button
+unchanged, which is exactly what `Customers/Show.tsx` and the new
+`Payments/Show.tsx` usage both do; `Manuscripts/Index.tsx` is the only
+caller that supplies `trigger`, to get a compact `DropdownItem` instead.
+
+**Why the "Send Bill" WhatsApp item couldn't just become a `DropdownItem
+href=...`**: `DropdownItem`'s `href` branch always renders through Inertia's
+`<Link>`, which intercepts every click via `router.visit()` regardless of a
+`target="_blank"` prop — wrong for an external, cross-origin `wa.me` URL (the
+exact reason the original markup used a plain `<a>`). The converted item
+stays a plain `onClick` `DropdownItem` that calls `window.open()` itself,
+preserving the original "opens in a new tab" behavior without touching
+`ui/Dropdown.tsx`.

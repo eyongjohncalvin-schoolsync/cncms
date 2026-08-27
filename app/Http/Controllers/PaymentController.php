@@ -236,7 +236,12 @@ class PaymentController extends Controller
         $this->authorize('view', $payment);
 
         $payment = $this->payments->findOrFail($payment->uuid);
-        $payment->load(['customer.zone', 'verification.verifier']);
+        // latestManuscript added alongside zone/verification (same
+        // load()-after-the-fact idiom this class's doc comment describes,
+        // not a repository contract change) purely so Payments/Show.tsx can
+        // offer an "Adjust Arrears" entry point without a page navigation —
+        // see this feature's design doc, 2026-08-27 addendum.
+        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier']);
 
         return Inertia::render('Payments/Show', [
             'payment' => $this->formatPayment($payment),
@@ -341,6 +346,15 @@ class PaymentController extends Controller
             'customer_name' => $payment->customer->name,
             'customer_bill' => (string) $payment->customer->bill,
             'zone_name' => $payment->customer->zone?->name,
+            // Only populated on Payments/Show.tsx (where `customer.
+            // latestManuscript` is eager-loaded — see show()'s doc comment
+            // above); null on Payments/Index.tsx's list rows, which never
+            // load that relation. Feeds the "Adjust Arrears" entry point's
+            // current-balance display the same way Customers/Show.tsx's
+            // `manuscript.total_arrears` does.
+            'customer_total_arrears' => $payment->customer->relationLoaded('latestManuscript')
+                ? $payment->customer->latestManuscript?->total_arrears
+                : null,
             'amount' => (string) $payment->amount,
             'credit' => (string) $payment->credit,
             'frequency' => $payment->frequency,

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Modal } from '@/components/ui/Modal';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
+import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
 import type { Payment } from '@/types';
 
@@ -62,6 +63,20 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
         [payment],
     );
 
+    // Mapped into the `{uuid, name, manuscript: {total_arrears}}` shape
+    // ArrearsAdjustmentModal expects — same shape Customers/Show.tsx
+    // already passes it. `customer_total_arrears` is only ever populated
+    // on this page (PaymentController::show() eager-loads it specifically
+    // for this), so `manuscript` is null rather than omitted when absent.
+    const arrearsCustomer = useMemo(
+        () => ({
+            uuid: payment.customer_uuid,
+            name: payment.customer_name,
+            manuscript: payment.customer_total_arrears != null ? { total_arrears: payment.customer_total_arrears } : null,
+        }),
+        [payment.customer_uuid, payment.customer_name, payment.customer_total_arrears],
+    );
+
     function submit(e: FormEvent) {
         e.preventDefault();
 
@@ -94,23 +109,26 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                         <h2 className="font-display text-2xl text-slate-900">Payment Detail</h2>
                         <p className="mt-1 text-sm text-slate-500">{payment.customer_name}</p>
                     </div>
-                    {(can_manage || can_delete) && (
-                        <div className="flex items-center gap-2">
-                            {can_manage && (
-                                <Link
-                                    href={`/payments/${payment.uuid}/edit`}
-                                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
-                                >
-                                    Edit Payment
-                                </Link>
-                            )}
-                            {can_delete && (
-                                <Button type="button" variant="danger" onClick={() => setConfirmingDelete(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
-                                    Delete Payment
-                                </Button>
-                            )}
-                        </div>
-                    )}
+                    {/* Adjust Arrears is ungated (ArrearsAdjustmentPolicy::create() —
+                        any authenticated tenant user, same as ComplaintPolicy::
+                        create()), so it renders unconditionally here, unlike
+                        Edit/Delete Payment which stay behind can_manage/can_delete. */}
+                    <div className="flex items-center gap-2">
+                        <ArrearsAdjustmentModal customer={arrearsCustomer} />
+                        {can_manage && (
+                            <Link
+                                href={`/payments/${payment.uuid}/edit`}
+                                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                            >
+                                Edit Payment
+                            </Link>
+                        )}
+                        {can_delete && (
+                            <Button type="button" variant="danger" onClick={() => setConfirmingDelete(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
+                                Delete Payment
+                            </Button>
+                        )}
+                    </div>
                 </div>
             </div>
 
