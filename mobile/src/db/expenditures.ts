@@ -126,3 +126,37 @@ export async function getFailedExpendituresCount(): Promise<number> {
 
     return row?.count ?? 0;
 }
+
+/**
+ * This device's own recorded expenditures, newest first — the Resources
+ * screen's "my recorded expenditures" history, mirroring
+ * src/db/payments.ts's getRecentPayments() for the same shape of screen.
+ */
+export async function getRecentExpenditures(limit = 100): Promise<LocalExpenditure[]> {
+    const db = await getDatabase();
+
+    return db.getAllAsync<LocalExpenditure>('SELECT * FROM expenditures ORDER BY created_at DESC LIMIT ?', [limit]);
+}
+
+/**
+ * Sum of this device's own recorded expenditures with `spent_at >=
+ * startDateOnly` (inclusive, `YYYY-MM-DD`) — backs the Resources screen's
+ * today/week/month period total. Deliberately a SQL aggregate over the full
+ * local table rather than a client-side sum over getRecentExpenditures()'s
+ * LIMIT-capped list, so the total stays correct even once an agent has
+ * recorded more rows than that list's limit — mirrors payments.ts's
+ * getTodayCollectionTotal(). Includes every sync_status (queued or synced):
+ * it's real money already spent either way, and expenditures carry no
+ * verification workflow to exclude by (see
+ * app/Policies/ExpenditurePolicy.php's own doc comment).
+ */
+export async function getExpenditureTotalSince(startDateOnly: string): Promise<number> {
+    const db = await getDatabase();
+
+    const row = await db.getFirstAsync<{ total: number | null }>(
+        `SELECT SUM(amount) as total FROM expenditures WHERE spent_at >= ?`,
+        [startDateOnly],
+    );
+
+    return row?.total ?? 0;
+}
