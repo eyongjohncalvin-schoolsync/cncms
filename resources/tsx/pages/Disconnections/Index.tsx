@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Badge } from '@/components/ui/Badge';
 import { StatusBadge } from '@/components/shared/StatusBadge';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { CustomerStatusActions } from '@/components/customers/CustomerStatusActions';
 import { BulkStatusModal } from '@/components/customers/BulkStatusModal';
 import type { StatusAction } from '@/components/customers/CustomerStatusActions';
@@ -374,9 +375,13 @@ export default function DisconnectionsIndex({ customers, zones, filters, isAgent
                                     )}
                                     {canManageStatus && (
                                         <Td>
-                                            <div className="flex flex-wrap items-center gap-3">
-                                                <CustomerStatusActions customer={customer} variant="links" />
-                                            </div>
+                                            {/* Same Dropdown/DropdownItem kebab-menu pattern Customers/Index.tsx's
+                                                and Manuscripts/Index.tsx's Actions columns use —
+                                                CustomerStatusActions' own variant="menu" mode was built exactly
+                                                for composing inside a parent Dropdown like this one. */}
+                                            <Dropdown label={`Actions for ${customer.name}`}>
+                                                <CustomerStatusActions customer={customer} variant="menu" />
+                                            </Dropdown>
                                         </Td>
                                     )}
                                 </tr>
