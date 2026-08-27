@@ -76,12 +76,21 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
     // reachable, never for every flagged name to be individually dismissed.
     const reviewSettled = preRunReview.data !== null || preRunReview.error !== null;
 
-    // Escalated by task-scheduler.md's 2026-08-27 stage 3 addendum: a
-    // ManuscriptRerunGuard rejection lands here as a validation error on the
-    // `period` field (see App\Services\ManuscriptRerunGuard's message). Only
-    // checking this box and clicking again resubmits with
-    // confirmed_rerun:true — never set automatically on the admin's behalf.
-    const rerunBlocked = !!calculateForm.errors.period;
+    // dispatch() throws a validation error on the `period` field for TWO
+    // distinct reasons that must not be conflated (final-verification-pass
+    // fix): ManuscriptRerunGuard (a PUBLISHED period — confirmed_rerun:true
+    // genuinely unblocks a resubmit) vs idx_command_runs_period_inflight's
+    // unique-violation catch in ManuscriptGenerationBatchService::dispatch()
+    // (a run for this period is still queued/pending_review — checking a
+    // confirmation box and resubmitting hits this exact same error again,
+    // since confirmed_rerun only bypasses the rerun guard, not the in-flight
+    // lock). Distinguished by matching the rerun guard's own fixed closing
+    // sentence (ManuscriptRerunGuard::describe()) rather than guessing from
+    // field presence alone, so the checkbox is only ever offered when it can
+    // actually help.
+    const periodError = calculateForm.errors.period;
+    const rerunBlocked = !!periodError && periodError.includes('Confirm the rerun if you really intend to recompute this period.');
+    const inFlightBlocked = !!periodError && !rerunBlocked;
 
     function openConfirm() {
         calculateForm.clearErrors();
@@ -411,6 +420,27 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                             </label>
                         </div>
                     )}
+
+                    {/* The OTHER validation error `period` can carry: a run for this period is
+                        still queued/pending_review right now (idx_command_runs_period_inflight,
+                        surfaced via ManuscriptGenerationBatchService::dispatch()'s unique-violation
+                        catch). No checkbox here — confirmed_rerun does not bypass this lock, only
+                        ManuscriptRerunGuard, so resubmitting after checking it would just hit this
+                        exact same error again. Point the admin at the one real way to clear a stuck
+                        run instead. */}
+                    {inFlightBlocked && (
+                        <div className="rounded-lg border border-red-300 bg-red-50 p-3">
+                            <p className="text-sm text-red-800">{calculateForm.errors.period}</p>
+                            <p className="mt-2 text-sm text-red-900">
+                                If that run is genuinely stuck (not actively progressing), a{' '}
+                                <span className="font-semibold">super/admin</span> can cancel it from{' '}
+                                <a href="/settings/command-runs" target="_blank" rel="noreferrer" className="underline">
+                                    Settings → Command Runs
+                                </a>{' '}
+                                to free this period up again.
+                            </p>
+                        </div>
+                    )}
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
                     <Button variant="secondary" onClick={closeConfirm} disabled={calculateForm.processing}>
@@ -420,7 +450,10 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                         variant="danger"
                         onClick={submitCalculate}
                         disabled={
-                            calculateForm.processing || !reviewSettled || (rerunBlocked && !calculateForm.data.confirmed_rerun)
+                            calculateForm.processing ||
+                            !reviewSettled ||
+                            (rerunBlocked && !calculateForm.data.confirmed_rerun) ||
+                            inFlightBlocked
                         }
                     >
                         {calculateForm.processing ? (
