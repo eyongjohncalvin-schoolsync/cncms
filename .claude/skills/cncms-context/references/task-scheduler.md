@@ -320,3 +320,116 @@ orphaned `queued` row, confirms a real `dispatch()` is rejected while it stands,
 cancelling it immediately unblocks a subsequent real `dispatch()` for the same period — mirrors
 `ManuscriptGenerationBatchServiceTest`'s real-committed-fixture style since a successful `dispatch()`
 here runs real chunk jobs that cycle the tenant DB connection).
+
+---
+
+## Addendum (2026-08-27, stage 3): manual/scheduled convergence, the pre-run review UI, and the missing Cancel button
+
+Three pieces, closing out everything stage 2 explicitly flagged as still needed:
+
+**1. `ManuscriptController::calculate()` now dispatches with `autoPublish: false`** — the manual
+"Run Manuscript Calculation" trigger no longer commits immediately. It lands at `pending_review`
+behind the exact same gate the scheduled path already used, converging manual and scheduled runs
+onto one identical execution+review mechanism (they already shared `dispatch()`'s chunked
+`Bus::batch()` execution per section 4.1; only the review *gate* itself differed before this
+change). The reasoning: an admin standing there and clicking Run is not a substitute for actually
+looking at the computed numbers before they're committed — those are two different acts, and the
+old "manual = auto-publish" behavior let the first stand in for the second.
+
+Because the review gate is no longer optional for the manual path, `calculate()` no longer redirects
+back to the Manuscripts list — it redirects to a **new, one-click review screen** keyed on the
+`CommandRun` `dispatch()` just created: `GET /manuscripts/runs/{run}`
+(`ManuscriptController::runReview()`, Inertia component `Manuscripts/RunReview.tsx`). This is
+deliberately NOT a redirect to Settings > Command Runs — that page is built for reviewing a run from
+hours ago among many; an admin who just clicked Run is standing there waiting for THIS one, a
+different need. `runReview()` is gated to `ManuscriptPolicy::calculate()` (the same ability as
+triggering the run at all — this is that action's own follow-through screen, not a general
+command-run browsing surface) and 404s if the `CommandRun` isn't a `manuscript:calculate` row.
+
+The screen: polls (Inertia's `usePoll` — the same primitive `AppLayout.tsx`'s notification bell
+already used, `usePoll(20000, { only: ['notifications'] })`) while `status === 'queued'`, showing
+`job_batches` progress; once `status === 'pending_review'`, shows the computed summary, the pre-run
+review list (below) as still-relevant context, and a Publish button hitting the exact same
+`POST /settings/command-runs/{run}/publish` endpoint `Settings/CommandRuns.tsx` already uses; once
+`published` or `failed`, shows a terminal state with a link back.
+
+A small `App\Support\ResolvesCommandRunBatchProgress` trait was extracted from
+`SettingsCommandRunController`'s previously-private `batchProgress()` method (used unchanged there)
+so `ManuscriptController::runReview()` reads `job_batches` progress identically rather than
+duplicating that lookup.
+
+A small `resources/tsx/components/manuscripts/ManuscriptRunSummary.tsx` component was extracted from
+`Settings/CommandRuns.tsx`'s preview-modal JSX (the `computed_result_summary` grid) — now shared,
+unchanged in appearance, between that modal and the new `RunReview.tsx` screen. Confirmed
+`Settings/CommandRuns.tsx`'s own Preview modal still renders identically after the extraction.
+
+**2. The pre-run review list (stage 2's `GET /manuscripts/pre-run-review`) is now surfaced in the UI**
+— previously backend-only. `Manuscripts/Index.tsx`'s Calculate confirm modal now fetches it on-demand
+(only while the modal is open, via a new `resources/tsx/hooks/usePreRunReview.ts` hook — plain
+`fetch()`, not an Inertia visit, since this is a small on-demand JSON call feeding a modal, not a
+page navigation) and shows the flagged count/total exposure prominently, above the existing warning.
+A shared `resources/tsx/components/manuscripts/PreRunReviewPanel.tsx` component (reused by both the
+modal and `RunReview.tsx`'s pending_review state) renders:
+
+- **≤15 flagged customers** (chosen threshold — a modal-context list past this starts forcing heavy
+  internal scrolling in the existing `Modal` component's `max-w-md` panel; 15 keeps it comfortably
+  inline): a compact inline mini-table (this page's existing `Table`/`Th`/`Td` components at reduced
+  padding/font size, not new ad-hoc markup).
+- **>15**: collapses to summary-only with a "Review full list" link opening a NEW, full
+  Disconnections/Index.tsx-shaped board — `GET /manuscripts/pre-run-review/full`
+  (`ManuscriptController::preRunReviewFull()`, Inertia component `Manuscripts/PreRunReviewList.tsx`)
+  — paginated table + zone filter, mirroring that page's exact established shape rather than
+  inventing a new list-page pattern. Pagination is in-memory over the already-computed flagged
+  collection (`LengthAwarePaginator` over a plain array) rather than a paginated Eloquent query,
+  since `ManuscriptPreRunReviewService`'s flagging logic (credit/prepaid-window exclusion) isn't a
+  single SQL WHERE clause and this tenant's real scale (~550 customers total) keeps computing the
+  full list up front cheap.
+
+Every flagged customer's name is a `window.open(...)` link to their profile — deliberately NOT
+Inertia's `<Link>`, mirroring `Manuscripts/Index.tsx`'s own pre-existing WhatsApp "Send Bill" link
+pattern — so fixing a miss opens in a new tab, leaving the modal/panel's already-fetched list (and,
+for the modal case, the Calculate confirmation itself) alive in the original tab. A "Refresh list"
+action re-fetches the same endpoint.
+
+This is advisory, not a hard per-row gate: the submit button only waits for the review list's FIRST
+load attempt to settle (data OR an error — either counts as "the admin has now seen it") before
+becoming reachable, never for every flagged name to be individually dismissed — a legitimately long
+list early in the month must stay usable, not become friction.
+
+**Escalation for an already-published rerun**: if `submitCalculate()`'s POST comes back with a
+validation error on `period` (the `ManuscriptRerunGuard` rejection — stage 1), the same modal
+escalates to show that message plus a required checkbox ("I understand this period was already
+calculated and published, and I want to recompute it anyway"). Only checking it and clicking again
+resubmits with `confirmed_rerun: true` — the frontend never sets this automatically on the admin's
+behalf.
+
+**Test fallout from the `autoPublish: false` flip**: three existing `tests/Feature/Web/ManuscriptTest.php`
+tests asserted the old immediate-auto-publish behavior and needed updating —
+`test_admin_can_run_the_manuscript_calculation` now asserts the run lands `pending_review` with NO
+`manuscripts` row yet, then explicitly publishes via the real `POST /settings/command-runs/{run}/publish`
+endpoint before asserting the `manuscripts` row exists (exercising the actual new two-step flow an
+admin now uses, not just the first half of it); the two rerun-guard tests
+(`test_admin_rerunning_an_already_published_period_is_rejected_without_confirmed_rerun` and
+`test_admin_can_rerun_an_already_published_period_with_confirmed_rerun_true`) now explicitly publish
+the first run before attempting the second `calculate()` call, since `ManuscriptRerunGuard` only
+fires against a genuinely `published` prior run and the manual trigger no longer reaches that status
+on its own.
+
+New tests: `tests/Feature/Web/ManuscriptRunReviewTest.php` (authorization, the shaped `run` prop, the
+different-command 404 guard) and three new cases appended to
+`tests/Feature/Web/ManuscriptPreRunReviewTest.php` for the `/full` board (authorization, the flagged
+fixture appearing in `customers.data`, zone filtering).
+
+**3. The Cancel button** stage 2 flagged as backend-only and still needing a frontend: added to
+`Settings/CommandRuns.tsx`'s row actions, shown only when `run.status === 'queued' && canCancel`.
+Uses a lightweight `confirm()`-gated `router.post`, not a full confirmation modal — this page has no
+modal component of its own to reuse for it, and (per stage 2's own "no time threshold, same-role
+human judgment is the safety mechanism" reasoning) the action doesn't warrant introducing one; this
+matches the lighter confirm-gated pattern already established elsewhere in this app (e.g.
+`Agents/Index.tsx`'s "Remove agent").
+
+**Left unresolved / flagged for the coordinator**: no dedicated HTTP-level test previously covered
+`POST /settings/command-runs/{run}/publish` at all (only `ManuscriptGenerationBatchService::publish()`
+was tested directly) — this stage's `ManuscriptTest.php` updates now exercise it incidentally via the
+new two-step flow, but a focused test file for that endpoint's own authorization/state-guard behavior
+(mirroring `CommandRunCancelTest.php`'s shape) would still be a reasonable gap to close later.

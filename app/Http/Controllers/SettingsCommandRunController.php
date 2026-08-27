@@ -8,9 +8,9 @@ use App\Http\Requests\UpdateScheduledTaskRequest;
 use App\Models\CommandRun;
 use App\Models\ScheduledTask;
 use App\Services\ManuscriptGenerationBatchService;
+use App\Support\ResolvesCommandRunBatchProgress;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -29,6 +29,8 @@ use Inertia\Response;
  */
 class SettingsCommandRunController extends Controller
 {
+    use ResolvesCommandRunBatchProgress;
+
     public function index(): Response
     {
         $this->authorize('viewAny', CommandRun::class);
@@ -186,28 +188,5 @@ class SettingsCommandRunController extends Controller
         ]);
 
         return redirect()->route('settings.command-runs.index')->with('success', "Manuscript period {$run->period}'s stuck run was cancelled — that period is free to run again.");
-    }
-
-    /**
-     * @param  array<int, string>  $batchIds
-     * @return array<string, array{total: int, pending: int, failed: int, finished: bool}>
-     */
-    private function batchProgress(array $batchIds): array
-    {
-        if ($batchIds === []) {
-            return [];
-        }
-
-        return DB::table('job_batches')
-            ->whereIn('id', $batchIds)
-            ->get()
-            ->keyBy('id')
-            ->map(fn ($row): array => [
-                'total' => (int) $row->total_jobs,
-                'pending' => (int) $row->pending_jobs,
-                'failed' => (int) $row->failed_jobs,
-                'finished' => $row->finished_at !== null,
-            ])
-            ->all();
     }
 }

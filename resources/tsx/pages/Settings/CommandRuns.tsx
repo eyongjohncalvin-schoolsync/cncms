@@ -12,6 +12,7 @@ import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ManuscriptRunSummary } from '@/components/manuscripts/ManuscriptRunSummary';
 import type { CommandRunEntry, CommandRunStatus, ManuscriptSchedule, PaginatedResponse } from '@/types';
 
 function metadataSummary(metadata: Record<string, unknown> | null): string {
@@ -84,9 +85,10 @@ interface SettingsCommandRunsProps {
     manuscriptSchedule: ManuscriptSchedule;
     canManageSchedule: boolean;
     canPublish: boolean;
+    canCancel: boolean;
 }
 
-export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManageSchedule, canPublish }: SettingsCommandRunsProps) {
+export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManageSchedule, canPublish, canCancel }: SettingsCommandRunsProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [previewRun, setPreviewRun] = useState<CommandRunEntry | null>(null);
 
@@ -102,6 +104,21 @@ export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManag
 
     function publish(run: CommandRunEntry) {
         router.post(`/settings/command-runs/${run.uuid}/publish`, {}, { preserveScroll: true });
+    }
+
+    // Cancel a run permanently stuck at 'queued' (2026-08-27 security-review
+    // finding — see App\Http\Controllers\SettingsCommandRunController::
+    // cancel()'s doc comment). Lightweight confirm()-gated router.post,
+    // matching this app's established pattern for a same-role, no-cooldown
+    // destructive action (e.g. Agents/Index.tsx's "Remove agent") rather
+    // than a full confirmation modal — this page has no such modal
+    // component of its own to reuse, and the action doesn't warrant
+    // introducing one.
+    function cancel(run: CommandRunEntry) {
+        if (!confirm(`Cancel this stuck run for period ${run.period}? This frees that period to be run again.`)) {
+            return;
+        }
+        router.post(`/settings/command-runs/${run.uuid}/cancel`, {}, { preserveScroll: true });
     }
 
     return (
@@ -240,6 +257,16 @@ export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManag
                                                     Publish
                                                 </Button>
                                             )}
+                                            {run.status === 'queued' && canCancel && (
+                                                <Button
+                                                    type="button"
+                                                    variant="danger"
+                                                    onClick={() => cancel(run)}
+                                                    className="px-2.5 py-1 text-xs"
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            )}
                                         </div>
                                     </Td>
                                 </tr>
@@ -259,32 +286,7 @@ export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManag
                             This is exactly what will be committed to Manuscripts when published — recomputing does not happen at
                             publish time, so these numbers won&apos;t drift even if new payments arrive before then.
                         </p>
-                        <dl className="grid grid-cols-2 gap-3 text-sm">
-                            <div>
-                                <dt className="text-xs text-slate-500">Customers processed</dt>
-                                <dd className="font-medium text-slate-900">{previewRun.computed_result_summary.customers_processed}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs text-slate-500">Frozen customers</dt>
-                                <dd className="font-medium text-slate-900">{previewRun.computed_result_summary.frozen_customers}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs text-slate-500">Total arrears</dt>
-                                <dd className="font-medium text-slate-900">{previewRun.computed_result_summary.total_arrears_sum.toLocaleString()}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs text-slate-500">Total credit</dt>
-                                <dd className="font-medium text-slate-900">{previewRun.computed_result_summary.total_credit_sum.toLocaleString()}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs text-slate-500">Total bill</dt>
-                                <dd className="font-medium text-slate-900">{previewRun.computed_result_summary.total_bill_sum.toLocaleString()}</dd>
-                            </div>
-                            <div>
-                                <dt className="text-xs text-slate-500">Errors</dt>
-                                <dd className="font-medium text-slate-900">{previewRun.computed_result_summary.errors}</dd>
-                            </div>
-                        </dl>
+                        <ManuscriptRunSummary summary={previewRun.computed_result_summary} />
                         {previewRun.status === 'pending_review' && canPublish && (
                             <Button
                                 type="button"

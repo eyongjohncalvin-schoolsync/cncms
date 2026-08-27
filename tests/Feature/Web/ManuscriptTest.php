@@ -100,6 +100,17 @@ class ManuscriptTest extends TestCase
         $response->assertStatus(403);
     }
 
+    /**
+     * Stage 3 (task-scheduler.md's 2026-08-27 "manual/scheduled convergence"
+     * addendum): the manual trigger no longer auto-publishes — it now lands
+     * at 'pending_review' behind the same gate the scheduled path already
+     * used, redirects to the new Manuscripts/RunReview.tsx screen
+     * (manuscripts.runs.show), and only actually writes to `manuscripts`
+     * once that run is explicitly published. This test exercises the full
+     * round trip through the real HTTP entry points an admin now uses:
+     * POST /manuscripts/calculate (lands pending_review, no manuscripts row
+     * yet) -> POST /settings/command-runs/{run}/publish (commits it).
+     */
     public function test_admin_can_run_the_manuscript_calculation(): void
     {
         // manuscript:calculate (invoked synchronously by
@@ -140,7 +151,18 @@ class ManuscriptTest extends TestCase
             $response->assertSessionHas('success');
 
             tenancy()->initialize(Tenant::find('swecom'));
+            $run = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+            $this->assertSame('pending_review', $run->status, 'the manual trigger must no longer auto-publish.');
+            $this->assertDatabaseMissing('manuscripts', ['customer_id' => $customer->id, 'period' => $period]);
+            tenancy()->end();
+
+            $publishResponse = $this->actingAs($user)->post("/settings/command-runs/{$run->uuid}/publish");
+            $publishResponse->assertRedirect();
+            $publishResponse->assertSessionHas('success');
+
+            tenancy()->initialize(Tenant::find('swecom'));
             $this->assertDatabaseHas('manuscripts', ['customer_id' => $customer->id, 'period' => $period]);
+            $this->assertSame('published', $run->fresh()->status);
         } finally {
             if (! tenancy()->initialized) {
                 tenancy()->initialize(Tenant::find('swecom'));
@@ -173,6 +195,13 @@ class ManuscriptTest extends TestCase
      * once the first run has finished. Same tenancy-lifecycle workaround as
      * test_admin_can_run_the_manuscript_calculation above (the command owns
      * its own tenancy()->initialize()/end()).
+     *
+     * Stage 3 (autoPublish:false flip): the guard only fires against a
+     * PUBLISHED prior run, and the manual trigger no longer publishes on its
+     * own — so this test now explicitly publishes the first run (via the
+     * same endpoint an admin would actually click) before attempting the
+     * unconfirmed rerun, to reach the exact state the guard is meant to
+     * catch.
      */
     public function test_admin_rerunning_an_already_published_period_is_rejected_without_confirmed_rerun(): void
     {
@@ -195,10 +224,14 @@ class ManuscriptTest extends TestCase
             $firstResponse->assertSessionHas('success');
 
             tenancy()->initialize(Tenant::find('swecom'));
-            $this->assertSame(
-                'published',
-                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->value('status')
-            );
+            $firstRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+            $this->assertSame('pending_review', $firstRun->status);
+            tenancy()->end();
+
+            $this->actingAs($user)->post("/settings/command-runs/{$firstRun->uuid}/publish")->assertSessionHas('success');
+
+            tenancy()->initialize(Tenant::find('swecom'));
+            $this->assertSame('published', $firstRun->fresh()->status);
             tenancy()->end();
 
             $secondResponse = $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period]);
@@ -229,6 +262,11 @@ class ManuscriptTest extends TestCase
     /**
      * The override escape hatch: `confirmed_rerun: true` lets an admin
      * deliberately rerun an already-published period through the web UI.
+     *
+     * Stage 3 (autoPublish:false flip): as above, the first run must
+     * actually be published (not just dispatched) before the guard has
+     * anything to fire against, so this test publishes it via the real
+     * endpoint before attempting the confirmed rerun.
      */
     public function test_admin_can_rerun_an_already_published_period_with_confirmed_rerun_true(): void
     {
@@ -247,6 +285,12 @@ class ManuscriptTest extends TestCase
 
         try {
             $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period])->assertSessionHas('success');
+
+            tenancy()->initialize(Tenant::find('swecom'));
+            $firstRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+            tenancy()->end();
+
+            $this->actingAs($user)->post("/settings/command-runs/{$firstRun->uuid}/publish")->assertSessionHas('success');
 
             $response = $this->actingAs($user)->post('/manuscripts/calculate', [
                 'period' => $period,

@@ -23,6 +23,8 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
+import { PreRunReviewPanel } from '@/components/manuscripts/PreRunReviewPanel';
+import { usePreRunReview } from '@/hooks/usePreRunReview';
 import { formatCurrency } from '@/lib/formatCurrency';
 import type { Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
 
@@ -58,7 +60,40 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
 
-    const calculateForm = useForm({ period });
+    const calculateForm = useForm({ period, confirmed_rerun: false });
+
+    // Fetched on-demand, only while the confirm modal is actually open — not
+    // on page load or on every filter change (the design ask) — keyed on
+    // calculateForm.data.period (the value that will actually be submitted)
+    // rather than the page's own `period` prop, so the review list can never
+    // silently disagree with what Calculate is about to run.
+    const preRunReview = usePreRunReview(calculateForm.data.period, undefined, confirmOpen);
+
+    // Advisory, not a hard per-row gate (a legitimately long list — e.g.
+    // early in the month — must stay usable): the submit button only waits
+    // for the review list's FIRST load attempt to settle (data or an error,
+    // either counts as "the admin has now seen it") before becoming
+    // reachable, never for every flagged name to be individually dismissed.
+    const reviewSettled = preRunReview.data !== null || preRunReview.error !== null;
+
+    // Escalated by task-scheduler.md's 2026-08-27 stage 3 addendum: a
+    // ManuscriptRerunGuard rejection lands here as a validation error on the
+    // `period` field (see App\Services\ManuscriptRerunGuard's message). Only
+    // checking this box and clicking again resubmits with
+    // confirmed_rerun:true — never set automatically on the admin's behalf.
+    const rerunBlocked = !!calculateForm.errors.period;
+
+    function openConfirm() {
+        calculateForm.clearErrors();
+        calculateForm.setData('confirmed_rerun', false);
+        setConfirmOpen(true);
+    }
+
+    function closeConfirm() {
+        setConfirmOpen(false);
+        calculateForm.clearErrors();
+        calculateForm.setData('confirmed_rerun', false);
+    }
 
     function applyFilter(next: Partial<ManuscriptFilters>) {
         router.get(
@@ -167,7 +202,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                         </a>
                     )}
                     {canCalculate && (
-                        <Button onClick={() => setConfirmOpen(true)} className="rounded-lg px-3.5 py-2.5 text-sm font-semibold shadow-sm shadow-blue-600/20">
+                        <Button onClick={openConfirm} className="rounded-lg px-3.5 py-2.5 text-sm font-semibold shadow-sm shadow-blue-600/20">
                             <IconCalculator size={18} stroke={1.75} />
                             Run Manuscript Calculation
                         </Button>
@@ -336,20 +371,58 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                 )}
             </div>
 
-            <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Run Manuscript Calculation">
-                <div className="flex gap-3 rounded-lg bg-amber-100 p-3 ring-1 ring-inset ring-amber-300">
-                    <IconAlertTriangle size={20} stroke={1.75} className="mt-0.5 shrink-0 text-amber-600" />
-                    <p className="text-sm text-amber-800">
-                        This is a real, consequential action. It <strong>overwrites the existing manuscript</strong> for period{' '}
-                        <strong>{period}</strong> — recalculating bills, arrears and credit for every customer from live billing
-                        data. Export the current manuscript first if you need a record of it. This action cannot be undone.
-                    </p>
+            <Modal open={confirmOpen} onClose={closeConfirm} title="Run Manuscript Calculation">
+                <div className="flex flex-col gap-3">
+                    <PreRunReviewPanel
+                        period={calculateForm.data.period}
+                        loading={preRunReview.loading}
+                        error={preRunReview.error}
+                        data={preRunReview.data}
+                        onReload={preRunReview.reload}
+                    />
+
+                    <div className="flex gap-3 rounded-lg bg-amber-100 p-3 ring-1 ring-inset ring-amber-300">
+                        <IconAlertTriangle size={20} stroke={1.75} className="mt-0.5 shrink-0 text-amber-600" />
+                        <p className="text-sm text-amber-800">
+                            This is a real, consequential action. It <strong>overwrites the existing manuscript</strong> for period{' '}
+                            <strong>{calculateForm.data.period}</strong> — recalculating bills, arrears and credit for every
+                            customer from live billing data. Export the current manuscript first if you need a record of it.
+                            This action cannot be undone.
+                        </p>
+                    </div>
+
+                    {/* Escalation for the ManuscriptRerunGuard rejection (task-scheduler.md's
+                        2026-08-27 stage 3 addendum) — a validation error on `period` means a
+                        published run already exists for this period. Resubmitting with
+                        confirmed_rerun:true requires the admin to explicitly check this box
+                        first; it is never set automatically. */}
+                    {rerunBlocked && (
+                        <div className="rounded-lg border border-red-300 bg-red-50 p-3">
+                            <p className="text-sm text-red-800">{calculateForm.errors.period}</p>
+                            <label className="mt-2 flex items-start gap-2 text-sm text-red-900">
+                                <input
+                                    type="checkbox"
+                                    checked={calculateForm.data.confirmed_rerun}
+                                    onChange={(e) => calculateForm.setData('confirmed_rerun', e.target.checked)}
+                                    className="mt-0.5 h-4 w-4 rounded border-red-300 text-red-600 focus:ring-red-600"
+                                />
+                                I understand this period was already calculated and published, and I want to recompute it
+                                anyway.
+                            </label>
+                        </div>
+                    )}
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                    <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={calculateForm.processing}>
+                    <Button variant="secondary" onClick={closeConfirm} disabled={calculateForm.processing}>
                         Cancel
                     </Button>
-                    <Button variant="danger" onClick={submitCalculate} disabled={calculateForm.processing}>
+                    <Button
+                        variant="danger"
+                        onClick={submitCalculate}
+                        disabled={
+                            calculateForm.processing || !reviewSettled || (rerunBlocked && !calculateForm.data.confirmed_rerun)
+                        }
+                    >
                         {calculateForm.processing ? (
                             <>
                                 <LoadingSpinner />

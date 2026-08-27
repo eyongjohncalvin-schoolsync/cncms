@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Message;
@@ -12,6 +13,7 @@ use App\Services\ManuscriptGenerationBatchService;
 use App\Services\ManuscriptPreRunReviewService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
+use App\Support\ResolvesCommandRunBatchProgress;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -29,6 +31,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class ManuscriptController extends Controller
 {
+    use ResolvesCommandRunBatchProgress;
+
     public function __construct(
         private readonly ManuscriptService $manuscripts,
         private readonly ZoneService $zones,
@@ -96,20 +100,31 @@ class ManuscriptController extends Controller
     /**
      * "Run Manuscript Calculation" (web-admin-spec.md section 3.8, gated
      * admin/super only via ManuscriptPolicy::calculate()) — the manual
-     * trigger. Per task-scheduler.md section 4.1, this now dispatches the
-     * same chunked, queued Bus::batch() mechanism the scheduled path uses
+     * trigger. Per task-scheduler.md section 4.1, this dispatches the same
+     * chunked, queued Bus::batch() mechanism the scheduled path uses
      * (thousands-of-customers robustness applies to a manually-triggered
      * run exactly as much as a scheduled one), rather than running
      * manuscript:calculate synchronously inline in this request.
      *
-     * Only the review GATE stays scheduled-path-only: this call passes
-     * autoPublish=true, so once every chunk finishes computing, the batch's
-     * then() callback commits straight to `manuscripts` with no
-     * pending_review pause — matching this button's pre-existing immediate-
-     * commit behavior. What changes is that "immediate" is no longer
-     * "before this HTTP request returns" — with a real queue connection,
-     * commit happens once a worker processes the batch, shortly after this
-     * redirect. See App\Services\ManuscriptGenerationBatchService.
+     * **Stage 3 (task-scheduler.md's 2026-08-27 "manual/scheduled
+     * convergence" addendum) flips this to autoPublish=false** — manual and
+     * scheduled runs now land on the IDENTICAL pending_review -> Publish
+     * gate; this button no longer commits immediately the instant its batch
+     * finishes computing. What used to be "only the review gate stays
+     * scheduled-path-only" is no longer true: only the EXECUTION mechanism
+     * (chunking, Bus::batch()) was ever meant to be shared unconditionally;
+     * per the completed architecture deliberation, the review gate itself
+     * converges too, since "the reviewer already stood there and clicked
+     * Run" is not actually a substitute for "the reviewer looked at the
+     * computed numbers" — those are two different acts. See
+     * App\Services\ManuscriptGenerationBatchService.
+     *
+     * Redirects to the new one-click review screen
+     * (Manuscripts/RunReview.tsx, runReview() below) keyed on the
+     * CommandRun this dispatch() just created, rather than back to the
+     * Manuscripts index — the admin is standing there waiting for a run
+     * they just triggered, which is a different need from Settings >
+     * Command Runs' "review a run from hours ago" surface.
      *
      * `confirmed_rerun` (task-scheduler.md's 2026-08-27 "already safely
      * runnable" guard addendum): App\Services\ManuscriptRerunGuard refuses
@@ -143,15 +158,60 @@ class ManuscriptController extends Controller
             'confirmed_rerun' => ['sometimes', 'boolean'],
         ]);
 
-        $this->batches->dispatch(
+        $run = $this->batches->dispatch(
             $period,
             scheduledTask: null,
-            autoPublish: true,
+            autoPublish: false,
             actingUserId: Auth::id(),
             override: (bool) ($validated['confirmed_rerun'] ?? false),
         );
 
-        return redirect()->back()->with('success', "Manuscript calculation for {$period} started — refresh the page shortly to see the results.");
+        return redirect()->route('manuscripts.runs.show', $run)
+            ->with('success', "Manuscript calculation for {$period} started — review and publish it below once it finishes computing.");
+    }
+
+    /**
+     * The new, lightweight "just-triggered, watch it compute, then review
+     * and publish" screen reachable in one click from Manuscripts/Index.tsx
+     * (task-scheduler.md's 2026-08-27 stage 3 addendum) — deliberately NOT
+     * a redirect to Settings > Command Runs, which is built for reviewing a
+     * run from hours ago, not standing there watching one an admin just
+     * kicked off.
+     *
+     * Renders the identical `computed_result_summary`/`batch_progress` shape
+     * SettingsCommandRunController::index() already produces per row (same
+     * field names, so the frontend's extracted ManuscriptRunSummary
+     * component and its batch-progress polling logic work unchanged here) —
+     * just for the single $run this page is keyed on instead of a
+     * paginated list.
+     *
+     * Gated to the same ability as triggering the run at all
+     * (ManuscriptPolicy::calculate()) rather than CommandRunPolicy::viewAny()
+     * — this is that same action's own follow-through screen, not a general
+     * command-run browsing surface.
+     */
+    public function runReview(CommandRun $run): InertiaResponse
+    {
+        $this->authorize('calculate', Manuscript::class);
+
+        abort_unless($run->command === 'manuscript:calculate', 404);
+
+        $batchProgressById = $this->batchProgress($run->batch_id ? [$run->batch_id] : []);
+
+        return Inertia::render('Manuscripts/RunReview', [
+            'run' => [
+                'uuid' => $run->uuid,
+                'command' => $run->command,
+                'period' => $run->period,
+                'ran_at' => $run->ran_at,
+                'metadata' => $run->metadata,
+                'status' => $run->status,
+                'computed_result_summary' => $run->computed_result['summary'] ?? null,
+                'batch_progress' => $batchProgressById[$run->batch_id] ?? null,
+                'published_at' => $run->published_at,
+            ],
+            'canPublish' => Auth::user()?->can('publish', CommandRun::class) ?? false,
+        ]);
     }
 
     /**
@@ -198,6 +258,62 @@ class ManuscriptController extends Controller
         return response()->json([
             'period' => $period,
             ...$this->preRunReview->reviewList($period, $zoneId),
+        ]);
+    }
+
+    /**
+     * The "large-count" companion to preRunReview() above (task-scheduler.md's
+     * 2026-08-27 stage 3 addendum): a full, paginated, zone-filterable board
+     * for the same flagged-customer list, in the SAME
+     * Disconnections/Index.tsx-style shape — reached via the pre-run review
+     * modal/panel's "Review full list" link when the flagged count is too
+     * large to render inline. Opened in a NEW browser tab from that link
+     * (window.open, not an Inertia visit) so the originating modal/panel's
+     * already-fetched state stays alive while the admin works through this
+     * list.
+     *
+     * Deliberately in-memory pagination over ManuscriptPreRunReviewService::
+     * reviewList()'s already-computed flagged collection, not a paginated
+     * Eloquent query — that service's own flagging logic (credit/prepaid-
+     * window exclusion) isn't expressible as a single SQL WHERE clause, and
+     * this tenant's real scale (~550 customers total, so at most that many
+     * flagged) keeps computing the full list up front cheap. Reuses
+     * paginatorProps() below for the same {data, links, meta} shape every
+     * other paginated Inertia page on this app already sends.
+     */
+    public function preRunReviewFull(Request $request): InertiaResponse
+    {
+        $this->authorize('calculate', Manuscript::class);
+
+        $period = (string) $request->input('period', now()->format('Y-m'));
+
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
+            return redirect()->route('manuscripts.index')->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.");
+        }
+
+        $zoneUuid = $request->string('zone_uuid')->toString() ?: null;
+        $zoneId = $zoneUuid !== null ? $this->zones->findOrFail($zoneUuid)->id : null;
+
+        $result = $this->preRunReview->reviewList($period, $zoneId);
+
+        $perPage = 25;
+        $page = max(1, (int) $request->input('page', 1));
+        $items = collect($result['customers']);
+
+        $paginator = new LengthAwarePaginator(
+            $items->forPage($page, $perPage)->values(),
+            $items->count(),
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()],
+        );
+
+        return Inertia::render('Manuscripts/PreRunReviewList', [
+            'period' => $period,
+            'filters' => ['zone_uuid' => $zoneUuid],
+            'summary' => $result['summary'],
+            'customers' => $this->paginatorProps($paginator),
+            'zones' => $this->zones->all(),
         ]);
     }
 

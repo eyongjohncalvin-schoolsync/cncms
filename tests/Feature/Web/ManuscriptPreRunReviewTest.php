@@ -225,4 +225,64 @@ class ManuscriptPreRunReviewTest extends TestCase
         $this->get('/manuscripts/pre-run-review?period=not-a-period')->assertStatus(422);
         $this->get('/manuscripts/pre-run-review?period=2099-01')->assertStatus(422);
     }
+
+    /**
+     * GET /manuscripts/pre-run-review/full — ManuscriptController::
+     * preRunReviewFull(), the large-count "Review full list" companion
+     * page (task-scheduler.md's 2026-08-27 stage 3 addendum). Same
+     * flagging rule as the JSON endpoint above, rendered as a real,
+     * paginated Inertia page instead.
+     */
+    public function test_an_admin_can_view_the_full_pre_run_review_board(): void
+    {
+        $this->actingAsRole('admin');
+
+        // Scoped to a dedicated, freshly-created zone (via zone_uuid) so this
+        // test's single fixture isn't pushed off page 1 by this tenant's
+        // real seeded customers, which may also legitimately be flagged for
+        // this period — same isolation technique
+        // tests/Feature/Web/ManuscriptTest.php's summary tests already use.
+        $zone = ZoneFactory::new()->create();
+        $flagged = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 3000]);
+
+        $response = $this->get('/manuscripts/pre-run-review/full?period='.self::PERIOD.'&zone_uuid='.$zone->uuid);
+
+        $response->assertOk()
+            ->assertInertia(fn (\Inertia\Testing\AssertableInertia $page) => $page
+                ->component('Manuscripts/PreRunReviewList')
+                ->where('period', self::PERIOD)
+                ->has('summary.count')
+                ->has('customers.data')
+                ->has('customers.meta')
+                ->has('zones'));
+
+        $page = json_decode(json_encode($response->viewData('page')), true);
+        $uuids = array_column($page['props']['customers']['data'], 'uuid');
+        $this->assertContains($flagged->uuid, $uuids);
+    }
+
+    public function test_a_manager_cannot_view_the_full_pre_run_review_board(): void
+    {
+        $this->actingAsRole('manager');
+
+        $this->get('/manuscripts/pre-run-review/full?period='.self::PERIOD)->assertForbidden();
+    }
+
+    public function test_the_full_board_can_be_filtered_by_zone(): void
+    {
+        $this->actingAsRole('admin');
+
+        $zoneA = ZoneFactory::new()->create();
+        $zoneB = ZoneFactory::new()->create();
+        $inZoneA = CustomerFactory::new()->active()->create(['zone_id' => $zoneA->id, 'bill' => 3000]);
+        $inZoneB = CustomerFactory::new()->active()->create(['zone_id' => $zoneB->id, 'bill' => 3000]);
+
+        $response = $this->get('/manuscripts/pre-run-review/full?period='.self::PERIOD.'&zone_uuid='.$zoneA->uuid);
+        $response->assertOk();
+
+        $page = json_decode(json_encode($response->viewData('page')), true);
+        $uuids = array_column($page['props']['customers']['data'], 'uuid');
+        $this->assertContains($inZoneA->uuid, $uuids);
+        $this->assertNotContains($inZoneB->uuid, $uuids);
+    }
 }

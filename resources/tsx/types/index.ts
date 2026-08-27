@@ -269,6 +269,36 @@ export interface ManuscriptSummary {
     collection_rate: number;
 }
 
+/**
+ * One flagged row from GET /manuscripts/pre-run-review
+ * (App\Services\ManuscriptPreRunReviewService::reviewList()'s `customers`
+ * shape) — an active customer with nothing covering the upcoming period yet.
+ * Shared by the pre-run review modal/panel (Manuscripts/Index.tsx's Calculate
+ * confirm modal) and its large-count full-board companion
+ * (Manuscripts/PreRunReviewList.tsx).
+ */
+export interface PreRunReviewCustomer {
+    uuid: string;
+    name: string;
+    zone_uuid: string | null;
+    zone_name: string | null;
+    phone: string | null;
+    bill: string;
+    last_payment_date: string | null;
+}
+
+export interface PreRunReviewSummary {
+    count: number;
+    total_exposure: string;
+}
+
+/** GET /manuscripts/pre-run-review's full JSON response shape. */
+export interface PreRunReviewResponse {
+    period: string;
+    summary: PreRunReviewSummary;
+    customers: PreRunReviewCustomer[];
+}
+
 export interface CustomerManuscriptSummary {
     uuid: string;
     bill: string;
