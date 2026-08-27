@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\UpdatePasswordRequest;
+use App\Http\Requests\UpdateProfileRequest;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
@@ -14,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
@@ -115,6 +118,78 @@ class AuthController extends Controller
                 'email' => $user->email,
             ],
             'role' => $context->role,
+        ]);
+    }
+
+    /**
+     * PATCH /auth/profile — self-service update of the authenticated user's
+     * own name/username/email. Deliberately resolves ONLY from
+     * $request->user() — there is no route parameter on this endpoint at
+     * all, so it can never be pointed at another user's row regardless of
+     * role, the same "no way to redirect elsewhere" guarantee
+     * AgentController::me() already establishes for the mobile Agent
+     * Profile screen. `status`/`password`/anything else can never surface
+     * here — UpdateProfileRequest::rules() doesn't define those keys, so
+     * $request->validated() only ever contains name/username/email.
+     */
+    public function updateProfile(UpdateProfileRequest $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $user->update($request->validated());
+
+        return response()->json([
+            'user' => [
+                'uuid' => $user->uuid,
+                'name' => $user->name,
+                'username' => $user->username,
+                'email' => $user->email,
+            ],
+        ]);
+    }
+
+    /**
+     * PATCH /auth/password — self-service password change. Requires proof
+     * of the CURRENT password via Hash::check() before accepting a new one
+     * — a valid session token alone is never enough, since a device left
+     * unlocked or borrowed mid-shift can hold a valid token without whoever
+     * is holding it actually knowing the account's password (the same
+     * "stolen unlocked phone" concern mobile-app-react-native.md §7 raises
+     * for payment actions, applied here to account takeover).
+     *
+     * On success, revokes every OTHER active Sanctum token for this user —
+     * this request's own current token is explicitly excluded, so the
+     * device making this call is never logged out by its own action. This
+     * is a standard "password change ends other sessions" security default.
+     * Real UX consequence, called out here since it's genuinely visible to
+     * an agent: if this account is also logged in on a second
+     * device/session, that other session's token stops working immediately
+     * and it will need to log back in with the new password. Accepted at
+     * this app's current scale (~6 users, one tenant) — a password change
+     * is rare, and it's exactly the moment an old/unexpected session
+     * SHOULD stop working.
+     */
+    public function updatePassword(UpdatePasswordRequest $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! Hash::check($request->validated('current_password'), $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['The current password is incorrect.'],
+            ]);
+        }
+
+        // The 'password' attribute is cast to 'hashed' on the User model,
+        // so Eloquent hashes this automatically on save (same convention as
+        // SettingsUserController::store()).
+        $user->update(['password' => $request->validated('new_password')]);
+
+        $currentTokenId = $request->user()->currentAccessToken()->id;
+
+        $user->tokens()->where('id', '!=', $currentTokenId)->delete();
+
+        return response()->json([
+            'message' => 'Password updated.',
         ]);
     }
 }

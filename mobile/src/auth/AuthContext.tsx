@@ -47,6 +47,13 @@ interface AuthContextValue {
     roleConfirmed: boolean;
     login: (identifier: string, password: string) => Promise<void>;
     logout: () => Promise<void>;
+    /** Merges a patch (e.g. the response of PATCH /auth/profile) into both
+     * in-memory state and the cached profile on disk, so the display
+     * refreshes immediately without a fresh /auth/me round-trip or a
+     * re-login. See app/edit-profile.tsx. No-op if called before a user is
+     * loaded (shouldn't happen — this is only ever called from an
+     * already-authenticated screen). */
+    updateCachedUser: (patch: Partial<AuthUser>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -169,9 +176,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus('unauthenticated');
     }, []);
 
+    const updateCachedUser = useCallback(
+        async (patch: Partial<AuthUser>) => {
+            if (!user || !role) {
+                return;
+            }
+
+            const next = { ...user, ...patch };
+
+            setUser(next);
+            await writeCachedProfile({ user: next, role });
+        },
+        [user, role],
+    );
+
     const value = useMemo<AuthContextValue>(
-        () => ({ status, user, role, roleConfirmed, login, logout }),
-        [status, user, role, roleConfirmed, login, logout],
+        () => ({ status, user, role, roleConfirmed, login, logout, updateCachedUser }),
+        [status, user, role, roleConfirmed, login, logout, updateCachedUser],
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

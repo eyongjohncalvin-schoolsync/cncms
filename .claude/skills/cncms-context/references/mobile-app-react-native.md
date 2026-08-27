@@ -745,6 +745,97 @@ a small new backend endpoint since none existed for mobile to call; both were ke
 each, reusing existing services, no new service classes) and covered by dedicated new feature tests,
 independently re-run and confirmed passing before landing (not just trusted from each agent's own report).
 
+## 12. Shared `DetailRow` primitive + self-service profile/password — 2026-08-27 addendum
+
+Two follow-ups landed after §11's seven-screen parallel build, both scoped narrowly.
+
+**`DetailRow` extraction.** `settings.tsx` and `agent-profile.tsx` (two of the seven §11 screens,
+built by different agents in the same parallel wave without seeing each other's work) each
+independently built a pixel-for-pixel identical local `Field({label, value, last})` helper plus
+matching `fieldRow`/`fieldRowDivider`/`fieldLabel`/`fieldValue` styles — the classic parallel-build
+duplication. Extracted to `src/components/ui/DetailRow.tsx` (same doc-comment/prop-typing
+convention as `Badge.tsx`/`StatCard.tsx`), and both screens now import it instead of defining their
+own copy. `app/(tabs)/record-payment/index.tsx` was checked too (a stray note from the §11 testing
+pass claimed it had "the same inline pattern") — it doesn't: its `fieldLabel` style is a standalone
+section caption above a segmented control/input, not a label-left/value-right divider row, and it
+has no `fieldRow`/`fieldValue` pair at all. Left untouched rather than forced into `DetailRow`.
+
+**Self-service profile & password update — a real, previously-missing feature.** Confirmed by grep
+before starting: no profile-edit or password-change endpoint existed anywhere in this codebase, web
+or mobile — only `SettingsUserController` (admin editing OTHER users). `settings.tsx`'s Profile
+section had been read-only for exactly this reason (see that screen's own now-updated doc comment).
+Built the real thing:
+
+- **`PATCH /api/v1/auth/profile`** (`AuthController::updateProfile()`, `UpdateProfileRequest`) —
+  updates the authenticated user's own `name`/`username`/`email` only (all `'sometimes'`).
+  `username`/`email` uniqueness validated via `Rule::unique('pgsql.users', ...)->ignore($userId)`.
+  No route parameter exists on this endpoint at all — it resolves strictly from `$request->user()`,
+  the same "can't be pointed at another user's row" shape as `AgentController::me()`.
+  `status`/`password`/anything else can never surface through it (not defined in the Request's
+  `rules()`, so absent from `validated()` regardless of what a caller sends).
+- **`PATCH /api/v1/auth/password`** (`AuthController::updatePassword()`, `UpdatePasswordRequest`) —
+  requires `current_password` (verified via `Hash::check()`, rejected with a `current_password`
+  validation error if wrong — never a bare 403/500), `new_password` (`confirmed`,
+  `Password::min(8)->letters()->numbers()` — stricter than this codebase's existing plain `min:8`
+  floor for admin-created accounts, since a self-service change is the one path where the person
+  choosing the password is the one who has to trust it later), `new_password_confirmation`. **On
+  success, every OTHER active Sanctum token for this user is revoked** (current token explicitly
+  excluded via `currentAccessToken()->id`) — a deliberate security default, not an oversight. Real
+  UX consequence: a second device/session logged in under the same account gets logged out
+  immediately and must re-authenticate with the new password. Accepted at this app's current scale
+  (~6 users, one tenant) since a password change is rare and is exactly the moment an
+  old/unexpected session should stop working.
+- Both endpoints gated by `auth:sanctum` only — placed alongside `logout()` in `routes/api.php`,
+  deliberately OUTSIDE the `ResolveTenant`/`throttle:api` group `auth/me` and every tenant-scoped
+  resource route sit inside, since both only ever touch the central `users` table, never
+  tenant-scoped data. No Policy check (`authorize()` returns `true` in both new Form Requests) —
+  mirrors `AuthController::me()`/`logout()`'s existing no-separate-authorization shape, since there
+  is no "other user's data" to protect against on an endpoint with no route parameter.
+- Feature tests added to `tests/Feature/Api/AuthTest.php` (kept in the existing file rather than a
+  new `ProfileTest.php` — same controller, same auth-endpoint scope the file already covers):
+  successful profile update, username/email uniqueness rejection (including "keep your own current
+  value" not tripping the uniqueness check), successful password change, wrong-current-password
+  rejection, weak-new-password rejection, and a token-revocation test confirming the current token
+  survives while a second token is revoked. All passing — run via
+  `php artisan test --filter=AuthTest`, not the full suite (per this repo's own convention).
+
+**Mobile:** two new standalone modal routes, `app/edit-profile.tsx` and `app/change-password.tsx`
+(registered in `app/_layout.tsx` exactly like every other §11 screen — `presentation: 'modal'`,
+`headerShown: true`), reached from two new "Edit profile"/"Change password" buttons on
+`settings.tsx`'s Profile card. Chose the route-per-form shape over React Native's `Modal` component
+— this app has zero existing use of RN's `Modal` anywhere; every other reached-one-tap-deeper form
+(`record-expense.tsx`, `log-complaint.tsx`, `reconnect/[uuid].tsx`, `disconnect/[uuid].tsx`) is
+already its own Stack route with `presentation: 'modal'`, so this follows that established
+convention rather than introducing a second, inconsistent one. Client-side validation added to
+`src/utils/validation.ts` as `validateProfileForm`/`validatePasswordForm` (same pure,
+screen-free, `node --test`-covered shape as `validateComplaintForm`/`validateExpenditureForm`),
+mirroring the server's password rules so a weak password is caught before the round-trip. Server
+422 field errors (uniqueness, wrong current password) are extracted locally in each screen (a small
+inline `error.response.data.errors[field]` read, matching `agent-profile.tsx`'s existing precedent
+of a local, non-shared error-shape check) rather than widening `src/api/client.ts`'s
+`extractErrorMessage` — that helper only ever surfaces the generic top-level `message`, which is
+fine for every existing caller but not specific enough for "this username is already taken."
+
+On a successful profile save, `edit-profile.tsx` calls a new `AuthContext.updateCachedUser(patch)`,
+which merges the patch into both in-memory `user` state and the SecureStore-cached profile
+(`writeCachedProfile`) — the display refreshes immediately with no re-login and no extra `/auth/me`
+round-trip, reusing the exact cache-write helper `login()` already uses internally. On a successful
+password change, `change-password.tsx` deliberately does nothing to local auth/token state beyond
+showing a confirmation — the server revokes *other* tokens, and this device's own token (the one
+that made the request) was never touched, so the agent stays signed in exactly as before; verified
+this assumption against the controller's actual implementation (see above) rather than assuming it.
+
+**Verification:** `cd mobile && npx tsc --noEmit` clean except the two pre-existing
+`src/api/devices.ts` errors (unrelated, unchanged, called out as expected in every prior pass's own
+verification section too). `npm test` passing, including the new `validateProfileForm`/
+`validatePasswordForm` cases added to `src/utils/__tests__/validation.test.ts`.
+
+**Deliberately NOT built:** a matching web-admin self-service profile/password UI. This work was
+scoped to the mobile app specifically (the task that produced this addendum was mobile-focused);
+the two new endpoints are plain `auth:sanctum` API routes with no Inertia/web page behind them, so a
+web self-service page is a real, separate, currently-open gap for whoever picks up web-admin
+self-service next — not silently solved here and not pretended to be out of scope for lack of need.
+
 **Navigation — the 5th tab.** §4 originally settled on 4 tabs specifically so a single feature
 (Log a Complaint) wouldn't get its own dedicated tab. That reasoning doesn't extend to a genuine
 grab-bag of 7+ secondary destinations landing in one session — a single **More** tab

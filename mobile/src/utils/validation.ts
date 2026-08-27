@@ -84,6 +84,100 @@ export function validateComplaintForm(input: ComplaintFormInput): ComplaintFormR
     return { valid: true, errors: {} };
 }
 
+// --- Profile / password self-service — mobile-app-react-native.md §11 addendum ---
+
+const SIMPLE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export interface ProfileFormInput {
+    name: string;
+    username: string;
+    email: string;
+}
+
+export interface ProfileFormErrors {
+    name?: string;
+    username?: string;
+    email?: string;
+}
+
+export type ProfileFormResult =
+    | { valid: true; errors: Record<string, never> }
+    | { valid: false; errors: ProfileFormErrors };
+
+/** Client-side pass only — deliberately does NOT duplicate the server's
+ * uniqueness check (that requires a round-trip; see AuthController::
+ * updateProfile() / UpdateProfileRequest). This just catches the "obviously
+ * incomplete/malformed" cases before spending a network call, matching
+ * validateComplaintForm/validateExpenditureForm's own scope. */
+export function validateProfileForm(input: ProfileFormInput): ProfileFormResult {
+    const errors: ProfileFormErrors = {};
+
+    if (!input.name.trim()) {
+        errors.name = 'Enter your name.';
+    }
+
+    if (!input.username.trim()) {
+        errors.username = 'Enter a username.';
+    }
+
+    if (!input.email.trim()) {
+        errors.email = 'Enter an email address.';
+    } else if (!SIMPLE_EMAIL_RE.test(input.email.trim())) {
+        errors.email = 'Enter a valid email address.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+        return { valid: false, errors };
+    }
+
+    return { valid: true, errors: {} };
+}
+
+export interface PasswordFormInput {
+    currentPassword: string;
+    newPassword: string;
+    confirmPassword: string;
+}
+
+export interface PasswordFormErrors {
+    currentPassword?: string;
+    newPassword?: string;
+    confirmPassword?: string;
+}
+
+export type PasswordFormResult =
+    | { valid: true; errors: Record<string, never> }
+    | { valid: false; errors: PasswordFormErrors };
+
+/** Mirrors App\Http\Requests\UpdatePasswordRequest's rules exactly (min 8,
+ * at least one letter and one number via Laravel's Password rule object) so
+ * a weak password is caught before the round-trip, not just after a 422. */
+export function validatePasswordForm(input: PasswordFormInput): PasswordFormResult {
+    const errors: PasswordFormErrors = {};
+
+    if (!input.currentPassword) {
+        errors.currentPassword = 'Enter your current password.';
+    }
+
+    if (!input.newPassword) {
+        errors.newPassword = 'Enter a new password.';
+    } else if (input.newPassword.length < 8) {
+        errors.newPassword = 'Must be at least 8 characters.';
+    } else if (!/[a-zA-Z]/.test(input.newPassword) || !/[0-9]/.test(input.newPassword)) {
+        errors.newPassword = 'Must include at least one letter and one number.';
+    }
+
+    if (input.confirmPassword !== input.newPassword) {
+        errors.confirmPassword = 'Passwords do not match.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+        return { valid: false, errors };
+    }
+
+    return { valid: true, errors: {} };
+}
+
 export function validateExpenditureForm(input: ExpenditureFormInput): ExpenditureFormResult {
     const errors: ExpenditureFormErrors = {};
 

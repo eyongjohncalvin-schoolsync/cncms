@@ -3,6 +3,7 @@ import { ActivityIndicator, Image, Linking, ScrollView, StyleSheet, Text, View }
 import { Stack, useFocusEffect } from 'expo-router';
 import { Card } from '../src/components/ui/Card';
 import { Badge, type BadgeTone } from '../src/components/ui/Badge';
+import { DetailRow } from '../src/components/ui/DetailRow';
 import { EmptyState } from '../src/components/ui/EmptyState';
 import { fetchMyAgentProfile, type AgentMeApi } from '../src/api/agents';
 import { extractErrorMessage } from '../src/api/client';
@@ -142,33 +143,22 @@ export default function AgentProfileScreen() {
             <Card>
                 <Text style={styles.sectionTitle}>Zone assignment</Text>
                 <View style={styles.fieldList}>
-                    <Field label="Zone" value={profile.zone_name ?? '—'} />
-                    <Field label="Location" value={profile.location ?? '—'} last />
+                    <DetailRow label="Zone" value={profile.zone_name ?? '—'} />
+                    <DetailRow label="Location" value={profile.location ?? '—'} last />
                 </View>
             </Card>
 
             <Card>
                 <Text style={styles.sectionTitle}>Employment</Text>
                 <View style={styles.fieldList}>
-                    <Field label="Salary" value={salary} />
-                    <Field label="Email" value={profile.email ?? '—'} />
-                    <Field label="Date of birth" value={profile.dob ? formatShortDate(profile.dob) : '—'} />
-                    <Field label="Marital status" value={maritalLabel} />
-                    <Field label="Children" value={profile.children !== null ? String(profile.children) : '—'} last />
+                    <DetailRow label="Salary" value={salary} />
+                    <DetailRow label="Email" value={profile.email ?? '—'} />
+                    <DetailRow label="Date of birth" value={profile.dob ? formatShortDate(profile.dob) : '—'} />
+                    <DetailRow label="Marital status" value={maritalLabel} />
+                    <DetailRow label="Children" value={profile.children !== null ? String(profile.children) : '—'} last />
                 </View>
             </Card>
         </ScrollView>
-    );
-}
-
-function Field({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
-    return (
-        <View style={[styles.fieldRow, !last && styles.fieldRowDivider]}>
-            <Text style={styles.fieldLabel}>{label}</Text>
-            <Text style={styles.fieldValue} numberOfLines={1}>
-                {value}
-            </Text>
-        </View>
     );
 }
 
@@ -196,17 +186,4 @@ const styles = StyleSheet.create({
     phoneHint: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
     sectionTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
     fieldList: { gap: spacing.sm },
-    fieldRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: spacing.md,
-        paddingBottom: spacing.sm,
-    },
-    fieldRowDivider: {
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    fieldLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
-    fieldValue: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
 });

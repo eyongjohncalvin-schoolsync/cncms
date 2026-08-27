@@ -1,8 +1,10 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
+import { useRouter } from 'expo-router';
 import { Card } from '../src/components/ui/Card';
 import { Button } from '../src/components/ui/Button';
+import { DetailRow } from '../src/components/ui/DetailRow';
 import { useAuth } from '../src/auth/AuthContext';
 import { getSyncState, subscribeSyncState } from '../src/sync/syncStore';
 import { extractErrorMessage } from '../src/api/client';
@@ -17,11 +19,14 @@ import { fontSize, spacing } from '../src/theme/tokens';
  * calls, and out of scope here by design, not oversight).
  *
  * Deliberately scoped to only what a real API endpoint supports today:
- *   - Profile: read-only display of the `/auth/me` identity + role. No
- *     profile-edit endpoint exists anywhere in routes/api.php (only
- *     auth/login, auth/logout, auth/me) — a non-admin user has no server-side
- *     path to change their own name/email today, so this is display-only
- *     rather than a form that would silently no-op.
+ *   - Profile: display of the `/auth/me` identity + role, with real
+ *     "Edit profile" and "Change password" actions (2026-08-27 addendum —
+ *     see mobile-app-react-native.md §11 addendum). This was read-only
+ *     until PATCH /auth/profile and PATCH /auth/password existed — see
+ *     app/edit-profile.tsx / app/change-password.tsx, both new standalone
+ *     modal routes. Role stays display-only here (no self-service role
+ *     change exists or should exist — that's an office-only action, see
+ *     SettingsUserController::update()).
  *   - Notification preferences: NOT built. App\Models\NotificationSetting is
  *     a single-row-PER-TENANT table (whatsapp/email/sms channel toggles +
  *     Twilio credentials), gated by SettingsNotificationController's
@@ -42,6 +47,7 @@ import { fontSize, spacing } from '../src/theme/tokens';
  *     backend involved.
  */
 export default function SettingsScreen() {
+    const router = useRouter();
     const { user, role, logout } = useAuth();
     const syncState = useSyncExternalStore(subscribeSyncState, getSyncState);
     const [loggingOut, setLoggingOut] = useState(false);
@@ -80,17 +86,29 @@ export default function SettingsScreen() {
             <Card>
                 <Text style={styles.sectionTitle}>Profile</Text>
                 <View style={styles.fieldList}>
-                    <Field label="Name" value={user?.name ?? '—'} />
-                    <Field label="Username" value={user?.username ?? '—'} />
-                    <Field label="Email" value={user?.email ?? '—'} />
-                    <Field label="Role" value={role ? capitalize(role) : '—'} last />
+                    <DetailRow label="Name" value={user?.name ?? '—'} />
+                    <DetailRow label="Username" value={user?.username ?? '—'} />
+                    <DetailRow label="Email" value={user?.email ?? '—'} />
+                    <DetailRow label="Role" value={role ? capitalize(role) : '—'} last />
+                </View>
+                <View style={styles.profileActions}>
+                    <Button
+                        title="Edit profile"
+                        variant="secondary"
+                        onPress={() => router.push('/edit-profile')}
+                    />
+                    <Button
+                        title="Change password"
+                        variant="secondary"
+                        onPress={() => router.push('/change-password')}
+                    />
                 </View>
             </Card>
 
             <Card>
                 <Text style={styles.sectionTitle}>About</Text>
                 <View style={styles.fieldList}>
-                    <Field label="App version" value={Constants.expoConfig?.version ?? '—'} last />
+                    <DetailRow label="App version" value={Constants.expoConfig?.version ?? '—'} last />
                 </View>
             </Card>
 
@@ -106,17 +124,6 @@ export default function SettingsScreen() {
     );
 }
 
-function Field({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
-    return (
-        <View style={[styles.fieldRow, !last && styles.fieldRowDivider]}>
-            <Text style={styles.fieldLabel}>{label}</Text>
-            <Text style={styles.fieldValue} numberOfLines={1}>
-                {value}
-            </Text>
-        </View>
-    );
-}
-
 /** No shared string-casing helper exists in src/utils/format.ts — this is a
  * one-off local capitalizer, only used for the role label. */
 function capitalize(value: string): string {
@@ -128,18 +135,11 @@ const styles = StyleSheet.create({
     content: { padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xxl },
     sectionTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
     fieldList: { gap: spacing.sm },
-    fieldRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: spacing.md,
-        paddingBottom: spacing.sm,
-    },
-    fieldRowDivider: {
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    fieldLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
-    fieldValue: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
+    // Stacked, not side-by-side — Button's fullWidth (default true) stretches
+    // on the CROSS axis only, so two fullWidth buttons in a row wouldn't
+    // split the row evenly. This mirrors log-complaint.tsx's own
+    // confirmActions layout (two stacked full-width Buttons), the only
+    // existing precedent in this app for "more than one Button together".
+    profileActions: { gap: spacing.sm, marginTop: spacing.md },
     logoutButton: { marginTop: spacing.sm },
 });

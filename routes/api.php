@@ -15,6 +15,12 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('auth/logout', [AuthController::class, 'logout']);
+        // Self-service profile/password endpoints — gated by auth:sanctum
+        // only (no ResolveTenant/tenant membership needed), same placement
+        // as logout() above: both only ever touch the central `users`
+        // table, never tenant-scoped data, so there's no tenant to resolve.
+        Route::patch('auth/profile', [AuthController::class, 'updateProfile']);
+        Route::patch('auth/password', [AuthController::class, 'updatePassword']);
 
         // Every other /api/v1/* endpoint requires both a valid Sanctum
         // token AND tenant membership. ResolveTenant initializes tenancy

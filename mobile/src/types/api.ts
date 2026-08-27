@@ -45,6 +45,31 @@ export interface MeResponse {
     role: TenantRole;
 }
 
+/** PATCH /auth/profile — App\Http\Requests\UpdateProfileRequest. Every field
+ * is optional on the wire ('sometimes' server-side), but the mobile "Edit
+ * profile" form always sends all three. */
+export interface UpdateProfilePayload {
+    name?: string;
+    username?: string;
+    email?: string;
+}
+
+export interface UpdateProfileResponse {
+    user: {
+        uuid: string;
+        name: string;
+        username: string;
+        email: string;
+    };
+}
+
+/** PATCH /auth/password — App\Http\Requests\UpdatePasswordRequest. */
+export interface UpdatePasswordPayload {
+    current_password: string;
+    new_password: string;
+    new_password_confirmation: string;
+}
+
 // ---------------------------------------------------------------------------
 // Sync — app/Services/SyncService.php, app/Http/Requests/SyncPushRequest.php
 // ---------------------------------------------------------------------------

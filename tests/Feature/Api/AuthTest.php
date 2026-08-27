@@ -8,6 +8,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 /**
@@ -132,5 +133,150 @@ class AuthTest extends TestCase
 
         $response->assertStatus(403)
             ->assertJsonPath('code', 'FORBIDDEN');
+    }
+
+    public function test_user_can_update_own_profile(): void
+    {
+        $user = User::factory()->create([
+            'name' => 'Old Name',
+            'username' => 'oldusername',
+            'email' => 'old@example.test',
+        ]);
+        $token = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/profile', [
+                'name' => 'New Name',
+                'username' => 'newusername',
+                'email' => 'new@example.test',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('user.name', 'New Name')
+            ->assertJsonPath('user.username', 'newusername')
+            ->assertJsonPath('user.email', 'new@example.test');
+
+        $this->assertSame('New Name', $user->fresh()->name);
+        $this->assertSame('newusername', $user->fresh()->username);
+        $this->assertSame('new@example.test', $user->fresh()->email);
+    }
+
+    public function test_profile_update_rejects_username_already_taken_by_another_user(): void
+    {
+        User::factory()->create(['username' => 'taken']);
+        $user = User::factory()->create(['username' => 'mine']);
+        $token = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/profile', ['username' => 'taken']);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('username');
+    }
+
+    public function test_profile_update_rejects_email_already_taken_by_another_user(): void
+    {
+        User::factory()->create(['email' => 'taken@example.test']);
+        $user = User::factory()->create(['email' => 'mine@example.test']);
+        $token = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/profile', ['email' => 'taken@example.test']);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('email');
+    }
+
+    public function test_profile_update_allows_a_user_to_keep_their_own_current_username_and_email(): void
+    {
+        $user = User::factory()->create(['username' => 'mine', 'email' => 'mine@example.test']);
+        $token = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/profile', [
+                'name' => 'Updated Name',
+                'username' => 'mine',
+                'email' => 'mine@example.test',
+            ]);
+
+        $response->assertOk()->assertJsonPath('user.name', 'Updated Name');
+    }
+
+    public function test_user_can_change_own_password(): void
+    {
+        $user = User::factory()->create(); // factory default password is 'password'
+        $token = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/password', [
+                'current_password' => 'password',
+                'new_password' => 'newpass123',
+                'new_password_confirmation' => 'newpass123',
+            ]);
+
+        $response->assertOk();
+
+        $this->assertTrue(Hash::check('newpass123', $user->fresh()->password));
+    }
+
+    public function test_password_change_rejects_wrong_current_password(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/password', [
+                'current_password' => 'not-the-real-password',
+                'new_password' => 'newpass123',
+                'new_password_confirmation' => 'newpass123',
+            ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('current_password');
+
+        // The password must be unchanged.
+        $this->assertTrue(Hash::check('password', $user->fresh()->password));
+    }
+
+    public function test_password_change_rejects_a_weak_new_password(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/password', [
+                'current_password' => 'password',
+                'new_password' => 'short',
+                'new_password_confirmation' => 'short',
+            ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('new_password');
+    }
+
+    public function test_password_change_revokes_other_tokens_but_keeps_the_current_one(): void
+    {
+        $user = User::factory()->create();
+        $currentToken = $user->createToken('api')->plainTextToken;
+        $otherToken = $user->createToken('api')->plainTextToken;
+
+        $response = $this->withHeader('Authorization', "Bearer {$currentToken}")
+            ->patchJson('/api/v1/auth/password', [
+                'current_password' => 'password',
+                'new_password' => 'newpass123',
+                'new_password_confirmation' => 'newpass123',
+            ]);
+
+        $response->assertOk();
+
+        $this->app->make('auth')->forgetGuards();
+
+        // The current token (the one used to make this request) keeps working.
+        $this->withHeader('Authorization', "Bearer {$currentToken}")
+            ->getJson('/api/v1/auth/me')
+            ->assertStatus(403); // no tenant membership on this factory user — still proves the token authenticates.
+
+        $this->app->make('auth')->forgetGuards();
+
+        // The other token was revoked.
+        $this->withHeader('Authorization', "Bearer {$otherToken}")
+            ->getJson('/api/v1/auth/me')
+            ->assertStatus(401);
     }
 }

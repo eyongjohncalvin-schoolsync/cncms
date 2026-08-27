@@ -148,6 +148,20 @@ function RootNavigation() {
               in this app already gets.
             */}
             <Stack.Screen name="settings" options={{ presentation: 'modal', headerShown: true, title: 'Settings' }} />
+            {/*
+              2026-08-27 addendum: self-service profile/password update
+              (mobile-app-react-native.md §11 addendum) — both reached one
+              tap deeper from settings.tsx's Profile card, same modal-route
+              shape as every other form screen above.
+            */}
+            <Stack.Screen
+                name="edit-profile"
+                options={{ presentation: 'modal', headerShown: true, title: 'Edit Profile' }}
+            />
+            <Stack.Screen
+                name="change-password"
+                options={{ presentation: 'modal', headerShown: true, title: 'Change Password' }}
+            />
             <Stack.Screen name="reports" options={{ presentation: 'modal', headerShown: true, title: 'Reports' }} />
             <Stack.Screen name="resources" options={{ presentation: 'modal', headerShown: true, title: 'Resources' }} />
             <Stack.Screen name="zones" options={{ presentation: 'modal', headerShown: true, title: 'Zones' }} />

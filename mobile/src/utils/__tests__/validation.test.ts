@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateComplaintForm, validateExpenditureForm } from '../validation';
+import { validateComplaintForm, validateExpenditureForm, validatePasswordForm, validateProfileForm } from '../validation';
 
 test('rejects a missing description — mobile is deliberately stricter than the web form', () => {
     const result = validateExpenditureForm({
@@ -169,6 +169,79 @@ test('complaint form: accepts a fully valid customer complaint', () => {
         description: 'Relayed during a route visit.',
         customerUuid: 'cust-uuid-123',
     });
+
+    assert.equal(result.valid, true);
+});
+
+// --- validateProfileForm / validatePasswordForm — self-service profile &
+// password update, mobile-app-react-native.md §11 addendum ---
+
+test('profile form: rejects blank name/username/email', () => {
+    const result = validateProfileForm({ name: '  ', username: '', email: '' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.name);
+        assert.ok(result.errors.username);
+        assert.ok(result.errors.email);
+    }
+});
+
+test('profile form: rejects a malformed email', () => {
+    const result = validateProfileForm({ name: 'Kelvin', username: 'kelvin', email: 'not-an-email' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.email);
+        assert.equal(result.errors.name, undefined);
+        assert.equal(result.errors.username, undefined);
+    }
+});
+
+test('profile form: accepts a fully valid form', () => {
+    const result = validateProfileForm({ name: 'Kelvin', username: 'kelvin', email: 'kelvin@example.test' });
+
+    assert.equal(result.valid, true);
+});
+
+test('password form: rejects a blank current password', () => {
+    const result = validatePasswordForm({ currentPassword: '', newPassword: 'newpass123', confirmPassword: 'newpass123' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.currentPassword);
+    }
+});
+
+test('password form: rejects a new password under 8 characters', () => {
+    const result = validatePasswordForm({ currentPassword: 'password', newPassword: 'short1', confirmPassword: 'short1' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.newPassword);
+    }
+});
+
+test('password form: rejects a new password missing a number', () => {
+    const result = validatePasswordForm({ currentPassword: 'password', newPassword: 'onlyletters', confirmPassword: 'onlyletters' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.newPassword);
+    }
+});
+
+test('password form: rejects mismatched confirmation', () => {
+    const result = validatePasswordForm({ currentPassword: 'password', newPassword: 'newpass123', confirmPassword: 'newpass124' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.confirmPassword);
+    }
+});
+
+test('password form: accepts a fully valid change', () => {
+    const result = validatePasswordForm({ currentPassword: 'password', newPassword: 'newpass123', confirmPassword: 'newpass123' });
 
     assert.equal(result.valid, true);
 });
