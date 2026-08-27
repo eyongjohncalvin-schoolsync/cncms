@@ -177,6 +177,10 @@ function RootNavigation() {
                 name="complaints"
                 options={{ presentation: 'modal', headerShown: true, title: 'Complaints' }}
             />
+            <Stack.Screen
+                name="manuscript"
+                options={{ presentation: 'modal', headerShown: true, title: 'Manuscript' }}
+            />
             {/*
               complaint-desk.md section 7: the one screen in this app that
               deliberately blocks. fullScreenModal (not 'modal') + no

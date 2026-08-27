@@ -48,6 +48,12 @@ export default function MoreScreen() {
                     accentColor: colors.danger,
                 },
                 {
+                    title: 'Manuscript',
+                    subtitle: 'Your zone’s billing register for the current period',
+                    href: '/manuscript',
+                    accentColor: colors.accent.payment,
+                },
+                {
                     title: 'Zones',
                     subtitle: 'Your zone, and a lookup of every other zone',
                     href: '/zones',
