@@ -94,3 +94,17 @@ export async function getFailedComplaintsCount(): Promise<number> {
 
     return row?.count ?? 0;
 }
+
+/**
+ * The full local outbox+history table, newest first — for the read-only
+ * "Complaints" list screen (app/complaints.tsx), mirroring
+ * getRecentPayments()'s exact shape in src/db/payments.ts. Every row here
+ * originated on THIS device by construction (complaint sync is push/
+ * create-only — there is no pull-back of complaints from the server), so
+ * there is no separate "mine" filter to apply.
+ */
+export async function getRecentComplaints(limit = 100): Promise<LocalComplaint[]> {
+    const db = await getDatabase();
+
+    return db.getAllAsync<LocalComplaint>('SELECT * FROM complaints ORDER BY created_at DESC LIMIT ?', [limit]);
+}
