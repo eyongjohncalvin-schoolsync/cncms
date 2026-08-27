@@ -60,7 +60,7 @@ class PaymentVerificationService
             }
         });
 
-        Cache::forget("payments:show:{$payment->uuid}");
+        $this->forgetShowCache($payment->uuid);
 
         // Extends the same forget-on-write to /reports: an approve/reject
         // flip changes the Daily tier's "verifications actioned today" and
@@ -175,8 +175,28 @@ class PaymentVerificationService
 
         $verification = $this->verifications->update($verification, ['receipt_photo_path' => $storedPath]);
 
-        Cache::forget("payments:show:{$payment->uuid}");
+        $this->forgetShowCache($payment->uuid);
 
         return $verification;
+    }
+
+    /**
+     * Must match App\Services\PaymentService::findOrFail()'s exact key
+     * format (including the :branchId suffix) — a bare "payments:show:{uuid}"
+     * forget() here was a silent no-op against the real, branch-suffixed
+     * key (the identical bug class fixed 2026-08-27 in
+     * CustomerStatusService/CustomerManuscriptRecalculationService — see
+     * their doc comments), so an approve/reject/attachReceipt could leave
+     * the payment detail page's cached figures stale for up to its 30s
+     * TTL. Same "own branch key + 'all' key" tradeoff as
+     * PaymentService::forgetShowCache(): a verify() call from a branch
+     * context different than whichever branch context last cached the
+     * page still only reliably covers those two variants, not every
+     * possible branch-scoped entry.
+     */
+    private function forgetShowCache(string $uuid): void
+    {
+        Cache::forget("payments:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all'));
+        Cache::forget("payments:show:{$uuid}:all");
     }
 }

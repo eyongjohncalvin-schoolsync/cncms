@@ -512,3 +512,85 @@ tests) — all 55 passing. Separately noted (not caused by, or related to, this 
 subprocess with a dompdf `Allowed memory size of 134217728 bytes exhausted` fatal — a CLI
 `memory_limit` environment issue, unrelated to query efficiency; flagged for a separate pass rather
 than fixed here.
+
+## Stage 5 addendum (2026-08-27): caching audit of stages 1–4 — one real bug found, outside the diff
+
+Prompted by a real bug fixed earlier the same day elsewhere in this codebase:
+`CustomerStatusService::forgetCache()` and `CustomerManuscriptRecalculationService`'s cache-forget
+call both used to forget a bare `"customers:show:{uuid}"` key while
+`CustomerService::findOrFail()` actually caches under `'customers:show:'.$uuid.':'.branchId` (`:all`
+or a real branch id) — the forgets were silent no-ops. This audit checked whether the identical bug
+class (a `Cache::` SET with one key shape, a FORGET with a different, non-matching shape) exists
+anywhere in the stage 1–4 manuscript-run-safety code, and whether the new manuscript code interacts
+correctly with this app's existing caching generally.
+
+**1. `ManuscriptService::forgetSummaryCache($period)`** — every new/changed write path that should
+invalidate it does, with the correct `$period`: `ManuscriptCalculate::handle()` (after
+`runForEveryCustomer()` succeeds, before marking the row `published`), `ManuscriptGenerationBatchService::publish()`
+(after the commit transaction, keyed off `$commandRun->period`), and
+`CustomerManuscriptRecalculationService::recalculateOne()` (called from both real callers —
+`ArrearsAdjustmentService::applyLedgerEffect()`'s synchronous current-period call, and
+`RecalculateCustomerManuscriptsForwardJob`'s per-period loop, which passes that iteration's own
+`$periodString`, not a captured/stale value). No mismatched-period call site found. One pre-existing,
+unchanged-by-these-stages gap noted for completeness: if `ManuscriptCalculate::runForEveryCustomer()`
+throws a genuinely fatal exception (outside its own per-customer try/catch), the command's
+`forgetSummaryCache()` call is skipped even though earlier chunks in that run may have already
+committed manuscript writes — this was already true before stage 1 (the pre-stage code had no
+try/catch around that call either) and is a "leaves cache stale until its 10-minute TTL, on a rare
+fatal-failure path" edge case, not a stage 1–4 regression; left alone.
+
+**2. The `customers:show:{uuid}:{branchId}` fix from earlier today** — confirmed byte-for-byte
+intact and untouched by stages 1–4: `git diff` across all four stage commits shows
+`CustomerManuscriptRecalculationService.php`'s `Cache::forget('customers:show:'.$customer->uuid.':all')`
+line is unchanged context, not a diff hunk. Stage 2's new `$trigger`/`$auditContext` parameters on
+`recalculateOne()` sit entirely above this line in the method body and don't touch it. No regression.
+
+**3. `ManuscriptGenerationBatchService`'s own caching** — none. `computed_result`/batch progress are
+plain `command_runs` columns, never wrapped in `Cache::remember`/`put`. A refused rerun
+(`ManuscriptRerunGuard::assertRerunAllowed()` throwing inside `dispatch()`) throws *before* any
+`CommandRun::create()`, so nothing is ever created and `publish()` (the only method that calls
+`forgetSummaryCache()`) is never reachable — a refused rerun touches zero cache state, correctly.
+
+**4. `Manuscripts/RunReview.tsx` + `ManuscriptController::runReview()`** — confirmed NOT cached.
+`runReview()` receives `CommandRun $run` via plain Eloquent route-model binding (no
+`resolveRouteBinding()` override, no `Cache::` call anywhere in `ManuscriptController.php` or
+`ResolvesCommandRunBatchProgress`) — every poll tick (`usePoll(3000, { only: ['run'] })`, active only
+while `status === 'queued'`) triggers a fresh Inertia partial reload that re-runs a fresh DB query.
+No staleness risk.
+
+**5. `ManuscriptPreRunReviewService::reviewList()`** — confirmed NOT cached (no `Cache::` call in the
+file, and its `CustomerRepositoryInterface::activeWithLatestManuscript()` dependency has none either
+— none of `app/Repositories/**` uses `Cache::` anywhere). This is correct and must stay this way: the
+feature's entire purpose is showing current, real-time "who hasn't paid" state so a just-recorded
+payment is visible before a run locks the period — any TTL, however short, would defeat that. No
+change made.
+
+**6. General sweep** — `git diff` of every stage-1–4 commit for `Cache::` (SET or FORGET) across all
+changed `.php` files returned **zero matches**: none of the four stages added, removed, or touched a
+single `Cache::` call anywhere. Item 6's "SET/FORGET correspondence within the new code" check is
+therefore vacuously satisfied — there is no new cache surface in stages 1–4 to audit for mismatches.
+
+**One real bug found and fixed, outside the stage 1–4 diff** — while cross-referencing every
+`Cache::` call in `app/` against `CustomerService`'s established `{key}:{branchId-or-'all'}` pattern
+(per this audit's own instructions), `PaymentVerificationService::verify()` and `attachReceipt()`
+(pre-existing since `c1b297b6`, never touched by any of the four stages) both called
+`Cache::forget("payments:show:{$payment->uuid}")` — a bare key — while
+`PaymentService::findOrFail()` actually caches under `"payments:show:{$uuid}:".($branchId ?? 'all')`.
+The exact same bug class as the customer one, in payments: an approve/reject or receipt-attach
+silently failed to invalidate the payment detail page's cache for up to its 30s TTL. Fixed by adding
+a `forgetShowCache()` private method to `PaymentVerificationService` that forgets both the
+branch-scoped key and the `:all` key, mirroring `PaymentService::forgetShowCache()`'s exact pattern —
+both `verify()` and `attachReceipt()` now call it instead of the bare `Cache::forget()`. Verified via
+`tests/Feature/Web/PaymentTest.php` + `tests/Feature/Api/PaymentTest.php` (61 tests, 367 assertions,
+covering the `verify()`/bulk-verify/receipt paths this touches) — all passing.
+
+**Tests run for this stage**: `PaymentVerificationTest.php` (Api) +
+`CustomerManuscriptRecalculationServiceTest.php` + `ManuscriptCalculateTest.php` +
+`ManuscriptGenerationBatchServiceTest.php` + `ArrearsAdjustmentCommandRunAuditTest.php` +
+`CommandRunCancelTest.php` + `ManuscriptPreRunReviewTest.php` + `ManuscriptRunReviewTest.php` +
+`CommandRunCancelUnblocksDispatchTest.php` + `LiveManuscriptRecalculationAndBatchConsistencyTest.php`
++ `ManuscriptPublishStaleRaceTest.php` (67 tests, 544 assertions); `ManuscriptTest.php` in full,
+including both PDF-export tests, run directly via `phpunit` with a raised `-d memory_limit` to work
+around the same pre-existing dompdf environment ceiling stage 4's addendum already noted (15 tests,
+134 assertions); `PaymentTest.php` (Web + Api) for the `PaymentVerificationService` fix (61 tests, 367
+assertions). 143 tests / 1045 assertions total, all passing.
