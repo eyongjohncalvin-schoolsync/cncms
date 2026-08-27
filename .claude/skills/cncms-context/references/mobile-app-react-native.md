@@ -334,3 +334,129 @@ information architecture (4 tabs, Record Payment as its own tab) — research co
 match current offline-first best practice, so this was "already good, don't fix it" territory, not
 an oversight. Also did not touch History, Sync Status, Notifications, Complaint Desk, Reconnect,
 Disconnect, or Emergency screens — out of stage 1's scope per the brief, left for stage 2.
+
+## 9. UI/UX pass — 2026-08-27 (stage 2 of a 4-stage build)
+
+Stage 2 covered everything stage 1 did NOT touch: `app/(tabs)/history.tsx`, `app/sync-status.tsx`,
+`app/notifications.tsx`, `app/log-complaint.tsx`, `app/reconnect/[uuid].tsx`,
+`app/disconnect/[uuid].tsx`, `app/emergency.tsx`. Research this pass: offline-capable apps'
+confirmation-state/micro-interaction conventions (2025-2026 consensus — visible sync/pending/failed
+indicators, no ambiguous spinners, optimistic-but-reversible updates for routine writes vs.
+pessimistic/confirmed-only for money-moving ones); incident-tooling emergency/alert UX (PagerDuty/
+Opsgenie's acknowledge-vs-dismiss separation and bulk-acknowledge precedent); empty/error-state
+writing tone for field-worker (not consumer) apps; and banking-app transaction-confirmation-screen
+conventions (dedicated in-app success view, not a native OS alert, for a completed monetary action).
+This codebase already had Complaint Desk, Notifications, and the Emergency broadcast fully built
+(not merely designed) going into this pass — `complaint-desk.md` §7's spec was already implemented
+faithfully in `src/db/notifications.ts`, `src/notifications/notificationStore.ts`,
+`src/utils/emergencyState.ts`, `src/components/ui/EmergencyBanner.tsx`, and `app/emergency.tsx`, so
+most of this pass was real-gap fixes and one considered addition, not a rebuild.
+
+**History (`app/(tabs)/history.tsx`):** Two fixes. (1) The status filter chips (All/Pending/
+Verified/Rejected) measured ~34dp tall — under this doc's own §6 48dp floor, the exact same class of
+bug stage 1 found and fixed on the Customers list's identical filter-chip pattern. Fixed identically
+(`minHeight: touchTarget.floor` + `justifyContent: 'center'`), not with `hitSlop`, since these are
+tapped on nearly every visit to this screen. (2) The screen only refetched on tab focus
+(`useFocusEffect`), so a payment's `verification_status` flipping from pending to verified/rejected
+via a background pull (the periodic in-foreground timer, §2) went unreflected if the agent was
+already sitting on this tab when it happened — silently stale data is exactly what offline-first UX
+research warns against ("users should always know what's going on"). Fixed by subscribing to
+`subscribeSyncState` and refetching on every sync-state change, reusing the exact pattern
+`app/sync-status.tsx` already established for its own live updates — not a new mechanism.
+
+**Notifications (`app/notifications.tsx`):** Same live-staleness gap as History, same fix: the
+screen only queried `getRecentNotifications()` on focus, so a new broadcast landing via
+`SyncManager`'s pull cycle while the agent was already viewing this list wouldn't appear until they
+left and came back. Now also subscribes to `notificationStore`'s `subscribeNotificationsState` (the
+same store `SyncManager` already republishes to after every pull) and refetches on change.
+
+**Log a Complaint (`app/log-complaint.tsx`):** Same touch-target audit as stage 1 ran on Record
+Payment/Customers. Two findings: the Operational/Customer category chips measured ~43dp
+(`paddingVertical: spacing.md` alone, no `minHeight`) — under the 48dp floor, and unlike the
+description disclosure below it, these are the first control on the screen and are tapped on every
+single submission, so fixed with an actual resize (`minHeight: touchTarget.floor`), matching stage
+1's "resize what's tapped constantly, `hitSlop` what's tapped rarely" rule. The "+ Add description"
+disclosure link, by contrast, is a once-per-submission link comparable to stage 1's Record Payment
+disclosure fixes, so it got `hitSlop={8}` instead — no visual change.
+
+**Reconnect & Pay (`app/reconnect/[uuid].tsx`) and Disconnect (`app/disconnect/[uuid].tsx`):** Both
+screens signaled a successful action with a native `Alert.alert(...)` populated with a "Done" button
+that called `router.back()`. Banking-app UX research is consistent that a dedicated in-app
+confirmation view — not an OS-native dialog — is the expected pattern for a completed monetary/
+status-changing action; a native alert is also the one interaction style this app otherwise never
+uses for routine success states (Record Payment, Record Expense, and Log Complaint all show an
+in-screen confirmation view instead). Replaced the success `Alert.alert` in both screens with a new
+`phase === 'success'` render branch — same visual shape as those three screens' own confirmation
+views (large title, body line, hint, a `Done` button), but using the `Badge` `synced` (green) tone
+rather than the `offline` (amber) tone those three use: §5 reserves green exclusively for
+"confirmed-on-server," and unlike Record Payment/Expense/Complaint (which write to a local queue
+first and may sync later), Reconnect and Disconnect are online-only API calls — by the time this
+view renders, the result is already confirmed on the server, so amber's "saved, will sync later"
+framing would be actively wrong here. The pre-action `Alert.alert` "Confirm reconnection payment" /
+"Confirm disconnection" dialogs were deliberately left as native alerts — that's a point-of-no-return
+gate for an irreversible action, a different UX role than signaling success, and native confirm
+dialogs are the expected pattern for that specific role too.
+
+**Emergency (`app/emergency.tsx`):** Added an "Acknowledge all N" bulk action, shown only when more
+than one item is queued (e.g. an agent who hasn't opened the app in a few days while several
+complaints separately crossed 48h). Backed directly by incident-tooling precedent — PagerDuty
+supports a bulk acknowledge-all alongside individual acknowledges for exactly this reason: forcing N
+separate confirm-taps on a screen already gated behind "rare + high-stakes enough to justify an
+interrupt" adds friction without adding safety. Bulk action calls the same per-item
+`syncManager.acknowledgeEmergency()` in a sequential loop (not `Promise.all`, to keep the SQLite
+writes and `notificationStore` republishes ordered) — every item is still individually recorded as
+acknowledged, so this doesn't weaken the "every acknowledgment is a real, tracked, per-complaint
+action" guarantee `complaint-desk.md` §5 relies on; it only removes the repeated-tapping tax. Left
+everything else about this screen unchanged: no back button, no swipe-to-dismiss, no bulk *dismiss*
+(only bulk *acknowledge*, preserving the acknowledge-vs-dismiss distinction complaint-desk.md §6/§7
+is explicit must never be blurred).
+
+**Sync Status (`app/sync-status.tsx`):** No changes. Already does everything this pass's research
+would otherwise recommend — determinate sync progress, plain-language errors via
+`humanizeSyncError`, a manual "Sync Now" trigger, and its own live `subscribeSyncState`-triggered
+refresh (the pattern this pass ported to History and Notifications came from here). Confirmed
+"already good," not an oversight.
+
+**Dead-end/navigation audit:** Checked every in-scope screen for the same class of bug as stage 1's
+Record Payment fix. All five modal screens (`log-complaint`, `notifications`, `sync-status`,
+`reconnect/[uuid]`, `disconnect/[uuid]`) are registered in `app/_layout.tsx` with
+`headerShown: true`, giving each a real native back arrow — confirmed by reading the Stack
+registration directly, not assumed. `emergency.tsx`'s lack of a back button/gesture is deliberate and
+unchanged on iOS (the one screen where that's correct — see its own doc comment). No dead ends found; none
+introduced.
+
+**Android hardware back button on `emergency.tsx` (2026-08-27, stage 3 fix — documented here since it
+landed in code but was missed in this section's original writeup):** `gestureEnabled: false` on this
+route's `Stack.Screen` only suppresses iOS's edge-swipe-to-dismiss gesture — per
+`@react-navigation/native-stack`'s own docs, it has no effect on Android. Without an explicit
+`BackHandler` interception, Android's hardware/gesture-nav back button would silently call
+`goBack()` and let an agent leave this screen having acknowledged nothing — defeating the "the ONLY
+way off this screen is Acknowledge" guarantee this section and `complaint-desk.md` §7 both rely on.
+Fixed with a `BackHandler.addEventListener('hardwareBackPress', () => true)` that consumes the event
+unconditionally while the screen is focused, matching the no-gesture/no-header/no-back treatment
+already applied on iOS. This was a real, previously-unclosed gap on Android specifically — not a
+platform where "deliberate and unchanged" was actually true until this fix.
+
+**Shared primitives:** None added or changed this pass. `dangerOutline` and `StatCard`'s `onPress`
+(stage 1's additions) were evaluated for reuse here but didn't genuinely fit any in-scope screen —
+Reconnect/Disconnect's destructive-vs-primary weighting question doesn't arise the same way Customer
+Detail's did (each screen has exactly one primary action, no competing secondary one), and none of
+these screens have a tile-grid layout `StatCard` would suit.
+
+**Deliberately NOT changed:** Did not add pull-to-refresh (`RefreshControl`) to History or
+Notifications despite both being lists — considered it, but no screen in this app uses that pattern
+today, and this app already has an established, working "how does new data arrive" convention (the
+sync triggers in §2, surfaced via `subscribeSyncState`/`subscribeNotificationsState`); introducing a
+second, parallel refresh mechanism found nowhere else in the app would add an inconsistent
+interaction pattern to solve a problem the live-subscription fix above already solves more
+consistently. Did not touch `EmergencyBanner.tsx`, `notificationStore.ts`, or `emergencyState.ts` —
+read them closely (they're stage 1-adjacent infrastructure, not stage 2 screens) and found them
+already correctly implementing complaint-desk.md §7's spec exactly as written.
+
+**Flagged for the product owner, not touched (stage 1's screens):** Reconnect and Disconnect's
+pre-action confirm step is a native `Alert.alert`, matching a pattern Customer Detail's Record
+Payment/Record Expense flows don't use at all (those go straight to their own form, no interstitial
+confirm). If a future pass wants full consistency, that confirm step could become an in-app review
+screen instead — deliberately not changed here since it's a working, reasonable pattern in its own
+right (see this section's Reconnect/Disconnect writeup) and touching it would be a bigger, riskier
+change than this pass's brief called for.
