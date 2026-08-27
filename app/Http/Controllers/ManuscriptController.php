@@ -107,6 +107,16 @@ class ManuscriptController extends Controller
      * "before this HTTP request returns" — with a real queue connection,
      * commit happens once a worker processes the batch, shortly after this
      * redirect. See App\Services\ManuscriptGenerationBatchService.
+     *
+     * `confirmed_rerun` (task-scheduler.md's 2026-08-27 "already safely
+     * runnable" guard addendum): App\Services\ManuscriptRerunGuard refuses
+     * dispatch() when a PUBLISHED run already exists for $period unless this
+     * is explicitly true — validated as a real boolean below (`sometimes`,
+     * `boolean`; a plain truthy string like "yes" is rejected) rather than
+     * accepted as loose truthiness, since this flag consciously bypasses a
+     * safety check. Distinct from — and stacked on top of —
+     * idx_command_runs_period_inflight's existing simultaneous-run lock,
+     * which this endpoint was already subject to and remains subject to.
      */
     public function calculate(Request $request): RedirectResponse
     {
@@ -126,7 +136,17 @@ class ManuscriptController extends Controller
             return redirect()->back()->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.");
         }
 
-        $this->batches->dispatch($period, scheduledTask: null, autoPublish: true, actingUserId: Auth::id());
+        $validated = $request->validate([
+            'confirmed_rerun' => ['sometimes', 'boolean'],
+        ]);
+
+        $this->batches->dispatch(
+            $period,
+            scheduledTask: null,
+            autoPublish: true,
+            actingUserId: Auth::id(),
+            override: (bool) ($validated['confirmed_rerun'] ?? false),
+        );
 
         return redirect()->back()->with('success', "Manuscript calculation for {$period} started — refresh the page shortly to see the results.");
     }

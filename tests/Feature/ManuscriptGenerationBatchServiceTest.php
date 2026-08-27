@@ -638,8 +638,11 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
             $this->assertEqualsWithDelta(12000.0, (float) $cP2Run1->total_bill, 0.001);
 
             // Re-dispatch P2 a third time, no further changes anywhere — B
-            // and C must be byte-identical to run 2 as well.
-            $run3 = $this->batches->dispatch($period2, scheduledTask: null, autoPublish: true, customerIds: $customerIds);
+            // and C must be byte-identical to run 2 as well. override:true
+            // (2026-08-27): run2 just above already published period2, and
+            // App\Services\ManuscriptRerunGuard now refuses a bare rerun of
+            // an already-published period.
+            $run3 = $this->batches->dispatch($period2, scheduledTask: null, autoPublish: true, customerIds: $customerIds, override: true);
             $commandRunIds[] = $run3->id;
             $this->assertSame('published', $run3->fresh()->status);
 
@@ -660,6 +663,102 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
             );
         } finally {
             $this->cleanUp($zone, [$customerA, $customerB, $customerC], $commandRunIds);
+        }
+    }
+
+    /**
+     * The "already safely runnable" guard (task-scheduler.md's 2026-08-27
+     * addendum, App\Services\ManuscriptRerunGuard) — distinct from the
+     * in-flight uniqueness index tested above (which only stops two
+     * SIMULTANEOUS runs). Once a period has a PUBLISHED run, a second
+     * dispatch() for that same period with no override must be refused,
+     * even though the first run is long finished and idx_command_runs_period_inflight
+     * has nothing left in-flight to collide with.
+     */
+    public function test_dispatch_refuses_to_rerun_an_already_published_period_without_override(): void
+    {
+        tenancy()->initialize($this->tenant);
+
+        $zone = ZoneFactory::new()->create();
+        $customer = $this->activeCustomer($zone);
+        PaymentFactory::new()->create([
+            'customer_id' => $customer->id,
+            'amount' => 2500,
+            'verification_status' => 'verified',
+        ]);
+
+        $period = '2031-04'; // see the stale-publish test above for why a far-future period is used here
+        $firstRun = null;
+        $secondAttemptRun = null;
+
+        try {
+            $firstRun = $this->batches->dispatch($period, scheduledTask: null, autoPublish: true, customerIds: [$customer->id]);
+            $this->assertSame('published', $firstRun->fresh()->status);
+
+            $thrown = null;
+
+            try {
+                $secondAttemptRun = $this->batches->dispatch($period, scheduledTask: null, autoPublish: true, customerIds: [$customer->id]);
+            } catch (ValidationException $e) {
+                $thrown = $e;
+            }
+
+            $this->assertNotNull($thrown, 'a rerun of an already-published period must be refused without an explicit override.');
+            $this->assertArrayHasKey('period', $thrown->errors());
+            $this->assertStringContainsString($period, $thrown->errors()['period'][0]);
+
+            // The refusal must happen BEFORE any new command_runs row is
+            // created — exactly one row (the original) exists for this period.
+            $this->assertSame(
+                1,
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count()
+            );
+        } finally {
+            $ids = array_values(array_filter([$firstRun?->id, $secondAttemptRun?->id]));
+            $this->cleanUp($zone, [$customer], $ids);
+        }
+    }
+
+    /**
+     * The override escape hatch: App\Http\Controllers\ManuscriptController::
+     * calculate() passes this through from the web request's validated
+     * `confirmed_rerun` boolean. With override:true, a rerun of an
+     * already-published period must proceed exactly like any other
+     * dispatch() call — a brand new CommandRun row, recomputed and published.
+     */
+    public function test_dispatch_reruns_an_already_published_period_when_override_is_true(): void
+    {
+        tenancy()->initialize($this->tenant);
+
+        $zone = ZoneFactory::new()->create();
+        $customer = $this->activeCustomer($zone);
+        PaymentFactory::new()->create([
+            'customer_id' => $customer->id,
+            'amount' => 1000,
+            'verification_status' => 'verified',
+        ]);
+
+        $period = '2031-05'; // see the stale-publish test above for why a far-future period is used here
+        $firstRun = null;
+        $secondRun = null;
+
+        try {
+            $firstRun = $this->batches->dispatch($period, scheduledTask: null, autoPublish: true, customerIds: [$customer->id]);
+            $this->assertSame('published', $firstRun->fresh()->status);
+
+            $secondRun = $this->batches->dispatch($period, scheduledTask: null, autoPublish: true, customerIds: [$customer->id], override: true);
+
+            $this->assertSame('published', $secondRun->fresh()->status);
+            $this->assertNotSame($firstRun->id, $secondRun->id, 'override must produce a genuinely new run, not reuse the old row.');
+
+            $this->assertSame(
+                2,
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+                'both the original and the overridden rerun must exist as separate history rows.'
+            );
+        } finally {
+            $ids = array_values(array_filter([$firstRun?->id, $secondRun?->id]));
+            $this->cleanUp($zone, [$customer], $ids);
         }
     }
 

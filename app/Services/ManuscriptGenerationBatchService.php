@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\ScheduledTask;
+use App\Support\DetectsUniqueViolation;
 use Illuminate\Bus\Batch;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -34,11 +35,22 @@ use Throwable;
  * ComputeManuscriptChunkJob chunks) and stores the result durably on the
  * command_runs row — it never itself writes to `manuscripts`. publish()
  * commits that exact stored result, never recomputing.
+ *
+ * dispatch() also runs the "already safely runnable" guard
+ * (App\Services\ManuscriptRerunGuard — task-scheduler.md's 2026-08-27
+ * addendum) before doing any work: refuses when a PUBLISHED run already
+ * exists for $period unless $override is true. That guard is deliberately
+ * separate from idx_command_runs_period_inflight's unique-violation handling
+ * just below — the guard stops a silent repeat of an already-finished
+ * period, the index stops two runs racing for the same period right now.
  */
 class ManuscriptGenerationBatchService
 {
+    use DetectsUniqueViolation;
+
     public function __construct(
         private readonly ManuscriptService $manuscripts,
+        private readonly ManuscriptRerunGuard $rerunGuard,
     ) {}
 
     /**
@@ -66,9 +78,19 @@ class ManuscriptGenerationBatchService
      *                                              failure behavior against a small, controlled set
      *                                              instead of this tenant's full ~549-customer
      *                                              production-mirroring dev dataset.
+     * @param  bool  $override  The "already safely runnable" guard's override (task-scheduler.md's
+     *                          2026-08-27 addendum — see App\Services\ManuscriptRerunGuard's class
+     *                          doc). False (the default) refuses to dispatch when a PUBLISHED
+     *                          manuscript:calculate run already exists for $period — a different,
+     *                          complementary check from the in-flight uniqueness guard just below,
+     *                          which only stops two SIMULTANEOUS runs. True proceeds regardless,
+     *                          which ManuscriptController::calculate() sets from the web request's
+     *                          validated `confirmed_rerun` boolean.
      */
-    public function dispatch(string $period, ?ScheduledTask $scheduledTask, bool $autoPublish, ?int $actingUserId = null, ?array $customerIds = null): CommandRun
+    public function dispatch(string $period, ?ScheduledTask $scheduledTask, bool $autoPublish, ?int $actingUserId = null, ?array $customerIds = null, bool $override = false): CommandRun
     {
+        $this->rerunGuard->assertRerunAllowed($period, $override);
+
         $tenantId = (string) (tenant()?->getTenantKey() ?? '');
         $command = 'manuscript:calculate';
 
@@ -431,22 +453,5 @@ class ManuscriptGenerationBatchService
             ],
             'metadata' => [...($commandRun->metadata ?? []), ...$summary],
         ]);
-    }
-
-    /**
-     * True when $e wraps a Postgres unique_violation (SQLSTATE 23505) —
-     * used by dispatch() to translate idx_command_runs_period_inflight's
-     * constraint violation into a friendly ValidationException rather than
-     * letting a raw QueryException bubble up. Checks the underlying PDO
-     * exception's SQLSTATE rather than matching on message text/constraint
-     * name, which is fragile across Postgres versions/locales.
-     */
-    private function isUniqueViolation(QueryException $e): bool
-    {
-        $previous = $e->getPrevious();
-
-        $sqlState = $previous instanceof \PDOException ? $previous->getCode() : $e->getCode();
-
-        return $sqlState === '23505';
     }
 }

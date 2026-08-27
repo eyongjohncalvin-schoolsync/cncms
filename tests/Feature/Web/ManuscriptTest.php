@@ -165,6 +165,139 @@ class ManuscriptTest extends TestCase
     }
 
     /**
+     * The "already safely runnable" guard (task-scheduler.md's 2026-08-27
+     * addendum) at the web entry point: once a period has been calculated
+     * and published, POSTing /manuscripts/calculate for that SAME period
+     * again with no `confirmed_rerun` must be refused — distinct from the
+     * pre-existing in-flight lock, which has nothing left to collide with
+     * once the first run has finished. Same tenancy-lifecycle workaround as
+     * test_admin_can_run_the_manuscript_calculation above (the command owns
+     * its own tenancy()->initialize()/end()).
+     */
+    public function test_admin_rerunning_an_already_published_period_is_rejected_without_confirmed_rerun(): void
+    {
+        DB::connection('tenant')->rollBack();
+        tenancy()->end();
+
+        tenancy()->initialize(Tenant::find('swecom'));
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $originalRole = TenantUser::query()->where('user_id', $user->id)->value('role');
+        TenantUser::query()->where('user_id', $user->id)->update(['role' => 'admin']);
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
+        tenancy()->end();
+
+        $period = '2020-02';
+
+        try {
+            $firstResponse = $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period]);
+            $firstResponse->assertRedirect();
+            $firstResponse->assertSessionHas('success');
+
+            tenancy()->initialize(Tenant::find('swecom'));
+            $this->assertSame(
+                'published',
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->value('status')
+            );
+            tenancy()->end();
+
+            $secondResponse = $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period]);
+            $secondResponse->assertRedirect();
+            $secondResponse->assertSessionHasErrors('period');
+
+            tenancy()->initialize(Tenant::find('swecom'));
+            $this->assertSame(
+                1,
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+                'a refused rerun must not create a second command_runs row.'
+            );
+        } finally {
+            if (! tenancy()->initialized) {
+                tenancy()->initialize(Tenant::find('swecom'));
+            }
+
+            Manuscript::query()->where('period', $period)->delete();
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
+            Customer::query()->whereKey($customer->id)->delete();
+            Zone::query()->whereKey($zone->id)->delete();
+            TenantUser::query()->where('user_id', $user->id)->update(['role' => $originalRole]);
+
+            DB::connection('tenant')->beginTransaction();
+        }
+    }
+
+    /**
+     * The override escape hatch: `confirmed_rerun: true` lets an admin
+     * deliberately rerun an already-published period through the web UI.
+     */
+    public function test_admin_can_rerun_an_already_published_period_with_confirmed_rerun_true(): void
+    {
+        DB::connection('tenant')->rollBack();
+        tenancy()->end();
+
+        tenancy()->initialize(Tenant::find('swecom'));
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $originalRole = TenantUser::query()->where('user_id', $user->id)->value('role');
+        TenantUser::query()->where('user_id', $user->id)->update(['role' => 'admin']);
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
+        tenancy()->end();
+
+        $period = '2020-03';
+
+        try {
+            $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period])->assertSessionHas('success');
+
+            $response = $this->actingAs($user)->post('/manuscripts/calculate', [
+                'period' => $period,
+                'confirmed_rerun' => true,
+            ]);
+            $response->assertRedirect();
+            $response->assertSessionHas('success');
+            $response->assertSessionDoesntHaveErrors();
+
+            tenancy()->initialize(Tenant::find('swecom'));
+            $this->assertSame(
+                2,
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+                'confirmed_rerun:true must let a genuinely new run through.'
+            );
+        } finally {
+            if (! tenancy()->initialized) {
+                tenancy()->initialize(Tenant::find('swecom'));
+            }
+
+            Manuscript::query()->where('period', $period)->delete();
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
+            Customer::query()->whereKey($customer->id)->delete();
+            Zone::query()->whereKey($zone->id)->delete();
+            TenantUser::query()->where('user_id', $user->id)->update(['role' => $originalRole]);
+
+            DB::connection('tenant')->beginTransaction();
+        }
+    }
+
+    /**
+     * `confirmed_rerun` must be validated as a real boolean, not accepted as
+     * loose truthiness — a plain non-boolean string is rejected outright
+     * (never silently coerced to true), since this flag consciously bypasses
+     * a safety check.
+     */
+    public function test_confirmed_rerun_must_be_a_real_boolean(): void
+    {
+        $this->actingAsRole('admin');
+
+        $period = Carbon::now()->format('Y-m');
+
+        $response = $this->post('/manuscripts/calculate', [
+            'period' => $period,
+            'confirmed_rerun' => 'yes-please',
+        ]);
+
+        $response->assertSessionHasErrors('confirmed_rerun');
+    }
+
+    /**
      * Regression test for the bug found in production: an unvalidated
      * `period` reaching ManuscriptController::calculate() was passed
      * straight to ManuscriptGenerationBatchService::dispatch() with

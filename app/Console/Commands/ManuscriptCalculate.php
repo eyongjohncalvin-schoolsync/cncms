@@ -11,15 +11,21 @@ use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\Tenant;
 use App\Services\ManuscriptCalculator;
+use App\Services\ManuscriptRerunGuard;
 use App\Services\ManuscriptService;
+use App\Support\DetectsUniqueViolation;
 use Illuminate\Console\Command;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class ManuscriptCalculate extends Command
 {
+    use DetectsUniqueViolation;
+
     /**
      * The name and signature of the console command.
      *
@@ -27,7 +33,8 @@ class ManuscriptCalculate extends Command
      */
     protected $signature = 'manuscript:calculate
         {period? : YYYY-MM, defaults to current month}
-        {--tenant=swecom : Slug/id of the tenant to run the calculation for}';
+        {--tenant=swecom : Slug/id of the tenant to run the calculation for}
+        {--force : Recompute even if this period was already calculated and published — Laravel\'s established "yes, proceed anyway" idiom (cf. migrate --force)}';
 
     /**
      * The console command description.
@@ -39,15 +46,16 @@ class ManuscriptCalculate extends Command
     public function __construct(
         private readonly ManuscriptCalculator $calculator,
         private readonly ManuscriptService $manuscripts,
+        private readonly ManuscriptRerunGuard $rerunGuard,
     ) {
         parent::__construct();
     }
 
     public function handle(): int
     {
-        $period = $this->argument('period') ?? Carbon::now()->format('Y-m');
+        $period = (string) ($this->argument('period') ?? Carbon::now()->format('Y-m'));
 
-        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) $period)) {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
             $this->error("Invalid period \"{$period}\" — expected format YYYY-MM.");
 
             return self::FAILURE;
@@ -62,44 +70,113 @@ class ManuscriptCalculate extends Command
             return self::FAILURE;
         }
 
+        $force = (bool) $this->option('force');
         $startedAt = microtime(true);
 
         tenancy()->initialize($tenant);
 
         try {
-            $stats = $this->runForEveryCustomer((string) $period);
+            // The "already safely runnable" guard (task-scheduler.md's
+            // 2026-08-27 addendum, App\Services\ManuscriptRerunGuard): refuses
+            // when a PUBLISHED manuscript:calculate run already exists for
+            // $period unless --force was passed. Deliberately run BEFORE the
+            // queued command_runs row below is even inserted — a refused run
+            // shouldn't leave any new row behind. This is a different check
+            // from idx_command_runs_period_inflight just below (two runs
+            // racing right now); both must coexist.
+            try {
+                $this->rerunGuard->assertRerunAllowed($period, $force);
+            } catch (ValidationException $e) {
+                $this->error(collect($e->errors())->flatten()->implode(' ').' Pass --force to recompute it anyway.');
 
-            // Runs (success or partial — matches CommandRun below, which logs
-            // regardless of $stats['errors']) while tenancy is still
-            // initialized, so CacheTenancyBootstrapper prefixes the forgotten
-            // key to this same tenant. See ManuscriptService::forgetSummaryCache()
-            // for what this does and does not cover.
-            $this->manuscripts->forgetSummaryCache((string) $period);
+                return self::FAILURE;
+            }
 
-            $stats['duration_ms'] = round((microtime(true) - $startedAt) * 1000, 2);
-            $stats['tenant'] = $tenantId;
+            // Inserted with status='queued' BEFORE the synchronous computation
+            // starts (2026-08-27) — this is what makes this CLI path subject
+            // to the SAME idx_command_runs_period_inflight partial unique
+            // index (command, period) WHERE status IN ('queued',
+            // 'pending_review') that
+            // App\Services\ManuscriptGenerationBatchService::dispatch()
+            // already relies on: the index only cares about a command_runs
+            // row's status at any given moment, not what code inserted it or
+            // whether it's sync or async, so a concurrent web/scheduled
+            // dispatch() OR a second simultaneous CLI invocation for this
+            // same period now correctly collides against this row. Updated to
+            // 'published' (success) or 'failed' (exception) below once
+            // computation finishes — never left at 'queued'.
+            try {
+                $commandRun = CommandRun::create([
+                    'command' => 'manuscript:calculate',
+                    'period' => $period,
+                    'ran_at' => Carbon::now(),
+                    'metadata' => ['tenant' => $tenantId, 'trigger' => 'cli'],
+                    'status' => 'queued',
+                ]);
+            } catch (QueryException $e) {
+                if ($this->isUniqueViolation($e)) {
+                    $this->error("A manuscript calculation for {$period} is already running or awaiting review. Wait for it to finish before starting another.");
 
-            CommandRun::create([
-                'command' => 'manuscript:calculate',
-                'period' => $period,
-                'ran_at' => Carbon::now(),
-                'metadata' => $stats,
-            ]);
+                    return self::FAILURE;
+                }
 
-            $this->info(sprintf(
-                'manuscript:calculate [%s] tenant=%s — %d customers processed, %d frozen, %d errors, %sms.',
-                $period,
-                $tenantId,
-                $stats['customers_processed'],
-                $stats['frozen_customers'],
-                $stats['errors'],
-                $stats['duration_ms'],
-            ));
+                throw $e;
+            }
+
+            try {
+                $stats = $this->runForEveryCustomer($period);
+
+                // Runs (success or partial — matches the commandRun update
+                // below, which publishes regardless of $stats['errors'],
+                // matching this command's pre-existing behavior of always
+                // logging a row even when some per-customer errors occurred)
+                // while tenancy is still initialized, so
+                // CacheTenancyBootstrapper prefixes the forgotten key to this
+                // same tenant. See ManuscriptService::forgetSummaryCache()
+                // for what this does and does not cover.
+                $this->manuscripts->forgetSummaryCache($period);
+
+                $stats['duration_ms'] = round((microtime(true) - $startedAt) * 1000, 2);
+                $stats['tenant'] = $tenantId;
+
+                $commandRun->update([
+                    'status' => 'published',
+                    'metadata' => [...$commandRun->metadata, ...$stats],
+                    'published_at' => Carbon::now(),
+                ]);
+
+                $this->info(sprintf(
+                    'manuscript:calculate [%s] tenant=%s — %d customers processed, %d frozen, %d errors, %sms.',
+                    $period,
+                    $tenantId,
+                    $stats['customers_processed'],
+                    $stats['frozen_customers'],
+                    $stats['errors'],
+                    $stats['duration_ms'],
+                ));
+
+                return $stats['errors'] > 0 ? self::FAILURE : self::SUCCESS;
+            } catch (Throwable $e) {
+                // A FATAL failure — something outside runForEveryCustomer()'s
+                // own per-customer try/catch (which already tolerates and
+                // counts a single bad customer record without throwing).
+                // Marked 'failed' rather than left at 'queued' so this row
+                // never permanently blocks idx_command_runs_period_inflight
+                // for this period.
+                $commandRun->update([
+                    'status' => 'failed',
+                    'metadata' => [...$commandRun->metadata, 'exception' => $e->getMessage()],
+                ]);
+
+                report($e);
+
+                $this->error("manuscript:calculate [{$period}] failed: {$e->getMessage()}");
+
+                return self::FAILURE;
+            }
         } finally {
             tenancy()->end();
         }
-
-        return $stats['errors'] > 0 ? self::FAILURE : self::SUCCESS;
     }
 
     /**

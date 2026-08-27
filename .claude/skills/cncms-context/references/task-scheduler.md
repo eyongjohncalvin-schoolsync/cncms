@@ -205,3 +205,63 @@ tenant-wide singleton settings in this app already work), and any task-type plug
 admins to define their own custom scheduled jobs — task types are code-defined, not admin-created,
 matching this app's established "keep it simple, don't over-build for a scale this app doesn't
 have" ethos.
+
+---
+
+## Addendum (2026-08-27): manuscripts uniqueness constraint + the "already safely runnable" rerun guard
+
+By this date, everything above sections 1-7 describe was already built: `payments.processed_period`
+makes same-period `manuscript:calculate` reruns arithmetically idempotent, and
+`idx_command_runs_period_inflight` (a partial unique index on `command_runs(command, period) WHERE
+status IN ('queued', 'pending_review')`) stops two SIMULTANEOUS runs from racing for the same
+period. Two gaps remained, both closed in this pass:
+
+**1. `manuscripts(customer_id, period)` had no real DB-level uniqueness constraint** — only the
+non-unique `idx_manuscripts_customer_period` composite index existed. Every write path happened to
+use `firstOrNew()`/upsert-by-(customer_id, period) semantics, but nothing at the database layer
+actually enforced it. Added `uq_manuscripts_customer_period`, a genuine unique constraint, via
+`database/migrations/tenant/2026_08_27_010000_add_unique_constraint_to_manuscripts_customer_period.php`.
+Verified zero duplicate `(customer_id, period)` rows and zero NULL-period rows existed in any of
+the 5 provisioned tenant schemas before adding it — no dedup step was needed. Migrated for all
+tenants via `php artisan tenants:migrate --force`.
+
+**2. `manuscript:calculate` had no "was this period already run?" check at all** — distinct from
+the in-flight lock above, which only guards a transient queued/pending_review window. Once a run
+for a period finished and published, nothing stopped it from being silently re-triggered (a stray
+re-click, a cron misfire, a second CLI invocation days later) — arithmetically harmless thanks to
+`processed_period`, but process-unsafe: a rerun with no signal to the operator that this period was
+already done. Closed with a new, small guard —
+`App\Services\ManuscriptRerunGuard::assertRerunAllowed(string $period, bool $override)` — used
+identically by both entry points that can trigger `manuscript:calculate`:
+
+- **`App\Services\ManuscriptGenerationBatchService::dispatch()`** now takes a `bool $override =
+  false` parameter and calls the guard before doing any work (before even inserting the
+  command_runs row). `App\Http\Controllers\ManuscriptController::calculate()` accepts a
+  `confirmed_rerun` request field, validated as a real boolean (`sometimes`, `boolean` — a loose
+  truthy string like `"yes"` is rejected, not coerced), and passes it through as `override`.
+- **`App\Console\Commands\ManuscriptCalculate`** — deliberately NOT rewritten to route through
+  `Bus::batch()`: ~15 existing tests rely on this command's synchronous, block-until-done behavior,
+  and an operator running it directly on a server legitimately wants synchronous execution. Instead
+  it now: (a) calls the same guard before starting `runForEveryCustomer()`, refusing with a clear
+  CLI message unless a new `--force` option is passed (Laravel's `migrate --force` idiom); (b)
+  inserts its OWN `command_runs` row with `status = 'queued'` *before* starting synchronous
+  computation, then updates that same row to `status = 'published'` (with the real metadata) on
+  success or `'failed'` on a fatal exception (never left stuck at `'queued'`). Because
+  `idx_command_runs_period_inflight` only cares about a `command_runs` row's status at any given
+  moment — not what code inserted it or whether it's sync or async — this closes the CLI's
+  previous complete invisibility to that lock: a concurrent web/scheduled `dispatch()` OR a second
+  simultaneous CLI invocation for the same period now correctly collides against this row too.
+
+Both guards are complementary and both remain in place: `idx_command_runs_period_inflight` stops
+two runs racing *right now*; `ManuscriptRerunGuard` stops a *finished* period from being silently
+repeated. A small `App\Support\DetectsUniqueViolation` trait was extracted (SQLSTATE 23505
+detection) so both `ManuscriptGenerationBatchService` and `ManuscriptCalculate` share one
+implementation of "was this a unique_violation" rather than duplicating it.
+
+New tests: `tests/Feature/ManuscriptGenerationBatchServiceTest.php` (guard refusal/override at the
+`dispatch()` level), `tests/Feature/ManuscriptCalculateTest.php` (guard refusal/`--force` at the
+CLI level, the queued-row concurrency-lock engagement, and a fatal-failure-marks-`failed` case),
+and `tests/Feature/Web/ManuscriptTest.php` (`confirmed_rerun` refusal/override/boolean-validation
+at the HTTP layer). Two pre-existing `ManuscriptCalculateTest` tests that intentionally rerun the
+same period without any override were updated to pass `--force` on their rerun call — the guard's
+whole point is that such a rerun now requires explicit confirmation.

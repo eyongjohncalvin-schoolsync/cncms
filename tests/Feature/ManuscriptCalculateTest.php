@@ -11,6 +11,7 @@ use App\Models\Tenant;
 use App\Models\Zone;
 use App\Services\ManuscriptCalculationResult;
 use App\Services\ManuscriptCalculator;
+use App\Services\ManuscriptService;
 use Database\Factories\CustomerFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
@@ -744,10 +745,16 @@ class ManuscriptCalculateTest extends TestCase
             // insufficiently, checked — see
             // test_rerunning_the_same_period_with_no_new_payments_produces_byte_identical_results
             // above for the direct reproduction of the bug this would have
-            // missed).
+            // missed). --force is required here (2026-08-27): the first run
+            // above already published this period, and
+            // App\Services\ManuscriptRerunGuard now refuses a bare rerun of
+            // an already-published period — see
+            // test_a_rerun_of_an_already_published_period_is_refused_without_force
+            // below for that refusal tested directly.
             $this->artisan('manuscript:calculate', [
                 'period' => $period,
                 '--tenant' => 'swecom',
+                '--force' => true,
             ])->assertExitCode(0);
 
             tenancy()->initialize(Tenant::find('swecom'));
@@ -875,8 +882,9 @@ class ManuscriptCalculateTest extends TestCase
 
             // A third run of P2, with no further changes for anyone — B and
             // C must be byte-identical to run 2 as well (idempotency
-            // compounded with cross-customer isolation).
-            $this->artisan('manuscript:calculate', ['period' => $period2, '--tenant' => 'swecom'])->assertExitCode(0);
+            // compounded with cross-customer isolation). --force is required
+            // (2026-08-27): the run just above already published P2.
+            $this->artisan('manuscript:calculate', ['period' => $period2, '--tenant' => 'swecom', '--force' => true])->assertExitCode(0);
 
             tenancy()->initialize(Tenant::find('swecom'));
 
@@ -910,6 +918,284 @@ class ManuscriptCalculateTest extends TestCase
             Payment::query()->whereIn('customer_id', $customerIds)->delete();
             CommandRun::query()->where('command', 'manuscript:calculate')->whereIn('period', [$period1, $period2])->delete();
             Customer::query()->whereIn('id', $customerIds)->delete();
+            Zone::query()->whereKey($zone->id)->delete();
+
+            tenancy()->end();
+        }
+    }
+
+    /**
+     * The "already safely runnable" guard (task-scheduler.md's 2026-08-27
+     * addendum, App\Services\ManuscriptRerunGuard), exercised directly
+     * against the CLI command: once a period has a PUBLISHED command_runs
+     * row, a bare rerun (no --force) must be refused — a different check
+     * from idx_command_runs_period_inflight, which by this point has
+     * nothing in-flight left to collide with (the first run already
+     * finished and published). Own tenancy()->initialize()/end() lifecycle,
+     * same reasoning as test_the_command_upserts_manuscripts_processes_payments_and_logs_a_command_run
+     * above.
+     */
+    public function test_a_rerun_of_an_already_published_period_is_refused_without_force(): void
+    {
+        DB::connection('tenant')->rollBack();
+        tenancy()->end();
+
+        tenancy()->initialize(Tenant::find('swecom'));
+        $zone = $this->zone();
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $zone->id,
+            'bill' => 2500,
+            'others' => 0,
+            'status' => 'active',
+        ]);
+        tenancy()->end();
+
+        $period = '2035-01';
+
+        try {
+            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(0);
+
+            tenancy()->initialize(Tenant::find('swecom'));
+            $publishedCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+            $this->assertSame('published', $publishedCommandRun->status);
+            $arrearsAfterFirstRun = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->value('total_arrears');
+            tenancy()->end();
+
+            // A brand new verified payment arrives, and someone (or a cron
+            // misfire) re-triggers the CLI for the SAME period with no
+            // --force — this must be refused, and must NOT touch the
+            // already-published manuscript or create a second command_runs row.
+            tenancy()->initialize(Tenant::find('swecom'));
+            PaymentFactory::new()->create([
+                'customer_id' => $customer->id,
+                'amount' => 2500,
+                'verification_status' => 'verified',
+            ]);
+            tenancy()->end();
+
+            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(1);
+
+            tenancy()->initialize(Tenant::find('swecom'));
+
+            $this->assertSame(
+                1,
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+                'a refused rerun must not create a second command_runs row.'
+            );
+
+            $manuscriptAfterRefusedRerun = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->firstOrFail();
+            $this->assertSame($arrearsAfterFirstRun, $manuscriptAfterRefusedRerun->total_arrears, 'a refused rerun must not have recomputed anything.');
+        } finally {
+            if (! tenancy()->initialized) {
+                tenancy()->initialize(Tenant::find('swecom'));
+            }
+
+            Manuscript::query()->where('customer_id', $customer->id)->delete();
+            Payment::query()->where('customer_id', $customer->id)->delete();
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
+            Customer::query()->whereKey($customer->id)->delete();
+            Zone::query()->whereKey($zone->id)->delete();
+
+            tenancy()->end();
+        }
+    }
+
+    /**
+     * The override escape hatch (--force), exercised directly: with it, a
+     * rerun of an already-published period proceeds, creates a genuinely
+     * new command_runs row (status lifecycle queued -> published), and
+     * actually recomputes against whatever new data has arrived since.
+     */
+    public function test_a_rerun_of_an_already_published_period_succeeds_with_force(): void
+    {
+        DB::connection('tenant')->rollBack();
+        tenancy()->end();
+
+        tenancy()->initialize(Tenant::find('swecom'));
+        $zone = $this->zone();
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $zone->id,
+            'bill' => 2500,
+            'others' => 0,
+            'status' => 'active',
+        ]);
+        tenancy()->end();
+
+        $period = '2035-02';
+
+        try {
+            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(0);
+
+            tenancy()->initialize(Tenant::find('swecom'));
+            $firstCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+
+            PaymentFactory::new()->create([
+                'customer_id' => $customer->id,
+                'amount' => 2500,
+                'verification_status' => 'verified',
+            ]);
+            tenancy()->end();
+
+            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom', '--force' => true])->assertExitCode(0);
+
+            tenancy()->initialize(Tenant::find('swecom'));
+
+            $this->assertSame(
+                2,
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+                'a forced rerun must create a genuinely new command_runs row alongside the original.'
+            );
+
+            $secondCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->latest('id')->firstOrFail();
+            $this->assertNotSame($firstCommandRun->id, $secondCommandRun->id);
+            $this->assertSame('published', $secondCommandRun->status);
+
+            // The new payment must actually have been consumed — proving
+            // this was a real recomputation, not a no-op.
+            $manuscript = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->firstOrFail();
+            $this->assertEqualsWithDelta(0.0, (float) $manuscript->total_arrears, 0.001);
+        } finally {
+            if (! tenancy()->initialized) {
+                tenancy()->initialize(Tenant::find('swecom'));
+            }
+
+            Manuscript::query()->where('customer_id', $customer->id)->delete();
+            Payment::query()->where('customer_id', $customer->id)->delete();
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
+            Customer::query()->whereKey($customer->id)->delete();
+            Zone::query()->whereKey($zone->id)->delete();
+
+            tenancy()->end();
+        }
+    }
+
+    /**
+     * The CLI's own queued-then-published status lifecycle (2026-08-27)
+     * actually engaging idx_command_runs_period_inflight — mirrors
+     * ManuscriptGenerationBatchServiceTest::
+     * test_a_rapid_double_click_on_the_manual_run_now_trigger_is_rejected_not_duplicated,
+     * but for a second CLI invocation racing a first one that's still
+     * 'queued' (rather than a second dispatch() call): confirms the
+     * partial unique index protects this synchronous path exactly as it
+     * protects the async batch path, because it only cares about the
+     * command_runs row's status at the moment of insert, not what code
+     * inserted it.
+     */
+    public function test_a_concurrent_cli_invocation_for_the_same_period_is_rejected_by_the_inflight_lock(): void
+    {
+        DB::connection('tenant')->rollBack();
+        tenancy()->end();
+
+        tenancy()->initialize(Tenant::find('swecom'));
+        $zone = $this->zone();
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $zone->id,
+            'bill' => 2500,
+            'others' => 0,
+            'status' => 'active',
+        ]);
+
+        $period = '2035-03';
+
+        // Simulates a first CLI invocation (or a racing web/scheduled
+        // dispatch()) that is still mid-computation — its command_runs row
+        // already inserted as 'queued', not yet 'published'.
+        $inFlightRun = CommandRun::create([
+            'command' => 'manuscript:calculate',
+            'period' => $period,
+            'ran_at' => now(),
+            'metadata' => ['tenant' => 'swecom', 'trigger' => 'cli'],
+            'status' => 'queued',
+        ]);
+        tenancy()->end();
+
+        try {
+            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(1);
+
+            tenancy()->initialize(Tenant::find('swecom'));
+
+            $this->assertSame(
+                1,
+                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+                'the second, concurrent-shaped invocation must not have created a competing command_runs row.'
+            );
+            $this->assertSame('queued', $inFlightRun->fresh()->status, 'the original in-flight row must be untouched.');
+
+            // Nothing computed by the rejected second invocation.
+            $this->assertFalse(Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->exists());
+        } finally {
+            if (! tenancy()->initialized) {
+                tenancy()->initialize(Tenant::find('swecom'));
+            }
+
+            Manuscript::query()->where('customer_id', $customer->id)->delete();
+            Payment::query()->where('customer_id', $customer->id)->delete();
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
+            Customer::query()->whereKey($customer->id)->delete();
+            Zone::query()->whereKey($zone->id)->delete();
+
+            tenancy()->end();
+        }
+    }
+
+    /**
+     * A FATAL failure (something outside runForEveryCustomer()'s own
+     * per-customer try/catch, which already tolerates a single bad customer
+     * record without throwing) must mark the queued command_runs row
+     * 'failed' — never leave it stuck at 'queued' forever, which would
+     * permanently block idx_command_runs_period_inflight from ever letting
+     * this period run again. Simulated via a ManuscriptService binding
+     * whose forgetSummaryCache() throws, since that runs after the real
+     * per-customer computation has already succeeded.
+     */
+    public function test_a_fatal_failure_after_computation_marks_the_command_run_failed_not_stuck_queued(): void
+    {
+        DB::connection('tenant')->rollBack();
+        tenancy()->end();
+
+        tenancy()->initialize(Tenant::find('swecom'));
+        $zone = $this->zone();
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $zone->id,
+            'bill' => 2500,
+            'others' => 0,
+            'status' => 'active',
+        ]);
+        tenancy()->end();
+
+        $period = '2035-04';
+
+        $this->app->bind(ManuscriptService::class, fn () => new class extends ManuscriptService
+        {
+            public function __construct() {}
+
+            public function forgetSummaryCache(string $period): void
+            {
+                throw new \RuntimeException('Simulated fatal failure after computation.');
+            }
+        });
+
+        try {
+            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(1);
+
+            tenancy()->initialize(Tenant::find('swecom'));
+
+            $commandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+            $this->assertSame('failed', $commandRun->status);
+            $this->assertArrayHasKey('exception', $commandRun->metadata);
+
+            // The manuscript upsert itself (which happens before the
+            // simulated failure point) is real and unaffected — only the
+            // command_runs row's final status reflects the failure.
+            $this->assertTrue(Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->exists());
+        } finally {
+            if (! tenancy()->initialized) {
+                tenancy()->initialize(Tenant::find('swecom'));
+            }
+
+            Manuscript::query()->where('customer_id', $customer->id)->delete();
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
+            Customer::query()->whereKey($customer->id)->delete();
             Zone::query()->whereKey($zone->id)->delete();
 
             tenancy()->end();
