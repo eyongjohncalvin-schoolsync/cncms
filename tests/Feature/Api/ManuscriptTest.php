@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Api;
 
 use App\Models\Manuscript;
+use App\Models\User;
+use Database\Factories\AgentFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
 use Database\Factories\PaymentFactory;
@@ -151,5 +153,65 @@ class ManuscriptTest extends TestCase
             ->getJson('/api/v1/manuscripts');
 
         $response->assertOk();
+    }
+
+    /**
+     * Regression test for the zone-scoping fix added alongside the mobile
+     * Manuscript screen — mirrors
+     * CustomerEligibilityTest::test_agent_cannot_view_another_zone_via_query_param()
+     * exactly. Before this fix, Api\ManuscriptController::index() passed an
+     * agent's own `zone_uuid` query param straight through unchecked, unlike
+     * its sibling eligible-for-disconnection endpoint.
+     */
+    public function test_agent_cannot_view_another_zones_manuscripts_via_query_param(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $token = $this->tokenForRole('agent');
+
+        $ownZone = ZoneFactory::new()->create();
+        $otherZone = ZoneFactory::new()->create();
+        AgentFactory::new()->create(['zone_id' => $ownZone->id, 'user_id' => $user->id]);
+
+        $otherZoneCustomer = CustomerFactory::new()->create(['zone_id' => $otherZone->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $otherZoneCustomer->id]);
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson("/api/v1/manuscripts?zone_uuid={$otherZone->uuid}");
+
+        $response->assertOk();
+        $this->assertCount(0, $response->json('data'));
+        $this->assertSame(0, $response->json('summary.total_customers'));
+    }
+
+    /**
+     * Confirms the fix's other half: an agent's OWN zone data is still
+     * reachable (the fence forces the agent's zone, it doesn't block them
+     * entirely) — a customer in their zone shows up even when they don't
+     * pass zone_uuid at all, matching how a mobile client would call this.
+     */
+    public function test_agent_sees_only_their_own_zones_manuscripts_by_default(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $token = $this->tokenForRole('agent');
+
+        $ownZone = ZoneFactory::new()->create();
+        $otherZone = ZoneFactory::new()->create();
+        AgentFactory::new()->create(['zone_id' => $ownZone->id, 'user_id' => $user->id]);
+
+        $ownZoneCustomer = CustomerFactory::new()->create(['zone_id' => $ownZone->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $ownZoneCustomer->id, 'bill' => 2500, 'total_bill' => 2500]);
+
+        $otherZoneCustomer = CustomerFactory::new()->create(['zone_id' => $otherZone->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $otherZoneCustomer->id]);
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/manuscripts');
+
+        $response->assertOk();
+        $data = $response->json('data');
+        $this->assertCount(1, $data);
+        $this->assertSame($ownZoneCustomer->uuid, $data[0]['customer_uuid']);
     }
 }

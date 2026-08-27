@@ -10,6 +10,7 @@ use App\Http\Resources\ManuscriptResource;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Services\ManuscriptService;
+use App\Support\TenantContext;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,14 +20,34 @@ class ManuscriptController extends Controller
 {
     public function __construct(
         private readonly ManuscriptService $manuscripts,
+        private readonly TenantContext $context,
     ) {}
 
+    /**
+     * Zone scoping is force-applied server-side from TenantContext::zoneId
+     * for the `agent` role — mirrors CustomerController::
+     * eligibleForDisconnection()'s exact pattern (resolved once by
+     * ResolveTenant from the caller's own Agent row). Any `zone_uuid` query
+     * value an agent sends is deliberately ignored, so an agent cannot see
+     * another zone's manuscript figures by tampering with the query string.
+     * Office roles (super/admin/manager) may optionally pass `zone_uuid` to
+     * filter; omitted, they see every zone — unchanged from before this
+     * fix. Found and closed alongside the mobile Manuscript screen
+     * (mobile-app-react-native.md section 13): this endpoint predates the
+     * eligible-for-disconnection precedent and had never had the same fence
+     * applied.
+     */
     public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Manuscript::class);
 
         $perPage = (int) $request->integer('per_page', 25);
         $filters = $request->only(['period', 'zone_uuid', 'status']);
+
+        if ($this->context->is('agent')) {
+            unset($filters['zone_uuid']);
+            $filters['zone_id'] = $this->context->zoneId;
+        }
 
         $manuscripts = $this->manuscripts->list($filters, $perPage);
         $summary = $this->manuscripts->summary($filters);

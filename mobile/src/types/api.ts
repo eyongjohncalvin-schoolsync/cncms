@@ -394,6 +394,77 @@ export interface EligibleForDisconnectionResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Manuscript (current-period billing register) — GET /api/v1/manuscripts,
+// App\Http\Controllers\Api\ManuscriptController::index(), App\Http\Resources\
+// ManuscriptResource.php, App\Services\ManuscriptService::scopedFilters()/
+// summaryFor(). Backs app/manuscript.tsx.
+//
+// PERIOD — always sent explicitly by the client as 'YYYY-MM' (see
+// src/api/manuscripts.ts's currentPeriod()); the server independently
+// defaults+validates the same way (Carbon::now()->format('Y-m'), rejecting
+// anything not matching /^\d{4}-(0[1-9]|1[0-2])$/) — this is deliberately
+// NOT the `latestManuscript`/`latestOfMany('period')` relationship, which a
+// real 2026-08 incident showed can silently trust a bogus future period
+// (see Customer::latestManuscript()'s own doc comment). Never build a screen
+// against "latest manuscript of any period" — always an explicit,
+// server-validated period.
+//
+// ZONE — an `agent` caller is force-scoped server-side to their own zone
+// (TenantContext::zoneId) regardless of any zone_uuid sent, mirroring
+// CustomerController::eligibleForDisconnection()'s pre-existing pattern
+// (added to ManuscriptController::index() alongside this screen — see
+// mobile-app-react-native.md §13). Office roles (manager/admin/super) are
+// unscoped by default, matching the web Manuscripts register.
+// ---------------------------------------------------------------------------
+
+export interface ManuscriptListItemApi {
+    customer_uuid: string;
+    customer_name: string;
+    zone_name: string | null;
+    /** Numeric strings — DECIMAL(12,2) cast to string by Eloquent. */
+    bill: string;
+    total_arrears: string;
+    credit: string;
+    total_bill: string;
+    payment_expiration: string | null;
+    period: string;
+    status: string;
+}
+
+/**
+ * App\Services\ManuscriptRepository::aggregates()'s exact scoping: `bill`/
+ * `arrears`/`credit`/`collected`/`collection_rate` below cover ACTIVE
+ * customers only (a disconnected/passive/suspended customer's dormant old
+ * balance is deliberately excluded from "how much is billed/owed right
+ * now"). `total_customers`, by contrast, counts every customer with a
+ * manuscript row this period regardless of status — so it will not always
+ * equal the number of rows actually summed into the money figures above it.
+ * See manuscript.tsx's footnote, which discloses this rather than silently
+ * implying the two always agree.
+ */
+export interface ManuscriptSummaryApi {
+    total_customers: number;
+    total_bill: string;
+    total_arrears: string;
+    total_credit: string;
+    total_collected: string;
+    /** Already rounded to 1 decimal server-side. */
+    collection_rate: number;
+}
+
+export interface ManuscriptIndexResponse {
+    data: ManuscriptListItemApi[];
+    period: string;
+    summary: ManuscriptSummaryApi;
+    meta?: {
+        current_page: number;
+        per_page: number;
+        total: number;
+        last_page: number;
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Bill WhatsApp message — GET /api/v1/bills/{uuid}/whatsapp-message,
 // app/Http/Controllers/Api/BillController.php::whatsappMessage(),
 // app/Services/BillNotificationService.php. Manual (free, no-Twilio) mode

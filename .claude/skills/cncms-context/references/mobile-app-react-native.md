@@ -836,6 +836,109 @@ the two new endpoints are plain `auth:sanctum` API routes with no Inertia/web pa
 web self-service page is a real, separate, currently-open gap for whoever picks up web-admin
 self-service next — not silently solved here and not pretended to be out of scope for lack of need.
 
+## 13. Manuscript screen + a real zone-scoping gap closed in the API — 2026-08-27 addendum
+
+Built `app/manuscript.tsx` (route `/manuscript`), the eighth new-screen addition after §11's
+seven. Product owner's framing: "though I don't think is that necessary, but I think is good to
+have the feature" — scoped as a modest read-only view, not a mobile port of the web Manuscripts
+register (`resources/tsx/pages/Manuscripts/Index.tsx`, a full paginated/filterable/exportable
+office tool).
+
+**Why this task started with a real incident, not a blank slate.** Immediately before this build,
+1,509 bogus manuscript rows for nonsense future periods (`2031-01`/`2031-02`) were found and
+deleted from the real dev database — generated for all 446 customers, and picked up as "current"
+everywhere by `Customer::latestManuscript()` (a `hasOne(...)->latestOfMany('period')` relationship
+that trusts whatever period sorts highest as a *string*, with no sanity bound against the real
+current calendar period). `latestManuscript()`'s own doc comment now documents this exact failure
+mode. This screen was built under an explicit mandate not to repeat it.
+
+**Scope decision — summary AND per-customer list, not one or the other.** A zone is only "low
+hundreds" of customers (§2's stated data scale), small enough that a full per-customer list is
+still a quick scroll, not the kind of thing that needs office-grade pagination. The screen shows
+one hero card (period total billed), two `StatCard` tiles (arrears outstanding, collected so far
+with a collection-rate hint), a conditional credit-balance card, then every customer's bill/
+arrears/credit/total_bill for the period, sorted client-side by arrears descending (highest-owing
+first — matches the Customers list's existing "arrears is what the agent is walking the zone to
+collect" convention). Rows are deliberately non-interactive plain `Card`s — no drill-down into
+Customer Detail, no bill-send action; this is a glance, not a workflow. A footnote discloses that
+the money figures (bill/arrears/credit/collected) are active-customers-only per
+`ManuscriptRepository::aggregates()`'s own scoping, while the customer count and per-customer list
+below it include every status — stated explicitly rather than left to look like the two always
+agree.
+
+**Period safety — confirmed by reading the real code, not assumed.** `Api\ManuscriptController::
+index()` (already existed, reachable from mobile's Sanctum client at `GET /api/v1/manuscripts` —
+this was NOT a Reports-style "no endpoint exists" gap) takes an explicit `period` query param,
+and `App\Services\ManuscriptService::scopedFilters()` defaults it to `Carbon::now()->format('Y-m')`
+and validates the format (`/^\d{4}-(0[1-9]|1[0-2])$/`) when omitted — genuinely period-bounded, the
+opposite of `latestManuscript()`'s trap. `src/api/manuscripts.ts`'s `fetchManuscripts()` still
+never omits `period` — it always computes and sends today's real calendar period client-side
+(`currentPeriod()`, a plain local-date computation, never derived from any cached/server value) as
+a deliberate belt-and-braces redundancy on top of the server's own independent validation, and
+documents the incident inline so a future edit to this call site can't accidentally drop it back to
+"trust the server's default silently" without at least reading why it's there.
+
+**A real gap found and closed in the API itself — zone scoping.** `Api\ManuscriptController::
+index()` passed an agent's own `zone_uuid` query value straight through to the query unchecked —
+unlike its sibling `CustomerController::eligibleForDisconnection()`, which force-applies
+`TenantContext::zoneId` for the `agent` role and ignores any `zone_uuid` the caller sends. This
+meant an agent could see another zone's (or, by omitting `zone_uuid`, the whole tenant's)
+manuscript figures by tampering with the query string — not the period trap this task was
+explicitly warned about, but a real, adjacent authorization gap in the same endpoint this screen
+needed to call, found by reading the controller against its own established sibling pattern.
+Fixed by mirroring `eligibleForDisconnection()` exactly: `Api\ManuscriptController` now takes a
+`TenantContext` dependency and, for the `agent` role, discards any `zone_uuid` sent and forces
+`zone_id` from `TenantContext::zoneId` before calling `ManuscriptService::list()`/`summary()`.
+Office roles (manager/admin/super) are unaffected — unscoped by default, may still pass
+`zone_uuid` to filter, matching the web register's existing behavior. Two new regression tests
+added to `tests/Feature/Api/ManuscriptTest.php`
+(`test_agent_cannot_view_another_zones_manuscripts_via_query_param`,
+`test_agent_sees_only_their_own_zones_manuscripts_by_default`), mirroring
+`CustomerEligibilityTest::test_agent_cannot_view_another_zone_via_query_param`'s exact pattern. All
+8 tests in that file pass: `php artisan test --filter="Tests\Feature\Api\ManuscriptTest"` (run
+filtered per this repo's own convention, after confirming no other test process was already
+running against the shared test DB — `Get-CimInstance Win32_Process -Filter "Name='php.exe'"`
+showed only `artisan serve`, nothing test-related). The full unfiltered suite was deliberately not
+run. Note: `php artisan test --filter=ManuscriptTest` (unqualified) also matches the unrelated
+`Tests\Feature\Web\ManuscriptTest`, which crashed independently on its PDF-export test with a
+pre-existing dompdf memory issue in this environment — unrelated to this change (that controller
+and test were not touched) and not chased further; the fully-qualified filter above avoids pulling
+it in.
+
+**Backend files touched:** `app/Http/Controllers/Api/ManuscriptController.php` (the zone-scoping
+fix, `App\Services\ManuscriptService`/`ManuscriptRepository` reused unchanged — no duplicated query
+logic), `tests/Feature/Api/ManuscriptTest.php` (two new tests). No new service, repository, or DTO
+class — this was a small, surgical fix to an existing endpoint, not new backend surface.
+
+**Mobile files added:** `app/manuscript.tsx` (the screen), `src/api/manuscripts.ts`
+(`fetchManuscripts()`/`currentPeriod()`), and a new Manuscript section in `src/types/api.ts`
+(`ManuscriptListItemApi`/`ManuscriptSummaryApi`/`ManuscriptIndexResponse`, hand-copied from
+`ManuscriptResource`/`ManuscriptService::summaryFor()`, per §1's "~15 interfaces by hand" convention).
+
+**Accent color:** `colors.accent.history` — reused, not new. The web sidebar's actual Manuscripts
+nav accent is literally `'amber'` (`resources/tsx/layouts/AppLayout.tsx`), and `accent.history` is
+already exactly that hue family in this app's palette, with its white-on-fill pairing already
+independently verified AAA (~7.63:1) — no new contrast math needed, per §10's brief for new-screen
+builders.
+
+**Verification:** `cd mobile && npx tsc --noEmit` — clean except the two pre-existing
+`src/api/devices.ts` errors (unrelated, unchanged, called out as expected in every prior pass's
+own verification section too). `npm test` — 95/95 passing, unchanged from before this screen (no
+new pure-function logic was added under `src/utils/*` — this screen is UI + API calls only, same
+shape as `disconnections.tsx`/`reports.tsx`, neither of which added test coverage either).
+
+**Deliberately NOT built:** bill-print, PDF export, or a "run manuscript calculation" trigger on
+mobile — `ManuscriptPolicy::export()` is super/admin/manager only and `calculate()` is super/admin
+only; neither ability is replicated here regardless of the viewing role, matching the web's
+`EXPORT_ROLES`/`CALCULATE_ROLES` gates exactly. No drill-down navigation from a customer row into
+Customer Detail — considered, deliberately left out to keep this screen a glance rather than a
+workflow entry point (Customer Detail is already reachable from the Customers tab). No local
+SQLite cache of manuscript rows — this is live, server-computed billing data, not persisted
+offline, same reasoning as `disconnections.tsx`'s eligibility board.
+
+**Navigation:** not registered here, per this build's established cross-agent convention (§11) —
+route is simply `/manuscript`, left for a separate wiring step.
+
 **Navigation — the 5th tab.** §4 originally settled on 4 tabs specifically so a single feature
 (Log a Complaint) wouldn't get its own dedicated tab. That reasoning doesn't extend to a genuine
 grab-bag of 7+ secondary destinations landing in one session — a single **More** tab
