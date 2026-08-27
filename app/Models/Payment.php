@@ -9,6 +9,7 @@ use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -57,5 +58,35 @@ class Payment extends Model
     public function verification(): HasOne
     {
         return $this->hasOne(PaymentVerification::class);
+    }
+
+    /**
+     * The single, canonical "eligible income for period P" predicate —
+     * previously duplicated verbatim in TWO places
+     * (App\Support\ScheduledTasks\ManuscriptChunkDataResolver::resolve() and
+     * App\Console\Commands\ManuscriptCalculate::runForEveryCustomer(), each
+     * one's own doc comment flagging the other as the place that must stay
+     * in lockstep with it) and about to be needed by a THIRD
+     * (App\Services\ManuscriptPreRunReviewService's "who hasn't paid" review
+     * list) — factored here once so there is exactly one definition of
+     * "eligible" for all three callers to share, closing the duplication
+     * instead of extending it.
+     *
+     * A payment is eligible for period P when it is `verification_status =
+     * 'verified'` AND it has never yet been consumed by any period's
+     * calculation (`processed_period IS NULL` — this is what lets a frozen
+     * customer's payment carry forward untouched across however many
+     * disconnected/passive/prepaid periods pass before it's finally
+     * consumed) OR it was already consumed by this SAME period P
+     * (`processed_period = P`), which is what makes re-running P idempotent.
+     * See App\Services\ManuscriptCalculator's class doc for the full
+     * rationale — this scope exists purely so that rationale has one place
+     * to actually live as code.
+     */
+    public function scopeEligibleForPeriod(Builder $query, string $period): Builder
+    {
+        return $query
+            ->where('verification_status', 'verified')
+            ->where(fn ($inner) => $inner->whereNull('processed_period')->orWhere('processed_period', $period));
     }
 }

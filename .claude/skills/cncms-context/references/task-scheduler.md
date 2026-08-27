@@ -265,3 +265,58 @@ and `tests/Feature/Web/ManuscriptTest.php` (`confirmed_rerun` refusal/override/b
 at the HTTP layer). Two pre-existing `ManuscriptCalculateTest` tests that intentionally rerun the
 same period without any override were updated to pass `--force` on their rerun call — the guard's
 whole point is that such a rerun now requires explicit confirmation.
+
+---
+
+## Addendum (2026-08-27, stage 2): the self-lockout fix — cancelling a permanently-stuck `queued` run
+
+Confirmed real gap from the security review, independent of stage 1's fixes above: nothing anywhere
+in this app could ever clear a `command_runs` row genuinely stuck at `status = 'queued'`. Stage 1's
+`manuscript:calculate` CLI fix (the "insert 'queued' before computing, flip to 'published'/'failed'
+after" change described above) only covers an exception PHP actually gets to run — a `kill -9`'d
+CLI process, or a queue worker that crashes mid-batch, never reaches a `catch` block and leaves its
+row stuck at `queued` forever, permanently blocking `idx_command_runs_period_inflight` for that
+exact `(command, period)` pair — every future run for that period would keep colliding with a dead
+row indefinitely.
+
+Fixed with a manual, `super`/`admin`-gated "Cancel" action: `POST
+/settings/command-runs/{run}/cancel` — `App\Http\Controllers\SettingsCommandRunController::cancel()`
+— flips a `queued` row's `status` to `'failed'` (never any other transition; a row at
+`pending_review` or any terminal status is refused unchanged) and stamps `metadata.cancelled_by`/
+`cancelled_at`/`cancel_reason`. Confirmed by reading the index's own `WHERE` clause
+(`WHERE status IN ('queued', 'pending_review')`, `2026_08_26_020000_add_inflight_unique_index_to_command_runs_table.php`)
+that this flip frees the period **immediately** — a `'failed'` row simply falls outside the partial
+index the instant the update commits, no separate release step needed.
+
+Gated to `CommandRunPolicy::publish()` — reused deliberately rather than adding a new ability: it is
+already exactly "the same roles as `ManuscriptPolicy::calculate()`" (`super`/`admin`) acting on this
+same `command_runs` row's lifecycle. `manageSchedule()` was the other candidate but is conceptually
+about `ScheduledTask` config, a different (if same-role-gated) surface.
+
+**No time threshold added** (e.g. "only cancellable after N minutes with no progress") — deliberate,
+reasoned judgment call: at this app's real scale (~6 users, all `super`/`admin` for this page), a
+human noticing a stuck run and choosing to cancel it already IS the safety mechanism, the same
+same-role judgment every other admin-only destructive action here (bulk disconnect, publish) relies
+on with no extra cooldown. A minimum-age gate would add real complexity (what counts as "no
+progress" — `job_batches` progress? a second timestamp column?) for negligible benefit, and could
+actively block a legitimate immediate cancel (an admin who realizes within seconds they fat-fingered
+the period). Matches section 7's "keep it simple, don't over-build for a scale this app doesn't
+have" ethos.
+
+A small `App\Models\CommandRun::isQueued()` helper was added alongside the pre-existing
+`isPendingReview()`/`isPublished()`. `SettingsCommandRunController::index()` now also exposes a
+`canCancel` Inertia prop (same underlying ability as `canPublish`, exposed under its own name so the
+frontend doesn't have to infer the gate from an unrelated prop name).
+
+**Frontend note for whoever builds the UI next**: this stage is backend-only — no `.tsx` file was
+touched. `Settings/CommandRuns.tsx` needs a "Cancel" row action wired to this route, offered only
+when a row's `status === 'queued'` (gated client-side on the new `canCancel` prop, exactly like the
+existing `canPublish`-gated "Publish" button), before this action is actually usable by staff.
+
+New tests: `tests/Feature/Web/CommandRunCancelTest.php` (authorization per role, and refusal for
+every non-`queued` status via a data provider) and
+`tests/Feature/CommandRunCancelUnblocksDispatchTest.php` (reproduces the lock with a manually-inserted
+orphaned `queued` row, confirms a real `dispatch()` is rejected while it stands, then confirms
+cancelling it immediately unblocks a subsequent real `dispatch()` for the same period — mirrors
+`ManuscriptGenerationBatchServiceTest`'s real-committed-fixture style since a successful `dispatch()`
+here runs real chunk jobs that cycle the tenant DB connection).

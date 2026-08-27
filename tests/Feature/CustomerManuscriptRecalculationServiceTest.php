@@ -66,8 +66,21 @@ class CustomerManuscriptRecalculationServiceTest extends TestCase
     /**
      * @param  array<int, Customer>  $customers
      * @param  array<int, int>  $commandRunIds
+     * @param  array<int, string>  $recalculateOnePeriods  Periods any recalculateOne() call in this
+     *                                                      test used — since 2026-08-27 (the audit-trace
+     *                                                      fix, App\Services\CustomerManuscriptRecalculationService's
+     *                                                      class doc) EVERY recalculateOne() call now
+     *                                                      creates its own 'manuscript:recalculate-one'
+     *                                                      command_runs row, which $commandRunIds above
+     *                                                      (populated only from
+     *                                                      ManuscriptGenerationBatchService::dispatch()'s
+     *                                                      returned CommandRun) never captures — cleaned
+     *                                                      up here by (command, period) instead, safe
+     *                                                      because every period this test file uses is a
+     *                                                      fictional far-future one ('2034-*') that can't
+     *                                                      collide with real data.
      */
-    private function cleanUp(Zone $zone, array $customers, array $commandRunIds = []): void
+    private function cleanUp(Zone $zone, array $customers, array $commandRunIds = [], array $recalculateOnePeriods = []): void
     {
         if (! tenancy()->initialized) {
             tenancy()->initialize($this->tenant);
@@ -82,6 +95,13 @@ class CustomerManuscriptRecalculationServiceTest extends TestCase
 
         if ($commandRunIds !== []) {
             CommandRun::query()->whereIn('id', $commandRunIds)->delete();
+        }
+
+        if ($recalculateOnePeriods !== []) {
+            CommandRun::query()
+                ->where('command', 'manuscript:recalculate-one')
+                ->whereIn('period', $recalculateOnePeriods)
+                ->delete();
         }
     }
 
@@ -197,7 +217,7 @@ class CustomerManuscriptRecalculationServiceTest extends TestCase
             $this->assertSame($manuscriptA1->fresh()->credit, $manuscriptA2->fresh()->credit);
             $this->assertSame($manuscriptA1->fresh()->total_bill, $manuscriptA2->fresh()->total_bill);
         } finally {
-            $this->cleanUp($zone, $customers, $commandRunIds);
+            $this->cleanUp($zone, $customers, $commandRunIds, [$period1, $period2]);
         }
     }
 
@@ -279,7 +299,7 @@ class CustomerManuscriptRecalculationServiceTest extends TestCase
             $this->assertEqualsWithDelta((float) $cComputedAttributes['total_bill'], (float) $manuscriptC->total_bill, 0.001);
             $this->assertNotContains($customerC->id, $published->metadata['skipped_stale_customers'] ?? [], 'C must NOT be flagged as skipped-stale.');
         } finally {
-            $this->cleanUp($zone, $customers, $commandRunIds);
+            $this->cleanUp($zone, $customers, $commandRunIds, [$period1, $period2]);
         }
     }
 }

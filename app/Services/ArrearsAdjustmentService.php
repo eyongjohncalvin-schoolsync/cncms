@@ -195,7 +195,7 @@ class ArrearsAdjustmentService
                     'status' => 'approved',
                 ]);
 
-            $this->applyLedgerEffect($adjustment, $customer);
+            $this->applyLedgerEffect($adjustment, $customer, $actor->id);
             $this->notifyApproved($adjustment);
 
             return $adjustment->fresh(['customer.zone', 'requestedBy', 'approvedBy', 'secondApprovedBy']);
@@ -296,14 +296,30 @@ class ArrearsAdjustmentService
      * see App\Services\CustomerManuscriptRecalculationService and
      * App\Jobs\RecalculateCustomerManuscriptsForwardJob's class docs for the
      * synchronous-current-period + queued-forward-sweep split.
+     *
+     * $actorId (the approving admin — the second/only approver, per
+     * approve()'s own doc comment) is threaded through both recalculation
+     * paths purely for audit attribution
+     * (CustomerManuscriptRecalculationService::recalculateOne()'s new
+     * command_runs metadata — see that class's doc comment): the
+     * synchronous call here still has a real auth() context to fall back on,
+     * but RecalculateCustomerManuscriptsForwardJob runs on a queue worker,
+     * where auth()->id() is already gone by the time handle() executes — so
+     * $actorId is captured HERE, while it's still available, and carried on
+     * the job itself rather than re-derived (impossible) later.
      */
-    private function applyLedgerEffect(ArrearsAdjustment $adjustment, Customer $customer): void
+    private function applyLedgerEffect(ArrearsAdjustment $adjustment, Customer $customer, int $actorId): void
     {
         $currentPeriod = Carbon::now()->format('Y-m');
 
-        $this->recalculator->recalculateOne($customer, $currentPeriod);
+        $this->recalculator->recalculateOne(
+            $customer,
+            $currentPeriod,
+            trigger: 'arrears_adjustment',
+            auditContext: ['arrears_adjustment_id' => $adjustment->id, 'triggered_by_user_id' => $actorId],
+        );
 
-        RecalculateCustomerManuscriptsForwardJob::dispatch($customer->id, $adjustment->target_period);
+        RecalculateCustomerManuscriptsForwardJob::dispatch($customer->id, $adjustment->target_period, $adjustment->id, $actorId);
     }
 
     private function notifyApproved(ArrearsAdjustment $adjustment): void

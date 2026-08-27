@@ -32,6 +32,11 @@ use Illuminate\Support\Collection;
  * App\Services\ManuscriptCalculator's class doc for what "eligible" means.
  * Both must stay in lockstep; a change to one without the other silently
  * makes the manual/scheduled paths disagree.
+ *
+ * Payment eligibility (as opposed to adjustment eligibility, above) no
+ * longer has this problem: it now goes through the single shared
+ * App\Models\Payment::scopeEligibleForPeriod() predicate — see that
+ * method's doc comment — rather than being inlined here a second time.
  */
 class ManuscriptChunkDataResolver
 {
@@ -48,17 +53,12 @@ class ManuscriptChunkDataResolver
             ->groupBy('customer_id')
             ->map(fn (Collection $manuscripts): Manuscript => $manuscripts->sortByDesc('period')->first());
 
-        // Eligibility for period $period (see App\Services\ManuscriptCalculator's
-        // class doc for the full rationale): `processed_period IS NULL`
-        // (never consumed by any period — this is what lets a frozen
-        // customer's payment carry forward across however many periods pass
-        // before it's finally consumed) OR `processed_period = $period`
-        // (already consumed by THIS period, which is what makes re-running
-        // the same period idempotent).
+        // Eligibility for period $period — see Payment::scopeEligibleForPeriod()'s
+        // doc comment for the full rationale; this is one of that scope's
+        // three callers, not an inlined copy of its predicate.
         $eligibleVerifiedPaymentsByCustomer = Payment::query()
             ->whereIn('customer_id', $customerIds)
-            ->where('verification_status', 'verified')
-            ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $period))
+            ->eligibleForPeriod($period)
             ->get()
             ->groupBy('customer_id');
 

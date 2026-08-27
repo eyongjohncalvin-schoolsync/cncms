@@ -217,14 +217,17 @@ class ManuscriptCalculate extends Command
                 ->groupBy('customer_id')
                 ->map(fn (Collection $manuscripts): Manuscript => $manuscripts->sortByDesc('period')->first());
 
-            // Eligibility mirrors App\Support\ScheduledTasks\ManuscriptChunkDataResolver::resolve()
-            // exactly — see App\Services\ManuscriptCalculator's class doc for
-            // the full rationale (idempotent reruns + frozen-payment
-            // carry-forward + no double-counting across periods).
+            // Eligibility goes through the single shared
+            // Payment::scopeEligibleForPeriod() predicate — see that
+            // method's doc comment. This used to inline an identical copy of
+            // that query (the other of the two places
+            // App\Support\ScheduledTasks\ManuscriptChunkDataResolver::resolve()'s
+            // own doc comment warned had to stay in lockstep); now both, plus
+            // App\Services\ManuscriptPreRunReviewService, share one
+            // definition instead.
             $eligibleVerifiedPaymentsByCustomer = Payment::query()
                 ->whereIn('customer_id', $customerIds)
-                ->where('verification_status', 'verified')
-                ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $period))
+                ->eligibleForPeriod($period)
                 ->get()
                 ->groupBy('customer_id');
 

@@ -51,9 +51,23 @@ class RecalculateCustomerManuscriptsForwardJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    /**
+     * $arrearsAdjustmentId/$triggeredByUserId (2026-08-27, the audit-trace
+     * fix — see App\Services\CustomerManuscriptRecalculationService's class
+     * doc): captured by App\Services\ArrearsAdjustmentService::
+     * applyLedgerEffect() while a real auth() context still exists and
+     * carried on this job's serialized properties, since auth()->id() is
+     * gone by the time handle() runs on a queue worker. Both nullable
+     * (rather than required) only so this job's constructor doesn't break
+     * for a hypothetical future caller with no adjustment/actor to report —
+     * every REAL caller today (ArrearsAdjustmentService::applyLedgerEffect())
+     * always supplies both.
+     */
     public function __construct(
         public readonly int $customerId,
         public readonly string $fromPeriod,
+        public readonly ?int $arrearsAdjustmentId = null,
+        public readonly ?int $triggeredByUserId = null,
     ) {}
 
     public function handle(CustomerManuscriptRecalculationService $recalculator): void
@@ -75,7 +89,16 @@ class RecalculateCustomerManuscriptsForwardJob implements ShouldQueue
             $periodString = $period->format('Y-m');
 
             DB::transaction(function () use ($recalculator, $customer, $periodString): void {
-                $recalculator->recalculateOne($customer, $periodString);
+                $recalculator->recalculateOne(
+                    $customer,
+                    $periodString,
+                    trigger: 'arrears_adjustment',
+                    auditContext: [
+                        'arrears_adjustment_id' => $this->arrearsAdjustmentId,
+                        'triggered_by_user_id' => $this->triggeredByUserId,
+                        'via' => 'forward_sweep',
+                    ],
+                );
             });
 
             $period = $period->addMonthNoOverflow();

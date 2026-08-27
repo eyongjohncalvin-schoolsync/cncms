@@ -17,6 +17,17 @@ Route::get('manuscripts/export', [ManuscriptController::class, 'export'])
 
 Route::post('manuscripts/calculate', [ManuscriptController::class, 'calculate'])->name('manuscripts.calculate');
 
+// The pre-run "who hasn't paid" review list — see
+// ManuscriptController::preRunReview()'s doc comment for the exact response
+// shape. On-demand JSON, called only when an admin opens the review, not on
+// every Manuscripts/Index.tsx page load. Registered above
+// manuscripts/{customer}/send-bill so the literal 'pre-run-review' segment
+// can never be mistaken for a {customer} route-model-bound uuid (not that it
+// could be here anyway — that route is POST-only — but matching
+// routes/web/manuscripts.php's existing "most specific path first" ordering
+// convention).
+Route::get('manuscripts/pre-run-review', [ManuscriptController::class, 'preRunReview'])->name('manuscripts.pre-run-review');
+
 // Logs a `messages` row for the manual WhatsApp "Send Bill" action — see
 // ManuscriptController::sendBill()'s doc comment. {customer} binds by
 // Customer's uuid route key (App\Models\Customer's #[RouteKey('uuid')]),

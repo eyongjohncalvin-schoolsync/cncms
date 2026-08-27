@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Support\ScheduledTasks\ManuscriptChunkDataResolver;
@@ -37,6 +38,26 @@ use Illuminate\Support\Facades\Cache;
  *   - App\Jobs\RecalculateCustomerManuscriptsForwardJob for each period in
  *     the queued forward ripple from an approved past-period adjustment's
  *     target_period through the current period.
+ *
+ * Audit trace (closed 2026-08-27 — see
+ * .claude/skills/cncms-context/references/arrears-adjustment.md's addendum):
+ * every call logs a lightweight `command_runs` row
+ * (command='manuscript:recalculate-one', status='published' immediately —
+ * this path writes synchronously with no review gate, matching its existing
+ * behavior). Before this, this method mutated `manuscripts` rows with ZERO
+ * run-level trace, unlike every tenant-wide manuscript:calculate run — the
+ * one path in this app that could silently change a customer's billing
+ * numbers and leave no record of when or why. $trigger/$auditContext are
+ * deliberately explicit, required-in-spirit parameters (not silently
+ * inferred) — both real callers above pass their own adjustment id and the
+ * acting user id (see ArrearsAdjustmentService::applyLedgerEffect()'s doc
+ * comment for exactly how the approving admin's identity survives the
+ * queued-job hop, where auth()->id() is otherwise lost). No concurrency
+ * lock/rerun guard is added here — this is customer-scoped, already
+ * protected by ArrearsAdjustment's own lockForUpdate(), a genuinely
+ * different shape from idx_command_runs_period_inflight's tenant-wide
+ * (command, period) key; this fix is purely about closing the audit-trace
+ * gap, not a new safety mechanism.
  */
 class CustomerManuscriptRecalculationService
 {
@@ -46,8 +67,26 @@ class CustomerManuscriptRecalculationService
         private readonly ManuscriptService $manuscripts,
     ) {}
 
-    public function recalculateOne(Customer $customer, string $period, ?Carbon $asOf = null): Manuscript
-    {
+    /**
+     * @param  string  $trigger  What kind of event caused this recalculation — e.g.
+     *                           'arrears_adjustment' for both real callers today. Recorded verbatim
+     *                           in the new command_runs row's metadata; defaults to 'unspecified'
+     *                           only for a caller (e.g. a test, or a not-yet-built feature) that
+     *                           hasn't been given a real trigger label yet — real production callers
+     *                           should always pass one explicitly rather than relying on this
+     *                           default.
+     * @param  array<string, mixed>  $auditContext  Extra identifying fields merged into the
+     *                                               command_runs row's metadata alongside
+     *                                               customer_id/trigger — e.g.
+     *                                               ['arrears_adjustment_id' => ..., 'triggered_by_user_id' => ...].
+     */
+    public function recalculateOne(
+        Customer $customer,
+        string $period,
+        ?Carbon $asOf = null,
+        string $trigger = 'unspecified',
+        array $auditContext = [],
+    ): Manuscript {
         $previousManuscript = Manuscript::query()
             ->where('customer_id', $customer->id)
             ->where('period', '<', $period)
@@ -77,6 +116,24 @@ class CustomerManuscriptRecalculationService
         foreach ($result->processedAdjustments as $adjustment) {
             $adjustment->forceFill(['processed_at' => Carbon::now(), 'processed_period' => $period])->save();
         }
+
+        // The audit-trace fix (this class's doc comment, above) — logged
+        // AFTER the manuscript write succeeds, mirroring
+        // manuscript:calculate's own "record what actually happened"
+        // ordering, and with status='published' immediately since this path
+        // has no queued/pending_review phase to pass through first.
+        CommandRun::create([
+            'command' => 'manuscript:recalculate-one',
+            'period' => $period,
+            'ran_at' => Carbon::now(),
+            'status' => 'published',
+            'published_at' => Carbon::now(),
+            'metadata' => [
+                'customer_id' => $customer->id,
+                'trigger' => $trigger,
+                ...$auditContext,
+            ],
+        ]);
 
         $this->manuscripts->forgetSummaryCache($period);
         // Must match CustomerService::findOrFail()'s exact key format

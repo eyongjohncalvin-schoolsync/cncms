@@ -249,3 +249,50 @@ exact reason the original markup used a plain `<a>`). The converted item
 stays a plain `onClick` `DropdownItem` that calls `window.open()` itself,
 preserving the original "opens in a new tab" behavior without touching
 `ui/Dropdown.tsx`.
+
+## 9. Addendum, 2026-08-27: closed the audit-trace gap on `recalculateOne()`
+
+Confirmed finding from a security review: §4's
+`CustomerManuscriptRecalculationService::recalculateOne()` mutated `manuscripts` rows with **zero**
+run-level trace — no `command_runs` row at all — unlike every tenant-wide `manuscript:calculate` run,
+which always logs one. The queued path made this worse: `App\Jobs\RecalculateCustomerManuscriptsForwardJob`
+runs on a queue worker, where `auth()->id()` is already gone by the time `handle()` executes, so even
+if a row had been logged there was no way to know which admin's approval caused it.
+
+Fixed by having `recalculateOne()` itself always create a lightweight `command_runs` row —
+`command = 'manuscript:recalculate-one'`, `period` = the period just recalculated, `status =
+'published'` immediately (this path writes synchronously with no `pending_review` gate, matching its
+pre-existing behavior — see §4's "no compute/publish preview gate" note), `metadata` carrying at
+minimum `customer_id` and `trigger`. **No concurrency lock or rerun guard was added** — this
+single-customer/single-period path is already protected by `ArrearsAdjustment::approve()`/`reject()`'s
+own `lockForUpdate()` (§2), a genuinely different shape from `idx_command_runs_period_inflight`'s
+tenant-wide `(command, period)` key; this fix is purely about closing the audit-trace gap, not a new
+safety mechanism.
+
+`recalculateOne()` gained two new, explicit parameters — `string $trigger = 'unspecified'` and
+`array $auditContext = []` — merged into the new row's `metadata` alongside `customer_id`. Both real
+callers now pass `trigger: 'arrears_adjustment'` plus an `$auditContext` carrying the WHO/WHAT:
+
+- **`ArrearsAdjustmentService::applyLedgerEffect()`** (the synchronous, current-period call) now
+  takes the approving admin's `$actorId` as a parameter (threaded from `approve()`, which already has
+  a real `User $actor`) and passes `['arrears_adjustment_id' => $adjustment->id, 'triggered_by_user_id'
+  => $actorId]`.
+- **`RecalculateCustomerManuscriptsForwardJob`** gained two new nullable constructor properties,
+  `$arrearsAdjustmentId`/`$triggeredByUserId` — captured by `applyLedgerEffect()` *before* dispatch,
+  while a real `auth()` context still exists, and carried on the job's serialized state so `handle()`
+  can still attribute every period it recalculates in its forward sweep back to the adjustment and
+  admin that caused it, even though it runs on a queue worker with no `auth()->id()` of its own.
+
+The `unspecified` default on `$trigger` exists only so a caller with no real trigger label yet (a
+test, or a not-yet-built feature — see `tests/Feature/CustomerManuscriptRecalculationServiceTest.php`'s
+own "shape a not-yet-built live-recalculate-on-payment-verification feature would take" calls, which
+predate this fix and call `recalculateOne()` with no context) doesn't need to invent one; every real
+production caller passes an explicit trigger rather than relying on it. That existing test's fixture
+cleanup was extended to also purge the new `command_runs` rows every `recalculateOne()` call now
+creates (by `(command, period)`, safe since that file only ever uses fictional far-future periods).
+
+New tests: `tests/Feature/Web/ArrearsAdjustmentCommandRunAuditTest.php` — a direct `recalculateOne()`
+call with explicit trigger/context (row exists, correct metadata), the `unspecified`-default case, and
+a full end-to-end `POST /arrears-adjustments/{uuid}/approve` request confirming the resulting
+`command_runs` row carries both the real `arrears_adjustment_id` and the actually-authenticated
+approver's user id.

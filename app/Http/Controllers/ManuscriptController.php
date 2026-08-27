@@ -9,9 +9,11 @@ use App\Models\Manuscript;
 use App\Models\Message;
 use App\Services\BillNotificationService;
 use App\Services\ManuscriptGenerationBatchService;
+use App\Services\ManuscriptPreRunReviewService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -32,6 +34,7 @@ class ManuscriptController extends Controller
         private readonly ZoneService $zones,
         private readonly BillNotificationService $billNotifications,
         private readonly ManuscriptGenerationBatchService $batches,
+        private readonly ManuscriptPreRunReviewService $preRunReview,
     ) {}
 
     public function index(Request $request): InertiaResponse
@@ -149,6 +152,53 @@ class ManuscriptController extends Controller
         );
 
         return redirect()->back()->with('success', "Manuscript calculation for {$period} started — refresh the page shortly to see the results.");
+    }
+
+    /**
+     * The pre-run "who hasn't paid" review list (UX deliberation pass — see
+     * App\Services\ManuscriptPreRunReviewService's class doc for the exact
+     * flagging rule). Deliberately its own on-demand JSON endpoint rather
+     * than data baked into index()'s Inertia props — this is the "review
+     * before you click Run" step, called only when an admin actually opens
+     * that review, not on every Manuscripts/Index.tsx page load. Gated to
+     * the identical ability as the run trigger itself
+     * (ManuscriptPolicy::calculate() — "whatever role may run the
+     * calculation may also preview who it will flag"), not a new,
+     * separately-drifting permission tier.
+     *
+     * Response shape:
+     * {
+     *   "period": "YYYY-MM",
+     *   "summary": {"count": int, "total_exposure": "1234.56"},
+     *   "customers": [
+     *     {
+     *       "uuid": string, "name": string,
+     *       "zone_uuid": string|null, "zone_name": string|null,
+     *       "phone": string|null, "bill": "2500.00",
+     *       "last_payment_date": "YYYY-MM-DD"|null
+     *     }, ...
+     *   ]
+     * }
+     */
+    public function preRunReview(Request $request): JsonResponse
+    {
+        $this->authorize('calculate', Manuscript::class);
+
+        $period = (string) $request->input('period', now()->format('Y-m'));
+
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
+            return response()->json([
+                'message' => "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.",
+            ], 422);
+        }
+
+        $zoneUuid = $request->string('zone_uuid')->toString() ?: null;
+        $zoneId = $zoneUuid !== null ? $this->zones->findOrFail($zoneUuid)->id : null;
+
+        return response()->json([
+            'period' => $period,
+            ...$this->preRunReview->reviewList($period, $zoneId),
+        ]);
     }
 
     /**

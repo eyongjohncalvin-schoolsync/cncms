@@ -34,6 +34,11 @@ Route::get('settings/command-runs', [SettingsCommandRunController::class, 'index
 Route::patch('settings/command-runs/schedule', [SettingsCommandRunController::class, 'updateSchedule'])->name('settings.command-runs.schedule.update');
 Route::post('settings/command-runs/{run}/publish', [SettingsCommandRunController::class, 'publish'])->name('settings.command-runs.publish');
 
+// The manual "unstick a permanently-queued run" action — see
+// SettingsCommandRunController::cancel()'s doc comment for the full
+// 2026-08-27 security-review rationale.
+Route::post('settings/command-runs/{run}/cancel', [SettingsCommandRunController::class, 'cancel'])->name('settings.command-runs.cancel');
+
 // Language switcher (resources/tsx/layouts/AppLayout.tsx) — updates the
 // caller's own `users.locale`, available to every authenticated tenant
 // member regardless of role (unlike the routes above, which are

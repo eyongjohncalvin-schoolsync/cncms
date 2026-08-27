@@ -50,4 +50,18 @@ class CommandRun extends Model
     {
         return $this->status === 'published';
     }
+
+    /**
+     * 'queued' is the one non-terminal status a run can get permanently
+     * stuck at with no code path left to move it forward — a crashed queue
+     * worker mid-batch, or a `kill -9`'d manuscript:calculate CLI process
+     * (stage 1's own try/catch->'failed' handling only covers an exception
+     * actually reaching PHP; a hard-killed process never runs it). See
+     * SettingsCommandRunController::cancel() — the 2026-08-27 manual unstick
+     * action gated to this status specifically.
+     */
+    public function isQueued(): bool
+    {
+        return $this->status === 'queued';
+    }
 }

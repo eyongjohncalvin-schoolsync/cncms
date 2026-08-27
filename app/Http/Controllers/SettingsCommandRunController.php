@@ -77,6 +77,13 @@ class SettingsCommandRunController extends Controller
             ],
             'canManageSchedule' => Auth::user()?->can('manageSchedule', CommandRun::class) ?? false,
             'canPublish' => Auth::user()?->can('publish', CommandRun::class) ?? false,
+            // Same ability as canPublish (CommandRunPolicy::publish() is
+            // reused for both — see cancel()'s doc comment) but exposed
+            // under its own name so the frontend's "Cancel" button (a
+            // row-level action only offered for status === 'queued', see
+            // that same doc comment for why stage 3 still needs to build
+            // this) doesn't have to infer its gate from an unrelated prop.
+            'canCancel' => Auth::user()?->can('publish', CommandRun::class) ?? false,
         ]);
     }
 
@@ -116,6 +123,69 @@ class SettingsCommandRunController extends Controller
         $batches->publish($run, Auth::id());
 
         return redirect()->route('settings.command-runs.index')->with('success', "Manuscript period {$run->period} published.");
+    }
+
+    /**
+     * The manual "unstick a permanently-queued run" action (2026-08-27
+     * security-review finding): nothing anywhere in this app could ever
+     * clear a `command_runs` row genuinely stuck at `status = 'queued'` — a
+     * crashed queue worker mid-batch, or a `kill -9`'d manuscript:calculate
+     * CLI process (stage 1's try/catch->'failed' handling only fires for an
+     * exception PHP actually gets to run; a hard-killed process never
+     * reaches it). Left stuck, such a row permanently blocks
+     * idx_command_runs_period_inflight for that (command, period) pair —
+     * every future run for that exact period would keep colliding with a
+     * dead row forever.
+     *
+     * Gated to CommandRunPolicy::publish() — deliberately reused rather than
+     * a new ability: it is already exactly "the same roles as
+     * ManuscriptPolicy::calculate()" (super/admin) acting on this same
+     * `command_runs` row's lifecycle, which is precisely what this action
+     * is too. manageSchedule() was the other candidate but is conceptually
+     * about ScheduledTask config, a different (if same-role-gated) surface —
+     * publish() is the closer semantic fit.
+     *
+     * Deliberately NO time threshold (e.g. "only cancellable after N minutes
+     * with no progress"): at this app's real scale (~6 users, all
+     * super/admin for this page), a human noticing a stuck run and choosing
+     * to cancel it is already the entire safety mechanism — the same
+     * same-role human judgment every other admin-only destructive action in
+     * this app (bulk disconnect, publish, etc.) relies on with no extra
+     * cooldown. A minimum-age gate would add real complexity (what counts as
+     * "no progress"? job_batches progress? a second timestamp column to
+     * track?) for negligible benefit, and could actively block a legitimate
+     * immediate cancel — e.g. an admin who realizes within seconds that they
+     * fat-fingered the period and wants to clear it right away rather than
+     * wait out an arbitrary window. Matches task-scheduler.md section 7's
+     * established "keep it simple, don't over-build for a scale this app
+     * doesn't have" ethos.
+     *
+     * Confirmed: flipping status to 'failed' immediately frees
+     * idx_command_runs_period_inflight for this exact (command, period) pair
+     * — that index's WHERE clause is `status IN ('queued', 'pending_review')`
+     * (see that migration's own doc comment), so a 'failed' row simply falls
+     * out of the partial index the instant this update commits; no separate
+     * "release the lock" step is needed.
+     */
+    public function cancel(CommandRun $run): RedirectResponse
+    {
+        $this->authorize('publish', CommandRun::class);
+
+        if (! $run->isQueued()) {
+            return redirect()->route('settings.command-runs.index')->with('error', 'Only a run still stuck at "queued" can be cancelled — this one has already moved on.');
+        }
+
+        $run->update([
+            'status' => 'failed',
+            'metadata' => [
+                ...($run->metadata ?? []),
+                'cancelled_by' => Auth::id(),
+                'cancelled_at' => now()->toIso8601String(),
+                'cancel_reason' => 'Manually cancelled from Settings > Command Runs — stuck at queued.',
+            ],
+        ]);
+
+        return redirect()->route('settings.command-runs.index')->with('success', "Manuscript period {$run->period}'s stuck run was cancelled — that period is free to run again.");
     }
 
     /**
