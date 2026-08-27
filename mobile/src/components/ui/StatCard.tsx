@@ -62,8 +62,13 @@ const styles = StyleSheet.create({
     },
     value: {
         marginTop: spacing.xs,
+        // fontSize.xxl bumped 28→32 in tokens.ts's 2026-08-27 rebrand (cascades
+        // here automatically); fontWeight bumped 700→800 directly here for
+        // "big, legible numerals" — the repeated, direct finding from this
+        // pass's MTN MoMo / mobile-money-app research (mobile-app-react-native.md
+        // dated section).
         fontSize: fontSize.xxl,
-        fontWeight: '700',
+        fontWeight: '800',
     },
     hint: {
         marginTop: spacing.xs,

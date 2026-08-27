@@ -1,6 +1,6 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, type StyleProp, type ViewStyle } from 'react-native';
 import { colors } from '../../theme/colors';
-import { fontSize, radius, spacing, touchTarget } from '../../theme/tokens';
+import { fontSize, radius, shadow, spacing, touchTarget } from '../../theme/tokens';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerOutline';
 /** 'large' hits the 56dp primary-action touch target; 'default' uses the
@@ -30,6 +30,12 @@ export function Button({
 }: ButtonProps) {
     const isDisabled = disabled || loading;
     const height = size === 'large' ? touchTarget.primary : touchTarget.floor;
+    // Solid-fill variants get a soft lift (matches Card's new default
+    // elevation — mobile-app-react-native.md's 2026-08-27 dated section);
+    // outline/ghost variants stay flat, since a shadow under a
+    // transparent-background element reads as a stray dark smudge rather
+    // than a lifted surface.
+    const isFilled = variant === 'primary' || variant === 'danger';
 
     return (
         <Pressable
@@ -40,7 +46,19 @@ export function Button({
             style={({ pressed }) => [
                 styles.base,
                 variantStyles[variant],
-                { height, opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1 },
+                isFilled && shadow.card,
+                {
+                    height,
+                    opacity: isDisabled ? 0.5 : pressed ? 0.9 : 1,
+                    // Small, deliberately subtle press-scale — the "satisfying
+                    // tap feedback" mobile-money apps consistently use (see
+                    // dated section's research notes) on top of the existing
+                    // opacity dip, not instead of it. 0.97 rather than a more
+                    // dramatic scale so it reads as responsive, not springy/
+                    // decorative, and costs nothing extra (Pressable already
+                    // re-renders on press-state change).
+                    transform: [{ scale: pressed && !isDisabled ? 0.97 : 1 }],
+                },
                 fullWidth && styles.fullWidth,
                 style,
             ]}
@@ -68,7 +86,11 @@ const styles = StyleSheet.create({
     },
     label: {
         fontSize: fontSize.md,
-        fontWeight: '600',
+        // Bumped 600→700 in the 2026-08-27 rebrand — a small, free win for
+        // "confident" CTA styling that costs nothing (same string, same
+        // layout, no truncation risk) and cascades to every Button call
+        // site automatically.
+        fontWeight: '700',
     },
 });
 

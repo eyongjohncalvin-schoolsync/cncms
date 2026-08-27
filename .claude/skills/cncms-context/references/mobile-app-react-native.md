@@ -460,3 +460,228 @@ confirm). If a future pass wants full consistency, that confirm step could becom
 screen instead — deliberately not changed here since it's a working, reasonable pattern in its own
 right (see this section's Reconnect/Disconnect writeup) and touching it would be a bigger, riskier
 change than this pass's brief called for.
+
+## 10. Visual rebrand pass — 2026-08-27 ("MTN MoMo quality bar," post-stage-2)
+
+After stages 1 and 2 (both §8/§9, both landed earlier the same day), the product owner reviewed the
+result and said plainly: "I am not impressed with the UI/UX at all," and asked to "mimic the MTN
+MoMo app." That request was deliberately reinterpreted, not followed literally: this pass studied
+and applied MTN MoMo's *UX quality and interaction patterns* (bold hero balance cards, confident
+high-contrast color, card elevation, big legible numerals, satisfying tap feedback) — it does **not**
+reproduce MTN's actual trademarked yellow/black brand identity or logo. SWECOM/CNCMS is not MTN;
+copying a real company's specific brand identity onto an unrelated product would be brand
+impersonation, not a rebrand. Confirmed via research (see below) that MTN's own 2022 identity
+redesign is explicitly "black on white, and black on yellow" — this app's new palette shares no hue
+family with that at all, by design.
+
+### Research (web search, not worked from memory)
+
+- **MTN MoMo app itself** — a detailed 2026 user-experience review of the new MTN MoMo app
+  (Uganda) ([ssmusoke.com](https://ssmusoke.com/2026/03/19/review-of-new-mtn-momo-app/)) describes
+  it as "a clear improvement from a UI/UX perspective, with a modern design," calls out the balance
+  card showing account + points balances with **a hide-balance toggle for privacy**, and separately
+  notes visual polish arriving ahead of some functional fixes — i.e. the visual layer and the
+  functional layer are explicitly reported as improving on different tracks, which matches this
+  pass's own scope (visual system only, no behavior/feature changes beyond the primitives listed
+  below).
+- **Airtel Money** — a first-hand 2026 comparison piece
+  ([moseskemibaro.medium.com](https://moseskemibaro.medium.com/i-finally-used-airtel-money-it-completely-changed-how-i-think-about-m-pesa-safaricom-f76e70091612))
+  and a UI/UX case study ([think.design](https://think.design/work/airtel-payments-bank-ui-ux-design/))
+  both emphasize **restraint** as the strongest UX trait — the home screen leads with balance +
+  clear CTAs, success/receipt screens are styled as verifiable records rather than upsell surfaces.
+- **M-Pesa** ("My OneApp") — balance-first home screen with smart shortcuts/quick-access tiles
+  (Google Play listing, corroborated by a redesign concept piece,
+  [medium.com/@allan.kimutai1](https://medium.com/@allan.kimutai1/redesigning-m-pesa-a-simpler-smarter-future-for-mobile-money-86c90c24b66d)) —
+  same "the balance is the anchor, everything else is a tile around it" shape this app's Home
+  already had structurally (§8's zone-snapshot work); this pass's job was making that anchor
+  *look* like one.
+- **General fintech/mobile-money UI research, 2026** (multiple sources, e.g.
+  [eleken.co](https://www.eleken.co/blog-posts/modern-fintech-design-guide),
+  [wandr.studio](https://www.wandr.studio/blog/fintech-mobile-app-design-trends)) — converging
+  findings directly applied below: "the important number is unmistakably the largest, secondary
+  details are grouped and quieted, and color is used with restraint to mean something specific
+  rather than to decorate" (→ bigger `fontSize.display`/`xxl`, one hero card per screen, not a
+  wall of colored tiles); "rounded corners and subtle elevation look polished without feeling
+  heavy" (→ `radius`/`shadow` token changes below); card-UI is "the most familiar interface format
+  for mobile users interacting with many services" (→ kept the existing Card-based layout, no
+  structural navigation change).
+
+### Palette — `mobile/src/theme/colors.ts` (verified, not eyeballed)
+
+A Node script implementing the WCAG relative-luminance/contrast formula
+(`(L_lighter + 0.05) / (L_darker + 0.05)`) was written and run against every color pair actually
+used in this codebase (not just the raw list) before any value was chosen, including several
+**pre-existing** colors this pass found already fell short of the app's own stated AAA 7:1 minimum:
+
+| Token | Old | Old ratio | New | New ratio | Context verified |
+|---|---|---|---|---|---|
+| `accent.home` | `#1D4ED8` | 6.70:1 (AA only) | `#1E40AF` | 8.72:1 | white text on fill |
+| `accent.customers` | `#4338CA` | 7.90:1 | `#3730A3` | 9.93:1 | white text on fill (Customers filter chip) |
+| `accent.payment` | `#15803D` | 5.02:1 (AA only) | `#065F46` | 7.68:1 | white text on fill (**Button `primary`** — the app's single most-used button was under AAA) |
+| `accent.history` | `#B45309` | 5.02:1 (AA only) | `#8A3D0C`* | 7.63:1 | white text on fill (History filter chip) |
+| `accent.expense` | `#7E22CE` | 6.98:1 (AA only) | `#6B21A8` | 8.72:1 | white text on fill — promotes stage-1's local `record-expense.tsx` fix to the shared token |
+| `accent.complaint` | `#A21CAF` | 6.32:1 (AA only) | `#86198F` | 8.24:1 | white text on fill |
+| `status.offlineFg` | `#92400E` | 6.37:1 (AA only) | `#78350F` | 8.15:1 | text on `offlineBg` tint |
+| `status.syncedFg` / `verifiedFg` | `#166534` | 6.49:1 (AA only) | `#14532D` | 8.30:1 | text on tint |
+| `status.errorFg` / `rejectedFg` | `#991B1B` | 6.80:1 (AA only) | `#7F1D1D` | 8.20:1 | text on tint |
+| `danger` | `#B91C1C` | 6.47:1 (AA only) | `#7F1D1D` | 10.02:1 / 8.20:1 | text-on-white **and** white-on-fill **and** text-on-`dangerBg` — one shade now covers all three, previously three near-duplicate reds each independently under AAA |
+| `border` | `#CBD5E1` | n/a (not text) | `#E2E8F0` | n/a | lightened — see "elevation over border" note below |
+
+*`#8A3D0C` is a custom shade between Tailwind's amber-800 (`#92400E`, 7.09:1 — passes but by a
+razor-thin margin for a stated *minimum*) and amber-900 (`#78350F`, 9.07:1 but visibly brown, not
+amber) — tuned for real headroom without losing the hue's identity.
+
+`status.syncingFg`/`syncingDot`, `accent.*Dot` colors, `pendingFg`, `whatsapp`, and every background
+tint were left unchanged — either already AAA (`syncingFg` was already blue-800 at 7.15:1) or not
+text (dots, tints have no contrast requirement of their own). Every hue's *family* (blue=home,
+indigo=customers, green/emerald=payment, amber=history, purple=expense, fuchsia=complaint) is
+unchanged — only the exact shade, one Tailwind step deeper each, consistent with the "color with
+restraint, meaning something specific" research finding above (nav-accent-per-feature-area is
+exactly that pattern; this pass makes each already-established hue actually clear AAA rather than
+mostly clearing AA).
+
+`accent.payment` (now a richer emerald-800, cooler/more premium-reading than the old flat green-700)
+doubles as this app's de facto brand-primary — it's `Button`'s `primary` fill, `TextInput`'s focus
+ring, and the new Home hero card's fill. Deliberately not a separate `brand.primary` token: "Record
+a payment" already is this app's single signature action, so one color serving both roles avoids a
+second near-identical green.
+
+### Sacred constraints — verified preserved, not just assumed
+
+- **AAA 7:1 minimum** — every color this pass touched now has a verified ratio ≥7:1 in every
+  context it's actually painted in (table above). Nothing new was introduced below AAA.
+- **Offline-status semantic rule** — amber/calm = offline-and-queuing, never red. Completely
+  untouched: `offlineBg`/`offlineDot`/`syncingBg`/`syncingDot`/`syncedBg`/`syncedDot`/`errorBg`/
+  `errorDot` are all byte-for-byte identical to before this pass. Only `offlineFg`'s exact amber
+  *shade* was darkened for contrast (still unambiguously amber, not red — see table). Which state
+  gets which hue family was never in question.
+- **Dark mode** — still not introduced. No new dark-mode tokens, no `useColorScheme` reads added
+  anywhere in this pass.
+- **No gradients, no backdrop-blur/glassmorphism** — no gradient was added anywhere, despite the
+  task brief explicitly permitting a reasoned, subtle exception. Solid, deeply-saturated fills plus
+  the new `shadow.hero` elevation (a drop shadow — a depth cue, not a translucency effect, and
+  costs nothing like a live blur does) already deliver the "bold hero card" quality bar without a
+  gradient's added render cost or its risk of reading as decorative rather than functional in
+  direct sunlight. The Home hero card's secondary text (`#ECFDF5`, "emerald-50") is a **solid,
+  fully-opaque** near-white, not an `rgba()` translucent white — chosen specifically so its contrast
+  ratio is a real, directly-measurable number (7.29:1) rather than something that only reads
+  correctly once composited over one specific fill color, which edges toward the glassmorphism this
+  app rules out.
+- **Touch-target floor** — `touchTarget.primary`/`touchTarget.floor` (56dp/48dp) in `tokens.ts` are
+  completely unchanged. No component's tappable height was reduced by this pass.
+
+### `mobile/src/theme/tokens.ts`
+
+- `radius`: `sm` 6→8, `md` 10→14, `lg` 14→20, new `xl` 28 (reserved for the hero card), `pill`
+  unchanged. Pure value bump — cascades rounder corners to every Button/Card/TextInput/chip
+  automatically, the cheapest, lowest-risk "modern fintech" signal available (no layout risk,
+  unlike gradients/blur).
+- `fontSize`: `xxl` 28→32 (used only for "the one big number on this screen" pattern — StatCard
+  value, sync-status last-sync value, login title, emergency header), `display` 36→40 (used only by
+  Home's hero total and Record Payment's amount display/confirm amount). Both bumps are pure
+  token-value changes that cascade into `record-payment/index.tsx` and other untouched screens
+  automatically — intended, not a scope violation, per the brief's "changing the VALUES... cascades
+  the new palette/scale... in one pass" framing.
+- New `shadow` export: `shadow.card` (subtle default lift, every `Card`) and `shadow.hero` (stronger
+  lift, filled/hero cards only) — RN `shadowColor`/`shadowOffset`/`shadowOpacity`/`shadowRadius` +
+  Android `elevation`, not CSS blur/backdrop-filter.
+- `spacing` and `touchTarget` — unchanged.
+
+### Primitives (`mobile/src/components/ui/`) — every existing prop kept working
+
+- **`Card.tsx`** — new `variant?: 'outlined' | 'filled'` (default `'outlined'`, so all 15+ existing
+  call sites render unchanged except for the free `radius`/`shadow.card` token cascade) and
+  `fillColor?: string`. `'filled'` renders a solid-color, no-border, `radius.xl`, `shadow.hero`
+  "hero" card — built for Home's collection total but reusable by any future screen. Default
+  (outlined) cards now also carry `shadow.card` for the first time (previously flat/no shadow at
+  all).
+- **`Button.tsx`** — label `fontWeight` 600→700. Solid-fill variants (`primary`, `danger`) gain
+  `shadow.card`; outline/ghost variants stay flat (a shadow under a transparent background looks
+  like a smudge, not a lift). New press feedback: `transform: scale(0.97)` on press, layered on top
+  of the existing opacity dip (0.85→0.9, slightly less aggressive since scale now also signals the
+  tap) — the "satisfying tap feedback" research consistently attributes to polished mobile-money
+  apps. `dangerOutline`/`danger` variant behavior otherwise unchanged.
+- **`StatCard.tsx`** — value `fontWeight` 700→800 (size already cascades via `fontSize.xxl`). No
+  prop changes.
+- **`Badge.tsx`** — label `fontWeight` 700→800, pill `paddingVertical` 4→6 (a deliberate scoped
+  value, not a `spacing` token bump, since `spacing.xs` is reused elsewhere for tight gaps this
+  shouldn't affect). No prop changes.
+- **`TextInput.tsx`** — new focus-ring behavior: 2px `colors.accent.payment` border while focused
+  (was always 1px `colors.border`). Implemented with local `useState`, and any caller-supplied
+  `onFocus`/`onBlur` is still called through — fully backward-compatible, verified no existing call
+  site currently passes either prop (grepped first).
+- **`EmptyState.tsx`** — title `fontSize` `lg`(18)→`xl`(22). No prop changes.
+- **`SyncStatusStrip.tsx`** — label `fontWeight` 600→700 only. Deliberately the smallest touch of
+  any primitive in this pass — see "deliberately not changed" below.
+
+### Home screen (`app/(tabs)/index.tsx`) — the concrete demonstration
+
+"Today's collection" is now a `Card variant="filled"` hero card: solid `accent.payment` (emerald-800)
+fill, an uppercase eyebrow label (`"TODAY'S COLLECTION"`, solid `#ECFDF5`, letter-spaced), a small
+white circular badge with a "₣" glyph (a lightweight text-glyph icon — no icon library added, matches
+this codebase's existing precedent of unicode glyphs in `SyncStatusStrip`/`record-expense.tsx`'s
+category picker), the total itself in white at `fontSize.display` (now 40, `fontWeight: '800'`), and
+a hint line in the same solid off-white. This is the single concrete instance of every token/primitive
+change above acting together: the new deeper `accent.payment`, the new `radius.xl`/`shadow.hero`,
+the new `fontSize.display`, all composed through `Card`'s new `variant="filled"` rather than
+one-off styling.
+
+The "Zone arrears outstanding" card directly below it deliberately stays the outlined style (not a
+second hero card) — documented inline in the screen's own comment: a zone carrying some arrears is
+the normal, expected day-to-day state, not a problem, so a full-bleed red hero block every time the
+app opens would read as a standing alarm — the exact same "calm until actually urgent" principle §5
+already applies to the sync strip (amber, not red, for normal offline operation), applied here to a
+second "is this actually bad?" judgment call. The two StatCard tiles and everything below (Quick
+actions, Notifications, Get around) are structurally untouched — they inherit the token cascade
+(rounder corners, card shadow, bolder StatCard values) automatically, no direct edits needed.
+
+**Considered, deliberately not built:** MTN MoMo's own hide-balance-for-privacy toggle (found in the
+research above) would be a natural fit for a cash-handling field agent, but it's a new interactive
+feature, not a visual-system change — out of scope for a rebrand pass and flagged here for whichever
+future pass covers Home's actual feature set, not silently dropped.
+
+### Verification
+
+- `cd mobile && npx tsc --noEmit` — clean except the two pre-existing `src/api/devices.ts` errors
+  (`RegisterPushTokenRequestBody`/`RegisterPushTokenResponse` not exported from `types/api`),
+  unrelated to this pass and out of scope.
+- `npm test` — 74/74 passing, unchanged from before this pass. This pass touched zero
+  `src/utils/*` pure-function logic — every change was colors/tokens/component styling/one screen's
+  JSX structure.
+
+### Deliberately NOT changed, and why
+
+- **`mobile/app/*`** — nothing under `app/` was touched except `(tabs)/index.tsx` as scoped. Every
+  other screen gets the palette/token cascade automatically and will read the new primitives
+  correctly the moment a future pass touches them; none were restructured here, per the explicit
+  "7 more agents about to build new screens" constraint.
+- **`record-expense.tsx`'s local `#6B21A8` override** — now redundant (the shared `accent.expense`
+  token is that exact value), but left in place rather than removed, since removing it means editing
+  a file under `app/` this pass was told not to touch. Harmless: still correct, just a little
+  duplicated safety margin.
+- **Dark mode** — not introduced (see sacred-constraints list above).
+- **A new icon library** — the hero card's "₣" glyph and every other glyph in this app remain plain
+  Unicode text, matching existing precedent, not a new dependency.
+- **Any component-rendering test framework** — this app's tested-surface convention (`src/utils/*`
+  only, via `node --test`) is unchanged; nothing in this pass needed or added test coverage beyond
+  what already existed.
+
+### Brief for the next wave of agents (new-screen builders)
+
+1. **Don't hardcode colors, radii, font sizes, or shadows.** Read them from `colors.ts`/`tokens.ts`.
+   If a new screen needs "the app's brand color," that's `colors.accent.payment` — don't introduce a
+   second green.
+2. **Default to `Card` (`variant="outlined"`, i.e. just `<Card>`)** for ordinary content. Reach for
+   `<Card variant="filled">` only for a screen's single most important figure — at most one hero
+   card per screen. Two hero cards on one screen defeats the "the eye goes here first" purpose.
+3. **If you introduce a new fill color for a hero card**, re-verify contrast for every text color
+   painted on it — do not copy `#ECFDF5`/`#FFFFFF` from Home's hero card assuming it transfers; it
+   was verified specifically against `accent.payment`'s current hex.
+4. **`Button`, `Badge`, `StatCard`, `TextInput`, `EmptyState` all already look and behave correctly**
+   with zero extra work — just use them with their existing prop APIs (all backward-compatible;
+   nothing in this pass requires updating existing call sites).
+5. **Still no gradients, no blur/glassmorphism, no charts.** Shadows (`shadow.card`/`shadow.hero`)
+   are fine and encouraged for card-like elements; they are not the same thing §6 rules out.
+6. **Still AAA (7:1), still amber-never-red-for-offline, still 56dp/48dp touch targets, still no dark
+   mode.** None of this pass's changes loosened any of those — verify new colors the same way this
+   pass did (a real contrast calculation, not eyeballing) before introducing any new token value.

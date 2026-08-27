@@ -33,7 +33,11 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
     },
     title: {
-        fontSize: fontSize.lg,
+        // Bumped lg(18)→xl(22) 2026-08-27 for a bit more presence — this is
+        // often the only content on the screen at that moment (an empty
+        // Customers filter, a fresh History list), so it can afford to read
+        // as a deliberate headline rather than a small caption.
+        fontSize: fontSize.xl,
         fontWeight: '700',
         color: colors.textPrimary,
         textAlign: 'center',

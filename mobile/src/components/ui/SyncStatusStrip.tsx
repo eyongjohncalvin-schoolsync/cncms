@@ -94,7 +94,16 @@ const styles = StyleSheet.create({
     },
     label: {
         fontSize: fontSize.xs,
-        fontWeight: '600',
+        // Bumped 600→700 in the 2026-08-27 rebrand for consistency with
+        // every other primitive's slightly bolder type — but deliberately
+        // NOTHING else here changed (no shadow, no radius, no color
+        // remapping beyond what colors.ts's status-token changes already
+        // cascade automatically). This strip's correct design is the
+        // opposite of "bold hero": flat, unobtrusive, calm — see §5. Giving
+        // it card-style elevation or a filled hero treatment would fight its
+        // actual job, which is to sit quietly below the header and only
+        // draw real attention when there's an actual error to act on.
+        fontWeight: '700',
         flexShrink: 1,
     },
 });

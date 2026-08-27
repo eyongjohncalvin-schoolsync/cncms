@@ -41,11 +41,20 @@ const styles = StyleSheet.create({
     pill: {
         alignSelf: 'flex-start',
         paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
+        // Slightly roomier than spacing.xs (4) alone — 2026-08-27 rebrand:
+        // a chunkier, more confident status pill, matching the bolder-weight
+        // label below. Not a token bump (spacing.xs is used elsewhere for
+        // tight gaps this shouldn't affect) — a deliberate one-off value
+        // scoped to just this pill.
+        paddingVertical: 6,
         borderRadius: radius.pill,
     },
     label: {
         fontSize: fontSize.xs,
-        fontWeight: '700',
+        // 700→800: this pill is often the only thing communicating a
+        // payment's verification state at a glance (History list, Record
+        // Payment confirmation) — a hair bolder keeps it legible without
+        // changing its size or color semantics.
+        fontWeight: '800',
     },
 });

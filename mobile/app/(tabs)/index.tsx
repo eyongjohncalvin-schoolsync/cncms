@@ -81,12 +81,30 @@ export default function HomeScreen() {
                 <Button title="Sign out" variant="ghost" size="default" fullWidth={false} onPress={handleLogout} />
             </View>
 
-            <Card accentColor={colors.accent.payment}>
-                <Text style={styles.totalLabel}>Today's collection</Text>
-                <Text style={styles.totalValue}>
-                    {todayTotal === null ? '—' : formatFcfa(todayTotal)}
-                </Text>
-                <Text style={styles.totalHint}>From this device — renders instantly, even offline.</Text>
+            {/*
+              Hero balance card — 2026-08-27 rebrand (mobile-app-react-native.md
+              dated section has the full research writeup). This is the single
+              most MTN-MoMo-like pattern this pass's research turned up: a
+              bold, high-contrast, elevated summary card carrying the one
+              figure a screen most wants an agent's eye to land on first —
+              not just a bigger number, a genuinely different treatment (solid
+              fill, not a white card with a colored stripe). Built on Card's
+              new `variant="filled"` (Card.tsx) rather than one-off styling
+              here, so a future screen wanting the same "hero" treatment reuses
+              this exact primitive instead of re-deriving it from scratch.
+              Deliberately the ONLY card on this screen that gets this
+              treatment — see the "Zone arrears outstanding" card just below,
+              which stays the outlined style on purpose (comment there).
+            */}
+            <Card variant="filled">
+                <View style={styles.heroTopRow}>
+                    <Text style={styles.heroLabel}>TODAY'S COLLECTION</Text>
+                    <View style={styles.heroGlyphBadge}>
+                        <Text style={styles.heroGlyphText}>₣</Text>
+                    </View>
+                </View>
+                <Text style={styles.heroValue}>{todayTotal === null ? '—' : formatFcfa(todayTotal)}</Text>
+                <Text style={styles.heroHint}>From this device — renders instantly, even offline.</Text>
             </Card>
 
             {/*
@@ -97,10 +115,12 @@ export default function HomeScreen() {
               addendum). Deliberately NOT laid out as 3 equal StatCard tiles
               — the product owner's brief specifically asked for clearer
               hierarchy on "the arrears/collection-critical numbers," so the
-              arrears TOTAL (what's actually left to collect today) gets the
-              same full-width, large-numeral treatment as "Today's
-              collection" right above it — a paired "done vs. still owed"
-              read at the very top of the screen. The owes-money COUNT
+              arrears TOTAL (what's actually left to collect today) gets a
+              full-width, large-numeral treatment right below "Today's
+              collection" — a paired "done vs. still owed" read at the very
+              top of the screen (2026-08-27: the two cards' fill styles now
+              deliberately differ — see that section's own comment below for
+              why). The owes-money COUNT
               becomes this card's hint line instead of a separate tile.
               Same red-for-arrears convention already used on the Customers
               list and Customer Detail (colors.danger only when > 0 — a
@@ -109,6 +129,21 @@ export default function HomeScreen() {
               pre-filtered, same shortcut Home's own "Continue your route"
               card already offers further down — this is just a faster,
               higher-visibility path to the identical destination.
+
+              2026-08-27: deliberately did NOT give this the new hero
+              (variant="filled") treatment the collection card above just
+              got, even though arrears is arguably just as important a
+              number. A zone carrying some arrears is the normal, expected
+              day-to-day state, not a problem — the same "calm until
+              actually urgent" principle §5 applies to the sync strip
+              (amber, not red, for normal offline operation) applies here:
+              a full-bleed red hero block would read as a standing alarm
+              every single time an agent opens the app, even on an entirely
+              routine day. Keeping this an outlined card with a red stripe
+              (only when > 0) preserves the existing, already-correct
+              "red means real money owed, not a system error" signal
+              without escalating its visual weight into looking like
+              something is wrong.
             */}
             <Card
                 onPress={() => router.push('/(tabs)/customers?filter=owes-money')}
@@ -220,6 +255,38 @@ const styles = StyleSheet.create({
     },
     greeting: { fontSize: fontSize.xl, fontWeight: '800', color: colors.textPrimary },
     role: { fontSize: fontSize.sm, color: colors.textSecondary, textTransform: 'capitalize' },
+    // Hero card (see the render-side comment above for why this exists).
+    heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    heroLabel: {
+        fontSize: fontSize.sm,
+        fontWeight: '700',
+        // Solid, fully-opaque near-white (emerald-50) rather than a
+        // translucent white — verified ~7.29:1 against this card's
+        // emerald-800 fill (mobile-app-react-native.md dated section has
+        // the full ratio table). A translucent/rgba white would blend with
+        // the fill color into something not directly measurable this way,
+        // and reads closer to the glassmorphism this app's §6 rules out —
+        // an opaque, slightly-tinted solid avoids both problems while still
+        // reading as "a lighter white" for label/hint-vs-value hierarchy.
+        // NOTE: this exact hex is only correct paired with accent.payment's
+        // current emerald-800 — a future hero card using a different
+        // fillColor needs its own verified pairing, not a copy of this one.
+        color: '#ECFDF5',
+        letterSpacing: 0.6,
+    },
+    heroGlyphBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: colors.textInverse,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    heroGlyphText: { fontSize: fontSize.md, fontWeight: '800', color: colors.accent.payment },
+    // fontSize.display (40, tokens.ts) on pure white — verified ~7.68:1
+    // against this card's emerald-800 fill, comfortably AAA.
+    heroValue: { fontSize: fontSize.display, fontWeight: '800', color: colors.textInverse, marginTop: spacing.sm },
+    heroHint: { fontSize: fontSize.xs, color: '#ECFDF5', marginTop: spacing.xs },
     totalLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
     totalValue: { fontSize: fontSize.display, fontWeight: '800', color: colors.accent.payment, marginTop: spacing.xs },
     // Overrides for the "Zone arrears outstanding" card, which reuses
