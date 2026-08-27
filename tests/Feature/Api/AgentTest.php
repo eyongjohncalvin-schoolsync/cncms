@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api;
 
+use App\Models\User;
 use Database\Factories\AgentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -71,6 +72,38 @@ class AgentTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.uuid', $agent->uuid)
             ->assertJsonPath('data.zone_uuid', $zone->uuid);
+    }
+
+    public function test_me_returns_the_authenticated_agents_own_record(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $token = $this->tokenForRole('agent');
+
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $agent = AgentFactory::new()->create(['zone_id' => $zone->id, 'user_id' => $user->id]);
+
+        // A second, unrelated agent must never be returned by this
+        // endpoint — this is the "own profile only" scoping this test
+        // exists to pin down.
+        AgentFactory::new()->create(['zone_id' => $zone->id, 'user_id' => null]);
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/agents/me');
+
+        $response->assertOk()
+            ->assertJsonPath('data.uuid', $agent->uuid)
+            ->assertJsonPath('data.zone_uuid', $zone->uuid)
+            ->assertJsonPath('data.salary', $agent->salary);
+    }
+
+    public function test_me_returns_404_when_the_caller_has_no_agent_record(): void
+    {
+        $token = $this->tokenForRole('manager');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/agents/me');
+
+        $response->assertStatus(404);
     }
 
     public function test_manager_can_create_an_agent(): void

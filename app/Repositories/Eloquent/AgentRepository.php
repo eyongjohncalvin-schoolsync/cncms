@@ -32,6 +32,14 @@ class AgentRepository implements AgentRepositoryInterface
             ->first();
     }
 
+    public function findByUserId(int $userId, array $with = []): ?Agent
+    {
+        return Agent::query()
+            ->with($with)
+            ->where('user_id', $userId)
+            ->first();
+    }
+
     public function create(int $zoneId, ?int $userId, AgentData $data): Agent
     {
         return Agent::query()->create([

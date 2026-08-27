@@ -8,6 +8,7 @@ use App\DataTransferObjects\AgentData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreAgentRequest;
 use App\Http\Requests\UpdateAgentRequest;
+use App\Http\Resources\AgentMeResource;
 use App\Http\Resources\AgentResource;
 use App\Models\Agent;
 use App\Services\AgentService;
@@ -19,6 +20,22 @@ class AgentController extends Controller
     public function __construct(
         private readonly AgentService $agents,
     ) {}
+
+    /**
+     * "My Profile" — the mobile app's read-only own-profile screen.
+     * Deliberately scoped to `auth()->id()`, never a uuid route param: an
+     * agent's own device can only ever resolve their own Agent row this
+     * way, regardless of what AgentPolicy::view() technically permits for
+     * office/web contexts. No policy check needed beyond auth:sanctum +
+     * ResolveTenant (already applied by the route group) — the query
+     * itself is what scopes this to "me", not an authorization decision.
+     */
+    public function me(Request $request): JsonResponse
+    {
+        $agent = $this->agents->findForUser($request->user()->id);
+
+        return (new AgentMeResource($agent))->response();
+    }
 
     public function index(Request $request): JsonResponse
     {

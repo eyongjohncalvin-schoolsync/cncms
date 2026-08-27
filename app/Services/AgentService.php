@@ -60,6 +60,23 @@ class AgentService
         return $agent;
     }
 
+    /**
+     * The Agent row belonging to the currently-authenticated user, for
+     * "my own profile" (GET /api/v1/agents/me). Deliberately not
+     * branch-cached like list() — this is a single self-scoped row, not a
+     * roster listing.
+     */
+    public function findForUser(int $userId): Agent
+    {
+        $agent = $this->agents->findByUserId($userId, ['zone']);
+
+        if (! $agent) {
+            throw new ModelNotFoundException("No agent record found for user [{$userId}].");
+        }
+
+        return $agent;
+    }
+
     public function create(AgentData $data): Agent
     {
         $zoneId = $this->resolveZoneId($data->zoneUuid);
