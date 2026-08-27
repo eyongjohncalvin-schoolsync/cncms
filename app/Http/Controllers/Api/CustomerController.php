@@ -13,8 +13,11 @@ use App\Http\Requests\SuspendCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
 use App\Http\Resources\CustomerResource;
 use App\Models\Customer;
+use App\Services\CustomerEligibilityService;
 use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
+use App\Services\ZoneService;
+use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -23,6 +26,9 @@ class CustomerController extends Controller
     public function __construct(
         private readonly CustomerService $customers,
         private readonly CustomerStatusService $statuses,
+        private readonly CustomerEligibilityService $eligibility,
+        private readonly ZoneService $zones,
+        private readonly TenantContext $context,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -116,5 +122,45 @@ class CustomerController extends Controller
         );
 
         return (new CustomerResource($customer))->additional(['message' => 'Customer reconnected'])->response();
+    }
+
+    /**
+     * GET /api/v1/customers/eligible-for-disconnection. The mobile
+     * counterpart to App\Http\Controllers\DisconnectionsController::
+     * eligibilityIndex()'s `?eligible=1` web tab — same policy ability
+     * (viewEligibilityBoard, which admits super/admin/manager/agent) and
+     * the exact same underlying App\Services\CustomerEligibilityService
+     * query, reused rather than reimplemented (mobile-app-react-native.md
+     * §12/Disconnections screen). Registered ahead of the apiResource in
+     * routes/api/customers.php so it isn't swallowed by the `{customer}`
+     * show route.
+     *
+     * Zone scoping is force-applied server-side from TenantContext::zoneId
+     * for the `agent` role — resolved once by ResolveTenant from the
+     * caller's own Agent row (App\Support\TenantContext::resolve()), the
+     * same mechanism PaymentPolicy::verify()'s zone fence already relies
+     * on. Any `zone_uuid` query value an agent sends is deliberately
+     * ignored, exactly like eligibilityIndex() ignores it for agents —
+     * an agent cannot see another zone's flagged customers by tampering
+     * with the query string. Office roles (super/admin/manager) may
+     * optionally pass `zone_uuid` to filter; omitted, they see every zone.
+     */
+    public function eligibleForDisconnection(Request $request): JsonResponse
+    {
+        $this->authorize('viewEligibilityBoard', Customer::class);
+
+        $zoneUuid = $request->string('zone_uuid')->toString() ?: null;
+
+        if ($this->context->is('agent')) {
+            $zoneId = $this->context->zoneId;
+        } elseif ($zoneUuid !== null) {
+            $zoneId = $this->zones->findOrFail($zoneUuid)->id;
+        } else {
+            $zoneId = null;
+        }
+
+        $eligible = $this->eligibility->eligibleForDisconnection($zoneId);
+
+        return response()->json(['data' => $eligible->values()->all()]);
     }
 }

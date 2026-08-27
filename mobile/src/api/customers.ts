@@ -3,6 +3,7 @@ import type {
     CustomerDetailResponse,
     DisconnectCustomerRequestBody,
     DisconnectCustomerResponse,
+    EligibleForDisconnectionResponse,
     ReconnectCustomerRequestBody,
     ReconnectCustomerResponse,
 } from '../types/api';
@@ -58,6 +59,24 @@ export async function disconnectCustomer(
     body: DisconnectCustomerRequestBody,
 ): Promise<DisconnectCustomerResponse> {
     const { data } = await apiClient.patch<DisconnectCustomerResponse>(`/customers/${uuid}/disconnect`, body);
+
+    return data;
+}
+
+/**
+ * GET /api/v1/customers/eligible-for-disconnection — the "flagged for
+ * non-payment" list backing app/disconnections.tsx. Live/computed each
+ * call (App\Services\CustomerEligibilityService is not persisted/cached),
+ * so this is deliberately online-only with no offline fallback, same as
+ * fetchCustomerDetail() above. Deliberately takes no zone_uuid parameter:
+ * the server force-scopes an `agent` caller to their own zone regardless
+ * of what's requested (App\Http\Controllers\Api\CustomerController::
+ * eligibleForDisconnection()), so there is nothing for this client to
+ * usefully pass — every mobile caller of this function is an agent seeing
+ * only their own zone.
+ */
+export async function fetchEligibleForDisconnection(): Promise<EligibleForDisconnectionResponse> {
+    const { data } = await apiClient.get<EligibleForDisconnectionResponse>('/customers/eligible-for-disconnection');
 
     return data;
 }

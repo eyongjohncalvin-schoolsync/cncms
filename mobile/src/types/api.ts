@@ -334,6 +334,41 @@ export interface DisconnectCustomerResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Disconnection eligibility — GET /api/v1/customers/eligible-for-disconnection,
+// App\Http\Controllers\Api\CustomerController::eligibleForDisconnection(),
+// App\Services\CustomerEligibilityService::shape(). The mobile JSON
+// counterpart of the web Disconnections page's `?eligible=1` tab. An
+// `agent` caller is always force-scoped server-side to their own zone
+// (App\Support\TenantContext::zoneId) regardless of any zone_uuid this
+// client might send — see the controller's doc comment.
+// ---------------------------------------------------------------------------
+
+export interface EligibleCustomerApi {
+    uuid: string;
+    name: string;
+    phone: string | null;
+    zone_uuid: string | null;
+    zone_name: string | null;
+    /** Numeric string, DECIMAL(12,2) cast to string by Eloquent. */
+    bill: string;
+    others: string;
+    level: string | null;
+    status: string;
+    status_reason: string | null;
+    status_note: string | null;
+    location: string | null;
+    /** Numeric string — accumulated prior arrears (not the fresh current-cycle charge). */
+    total_arrears: string;
+    /** Display-only ("2.8x bill") — never itself a threshold decision. */
+    arrears_ratio: number;
+    months_overdue: number;
+}
+
+export interface EligibleForDisconnectionResponse {
+    data: EligibleCustomerApi[];
+}
+
+// ---------------------------------------------------------------------------
 // Bill WhatsApp message — GET /api/v1/bills/{uuid}/whatsapp-message,
 // app/Http/Controllers/Api/BillController.php::whatsappMessage(),
 // app/Services/BillNotificationService.php. Manual (free, no-Twilio) mode
