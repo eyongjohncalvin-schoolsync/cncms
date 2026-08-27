@@ -79,7 +79,16 @@ class CustomerManuscriptRecalculationService
         }
 
         $this->manuscripts->forgetSummaryCache($period);
-        Cache::forget("customers:show:{$customer->uuid}");
+        // Must match CustomerService::findOrFail()'s exact key format
+        // (including the :branchId suffix) — a bare "customers:show:{uuid}"
+        // forget() here was a silent no-op against the real, branch-suffixed
+        // key, so a recalculation's effect on the customer detail page could
+        // sit stale for up to that cache's 60s TTL. Not the customer's own
+        // branch necessarily (this recalculation can be triggered by staff
+        // in a different branch context than the one that last cached the
+        // page), so this only reliably covers the unscoped 'all' variant —
+        // a real branch-scoped cache entry still expires on its own 60s TTL.
+        Cache::forget('customers:show:'.$customer->uuid.':all');
 
         return $manuscript;
     }

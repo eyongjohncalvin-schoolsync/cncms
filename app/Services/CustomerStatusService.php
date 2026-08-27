@@ -390,7 +390,14 @@ class CustomerStatusService
 
     private function forgetCache(Customer $customer): void
     {
-        Cache::forget("customers:show:{$customer->uuid}");
+        // Must match CustomerService::findOrFail()'s exact key format
+        // (including the :branchId suffix) — a bare "customers:show:{uuid}"
+        // here was a silent no-op against the real, branch-suffixed key, so
+        // a disconnect/suspend/reconnect's effect on the customer detail
+        // page could sit stale for up to that cache's 60s TTL. Reliably
+        // covers only the unscoped 'all' variant; a branch-scoped entry
+        // still expires on its own short TTL.
+        Cache::forget('customers:show:'.$customer->uuid.':all');
     }
 
     /**
