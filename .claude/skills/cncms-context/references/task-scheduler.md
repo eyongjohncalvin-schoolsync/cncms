@@ -433,3 +433,82 @@ matches the lighter confirm-gated pattern already established elsewhere in this 
 was tested directly) — this stage's `ManuscriptTest.php` updates now exercise it incidentally via the
 new two-step flow, but a focused test file for that endpoint's own authorization/state-guard behavior
 (mirroring `CommandRunCancelTest.php`'s shape) would still be a reasonable gap to close later.
+
+---
+
+## Stage 4 addendum (2026-08-27): N+1 / query-efficiency audit of stages 1–3
+
+Dedicated audit of every piece stages 1–3 touched or added, at this tenant's real scale
+(~446–549 customers). **Result: no genuine N+1s found — nothing needed fixing.** Every hot path
+already followed the "batch-resolve once, never per-customer" discipline its own doc comments
+claimed. Ground truth (not just code-reading inference) came from a throwaway diagnostic test that
+seeded 450 customers/manuscripts/payments on the real `swecom` tenant schema, wrapped
+`ManuscriptPreRunReviewService::reviewList()` in `DB::enableQueryLog()`, and asserted the query
+count stays flat. Deleted after the audit; not part of the permanent suite.
+
+**1. `ManuscriptPreRunReviewService::reviewList()`** — confirmed 5 flat queries total regardless of
+customer count (measured: 450 seeded customers, 496 flagged, still 5 queries): (1) the active-customer
+list via `CustomerRepository::activeWithLatestManuscript()`, (2) its eager-loaded `zones` batch, (3)
+its eager-loaded `latestManuscript` batch (a `latestOfMany()`-style subquery join), (4) one
+`whereIn(...)->eligibleForPeriod($period)->pluck('customer_id')` for the "who has an eligible
+payment" exclusion — a single set query, not a per-customer loop, and (5) one
+`selectRaw('customer_id, MAX(created_at)...')->groupBy('customer_id')` aggregate for
+`last_payment_date` — exactly the `withMax`-equivalent pattern the brief asked to confirm, not a
+per-customer fetch. The prepaid-window and credit exclusions run in-memory against the
+already-eager-loaded `latestManuscript` relation (no query at all). Nothing to fix here.
+
+**2. `Payment::scopeEligibleForPeriod()`** — checked all three call sites
+(`ManuscriptChunkDataResolver::resolve()`, `ManuscriptCalculate::runForEveryCustomer()`,
+`ManuscriptPreRunReviewService::reviewList()`): every one applies the scope as a single
+`whereIn('customer_id', $customerIds)->eligibleForPeriod($period)` over the whole candidate set,
+never inside a per-customer loop. Spreading the predicate to a third caller did not spread an N+1 —
+the extraction stayed single-query at every site.
+
+**3. `Manuscripts/RunReview.tsx` polling + `ManuscriptController::runReview()` +
+`ResolvesCommandRunBatchProgress`** — each poll tick (`usePoll(3000, { only: ['run'] })`, active only
+while `status === 'queued'`, stopped via a `useEffect` the instant it leaves `queued`) triggers a
+single Inertia partial reload that does exactly one `CommandRun` lookup plus one
+`DB::table('job_batches')->whereIn('id', [...])->get()` call — bounded and cheap regardless of
+customer count. The expensive pre-run review list (`usePreRunReview`) is fetched once when the run
+reaches `pending_review` (an `active` boolean gate, not the poll interval) — it is never re-fetched
+on a timer.
+
+**4. `CustomerManuscriptRecalculationService::recalculateOne()`'s `CommandRun::create()` and the
+actor/adjustment-id threading through `RecalculateCustomerManuscriptsForwardJob`** — the job fetches
+`$customer` once via `Customer::query()->find()` **before** its `while` loop over periods; the loop
+body only reads `$this->arrearsAdjustmentId`/`$this->triggeredByUserId`, both plain scalar
+constructor properties serialized onto the job, never re-queried per iteration. The one new query per
+iteration is `CommandRun::create()` itself — an intentional one-INSERT-per-period audit trace, bounded
+by "periods since the adjustment's target period" (genuinely O(periods), not O(customers), per this
+job's own design doc), not an N+1.
+
+**5. `PreRunReviewList.tsx` / `ManuscriptController::preRunReviewFull()`** — confirmed this
+paginates **in-memory** over `reviewList()`'s already-computed flagged collection (a manually
+constructed `LengthAwarePaginator` around `$items->forPage($page, $perPage)`), not a database-level
+`->paginate()`. Checked `DisconnectionsController::paginate()` (its own eligibility board) and found
+the **identical** pattern already in production there — same `forPage()`-into-`LengthAwarePaginator`
+shape. This is a **pre-existing, pattern-level choice** (not something stage 3 introduced), it's
+correctly bounded at this tenant's real scale (~550 customers total, so at most that many flagged
+rows ever materialize in PHP), and `preRunReviewFull()`'s own doc comment already states the
+rationale explicitly. Left alone; flagging for a separate future pass only if either board's
+candidate set ever stops being tenant-bounded (e.g. if it started spanning multiple tenants at once).
+
+**6. General sweep** — grepped every added/changed line across all three stage commits touching
+`Manuscript`/`Payment`/`Customer`/`CommandRun` for relation access (`->zone`, `->latestManuscript`,
+etc.) outside an eager-loaded context. The only lazy-relation accesses found were the ones in
+`ManuscriptPreRunReviewService` already covered by area 1's `with(['zone', 'latestManuscript'])`
+eager load; the remaining matches were test-file zone lookups (`$this->zone()`), not production code.
+`ManuscriptRerunGuard::assertRerunAllowed()` (new in stage 1) issues exactly one `CommandRun` lookup
+per `dispatch()` call, not per customer.
+
+**Tests**: no production code was changed, so no regression risk was introduced. Ran the full
+relevant sweep anyway to confirm the baseline is intact: `ManuscriptCalculateTest.php` +
+`ManuscriptGenerationBatchServiceTest.php` (31 tests), `ManuscriptPreRunReviewTest.php` +
+`ManuscriptRunReviewTest.php` + `CommandRunCancelTest.php` + `CommandRunCancelUnblocksDispatchTest.php`
++ `ArrearsAdjustmentCommandRunAuditTest.php` + `CustomerManuscriptRecalculationServiceTest.php` (24
+tests) — all 55 passing. Separately noted (not caused by, or related to, this audit):
+`ManuscriptTest.php`'s pre-existing `test_manager_can_export_the_manuscript_register_as_a_pdf`
+(present since `c1b297b6`, well before stage 1) crashes this environment's PHPUnit process-isolated
+subprocess with a dompdf `Allowed memory size of 134217728 bytes exhausted` fatal — a CLI
+`memory_limit` environment issue, unrelated to query efficiency; flagged for a separate pass rather
+than fixed here.
