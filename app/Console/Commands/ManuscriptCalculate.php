@@ -32,7 +32,7 @@ class ManuscriptCalculate extends Command
      * @var string
      */
     protected $signature = 'manuscript:calculate
-        {period? : YYYY-MM, defaults to current month}
+        {period? : YYYY-MM, defaults to the UPCOMING month — a run executed near month-end governs the month it is about to become, not the one it runs in (business-rules.md section 2, 2026-08-28 correction)}
         {--tenant=swecom : Slug/id of the tenant to run the calculation for}
         {--force : Recompute even if this period was already calculated and published — Laravel\'s established "yes, proceed anyway" idiom (cf. migrate --force)}';
 
@@ -53,7 +53,16 @@ class ManuscriptCalculate extends Command
 
     public function handle(): int
     {
-        $period = (string) ($this->argument('period') ?? Carbon::now()->format('Y-m'));
+        // 2026-08-28 correction (business-rules.md section 2): this command
+        // is triggered near month-end ("historically last week of each
+        // month"), and the resulting manuscript governs billing through the
+        // NEXT calendar month, not the one the run executes in — a run on
+        // 2026-07-22 with no explicit period produces period='2026-08', the
+        // bill customers actually owe throughout August, not '2026-07'.
+        // addMonthNoOverflow(), not addMonth(): a run on the 29th-31st must
+        // not skip a whole month when the target month is shorter (e.g. Jan
+        // 31 + addMonth() overflows to March 3, not Feb 28/29).
+        $period = (string) ($this->argument('period') ?? Carbon::now()->addMonthNoOverflow()->format('Y-m'));
 
         if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
             $this->error("Invalid period \"{$period}\" — expected format YYYY-MM.");
@@ -124,7 +133,7 @@ class ManuscriptCalculate extends Command
             }
 
             try {
-                $stats = $this->runForEveryCustomer($period);
+                $stats = $this->runForEveryCustomer($period, $commandRun);
 
                 // Runs (success or partial — matches the commandRun update
                 // below, which publishes regardless of $stats['errors'],
@@ -182,7 +191,7 @@ class ManuscriptCalculate extends Command
     /**
      * @return array<string, mixed>
      */
-    private function runForEveryCustomer(string $period): array
+    private function runForEveryCustomer(string $period, CommandRun $commandRun): array
     {
         $customersProcessed = 0;
         $frozenCustomers = 0;
@@ -194,6 +203,7 @@ class ManuscriptCalculate extends Command
 
         Customer::query()->chunkById(200, function ($customers) use (
             $period,
+            $commandRun,
             &$customersProcessed,
             &$frozenCustomers,
             &$totalArrearsSum,
@@ -249,6 +259,7 @@ class ManuscriptCalculate extends Command
                     DB::transaction(function () use (
                         $customer,
                         $period,
+                        $commandRun,
                         $previousManuscriptsByCustomer,
                         $eligibleVerifiedPaymentsByCustomer,
                         $eligibleAdjustmentsByCustomer,
@@ -265,9 +276,13 @@ class ManuscriptCalculate extends Command
                             $eligibleAdjustmentsByCustomer->get($customer->id, new Collection),
                         );
 
+                        // command_run_id — see ManuscriptGenerationBatchService::
+                        // publish()'s matching comment; this is the CLI's own
+                        // direct write path (no publish() involved), so it must
+                        // set the same linkage itself.
                         Manuscript::query()
                             ->firstOrNew(['customer_id' => $customer->id, 'period' => $period])
-                            ->fill($result->toManuscriptAttributes())
+                            ->fill([...$result->toManuscriptAttributes(), 'command_run_id' => $commandRun->id])
                             ->save();
 
                         foreach ($result->processedPayments as $payment) {

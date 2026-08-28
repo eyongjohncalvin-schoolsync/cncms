@@ -514,6 +514,62 @@ export interface ExpenseCategoryListResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Arrears Adjustment — POST /api/v1/arrears-adjustments,
+// App\Http\Controllers\Api\ArrearsAdjustmentController::store(),
+// App\Http\Requests\StoreArrearsAdjustmentRequest,
+// App\Http\Resources\ArrearsAdjustmentResource. Hand-copied 2026-08-28 for
+// the mobile "Request an arrears adjustment" screen — see
+// .claude/skills/cncms-context/references/arrears-adjustment.md. This is
+// the REQUEST side only: mobile never calls approve()/reject() (no JSON
+// route exists for either — see the controller's own class doc), so no
+// approval-related fields are represented here.
+// ---------------------------------------------------------------------------
+
+export type ArrearsAdjustmentDirection = 'decrease' | 'increase';
+
+export type ArrearsAdjustmentReasonCategory =
+    | 'legacy_migration_error'
+    | 'billing_error'
+    | 'goodwill_service_outage'
+    | 'bad_debt_writeoff'
+    | 'credit_clawback'
+    | 'other';
+
+export type ArrearsAdjustmentStatus = 'pending' | 'pending_second_approval' | 'approved' | 'rejected';
+
+/** Request body — mirrors StoreArrearsAdjustmentRequest::rules() exactly.
+ * `amount` is a decimal STRING (matches the server's `decimal:0,2` rule),
+ * same convention as ReconnectCustomerRequestBody::arrears_payment. */
+export interface RequestArrearsAdjustmentPayload {
+    customer_uuid: string;
+    target_period: string;
+    direction: ArrearsAdjustmentDirection;
+    amount: string;
+    reason_category: ArrearsAdjustmentReasonCategory;
+    reason_note: string;
+    complaint_uuid?: string;
+}
+
+export interface ArrearsAdjustmentApi {
+    uuid: string;
+    customer_uuid: string;
+    customer_name: string;
+    target_period: string;
+    direction: ArrearsAdjustmentDirection;
+    amount: string;
+    reason_category: ArrearsAdjustmentReasonCategory;
+    reason_note: string;
+    arrears_snapshot: string;
+    status: ArrearsAdjustmentStatus;
+    requested_by: { uuid: string; name: string } | null;
+    created_at: string;
+}
+
+export interface RequestArrearsAdjustmentResponse {
+    data: ArrearsAdjustmentApi;
+}
+
+// ---------------------------------------------------------------------------
 // Generic API error envelope (401/403/422/500 all share this shape)
 // ---------------------------------------------------------------------------
 

@@ -353,13 +353,49 @@ const AuditLogRow = memo(function AuditLogRow({ log }: { log: AuditLogEntry }) {
 });
 
 /**
+ * Before/after balance for one row of the Arrears Adjustments audit table
+ * (2026-08-28 addendum — the audit-trail request: "what changes were made
+ * to a customer's arrears"). `arrears_snapshot` (the "before" figure) is a
+ * real, permanently stored fact captured at request time — always shown.
+ * "After" is only ever shown for `status === 'approved'` rows: that is the
+ * one point at which `arrears_snapshot ± amount` is the actual resulting
+ * `total_arrears` for `target_period` (ArrearsAdjustmentService::approve()
+ * applies exactly this delta via a real ManuscriptCalculator run — see
+ * arrears-adjustment.md §4). For anything still pending, or rejected,
+ * nothing has been applied to the ledger yet — showing a computed "after"
+ * there would misstate this table's own contract of showing only what
+ * genuinely happened, not a projection (that guidance-only preview already
+ * exists in the request form itself, ArrearsAdjustmentModal's balanceAfter).
+ */
+function BalanceChange({ row }: { row: ArrearsAdjustmentAuditRow }) {
+    const before = formatCurrency(row.arrears_snapshot);
+
+    if (row.status !== 'approved') {
+        return <span className="text-slate-500">{before}</span>;
+    }
+
+    const beforeNumber = Number(row.arrears_snapshot);
+    const amountNumber = Number(row.amount);
+    const after =
+        row.direction === 'decrease' ? Math.max(0, beforeNumber - amountNumber) : beforeNumber + amountNumber;
+
+    return (
+        <span className="whitespace-nowrap text-slate-700">
+            {before} <span className="text-slate-400">→</span> <span className="font-semibold text-slate-900">{formatCurrency(String(after))}</span>
+        </span>
+    );
+}
+
+/**
  * The Arrears Adjustment sub-tab (this feature's design doc): its own
  * StatCard row (Pending Approval / Applied This Month / Total Written Off)
- * and table (Date, Customer, Amount, Reason, Requested by, Approved by,
- * Status), with inline Approve/Reject actions — `can_approve`/`can_reject`
- * are resolved server-side per row (App\Policies\ArrearsAdjustmentPolicy is
- * state-dependent on the adjustment's current status), so this component
- * never re-derives who may act.
+ * and table (Date, Customer, Amount, Balance, Reason, Requested by, Approved
+ * by, Status), with inline Approve/Reject actions — `can_approve`/
+ * `can_reject` are resolved server-side per row
+ * (App\Policies\ArrearsAdjustmentPolicy is state-dependent on the
+ * adjustment's current status), so this component never re-derives who may
+ * act. The Balance column (2026-08-28 addendum) is this page's answer to
+ * "what changed" — see BalanceChange above.
  */
 function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
     const { stats, adjustments } = data;
@@ -412,6 +448,7 @@ function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
                             <Th>Customer</Th>
                             <Th>Period</Th>
                             <Th>Amount</Th>
+                            <Th>Balance</Th>
                             <Th>Reason</Th>
                             <Th>Requested by</Th>
                             <Th>Approved by</Th>
@@ -427,6 +464,9 @@ function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
                                     <Td className="capitalize">
                                         {row.direction === 'decrease' ? '−' : '+'}
                                         {formatCurrency(row.amount)}
+                                    </Td>
+                                    <Td>
+                                        <BalanceChange row={row} />
                                     </Td>
                                     <Td className="capitalize">{row.reason_category.replace(/_/g, ' ')}</Td>
                                     <Td>{row.requested_by_name ?? '—'}</Td>

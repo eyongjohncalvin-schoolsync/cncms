@@ -1,6 +1,6 @@
 import { Form, Head, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
-import { IconTerminal2, IconEye, IconCheck, IconClock, IconCalendarTime } from '@tabler/icons-react';
+import { IconTerminal2, IconEye, IconCheck, IconClock, IconCalendarTime, IconLock, IconBan, IconTrash } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { SettingsTabs } from '@/components/settings/SettingsTabs';
 import { Badge } from '@/components/ui/Badge';
@@ -12,6 +12,7 @@ import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
 import { ManuscriptRunSummary } from '@/components/manuscripts/ManuscriptRunSummary';
 import type { CommandRunEntry, CommandRunStatus, ManuscriptSchedule, PaginatedResponse } from '@/types';
 
@@ -75,6 +76,8 @@ function statusBadge(status: CommandRunStatus, progress: CommandRunEntry['batch_
             return <Badge tone="green">Published</Badge>;
         case 'failed':
             return <Badge tone="red">Failed</Badge>;
+        case 'rolled_back':
+            return <Badge tone="slate">Rolled Back</Badge>;
         default:
             return <Badge tone="slate">{status}</Badge>;
     }
@@ -86,9 +89,17 @@ interface SettingsCommandRunsProps {
     canManageSchedule: boolean;
     canPublish: boolean;
     canCancel: boolean;
+    canRollback: boolean;
 }
 
-export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManageSchedule, canPublish, canCancel }: SettingsCommandRunsProps) {
+export default function SettingsCommandRuns({
+    runs,
+    manuscriptSchedule,
+    canManageSchedule,
+    canPublish,
+    canCancel,
+    canRollback,
+}: SettingsCommandRunsProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [previewRun, setPreviewRun] = useState<CommandRunEntry | null>(null);
 
@@ -119,6 +130,24 @@ export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManag
             return;
         }
         router.post(`/settings/command-runs/${run.uuid}/cancel`, {}, { preserveScroll: true });
+    }
+
+    // Delete/Rollback (2026-08-28 manuscript-run-management addendum) — only
+    // ever reachable for the current, unlocked period (run.is_locked gates
+    // this row action out entirely below; the backend enforces the same
+    // check regardless). Same lightweight confirm()-gated router.post as
+    // cancel() above, for the same reason — this page has no confirmation
+    // modal of its own to reuse, and this action doesn't warrant introducing
+    // one.
+    function rollback(run: CommandRunEntry) {
+        if (
+            !confirm(
+                `Delete/roll back this run for period ${run.period}? This permanently removes the manuscript rows it wrote. This cannot be undone — you would need to re-run the calculation.`,
+            )
+        ) {
+            return;
+        }
+        router.post(`/settings/command-runs/${run.uuid}/rollback`, {}, { preserveScroll: true });
     }
 
     return (
@@ -238,6 +267,9 @@ export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManag
                                     <Td className="text-xs text-slate-500">{metadataSummary(run.metadata)}</Td>
                                     <Td>
                                         <div className="flex items-center gap-2">
+                                            {/* Preview is a read-only action — unlike Publish/Cancel/Rollback
+                                                below, it stays available for a locked (past-period) run too;
+                                                the lock is about mutation, not visibility. */}
                                             {run.computed_result_summary && (
                                                 <button
                                                     type="button"
@@ -248,24 +280,63 @@ export default function SettingsCommandRuns({ runs, manuscriptSchedule, canManag
                                                     Preview
                                                 </button>
                                             )}
-                                            {run.status === 'pending_review' && canPublish && (
-                                                <Button
-                                                    type="button"
-                                                    onClick={() => publish(run)}
-                                                    className="px-2.5 py-1 text-xs"
-                                                >
-                                                    Publish
-                                                </Button>
-                                            )}
-                                            {run.status === 'queued' && canCancel && (
-                                                <Button
-                                                    type="button"
-                                                    variant="danger"
-                                                    onClick={() => cancel(run)}
-                                                    className="px-2.5 py-1 text-xs"
-                                                >
-                                                    Cancel
-                                                </Button>
+
+                                            {/* Manuscript-run-management feature (task-scheduler.md's 2026-08-28
+                                                addendum): a locked (past-period) run gets a plain read-only
+                                                "Locked" badge and NO action menu at all — never a hidden/disabled
+                                                menu, per the "never trust a hidden button as the only protection"
+                                                rule; the backend enforces this identically regardless of what
+                                                renders here. An unlocked run gets one dots-dropdown bundling
+                                                whichever of Publish/Cancel/Delete-Rollback actually apply to its
+                                                current status — the same Dropdown/DropdownItem/DropdownDivider
+                                                kebab-menu pattern already established this session on
+                                                Customers/Index.tsx and Disconnections/Index.tsx's Actions columns. */}
+                                            {run.is_locked ? (
+                                                <Badge tone="slate">
+                                                    <IconLock size={12} className="mr-1 inline" stroke={2} />
+                                                    Locked
+                                                </Badge>
+                                            ) : (
+                                                (() => {
+                                                    const showPublish = run.status === 'pending_review' && canPublish;
+                                                    const showCancel = run.status === 'queued' && canCancel;
+                                                    const showRollback =
+                                                        (run.status === 'pending_review' || run.status === 'published' || run.status === 'failed') &&
+                                                        canRollback;
+
+                                                    if (!showPublish && !showCancel && !showRollback) {
+                                                        return null;
+                                                    }
+
+                                                    return (
+                                                        <Dropdown label={`Actions for ${run.period} run`}>
+                                                            {showPublish && (
+                                                                <DropdownItem onClick={() => publish(run)} icon={<IconCheck size={16} stroke={1.75} />}>
+                                                                    Publish
+                                                                </DropdownItem>
+                                                            )}
+                                                            {showCancel && (
+                                                                <DropdownItem
+                                                                    onClick={() => cancel(run)}
+                                                                    variant="warning"
+                                                                    icon={<IconBan size={16} stroke={1.75} />}
+                                                                >
+                                                                    Cancel
+                                                                </DropdownItem>
+                                                            )}
+                                                            {(showPublish || showCancel) && showRollback && <DropdownDivider />}
+                                                            {showRollback && (
+                                                                <DropdownItem
+                                                                    onClick={() => rollback(run)}
+                                                                    variant="danger"
+                                                                    icon={<IconTrash size={16} stroke={1.75} />}
+                                                                >
+                                                                    Delete / Rollback
+                                                                </DropdownItem>
+                                                            )}
+                                                        </Dropdown>
+                                                    );
+                                                })()
                                             )}
                                         </div>
                                     </Td>

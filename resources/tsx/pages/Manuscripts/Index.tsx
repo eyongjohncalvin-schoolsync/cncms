@@ -42,6 +42,23 @@ interface ManuscriptsIndexProps {
     zones: Zone[];
 }
 
+/**
+ * 2026-08-28 correction (business-rules.md section 2): a manuscript run
+ * triggered near month-end governs the UPCOMING month, not the one it's
+ * clicked in — matches the identical default now computed server-side in
+ * ManuscriptController::calculate()/preRunReview()/preRunReviewFull().
+ * Computed independently of the page's own (possibly filtered-to-a-past-
+ * period) `period` prop — Run Calculation must always default to the real
+ * upcoming period regardless of which period the admin happens to be
+ * browsing.
+ */
+function upcomingPeriod(): string {
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+}
+
 const EXPORT_ROLES = ['super', 'admin', 'manager'];
 const CALCULATE_ROLES = ['super', 'admin'];
 // Matches App\Policies\ManuscriptPolicy::sendBill() — same roles as
@@ -60,7 +77,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
 
-    const calculateForm = useForm({ period, confirmed_rerun: false });
+    const calculateForm = useForm({ period: upcomingPeriod(), confirmed_rerun: false });
 
     // Fetched on-demand, only while the confirm modal is actually open — not
     // on page load or on every filter change (the design ask) — keyed on

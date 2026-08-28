@@ -5,12 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Web;
 
 use App\Models\CommandRun;
-use App\Models\Customer;
-use App\Models\Manuscript;
-use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
-use App\Models\Zone;
 use Database\Factories\CompanyFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
@@ -20,6 +16,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
+use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
 
 /**
@@ -33,12 +30,34 @@ class ManuscriptTest extends TestCase
 {
     use DatabaseTransactions;
     use InteractsWithTenantRoles;
+    use UsesDisposableTenant;
+
+    /**
+     * The three tests that invoke the real manuscript:calculate command/
+     * endpoint (see each one's own doc comment) provision their own
+     * disposable tenant instead — never touching real swecom at all, not
+     * even briefly. Initializing swecom here first and then trying to
+     * transition to a fresh disposable tenant mid-test was tried and
+     * doesn't work cleanly (Stancl's Tenant::create() migration step ends
+     * up with no search_path selected on the `tenant` connection,
+     * regardless of an explicit DB::purge('tenant') first) — so those three
+     * tests are excluded from this shared real-tenant setup entirely,
+     * exactly mirroring tests/Feature/ManuscriptCalculateTest.php's clean-
+     * slate-from-the-start pattern.
+     */
+    private const array DISPOSABLE_TENANT_TESTS = [
+        'test_admin_can_run_the_manuscript_calculation',
+        'test_admin_rerunning_an_already_published_period_is_rejected_without_confirmed_rerun',
+        'test_admin_can_rerun_an_already_published_period_with_confirmed_rerun_true',
+    ];
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->initializeTenant();
+        if (! in_array($this->name(), self::DISPOSABLE_TENANT_TESTS, true)) {
+            $this->initializeTenant();
+        }
     }
 
     private function actingAsRole(string $role): User
@@ -110,39 +129,41 @@ class ManuscriptTest extends TestCase
      * round trip through the real HTTP entry points an admin now uses:
      * POST /manuscripts/calculate (lands pending_review, no manuscripts row
      * yet) -> POST /settings/command-runs/{run}/publish (commits it).
+     *
+     * 2026-08-28: converted to a disposable tenant (see UsesDisposableTenant
+     * and task-scheduler.md's 2026-08-28 addendum) — this test used to run
+     * manuscript:calculate against the REAL swecom tenant (its own
+     * tenancy()->initialize()/end() lifecycle purges/reconnects the `tenant`
+     * PDO connection mid-test, which is exactly the mechanism that let real
+     * fixtures survive as committed data if the process was ever killed
+     * before its old manual cleanup ran — the same root cause as both prior
+     * production data-corruption incidents this session).
      */
     public function test_admin_can_run_the_manuscript_calculation(): void
     {
-        // manuscript:calculate (invoked synchronously by
-        // App\Http\Controllers\ManuscriptController::calculate()) owns its
-        // own tenancy()->initialize()/end() lifecycle end-to-end, exactly as
-        // it does in production. Stancl's tenancy()->end() purges (disconnects)
-        // the tenant DB connection, which would silently roll back this
-        // test's own fixtures if they were sitting in the still-open outer
-        // transaction opened by initializeTenant() in setUp(). So — unlike
-        // every other test in this class — this one releases that empty
-        // outer transaction up front and cleans up its own rows explicitly
-        // afterwards instead of relying on DatabaseTransactions-style
-        // rollback. See tests/Feature/ManuscriptCalculateTest.php's
-        // "test_the_command_upserts_..." test for the same workaround
-        // against the raw command.
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
+        // DatabaseTransactions wraps this test's default (central `pgsql`)
+        // connection in an outer, uncommitted transaction — but
+        // provisionDisposableTenant()'s CREATE SCHEMA runs on that same
+        // connection, and the migration step right after runs on the
+        // separate `tenant` session, which cannot see an uncommitted DDL
+        // change from a different Postgres session. Committing for real
+        // first (mirroring provisionDisposableTenantAdmin()'s own pattern
+        // below) makes the new schema actually visible cross-session.
+        // tests/Feature/ManuscriptCalculateTest.php never hits this because
+        // it doesn't use DatabaseTransactions at all.
+        if (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->commit();
+        }
 
-        tenancy()->initialize(Tenant::find('swecom'));
-        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
-        $originalRole = TenantUser::query()->where('user_id', $user->id)->value('role');
-        TenantUser::query()->where('user_id', $user->id)->update(['role' => 'admin']);
+        $tenant = $this->provisionDisposableTenant('wmct');
+        $user = $this->provisionDisposableTenantAdmin($tenant, 'admin');
+
+        tenancy()->initialize($tenant);
         $zone = ZoneFactory::new()->create();
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
         tenancy()->end();
 
-        // A fixed, distant-past period rather than "now" — the command
-        // processes every real customer in the tenant schema (small dataset,
-        // ~550 rows), so picking a period nobody else's fixtures touch keeps
-        // this test from colliding with anything meaningful, exactly like
-        // tests/Feature/ManuscriptCalculateTest.php's equivalent command test.
-        $period = '2020-01';
+        $period = Carbon::now()->format('Y-m');
 
         try {
             $response = $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period]);
@@ -150,39 +171,37 @@ class ManuscriptTest extends TestCase
             $response->assertRedirect();
             $response->assertSessionHas('success');
 
-            tenancy()->initialize(Tenant::find('swecom'));
+            tenancy()->initialize($tenant);
             $run = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
             $this->assertSame('pending_review', $run->status, 'the manual trigger must no longer auto-publish.');
-            $this->assertDatabaseMissing('manuscripts', ['customer_id' => $customer->id, 'period' => $period]);
+            $this->assertDatabaseMissing('manuscripts', ['customer_id' => $customer->id, 'period' => $period], 'tenant');
             tenancy()->end();
 
             $publishResponse = $this->actingAs($user)->post("/settings/command-runs/{$run->uuid}/publish");
             $publishResponse->assertRedirect();
             $publishResponse->assertSessionHas('success');
 
-            tenancy()->initialize(Tenant::find('swecom'));
-            $this->assertDatabaseHas('manuscripts', ['customer_id' => $customer->id, 'period' => $period]);
+            tenancy()->initialize($tenant);
+            $this->assertDatabaseHas('manuscripts', ['customer_id' => $customer->id, 'period' => $period], 'tenant');
             $this->assertSame('published', $run->fresh()->status);
+            tenancy()->end();
         } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
+            if (tenancy()->initialized) {
+                tenancy()->end();
             }
 
-            Manuscript::query()->where('period', $period)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-            TenantUser::query()->where('user_id', $user->id)->update(['role' => $originalRole]);
+            $tenant->delete();
+            User::query()->whereKey($user->id)->delete();
 
-            // Leave tenancy initialized with an empty open transaction rather
-            // than ending it here: InteractsWithTenantRoles registers a
-            // beforeApplicationDestroyed callback (see its setUp()) that
-            // unconditionally calls DB::connection('tenant')->transactionLevel()
-            // during teardown — which throws once the connection is purged
-            // by tenancy()->end(). All real cleanup already happened above via
-            // explicit deletes, so this transaction is just a harmless no-op
-            // for that callback to roll back.
-            DB::connection('tenant')->beginTransaction();
+            // DatabaseTransactions' own teardown expects an open transaction
+            // on the default connection — provisionDisposableTenantAdmin()
+            // committed it for real to make the new User row visible
+            // cross-session; this reopens an empty one for the framework to
+            // roll back, the same no-op-cleanup pattern already used for the
+            // `tenant` connection elsewhere in this file.
+            if (DB::connection()->transactionLevel() === 0) {
+                DB::connection()->beginTransaction();
+            }
         }
     }
 
@@ -205,32 +224,37 @@ class ManuscriptTest extends TestCase
      */
     public function test_admin_rerunning_an_already_published_period_is_rejected_without_confirmed_rerun(): void
     {
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
+        // See test_admin_can_run_the_manuscript_calculation's comment on
+        // this same commit — provisionDisposableTenant()'s CREATE SCHEMA
+        // must be committed for real before the migration step (a separate
+        // Postgres session) can see the new schema.
+        if (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->commit();
+        }
 
-        tenancy()->initialize(Tenant::find('swecom'));
-        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
-        $originalRole = TenantUser::query()->where('user_id', $user->id)->value('role');
-        TenantUser::query()->where('user_id', $user->id)->update(['role' => 'admin']);
+        $tenant = $this->provisionDisposableTenant('wmct');
+        $user = $this->provisionDisposableTenantAdmin($tenant, 'admin');
+
+        tenancy()->initialize($tenant);
         $zone = ZoneFactory::new()->create();
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
         tenancy()->end();
 
-        $period = '2020-02';
+        $period = Carbon::now()->format('Y-m');
 
         try {
             $firstResponse = $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period]);
             $firstResponse->assertRedirect();
             $firstResponse->assertSessionHas('success');
 
-            tenancy()->initialize(Tenant::find('swecom'));
+            tenancy()->initialize($tenant);
             $firstRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
             $this->assertSame('pending_review', $firstRun->status);
             tenancy()->end();
 
             $this->actingAs($user)->post("/settings/command-runs/{$firstRun->uuid}/publish")->assertSessionHas('success');
 
-            tenancy()->initialize(Tenant::find('swecom'));
+            tenancy()->initialize($tenant);
             $this->assertSame('published', $firstRun->fresh()->status);
             tenancy()->end();
 
@@ -238,24 +262,24 @@ class ManuscriptTest extends TestCase
             $secondResponse->assertRedirect();
             $secondResponse->assertSessionHasErrors('period');
 
-            tenancy()->initialize(Tenant::find('swecom'));
+            tenancy()->initialize($tenant);
             $this->assertSame(
                 1,
                 CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
                 'a refused rerun must not create a second command_runs row.'
             );
+            tenancy()->end();
         } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
+            if (tenancy()->initialized) {
+                tenancy()->end();
             }
 
-            Manuscript::query()->where('period', $period)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-            TenantUser::query()->where('user_id', $user->id)->update(['role' => $originalRole]);
+            $tenant->delete();
+            User::query()->whereKey($user->id)->delete();
 
-            DB::connection('tenant')->beginTransaction();
+            if (DB::connection()->transactionLevel() === 0) {
+                DB::connection()->beginTransaction();
+            }
         }
     }
 
@@ -270,23 +294,28 @@ class ManuscriptTest extends TestCase
      */
     public function test_admin_can_rerun_an_already_published_period_with_confirmed_rerun_true(): void
     {
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
+        // See test_admin_can_run_the_manuscript_calculation's comment on
+        // this same commit — provisionDisposableTenant()'s CREATE SCHEMA
+        // must be committed for real before the migration step (a separate
+        // Postgres session) can see the new schema.
+        if (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->commit();
+        }
 
-        tenancy()->initialize(Tenant::find('swecom'));
-        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
-        $originalRole = TenantUser::query()->where('user_id', $user->id)->value('role');
-        TenantUser::query()->where('user_id', $user->id)->update(['role' => 'admin']);
+        $tenant = $this->provisionDisposableTenant('wmct');
+        $user = $this->provisionDisposableTenantAdmin($tenant, 'admin');
+
+        tenancy()->initialize($tenant);
         $zone = ZoneFactory::new()->create();
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
         tenancy()->end();
 
-        $period = '2020-03';
+        $period = Carbon::now()->format('Y-m');
 
         try {
             $this->actingAs($user)->post('/manuscripts/calculate', ['period' => $period])->assertSessionHas('success');
 
-            tenancy()->initialize(Tenant::find('swecom'));
+            tenancy()->initialize($tenant);
             $firstRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
             tenancy()->end();
 
@@ -300,24 +329,24 @@ class ManuscriptTest extends TestCase
             $response->assertSessionHas('success');
             $response->assertSessionDoesntHaveErrors();
 
-            tenancy()->initialize(Tenant::find('swecom'));
+            tenancy()->initialize($tenant);
             $this->assertSame(
                 2,
                 CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
                 'confirmed_rerun:true must let a genuinely new run through.'
             );
+            tenancy()->end();
         } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
+            if (tenancy()->initialized) {
+                tenancy()->end();
             }
 
-            Manuscript::query()->where('period', $period)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-            TenantUser::query()->where('user_id', $user->id)->update(['role' => $originalRole]);
+            $tenant->delete();
+            User::query()->whereKey($user->id)->delete();
 
-            DB::connection('tenant')->beginTransaction();
+            if (DB::connection()->transactionLevel() === 0) {
+                DB::connection()->beginTransaction();
+            }
         }
     }
 

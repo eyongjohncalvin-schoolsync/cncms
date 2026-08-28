@@ -58,7 +58,13 @@ class ManuscriptGenerationTaskType implements ScheduledTaskType
 
     public function run(ScheduledTask $task): void
     {
-        $period = Carbon::now()->format('Y-m');
+        // 2026-08-28 correction (business-rules.md section 2): this task
+        // fires near month-end (the admin-configured day_of_month), and the
+        // resulting manuscript governs the NEXT calendar month, not the one
+        // it fires in — see App\Console\Commands\ManuscriptCalculate's
+        // identical comment. addMonthNoOverflow() so a firing on the 29th-
+        // 31st doesn't skip a whole month in a shorter target month.
+        $period = Carbon::now()->addMonthNoOverflow()->format('Y-m');
 
         $this->batches->dispatch($period, scheduledTask: $task, autoPublish: false);
 

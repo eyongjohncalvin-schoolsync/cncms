@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Concerns;
 
 use App\Models\Tenant;
+use App\Models\TenantUser;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Provisions a real, throwaway tenant SCHEMA for tests that must commit
@@ -83,5 +86,56 @@ trait UsesDisposableTenant
             'name' => "Disposable test tenant ({$prefix})",
             'slug' => $id,
         ]);
+    }
+
+    /**
+     * TenantDatabaseSeeder (see its own docblock) seeds only reference data
+     * (zones/expense categories/company) — no admin user — so a test that
+     * needs to authenticate against a disposable tenant has to create one
+     * itself. That's less trivial than it looks: User/TenantUser live on two
+     * genuinely separate Postgres SESSIONS (the central `pgsql` connection
+     * vs. the `tenant` connection Stancl swaps in), so a User row still
+     * sitting inside this test's own uncommitted DatabaseTransactions
+     * wrapper on `pgsql` is invisible to the `tenant` session's FK check
+     * when inserting the matching `tenant_users` row — the exact gap
+     * Tests\Feature\Api\Concerns\InteractsWithTenantRoles::tokenForRole()'s
+     * docblock documents (and sidesteps by reusing an already-committed
+     * seeded user instead of creating a fresh one).
+     *
+     * A disposable tenant has no such pre-existing user to reuse, so this
+     * method takes the other valid way out: commit the central connection's
+     * transaction for real (making the new User row genuinely visible
+     * cross-session), then re-open an empty one before returning, exactly
+     * mirroring how every caller of provisionDisposableTenant() already
+     * leaves the `tenant` connection — `DB::connection('tenant')->
+     * beginTransaction()` — as a harmless no-op for DatabaseTransactions'
+     * own teardown to roll back. The real User row this creates is
+     * committed and durable, so callers MUST delete it themselves once
+     * done (see this method's own return value) — dropping the disposable
+     * tenant's schema in tearDown() only removes the `tenant_users` row
+     * (schema-local); the central `users` row lives outside that schema
+     * entirely and would otherwise leak into every future test run.
+     */
+    private function provisionDisposableTenantAdmin(Tenant $tenant, string $role = 'admin'): User
+    {
+        if (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->commit();
+        }
+
+        $user = User::factory()->create();
+
+        DB::connection()->beginTransaction();
+
+        tenancy()->initialize($tenant);
+
+        TenantUser::query()->create([
+            'user_id' => $user->id,
+            'tenant_id' => $tenant->id,
+            'role' => $role,
+        ]);
+
+        tenancy()->end();
+
+        return $user;
     }
 }

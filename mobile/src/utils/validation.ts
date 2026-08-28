@@ -178,6 +178,68 @@ export function validatePasswordForm(input: PasswordFormInput): PasswordFormResu
     return { valid: true, errors: {} };
 }
 
+// --- Arrears Adjustment request — mobile-app-react-native.md 2026-08-28 addendum ---
+
+const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export interface ArrearsAdjustmentFormInput {
+    targetPeriod: string;
+    amountText: string;
+    reasonNote: string;
+}
+
+export interface ArrearsAdjustmentFormErrors {
+    targetPeriod?: string;
+    amount?: string;
+    reasonNote?: string;
+}
+
+export type ArrearsAdjustmentFormResult =
+    | { valid: true; errors: Record<string, never>; amount: number }
+    | { valid: false; errors: ArrearsAdjustmentFormErrors };
+
+/** Mirrors StoreArrearsAdjustmentRequest::rules() exactly: target_period
+ * must be 'YYYY-MM' and not in the future, amount must be a positive
+ * number, reason_note is required (matches the web modal's own required
+ * "Notes" textarea) — client-side pass only, same "catch the obviously
+ * malformed case before spending a round-trip" scope as
+ * validateExpenditureForm/validateComplaintForm above. direction and
+ * reason_category are chip pickers with a pre-selected default, so they
+ * can never be empty and don't need a validation entry here. */
+export function validateArrearsAdjustmentForm(input: ArrearsAdjustmentFormInput): ArrearsAdjustmentFormResult {
+    const errors: ArrearsAdjustmentFormErrors = {};
+
+    const trimmedPeriod = input.targetPeriod.trim();
+
+    if (!PERIOD_RE.test(trimmedPeriod)) {
+        errors.targetPeriod = 'Enter a valid period as YYYY-MM.';
+    } else {
+        const now = new Date();
+        const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        if (trimmedPeriod > currentPeriod) {
+            errors.targetPeriod = 'The target period cannot be in the future.';
+        }
+    }
+
+    const trimmedAmount = input.amountText.trim();
+    const amount = Number(trimmedAmount);
+
+    if (!trimmedAmount || !Number.isFinite(amount) || amount <= 0) {
+        errors.amount = 'Enter an amount greater than 0.';
+    }
+
+    if (!input.reasonNote.trim()) {
+        errors.reasonNote = 'Explain why this correction is needed — this is a permanent audit record.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+        return { valid: false, errors };
+    }
+
+    return { valid: true, errors: {}, amount };
+}
+
 export function validateExpenditureForm(input: ExpenditureFormInput): ExpenditureFormResult {
     const errors: ExpenditureFormErrors = {};
 

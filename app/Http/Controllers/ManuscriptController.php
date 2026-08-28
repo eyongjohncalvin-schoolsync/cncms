@@ -140,7 +140,10 @@ class ManuscriptController extends Controller
     {
         $this->authorize('calculate', Manuscript::class);
 
-        $period = (string) $request->input('period', now()->format('Y-m'));
+        // 2026-08-28 correction (business-rules.md section 2): triggered
+        // near month-end, this run governs the UPCOMING month, not the one
+        // it's clicked in — see ManuscriptCalculate's identical comment.
+        $period = (string) $request->input('period', now()->addMonthNoOverflow()->format('Y-m'));
 
         // A bad/mistyped period reaching this endpoint previously ran and
         // auto-published billing for the ENTIRE tenant against that literal
@@ -149,9 +152,11 @@ class ManuscriptController extends Controller
         // manuscript rows for every customer, corrupting BillNotificationService's
         // "latest manuscript" for all of them at once. Mirrors
         // StoreArrearsAdjustmentRequest's target_period validation (format +
-        // not-in-the-future) since the same invariant applies here.
-        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
-            return redirect()->back()->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.");
+        // not-in-the-future) since the same invariant applies here — except
+        // "future" now means "beyond the upcoming month", since generating
+        // next month's bill in advance is the NORMAL case, not a mistake.
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->addMonthNoOverflow()->format('Y-m')) {
+            return redirect()->back()->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be beyond next month.");
         }
 
         $validated = $request->validate([
@@ -244,11 +249,14 @@ class ManuscriptController extends Controller
     {
         $this->authorize('calculate', Manuscript::class);
 
-        $period = (string) $request->input('period', now()->format('Y-m'));
+        // Matches calculate()'s own default/guard — this previews who WOULD
+        // be flagged by the run that's about to happen, which governs the
+        // upcoming month (2026-08-28 correction, business-rules.md section 2).
+        $period = (string) $request->input('period', now()->addMonthNoOverflow()->format('Y-m'));
 
-        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->addMonthNoOverflow()->format('Y-m')) {
             return response()->json([
-                'message' => "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.",
+                'message' => "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be beyond next month.",
             ], 422);
         }
 
@@ -285,10 +293,12 @@ class ManuscriptController extends Controller
     {
         $this->authorize('calculate', Manuscript::class);
 
-        $period = (string) $request->input('period', now()->format('Y-m'));
+        // Matches calculate()'s own default/guard — see preRunReview()'s
+        // identical comment (2026-08-28 correction).
+        $period = (string) $request->input('period', now()->addMonthNoOverflow()->format('Y-m'));
 
-        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
-            return redirect()->route('manuscripts.index')->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.");
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->addMonthNoOverflow()->format('Y-m')) {
+            return redirect()->route('manuscripts.index')->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be beyond next month.");
         }
 
         $zoneUuid = $request->string('zone_uuid')->toString() ?: null;

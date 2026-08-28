@@ -193,10 +193,10 @@ straight to the review queue.
 
 ## 7. Deliberately out of scope
 
-- **Mobile.** Confirmed via grep that `mobile/` has zero references to the request/approve/reject
-  workflow (only unrelated arrears-*balance display* on a few screens). This should stay
-  office/web-only — mobile field agents should not be able to write off arrears — and nothing here
-  changes that.
+- **Mobile approve/reject.** The two-approver review/decision workflow stays office/web-only —
+  there is still no way to approve or reject a request from the mobile app, and nothing here changes
+  that. (The mobile *request* side shipped 2026-08-28 — see §10 below; this bullet is scoped
+  narrower than it originally was, which covered mobile entirely.)
 - **No new nav item, no dedicated index page.** The existing customer-page-modal +
   Audit-Log-sub-tab shape already meets "a staff member can create an adjustment and see its
   status," and a full index page would duplicate the Audit Log sub-tab's own paginated/filterable
@@ -296,3 +296,203 @@ call with explicit trigger/context (row exists, correct metadata), the `unspecif
 a full end-to-end `POST /arrears-adjustments/{uuid}/approve` request confirming the resulting
 `command_runs` row carries both the real `arrears_adjustment_id` and the actually-authenticated
 approver's user id.
+
+## 10. Addendum, 2026-08-28: the mobile REQUEST side shipped (still no mobile approve/reject)
+
+Closed the gap §7 used to describe as "mobile — should stay office/web-only." The product owner
+clarified: mobile field agents should be able to *request* a write-off (matching the pattern already
+established for payments/expenditures/complaints — mobile creates, office reviews), just not
+*approve* one — the two-approver review workflow itself is still exclusively web (Audit Log's
+"Arrears Adjustments" sub-tab), unchanged.
+
+**Backend — a new JSON API surface, zero duplicated logic.** `POST /arrears-adjustments` (this doc's
+existing route) was confirmed to be Inertia/web-session-only — `ArrearsAdjustmentController::store()`
+returns a `RedirectResponse` via `back()->with(...)`, not JSON, and there was no `Api\`-namespaced
+counterpart. Added one, mirroring `Api\ComplaintController`'s exact "JSON counterpart of the web
+controller" shape:
+
+- **`POST /api/v1/arrears-adjustments`** — `App\Http\Controllers\Api\ArrearsAdjustmentController::store()`.
+  Reuses `StoreArrearsAdjustmentRequest` (the identical FormRequest the web controller already used —
+  same validation, same `ArrearsAdjustmentPolicy::create()` gate via `authorize()`, so mobile cannot
+  bypass anything the web form enforces) and `ArrearsAdjustmentService::create()` unchanged — no
+  business logic was duplicated or forked. Returns a new `App\Http\Resources\ArrearsAdjustmentResource`
+  (201 Created) instead of a redirect. Registered in its own `routes/api/arrears-adjustments.php`,
+  required from `routes/api.php` alongside `complaints.php`.
+- **Deliberately `store()` only.** No `approve()`/`reject()` JSON routes exist or were added — the
+  controller's own class doc states this explicitly, so a future agent isn't tempted to "complete the
+  CRUD" by adding them. This is the one deliberate, permanent scope boundary of this addendum.
+- **New tests**: `tests/Feature/Api/ArrearsAdjustmentTest.php` — every one of the 5 roles can request
+  via the JSON endpoint (mirroring the existing web test's identical per-role loop), plus the same
+  three validation-rejection cases the web `StoreArrearsAdjustmentRequest` already covered (future
+  target period, blank reason note, non-positive amount) — confirming the API endpoint enforces
+  identically, not a looser copy. Run via `php artisan test --filter=ArrearsAdjustmentTest` (matches
+  both the web and API test classes; all 20 pass, no collision) after confirming no other test process
+  was already running (`Get-CimInstance Win32_Process -Filter "Name='php.exe'"` showed only
+  `artisan serve`).
+
+**Mobile — `app/adjust-arrears/[uuid].tsx`.** A new per-customer, online-only modal route (same shape
+family as `reconnect/[uuid].tsx`/`disconnect/[uuid].tsx`), reachable from Customer Detail
+(`app/(tabs)/customers/[uuid].tsx`)'s "Other actions" cluster as a new, *unconditional* button — unlike
+Disconnect (gated to active/passive status) or WhatsApp (gated to having a phone on file), Adjust
+Arrears has no visibility gate at all, matching `ArrearsAdjustmentPolicy::create()` being ungated for
+every role and every customer status (a disconnected customer's frozen, wrong arrears figure is this
+feature's own central use case per §4 above).
+
+Mirrors `ArrearsAdjustmentModal.tsx`'s fields/copy closely: reason-category chips (6 options),
+direction chips (decrease/increase), a `YYYY-MM` target-period text field pre-filled with the current
+period, an amount field, a required notes field, the identical "This does not record a payment…"
+explanatory note, and the same current-balance/balance-after read-only guidance block (client-side
+`balanceAfter` calc, explicitly labeled "guidance only" — the real figure is only ever set by a real
+`ManuscriptCalculator` run once approved, exactly as on web). The current-arrears figure is fetched
+fresh via the same `fetchCustomerDetail()` call `reconnect`/`disconnect` already use — online-only, no
+offline queue, no local SQLite cache of this figure — for the same reason those two screens give: this
+needs the real current server-side number, not a stale local value.
+
+**Confirmation copy is deliberately NOT "confirmed."** Unlike Reconnect/Disconnect's green
+`synced`-tone success screens (those are immediate, already-applied server changes), this screen's
+success view uses `Badge tone="pending"` with the label "Submitted — pending approval" and body copy
+stating plainly that the customer's balance has not changed yet and still needs office approval — the
+one place this build was most careful not to imply an immediate effect that doesn't exist yet.
+
+**New accent color: `colors.accent.arrears` (`#5B21B6`, violet-800, ~8.98:1 white-on-fill, verified via
+the same relative-luminance script the 2026-08-27 rebrand pass used).** Checked existing tokens first,
+per this app's own convention: the web modal's purple-600 is described in that component's own doc
+comment as "the one genuinely unclaimed color" on `Customers/Show.tsx` *specifically* — a page-local
+choice, not the web nav's own `NAV_ACCENTS.purple` (which is `Agents`, not this feature). On mobile,
+plain purple is already claimed by `colors.accent.expense` (Record Expense / Resources) — reusing it
+for an unrelated feature would blur two feature areas under one hue, against this app's own
+"color used with restraint to mean something specific" rule. Violet is a genuinely distinct,
+previously-unclaimed Tailwind hue family, so a new token was the correct call, not a reuse. Also added
+`arrears: colors.accent.arrears` to `StatCard.tsx`'s `toneColors` map (a mechanical fix — `StatCardTone`
+is derived from `AccentKey`, so adding the new accent key was a required, not optional, follow-up for
+`npx tsc --noEmit` to stay clean; no `StatCard` on this screen actually uses the `arrears` tone yet).
+
+**Not wired into `app/manuscript.tsx`.** Considered per the task brief's explicit invitation, then
+deliberately left out: that screen's own class doc states outright "Rows are deliberately
+non-interactive plain Cards — no drill-down into Customer Detail, no bill-send action; this is a
+glance, not a workflow" — adding a third per-row action there would directly contradict a design
+decision that screen already made for itself, not just lack of room. Customer Detail is the complete,
+single v1 entry point.
+
+**Verification**: `cd mobile && npx tsc --noEmit` — clean except the two pre-existing
+`src/api/devices.ts` errors. `npm test` — 100/100 passing (95 pre-existing + 5 new
+`validateArrearsAdjustmentForm` cases in `src/utils/__tests__/validation.test.ts`).
+
+**Deliberately left out of this pass**: any change to `arrears-adjustment.md`'s own approve/reject
+model, policy, or service code — this addendum is additive (one new controller, one new resource, one
+new route file, one new mobile screen, one new accent token) and touches none of the maker-checker
+logic §2–§6 above describe. See `mobile-app-react-native.md`'s own dated addendum for the mobile-side
+UI/navigation details in full.
+
+## 11. Addendum, 2026-08-28: "Clear all arrears" quick-fill (web + mobile)
+
+Product owner request, verbatim: a faster way to fill the single most common case — writing off a
+customer's ENTIRE current balance — "not that it will eliminate the current implementation... every
+previous implementation remains the same." This is a pure pre-fill convenience on both request
+surfaces. **Nothing about §1–§10 above changed**: every adjustment, however initiated, still lands as
+a `pending` row through the identical `ArrearsAdjustmentService::create()` call, still needs the same
+maker-checker approval, and the request-time `arrears_snapshot` is still always captured fresh,
+server-side, in that same method — regardless of what amount the client happened to send.
+
+- **Web** (`ArrearsAdjustmentModal.tsx`): a new "Clear all arrears (X)" chip rendered above the Amount
+  field, visible only when `customer.manuscript.total_arrears > 0` (hidden — nothing to clear — when
+  it's `0` or the customer has no manuscript yet). `clearAllArrears()` sets `direction: 'decrease'` and
+  `amount: currentBalance` via `setData`'s functional form (matching `Complaints/Create.tsx`'s and
+  `Payments/Create.tsx`'s existing precedent for multi-field updates); `reason_category` and
+  `reason_note` are left exactly as the user already had them — no default note is invented, since a
+  write-off still needs a real justification, and `reason_note` stays a required field on submit.
+  Clicking the chip does not submit; **Submit Request** is still a separate, explicit click.
+- **Mobile** (`mobile/app/adjust-arrears/[uuid].tsx`): an identical chip above the amount field,
+  styled with the same violet accent already established for this screen
+  (`colors.accent.arrears`/`#F3E8FF`, matching `chipActive`'s treatment), sized to the 48dp touch-
+  target floor (not the 56dp primary-action size — this is a secondary convenience, not the screen's
+  main CTA, which stays Submit Request at `size="large"`). `clearAllArrears()` sets `direction` and
+  `amountText` from the screen's existing `currentBalance` state and clears any prior amount
+  validation error.
+
+**Why neither surface added a new "fetch fresh" API call for this feature specifically**: the brief's
+"needs current server truth, don't trust a stale cached figure" principle is already satisfied by each
+surface's *existing* architecture, not by anything new added here —
+
+- Mobile's screen already fetches the customer (and `manuscript.total_arrears`) fresh via
+  `fetchCustomerDetail()` on every focus (see §10 above) specifically because that screen has no other
+  source of customer data; the quick-fill reuses that already-fresh `currentBalance` state rather than
+  issuing a second, redundant fetch.
+- Web's modal receives `customer.manuscript.total_arrears` as an Inertia page prop and already uses
+  that exact same value, unmodified, for its own "Current balance" display line directly below the
+  Amount field — the quick-fill reads from the identical prop, not a separately-cached copy. Building a
+  new live-fetch mechanism into this modal (which has never had one) would have been new
+  architecture the brief did not ask for, and — more importantly — would not have closed any real gap:
+  `ArrearsAdjustmentService::create()` always re-derives `arrears_snapshot` itself, server-side, via
+  `arrearsFor()`, independent of whatever amount the request body carries (§1), and
+  `ArrearsAdjustmentService::approve()`'s staleness re-check (§2) compares against *that* snapshot, not
+  against anything the frontend sent. A quick-filled amount and a hand-typed amount are equally
+  protected by that same server-side check — clicking the chip carries no more (and no less) staleness
+  risk than typing the number by hand already did.
+
+**No backend changes.** No new route, controller method, validation rule, or policy ability — this is
+UI-only on both surfaces, confirmed by re-reading `ArrearsAdjustmentController`,
+`Api\ArrearsAdjustmentController`, `StoreArrearsAdjustmentRequest`, and `ArrearsAdjustmentPolicy`
+unchanged.
+
+## 12. Addendum, 2026-08-28: the audit-trail request — already built, one field wired in
+
+Product owner request, verbatim: "I hope there's a log table for arrears adjustment... for
+auditing... if there's none, assign an agent to work on that feature." Investigated before building
+anything, per the brief's explicit instruction not to assume a gap exists.
+
+**Finding: no new table was needed, and none was built.** `arrears_adjustments` already IS the audit
+log for this feature, and has been reviewable on a real page since before this addendum — §"Where to
+actually use this feature" at the top of this doc, and §6's diagnosis, both already describe the
+**Audit Log page's "Arrears Adjustments" sub-tab** (`/audit/logs?view=arrears_adjustments`,
+`AuditLogController::arrearsAdjustmentsTabData()`, rendered by `Audit/Index.tsx`'s
+`ArrearsAdjustmentsTab`). Before this addendum, that sub-tab already showed, per row: date, customer,
+target period, signed amount (direction-aware), reason category, requester, both approvers (with the
+first-approval name kept visible even after a second approval supersedes it), status, rejection reason
+when rejected, and inline Approve/Reject actions gated by the same `ArrearsAdjustmentPolicy` used
+everywhere else in this feature (§3) — server-resolved per row via `can_approve`/`can_reject`, never
+re-derived client-side. Separately, because `ArrearsAdjustment use`s the `Auditable` trait (§1), every
+create/approve/reject transition on this table *also* already flows into the general `audit_logs`
+table and is visible, filterable, and expandable (old/new values) on the same page's "All Activity"
+tab — a second, independent trail that already existed and needed no changes here either.
+
+**The one genuine gap, closed**: the sub-tab's table showed the adjustment's *amount and direction*
+(the delta) but not the customer's arrears balance immediately *before* the change — the one piece
+needed to answer "what changed" without opening a separate customer page. `arrears_snapshot` (§1) was
+already captured on every row for an unrelated reason (the approval-time staleness re-check) but was
+never surfaced to this payload. Fixed by:
+
+- `AuditLogController::arrearsAdjustmentsTabData()` now includes `arrears_snapshot` in each row's
+  payload (one new array key — no query shape change, the column was already selected as part of the
+  Eloquent model).
+- `resources/tsx/types/index.ts`'s `ArrearsAdjustmentAuditRow` gained the matching `arrears_snapshot:
+  string` field.
+- `Audit/Index.tsx` gained a new **Balance** column (via a small `BalanceChange` component) between
+  Amount and Reason, showing the "before" figure always, and a "before → after" figure **only for
+  `status === 'approved'` rows** — deliberately not for pending/rejected ones, since
+  `arrears_snapshot ± amount` is only the real, already-applied resulting `total_arrears` for
+  `target_period` once §2's approval flow has actually run `ManuscriptCalculator` against it (§4); for
+  anything not yet approved, showing a computed "after" figure would misrepresent this table's own
+  "what actually happened" contract as a projection, so those rows only ever display the stored
+  "before" value. (A guidance-only preview of what the request *would* do already exists separately,
+  unchanged, in the request form itself — `ArrearsAdjustmentModal`'s own `balanceAfter` calc.)
+
+**Gating**: unchanged — the whole Audit Log page, both tabs, stays behind `AuditLogPolicy::viewAny()`
+(`super`/`admin`/`manager` only). No new permission or gate was added for this addendum; the new
+column is just one more field on a payload already restricted the same way every other field on that
+page already is.
+
+**Verification note**: this addendum's backend touches one controller method (a single added array
+key, no new query) and no service/model/migration code, and the frontend touches one new small
+presentational component plus one type addition — reviewed by re-reading every changed file in full,
+but the backend PHP test suite could not be *executed* in this pass: a leaked session from an earlier,
+unrelated agent run (`idle in transaction` for 45+ minutes, blocking a stuck `DROP SCHEMA ... CASCADE`
+and, transitively, ordinary `SELECT`s against `public.users`) had the shared Postgres instance
+genuinely gridlocked for the entirety of this work, confirmed via `pg_stat_activity` before and after
+attempting a bounded test run. Per this task's own instructions, that session was left untouched rather
+than force-terminated. `tests/Feature/Web/ArrearsAdjustmentTest.php`'s existing audit-tab assertion
+(`test_the_audit_log_arrears_adjustments_tab_lists_pending_and_decided_requests_with_stats`) only
+asserts the `arrears_adjustments.stats`/`.adjustments.data` keys exist and the row count — it does not
+enumerate row fields, so it was not expected to (and structurally cannot) break from the new
+`arrears_snapshot` key. A follow-up pass should re-run
+`php artisan test --filter=ArrearsAdjustmentTest` once the stuck session has cleared.

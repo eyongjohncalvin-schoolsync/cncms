@@ -4,20 +4,19 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
-use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
-use App\Models\Tenant;
-use App\Models\Upload;
 use App\Models\User;
-use App\Models\Zone;
 use App\Services\CustomerImportService;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
 
 /**
@@ -36,35 +35,44 @@ use Tests\TestCase;
  * manuscript:calculate` run into manuscripts.total_arrears — not just that
  * the `others` column is mapped to a fillable attribute.
  *
- * Runs the real manuscript:calculate command, which owns its own
- * tenancy()->initialize()/end() lifecycle. Mirrors
- * tests/Feature/ManuscriptCalculateTest.php's
- * test_the_command_upserts_manuscripts_processes_payments_and_logs_a_command_run
- * pattern exactly, including its explicit (non-transactional) fixture
- * cleanup in a finally block: DatabaseTransactions only wraps the default
- * `pgsql` connection, and Stancl's tenancy()->end() purges (disconnects)
- * the dynamically-created `tenant` connection, which would silently roll
- * back any fixtures still sitting in an open transaction on it. So, like
- * that test, this one does real (uncommitted-transaction) writes against
- * the real swecom tenant schema and cleans them up itself afterwards.
+ * 2026-08-28 incident this closes: this file used to initialize tenancy
+ * against the REAL `swecom` tenant and run manuscript:calculate against it
+ * directly, cleaning up only its own single imported customer's manuscript
+ * row afterward — never the ~445 OTHER real customers the unscoped command
+ * also wrote a period='2026-06' row for on every green run. Traced (2026-
+ * 08-28, task-scheduler.md addendum) as the source of 892 real manuscript
+ * rows (periods 2026-05/06, no command_runs audit trail) bulk-inserted
+ * against real swecom weeks after the fact — the same incident class as
+ * the two files already fixed 2026-08-27 and the third fixed earlier today
+ * (ManuscriptCalculateTest.php). Converted to UsesDisposableTenant — see
+ * tests/Feature/Web/ManuscriptTest.php's identical pattern/reasoning,
+ * including the "commit before provisioning" fix DatabaseTransactions
+ * requires (its CREATE SCHEMA runs on the same connection DatabaseTransactions
+ * wraps in an outer, uncommitted transaction — invisible to the separate
+ * `tenant` session the migration step then needs to see it from).
  */
 class CustomerImportSeedsManuscriptArrearsTest extends TestCase
 {
     use DatabaseTransactions;
+    use UsesDisposableTenant;
 
     public function test_a_customer_imported_with_a_seeded_others_balance_carries_it_into_their_first_manuscript(): void
     {
-        $tenant = Tenant::find('swecom');
-        $this->assertNotNull($tenant, 'The swecom tenant must already be provisioned to run this test.');
+        if (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->commit();
+        }
 
-        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $tenant = $this->provisionDisposableTenant('cismat');
+        $user = $this->provisionDisposableTenantAdmin($tenant, 'admin');
 
         Storage::fake('local');
 
-        tenancy()->initialize($tenant);
-
-        $zone = ZoneFactory::new()->create(['name' => 'MANIMP ZONE']);
-
+        // Built before tenancy()->initialize(): Stancl's filesystem
+        // bootstrapper rewrites storage_path() to a per-tenant directory
+        // once tenancy is active, and unlike real swecom (which already has
+        // one from normal use), a brand-new disposable tenant has no
+        // storage/<tenant>/app/ directory on disk yet — writing here first
+        // avoids that entirely.
         $file = $this->buildSpreadsheet([[
             'name' => 'Manuscript Import Customer',
             'phone' => '677123456',
@@ -78,13 +86,16 @@ class CustomerImportSeedsManuscriptArrearsTest extends TestCase
             'status' => 'active',
         ]]);
 
+        tenancy()->initialize($tenant);
+
+        $zone = ZoneFactory::new()->create(['name' => 'MANIMP ZONE']);
+
         $result = app(CustomerImportService::class)->import($file, $user);
 
         $this->assertCount(1, $result['succeeded']);
         $this->assertSame([], $result['failed']);
 
         $customer = Customer::query()->where('name', 'Manuscript Import Customer')->firstOrFail();
-        $uploadUuid = $result['upload_uuid'];
 
         // Before manuscript:calculate: the seed balance landed exactly on
         // customers.others, untouched.
@@ -92,12 +103,12 @@ class CustomerImportSeedsManuscriptArrearsTest extends TestCase
 
         tenancy()->end();
 
-        $period = '2026-06';
+        $period = Carbon::now()->format('Y-m');
 
         try {
             $this->artisan('manuscript:calculate', [
                 'period' => $period,
-                '--tenant' => 'swecom',
+                '--tenant' => $tenant->id,
             ])->assertExitCode(0);
 
             tenancy()->initialize($tenant);
@@ -117,18 +128,18 @@ class CustomerImportSeedsManuscriptArrearsTest extends TestCase
             $this->assertEqualsWithDelta(6500.0, (float) $manuscript->total_arrears, 0.001);
             $this->assertEqualsWithDelta(0.0, (float) $manuscript->credit, 0.001);
             $this->assertEqualsWithDelta(9000.0, (float) $manuscript->total_bill, 0.001);
+            tenancy()->end();
         } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize($tenant);
+            if (tenancy()->initialized) {
+                tenancy()->end();
             }
 
-            Manuscript::query()->where('customer_id', $customer->id)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Upload::query()->where('uuid', $uploadUuid)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
+            $tenant->delete();
+            User::query()->whereKey($user->id)->delete();
 
-            tenancy()->end();
+            if (DB::connection()->transactionLevel() === 0) {
+                DB::connection()->beginTransaction();
+            }
         }
     }
 

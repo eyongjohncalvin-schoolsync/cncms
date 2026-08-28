@@ -104,9 +104,24 @@ class CustomerManuscriptRecalculationService
             $asOf,
         );
 
+        // command_run_id is explicitly cleared (not left at whatever a prior
+        // manuscript:calculate bulk run set it to) — task-scheduler.md's
+        // 2026-08-28 manuscript-run-management addendum's Delete/Rollback
+        // action deletes manuscripts rows by matching command_run_id back to
+        // the bulk run that (over)wrote them. A row this method touches has
+        // since been individually recalculated by a DIFFERENT, more
+        // authoritative mechanism (an approved arrears adjustment) — it must
+        // no longer be attributed to that original bulk run, or rolling that
+        // run back later would silently delete a legitimate, newer
+        // correction it had nothing to do with. This service's own
+        // command_runs row (command='manuscript:recalculate-one', created
+        // below) is deliberately NOT the new attribution either — that
+        // command has no batch/review lifecycle and rollback() only ever
+        // targets command='manuscript:calculate' rows (mirrors
+        // ManuscriptController::runReview()'s same command-scoping guard).
         $manuscript = Manuscript::query()
             ->firstOrNew(['customer_id' => $customer->id, 'period' => $period])
-            ->fill($result->toManuscriptAttributes());
+            ->fill([...$result->toManuscriptAttributes(), 'command_run_id' => null]);
         $manuscript->save();
 
         foreach ($result->processedPayments as $payment) {

@@ -241,30 +241,46 @@ export default function CustomerDetailScreen() {
               happens, only how strongly this entry point competes for
               attention against Record Payment. See Button's 'dangerOutline'
               variant for the lower-emphasis treatment.
+
+              2026-08-28: "Adjust Arrears" added to this same cluster — the
+              mobile REQUEST side of the maker-checker write-off workflow
+              (arrears-adjustment.md). Unlike Disconnect/WhatsApp above, it
+              is never conditionally hidden: ArrearsAdjustmentPolicy::create()
+              is ungated for every role and every customer status (a
+              disconnected customer's frozen, wrong arrears figure is
+              exactly this feature's central use case — see that doc's
+              section 4), so there's no "canAdjustArrears" gate to mirror
+              here, matching how the web modal renders unconditionally on
+              Customers/Show.tsx too.
             */}
-            {canDisconnect || customer.phone ? (
-                <View style={styles.secondaryActions}>
-                    <Text style={styles.secondaryActionsLabel}>Other actions</Text>
+            <View style={styles.secondaryActions}>
+                <Text style={styles.secondaryActionsLabel}>Other actions</Text>
 
-                    {customer.phone ? (
-                        <Button
-                            title={sendingWhatsapp ? 'Preparing…' : 'Send Bill via WhatsApp'}
-                            loading={sendingWhatsapp}
-                            disabled={sendingWhatsapp}
-                            onPress={handleSendBillWhatsapp}
-                            style={styles.whatsappButton}
-                        />
-                    ) : null}
+                {customer.phone ? (
+                    <Button
+                        title={sendingWhatsapp ? 'Preparing…' : 'Send Bill via WhatsApp'}
+                        loading={sendingWhatsapp}
+                        disabled={sendingWhatsapp}
+                        onPress={handleSendBillWhatsapp}
+                        style={styles.whatsappButton}
+                    />
+                ) : null}
 
-                    {canDisconnect ? (
-                        <Button
-                            title="Disconnect this customer"
-                            variant="dangerOutline"
-                            onPress={() => router.push(`/disconnect/${uuid}`)}
-                        />
-                    ) : null}
-                </View>
-            ) : null}
+                <Button
+                    title="Adjust Arrears"
+                    variant="secondary"
+                    onPress={() => router.push(`/adjust-arrears/${uuid}`)}
+                    style={styles.arrearsButton}
+                />
+
+                {canDisconnect ? (
+                    <Button
+                        title="Disconnect this customer"
+                        variant="dangerOutline"
+                        onPress={() => router.push(`/disconnect/${uuid}`)}
+                    />
+                ) : null}
+            </View>
         </ScrollView>
     );
 }
@@ -305,4 +321,9 @@ const styles = StyleSheet.create({
     // see colors.whatsapp's doc comment for why it's the darker AAA-safe
     // teal rather than WhatsApp's brighter brand green.
     whatsappButton: { backgroundColor: colors.whatsapp },
+    // 'secondary' variant (light fill, dark text) with a violet border laid
+    // on top — ties this action to the new colors.accent.arrears identity
+    // without needing a whole new Button variant just for one screen's
+    // entry point.
+    arrearsButton: { borderColor: colors.accent.arrears },
 });

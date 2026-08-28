@@ -86,6 +86,16 @@ class AuditLogController extends Controller
     }
 
     /**
+     * This IS the arrears-adjustment audit trail the product owner asked for
+     * (2026-08-28 addendum) — `arrears_adjustments` already carries every
+     * fact a real audit needs (requester, both approvers + timestamps,
+     * outcome, and — via `arrears_snapshot`, added below — the customer's
+     * arrears balance immediately before the change), so this stays a
+     * wiring task against the sub-tab that already existed, not a new
+     * table. `arrears_snapshot` is the one field this row shape was missing
+     * for "what changed" to be answerable from the table alone, without
+     * clicking into a row; see Audit/Index.tsx's rendering of it.
+     *
      * @return array{stats: array{pending_approval: int, applied_this_month: int, total_written_off: string}, adjustments: array{data: array<int, array<string, mixed>>, links: array<int, array{url: ?string, label: string, active: bool}>, meta: array{current_page: int, per_page: int, total: int, last_page: int}}}
      */
     private function arrearsAdjustmentsTabData(Request $request): array
@@ -98,6 +108,7 @@ class AuditLogController extends Controller
             'target_period' => $adjustment->target_period,
             'direction' => $adjustment->direction,
             'amount' => $adjustment->amount,
+            'arrears_snapshot' => $adjustment->arrears_snapshot,
             'reason_category' => $adjustment->reason_category,
             'reason_note' => $adjustment->reason_note,
             'status' => $adjustment->status,

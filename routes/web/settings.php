@@ -39,6 +39,11 @@ Route::post('settings/command-runs/{run}/publish', [SettingsCommandRunController
 // 2026-08-27 security-review rationale.
 Route::post('settings/command-runs/{run}/cancel', [SettingsCommandRunController::class, 'cancel'])->name('settings.command-runs.cancel');
 
+// Delete/rollback a run against the current, still-mutable period — see
+// SettingsCommandRunController::rollback()'s doc comment for the full
+// 2026-08-28 manuscript-run-management rationale.
+Route::post('settings/command-runs/{run}/rollback', [SettingsCommandRunController::class, 'rollback'])->name('settings.command-runs.rollback');
+
 // Language switcher (resources/tsx/layouts/AppLayout.tsx) — updates the
 // caller's own `users.locale`, available to every authenticated tenant
 // member regardless of role (unlike the routes above, which are

@@ -87,6 +87,20 @@ export const colors = {
         // empty (the same "calm until actually urgent" rule the sync strip
         // follows).
         complaint: '#86198F', // fuchsia-800 (was fuchsia-700 #A21CAF, ~6.32:1 — AA only) — now ~8.24:1
+        // Arrears Adjustment (2026-08-28) — mirrors the web app's own
+        // "Adjust Arrears" modal, which uses purple-600 as, per that
+        // component's own doc comment, "the one genuinely unclaimed color"
+        // on Customers/Show.tsx specifically (a page-local choice, not tied
+        // to the web nav's own NAV_ACCENTS 'purple' = Agents assignment).
+        // On mobile, plain purple is already claimed by `expense` above
+        // (Record Expense / Resources) — reusing it here would blur two
+        // unrelated feature areas under one hue, against this app's own
+        // "color used with restraint to mean something specific" rule (see
+        // this file's 2026-08-27 rebrand comment). `violet` is a genuinely
+        // distinct, still-unclaimed Tailwind hue family (sits between
+        // indigo and purple) — verified white-on-fill via the same
+        // relative-luminance formula the rebrand pass used, not eyeballed.
+        arrears: '#5B21B6', // violet-800, ~8.98:1 white-on-fill (AAA)
     },
 
     // Status semantics — used by Badge/StatusPill and the sync strip.

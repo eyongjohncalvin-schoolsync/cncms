@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateComplaintForm, validateExpenditureForm, validatePasswordForm, validateProfileForm } from '../validation';
+import {
+    validateArrearsAdjustmentForm,
+    validateComplaintForm,
+    validateExpenditureForm,
+    validatePasswordForm,
+    validateProfileForm,
+} from '../validation';
 
 test('rejects a missing description — mobile is deliberately stricter than the web form', () => {
     const result = validateExpenditureForm({
@@ -244,4 +250,61 @@ test('password form: accepts a fully valid change', () => {
     const result = validatePasswordForm({ currentPassword: 'password', newPassword: 'newpass123', confirmPassword: 'newpass123' });
 
     assert.equal(result.valid, true);
+});
+
+// --- validateArrearsAdjustmentForm — 2026-08-28 addendum ---
+
+test('arrears adjustment form: rejects a malformed target period', () => {
+    const result = validateArrearsAdjustmentForm({ targetPeriod: '2026-8', amountText: '1000', reasonNote: 'Billing error found in the field.' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.targetPeriod);
+    }
+});
+
+test('arrears adjustment form: rejects a future target period', () => {
+    const now = new Date();
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const futurePeriod = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`;
+
+    const result = validateArrearsAdjustmentForm({ targetPeriod: futurePeriod, amountText: '1000', reasonNote: 'Should be rejected.' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.targetPeriod);
+    }
+});
+
+test('arrears adjustment form: rejects a zero or negative amount', () => {
+    const zero = validateArrearsAdjustmentForm({ targetPeriod: '2026-08', amountText: '0', reasonNote: 'Some note.' });
+    const negative = validateArrearsAdjustmentForm({ targetPeriod: '2026-08', amountText: '-500', reasonNote: 'Some note.' });
+
+    assert.equal(zero.valid, false);
+    assert.equal(negative.valid, false);
+    if (!zero.valid) {
+        assert.ok(zero.errors.amount);
+    }
+});
+
+test('arrears adjustment form: rejects a blank reason note', () => {
+    const result = validateArrearsAdjustmentForm({ targetPeriod: '2026-08', amountText: '1000', reasonNote: '   ' });
+
+    assert.equal(result.valid, false);
+    if (!result.valid) {
+        assert.ok(result.errors.reasonNote);
+    }
+});
+
+test('arrears adjustment form: accepts a fully valid form and returns the parsed amount', () => {
+    const result = validateArrearsAdjustmentForm({
+        targetPeriod: '2026-08',
+        amountText: '2500.50',
+        reasonNote: 'Goodwill credit for a multi-day outage.',
+    });
+
+    assert.equal(result.valid, true);
+    if (result.valid) {
+        assert.equal(result.amount, 2500.5);
+    }
 });

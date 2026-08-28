@@ -40,6 +40,7 @@ export default function SyncStatusScreen() {
     const [persistedLastSyncAt, setPersistedLastSyncAt] = useState<string | null>(null);
     const [items, setItems] = useState<PendingItem[]>([]);
     const [loaded, setLoaded] = useState(false);
+    const [forceRefreshing, setForceRefreshing] = useState(false);
 
     const refresh = useCallback(async () => {
         const [queuedPayments, queuedExpenditures, customers, categories, storedLastSyncAt] = await Promise.all([
@@ -92,6 +93,21 @@ export default function SyncStatusScreen() {
     // the agent is looking at it, not just on first open.
     useEffect(() => subscribeSyncState(() => void refresh()), [refresh]);
 
+    // Distinct from the ordinary "Sync now" button/queuingProgress-driven
+    // isSyncing below: a force-full-refresh pull is invisible to
+    // syncingProgress (that's only ever set inside push() for queued
+    // outbox items — see SyncManager.push()), so a dedicated local loading
+    // flag is the only way this button can show its own busy state.
+    const handleForceRefresh = useCallback(async () => {
+        setForceRefreshing(true);
+
+        try {
+            await syncManager.forceFullResync();
+        } finally {
+            setForceRefreshing(false);
+        }
+    }, []);
+
     const lastSyncAt = liveState.lastSyncAt ?? persistedLastSyncAt;
     const failedItems = items.filter((item) => item.failed);
     const pendingItems = items.filter((item) => !item.failed);
@@ -113,6 +129,17 @@ export default function SyncStatusScreen() {
                     loading={isSyncing}
                     style={styles.syncButton}
                 />
+                <Button
+                    title={forceRefreshing ? 'Refreshing…' : 'Force full refresh'}
+                    onPress={() => void handleForceRefresh()}
+                    loading={forceRefreshing}
+                    variant="secondary"
+                    style={styles.forceRefreshButton}
+                />
+                <Text style={styles.forceRefreshHint}>
+                    Re-downloads every customer's bill and arrears figures from the server, even ones
+                    "Sync now" would skip. Use this if a customer's balance looks out of date.
+                </Text>
             </Card>
 
             {failedItems.length > 0 ? (
@@ -164,6 +191,8 @@ const styles = StyleSheet.create({
     lastSyncValue: { fontSize: fontSize.xxl, fontWeight: '800', color: colors.textPrimary, marginTop: spacing.xs },
     lastSyncHint: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.xs },
     syncButton: { marginTop: spacing.lg },
+    forceRefreshButton: { marginTop: spacing.sm },
+    forceRefreshHint: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: spacing.xs },
     section: { gap: spacing.sm },
     sectionTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     emptyHint: { fontSize: fontSize.sm, color: colors.textSecondary },

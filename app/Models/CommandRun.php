@@ -11,9 +11,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * @property string $status 'queued'|'pending_review'|'published'|'failed' — see the
+ * @property string $status 'queued'|'pending_review'|'published'|'failed'|'rolled_back' — see the
  *                           2026_08_25_200010_add_scheduling_fields_to_command_runs_table
- *                           migration's docblock for the full state meaning.
+ *                           migration's docblock for the full state meaning,
+ *                           and SettingsCommandRunController::rollback() for
+ *                           'rolled_back' (added 2026-08-28, plain string
+ *                           column — status has no DB check constraint to
+ *                           extend).
  * @property array<string, mixed>|null $computed_result The durable, per-customer
  *                           computed result set a chunked batch run writes (see
  *                           App\Jobs\ComputeManuscriptChunkJob /
@@ -63,5 +67,30 @@ class CommandRun extends Model
     public function isQueued(): bool
     {
         return $this->status === 'queued';
+    }
+
+    public function isRolledBack(): bool
+    {
+        return $this->status === 'rolled_back';
+    }
+
+    /**
+     * The manuscript-run-management feature's (task-scheduler.md's
+     * 2026-08-28 addendum) Delete/Rollback action is offered for any status
+     * that could plausibly have written real `manuscripts` rows under this
+     * run's `command_run_id` — 'pending_review' (computed, awaiting
+     * publish — deletes zero rows today since only publish() writes
+     * `manuscripts`, but the action is still meaningful: it discards the
+     * computed result and frees the period), 'published' (the normal case —
+     * real rows exist), and 'failed' (a CLI run can fail partway through
+     * `runForEveryCustomer()`'s per-customer loop after already committing
+     * some customers' rows before the fatal exception — those partial rows
+     * are real and deletable too). Excludes 'queued' (that is Cancel's job,
+     * not Rollback's — a queued run has never written a `manuscripts` row)
+     * and 'rolled_back' (terminal; already done).
+     */
+    public function isRollbackable(): bool
+    {
+        return in_array($this->status, ['pending_review', 'published', 'failed'], true);
     }
 }

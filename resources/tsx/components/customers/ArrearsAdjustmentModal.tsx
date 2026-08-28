@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useMemo, useState } from 'react';
 import { useForm } from '@inertiajs/react';
-import { IconScale } from '@tabler/icons-react';
+import { IconEraser, IconScale } from '@tabler/icons-react';
 import { Modal } from '@/components/ui/Modal';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { TextInput } from '@/components/ui/TextInput';
@@ -52,6 +52,13 @@ function currentPeriod(): string {
  * Index.tsx needs a compact per-row pill, not this component's own
  * full-size purple button. Omitting it (Customers/Show.tsx, Payments/
  * Show.tsx) renders that original button exactly as before.
+ *
+ * The "Clear all arrears" chip above the Amount field (2026-08-28 addendum)
+ * is a pure convenience — it pre-fills direction=decrease and
+ * amount=the customer's current arrears figure, then stops; every field
+ * remains editable and Submit Request is still a separate, explicit step.
+ * It changes nothing about how a request is created, reviewed, or applied —
+ * see clearAllArrears() below.
  */
 export function ArrearsAdjustmentModal({
     customer,
@@ -92,6 +99,28 @@ export function ArrearsAdjustmentModal({
 
         return data.direction === 'decrease' ? Math.max(0, balance - amount) : balance + amount;
     }, [currentBalance, data.amount, data.direction]);
+
+    // "Clear all arrears" quick-fill — a faster path to the single most
+    // common case (writing off the customer's ENTIRE current balance),
+    // added per the product owner's explicit "faster, not that it will
+    // eliminate the current implementation" request. Pre-fills
+    // direction+amount only; reason_category and reason_note are left for
+    // the user to fill in (a write-off still needs a real justification —
+    // no default note is invented), and this never submits on its own.
+    // Uses the same `customer.manuscript.total_arrears` figure already
+    // shown as this modal's own "Current balance" line below — not a
+    // separately-fetched value — because the approval-time staleness
+    // re-check (ArrearsAdjustmentService::approve()) always re-derives the
+    // true current figure server-side from a fresh arrears_snapshot taken
+    // at request time regardless of what amount the form sends, exactly the
+    // same safety net a hand-typed amount already relies on.
+    function clearAllArrears() {
+        if (currentBalance === null) {
+            return;
+        }
+
+        setData((current) => ({ ...current, direction: 'decrease', amount: currentBalance }));
+    }
 
     function close() {
         reset();
@@ -167,6 +196,17 @@ export function ArrearsAdjustmentModal({
                             required
                         />
                     </div>
+
+                    {currentBalance !== null && Number(currentBalance) > 0 && (
+                        <button
+                            type="button"
+                            onClick={clearAllArrears}
+                            className="inline-flex w-fit items-center justify-center gap-1.5 rounded-full border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 transition-colors hover:bg-purple-100"
+                        >
+                            <IconEraser size={14} stroke={1.75} />
+                            Clear all arrears ({formatCurrency(currentBalance)})
+                        </button>
+                    )}
 
                     <TextInput
                         id="amount"

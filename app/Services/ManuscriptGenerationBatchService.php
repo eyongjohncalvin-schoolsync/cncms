@@ -341,9 +341,17 @@ class ManuscriptGenerationBatchService
                     continue;
                 }
 
+                // command_run_id (task-scheduler.md's 2026-08-28 manuscript-run-
+                // management addendum): links this row back to exactly the
+                // command_runs row that wrote it, so Delete/Rollback can scope its
+                // DELETE precisely — never by period alone (see
+                // SettingsCommandRunController::rollback()). Set on every publish,
+                // including a republish of an already-existing row, so the link
+                // always reflects whichever run most recently committed this row's
+                // numbers.
                 Manuscript::query()
                     ->firstOrNew(['customer_id' => (int) $customerId, 'period' => $commandRun->period])
-                    ->fill($entry['attributes'] ?? [])
+                    ->fill([...($entry['attributes'] ?? []), 'command_run_id' => $commandRun->id])
                     ->save();
 
                 $paymentIds = $entry['processed_payment_ids'] ?? [];

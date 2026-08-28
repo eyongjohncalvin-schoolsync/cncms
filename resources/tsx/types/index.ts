@@ -358,6 +358,9 @@ export interface ArrearsAdjustment {
 export interface ArrearsAdjustmentAuditRow extends ArrearsAdjustment {
     customer_uuid: string | null;
     customer_name: string | null;
+    /** The customer's arrears balance for target_period at request time —
+     * the "before" figure. See ArrearsAdjustmentModal's identical field. */
+    arrears_snapshot: string;
     can_approve: boolean;
     can_reject: boolean;
 }
@@ -436,7 +439,7 @@ export interface TenantUserRow {
     is_investor: boolean;
 }
 
-export type CommandRunStatus = 'queued' | 'pending_review' | 'published' | 'failed';
+export type CommandRunStatus = 'queued' | 'pending_review' | 'published' | 'failed' | 'rolled_back';
 
 /**
  * Aggregate stats only (App\Services\ManuscriptGenerationBatchService::
@@ -474,6 +477,8 @@ export interface CommandRunEntry {
     computed_result_summary: CommandRunComputedResultSummary | null;
     batch_progress: CommandRunBatchProgress | null;
     published_at: string | null;
+    /** ManuscriptRunLockService::isPeriodLocked() — true once this run's period has passed. A display hint only; the backend enforces the same check independently on every action. */
+    is_locked: boolean;
 }
 
 /** Settings > Command Runs' manuscript_generation schedule config (task-scheduler.md section 4). */
