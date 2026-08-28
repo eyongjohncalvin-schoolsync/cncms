@@ -326,6 +326,36 @@ After expiration_date:
 - Customer resumes normal monthly billing
 - Previous arrears (if any) reactivate
 
+### 2026-08-28 addendum — v2 baseline + planned move to draw-down credit
+
+**Baseline repair (done).** The v1 register never persisted `payment_expiration`
+on manuscripts, so `ManuscriptImportAugust` seeded every 2026-08 row NULL.
+`manuscript:reconcile-prepaid-baseline` (one-off, safe to delete) backfilled
+`payment_expiration` onto the 22 `tenantswecom` customers whose prepaid window
+still covers 2026-09+, from each customer's latest verified future
+`expiration_date`. Money columns unchanged; a synthetic `published`
+`command_runs` row for 2026-08 (id 1438) now blocks an accidental
+`manuscript:calculate 2026-08` from rebuilding the baseline off `customers.others`.
+5 already-lapsed multi-month payments were left alone (their window is over —
+the customer is billed normally from 2026-09) but still need `processed_period`
+stamped by the payment reconciliation or 2026-09 re-reads their amount as income.
+
+**Direction (owner-approved, NOT yet implemented).** New `months`/`yearly`
+payments should stop setting `expiration_date` and route their full `amount`
+through the normal income path, so the existing ledger draws them down as
+`credit` one month at a time — no freeze branch, no date special-casing. A rate
+change must not shorten already-purchased coverage.
+
+**Blocker.** The cutover is held on a pre-existing ledger defect:
+`total_bill = bill + total_arrears - credit` bills the full amount in the period
+that exhausts a credit exactly (`net == 0`) — so an N-month payment yields only
+N-1 free months. Documented in
+`ManuscriptCalculateTest::test_credit_is_consumed_before_arrears` and
+`::test_a_months_payment_with_no_expiration_date_draws_down_as_credit`. The
+freeze model does not have this bug. Fixing it is a core `ManuscriptCalculator`
+change that needs owner sign-off and a parallel-run verification before the
+draw-down cutover ships. Until then, `months`/`yearly` keep the freeze branch.
+
 ---
 
 ## 8. `others` Field (Initial Balance Seeding)

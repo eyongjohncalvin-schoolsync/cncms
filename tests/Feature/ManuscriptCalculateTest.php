@@ -303,6 +303,42 @@ class ManuscriptCalculateTest extends TestCase
         $this->assertTrue($result2->paymentExpiration->isSameDay(Carbon::parse($payment->expiration_date)));
     }
 
+    public function test_a_months_payment_with_no_expiration_date_draws_down_as_credit(): void
+    {
+        // The draw-down-credit model (prepayment redesign, 2026-08): a
+        // `months`/`yearly` payment that carries NO expiration_date is not a
+        // freeze — it is just a large credit the monthly ledger consumes.
+        // This test pins the CURRENT behaviour so a future cutover has a
+        // baseline: a 6-month (15,000) payment at a 2,500 bill.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id,
+            'bill' => 2500,
+            'others' => 0,
+            'status' => 'active',
+        ]);
+
+        PaymentFactory::new()->months(6, 2500)->create([
+            'customer_id' => $customer->id,
+            'verification_status' => 'verified',
+            'expiration_date' => null,
+        ]);
+
+        $totals = [];
+        foreach (['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'] as $period) {
+            $r = $this->runAndPersist($customer, $period);
+            $this->assertFalse($r->isFrozen, "{$period} must not be a freeze — no expiration_date");
+            $totals[$period] = [(float) $r->credit, (float) $r->totalBill];
+        }
+
+        // KNOWN WART (documented in test_credit_is_consumed_before_arrears):
+        // total_bill = bill + arrears - credit, so the period that exhausts
+        // the credit exactly (net == 0) is billed the full amount anyway.
+        // A 6-month payment therefore yields only 5 free months here, not 6.
+        $this->assertSame(0.0, $totals['2026-05'][1], 'month 5 still covered');
+        $this->assertSame(2500.0, $totals['2026-06'][1], 'month 6 billed — the exhaustion-boundary off-by-one');
+        $this->assertSame(5000.0, $totals['2026-07'][1], 'month 7 billed + month 6 arrears');
+    }
+
     public function test_a_prepaid_customers_freeze_lifts_exactly_on_the_expiration_day(): void
     {
         // business-rules.md #7 / step 3 of the calculation formula: the freeze
