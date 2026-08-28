@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Card } from '../../../src/components/ui/Card';
@@ -46,6 +46,56 @@ function matchesSearch(customer: LocalCustomer, query: string): boolean {
 
     return nameMatch || phoneMatch;
 }
+
+/**
+ * Extracted and wrapped in React.memo (2026-08-28, real-device perf
+ * report: a VirtualizedList "slow to update" warning on this exact
+ * screen, ~8.7s for one update on a ~450-row zone). Before this, `Card`
+ * onPress={() => router.push(...)}` was a fresh arrow function created
+ * inline in `renderItem` on every parent re-render (every keystroke in
+ * search, every focus-triggered refresh) — with `renderItem` itself also
+ * a plain, non-memoized function, FlatList had no way to tell an
+ * unrelated re-render apart from one that actually changed a row's data,
+ * so it re-rendered every visible row every time. A memoized row
+ * component with only true per-row data as props (never the whole
+ * customer array, never a fresh-every-render callback) lets FlatList's
+ * own default `shouldComponentUpdate`-equivalent actually skip rows
+ * whose `item`/`onPress`/`onCall` didn't change.
+ */
+const CustomerRow = memo(function CustomerRow({
+    customer,
+    onPress,
+    onCall,
+}: {
+    customer: LocalCustomer;
+    onPress: (uuid: string) => void;
+    onCall: (phone: string) => void;
+}) {
+    const arrears = arrearsOf(customer);
+
+    return (
+        <Card onPress={() => onPress(customer.uuid)} style={styles.row}>
+            <View style={styles.rowTop}>
+                <View style={styles.nameRow}>
+                    <View
+                        style={[styles.dot, { backgroundColor: STATUS_DOT_COLOR[customer.status] ?? colors.textSecondary }]}
+                    />
+                    <Text style={styles.name} numberOfLines={1}>
+                        {customer.name}
+                    </Text>
+                </View>
+                {arrears > 0 ? <Text style={styles.arrears}>{formatFcfa(arrears)}</Text> : null}
+            </View>
+            {customer.phone ? (
+                <Pressable onPress={() => onCall(customer.phone as string)} hitSlop={8}>
+                    <Text style={styles.phone}>{customer.phone}</Text>
+                </Pressable>
+            ) : (
+                <Text style={styles.phoneMissing}>No phone on file</Text>
+            )}
+        </Card>
+    );
+});
 
 function matchesFilter(customer: LocalCustomer, filter: FilterKey): boolean {
     switch (filter) {
@@ -121,36 +171,24 @@ export default function CustomersScreen() {
         [customers, filter, search],
     );
 
-    function handleCall(phone: string) {
+    // Stable across renders (empty deps — neither reads component state,
+    // `router` itself is stable per expo-router) so CustomerRow's memo
+    // comparison actually holds when unrelated state (search text, filter)
+    // changes — see CustomerRow's own doc comment for why this matters.
+    const handleOpenCustomer = useCallback(
+        (uuid: string) => router.push(`/(tabs)/customers/${uuid}`),
+        [router],
+    );
+    const handleCall = useCallback((phone: string) => {
         void Linking.openURL(`tel:${phone}`);
-    }
+    }, []);
 
-    function renderItem({ item }: { item: LocalCustomer }) {
-        const arrears = arrearsOf(item);
-
-        return (
-            <Card onPress={() => router.push(`/(tabs)/customers/${item.uuid}`)} style={styles.row}>
-                <View style={styles.rowTop}>
-                    <View style={styles.nameRow}>
-                        <View
-                            style={[styles.dot, { backgroundColor: STATUS_DOT_COLOR[item.status] ?? colors.textSecondary }]}
-                        />
-                        <Text style={styles.name} numberOfLines={1}>
-                            {item.name}
-                        </Text>
-                    </View>
-                    {arrears > 0 ? <Text style={styles.arrears}>{formatFcfa(arrears)}</Text> : null}
-                </View>
-                {item.phone ? (
-                    <Pressable onPress={() => handleCall(item.phone as string)} hitSlop={8}>
-                        <Text style={styles.phone}>{item.phone}</Text>
-                    </Pressable>
-                ) : (
-                    <Text style={styles.phoneMissing}>No phone on file</Text>
-                )}
-            </Card>
-        );
-    }
+    const renderItem = useCallback(
+        ({ item }: { item: LocalCustomer }) => (
+            <CustomerRow customer={item} onPress={handleOpenCustomer} onCall={handleCall} />
+        ),
+        [handleOpenCustomer, handleCall],
+    );
 
     return (
         <View style={styles.flex}>
