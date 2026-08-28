@@ -33,8 +33,20 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files — explicit here (not just relying on the repo root
+# .gitignore's bare ".env" pattern matching this directory too, which is
+# how this was actually being protected before 2026-08-28) so this stays
+# safe even if mobile/ is ever split into its own repo or committed from
+# a tool that doesn't walk up to the parent .gitignore. See .env.example
+# for the one (non-secret, machine-specific) value this holds.
+.env
+.env.local
 .env*.local
+
+# EAS-managed credentials export (only present if this project stops using
+# EAS-managed credentials and runs `eas credentials` in local/manual mode —
+# not in use today, ignored defensively regardless)
+credentials.json
 
 # typescript
 *.tsbuildinfo
