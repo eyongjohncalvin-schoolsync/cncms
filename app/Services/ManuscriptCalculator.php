@@ -153,6 +153,14 @@ final class ManuscriptCalculator
 
         $previousExpiration = $isFirstRun ? null : $previousManuscript->payment_expiration;
 
+        // Draw-down prepayment state carried forward from the prior row
+        // (references/prepayment-drawdown.md). 0 / null for everyone not in a
+        // months/yearly prepaid window.
+        $previousPrepaidMonths = $isFirstRun ? 0 : (int) $previousManuscript->prepaid_months_remaining;
+        $previousPrepaidRate = $isFirstRun || $previousManuscript->prepaid_rate === null
+            ? null
+            : $this->normalize((string) $previousManuscript->prepaid_rate);
+
         $adjustmentNet = $this->adjustmentNet($eligibleAdjustments);
         $processedAdjustments = $eligibleAdjustments->values();
 
@@ -172,6 +180,11 @@ final class ManuscriptCalculator
                 frozenReason: $customer->status,
                 processedPayments: new Collection,
                 processedAdjustments: $processedAdjustments,
+                // PD-8: a frozen customer does NOT consume prepaid months —
+                // carry the window forward untouched so it is all still there
+                // on reconnection.
+                prepaidMonthsRemaining: $previousPrepaidMonths,
+                prepaidRate: $previousPrepaidRate,
             );
         }
 
@@ -199,6 +212,120 @@ final class ManuscriptCalculator
                 frozenReason: 'prepaid',
                 processedPayments: $expiringPayments->values(),
                 processedAdjustments: $processedAdjustments,
+                // A legacy (pre-cutover) prepaid customer could in principle
+                // also carry a draw-down window from a later payment — pass
+                // it through untouched, same as the status-freeze branch.
+                prepaidMonthsRemaining: $previousPrepaidMonths,
+                prepaidRate: $previousPrepaidRate,
+            );
+        }
+
+        // --- Draw-down prepayment branch (references/prepayment-drawdown.md) ---
+        // A months/yearly payment with NO expiration_date is a post-cutover
+        // draw-down prepayment: it buys N whole billing periods at the rate
+        // in effect when it was made, and the account carries a
+        // prepaid_months_remaining counter. A covered period is not charged
+        // the monthly bill at all (so a later rate change is irrelevant —
+        // PD-3); total_bill shows only outstanding old debt.
+        $drawdownPayments = $eligibleVerifiedPayments->filter(
+            fn (Payment $payment): bool => in_array($payment->frequency, ['months', 'yearly'], true)
+                && $payment->expiration_date === null,
+        );
+
+        if ($previousPrepaidMonths > 0 || $drawdownPayments->isNotEmpty()) {
+            $arrears = $previousArrears;
+            $credit = $previousCredit;
+            $prepaidMonths = $previousPrepaidMonths;
+            $prepaidRate = $previousPrepaidRate;
+
+            // 1. Absorb each new prepayment (Q1 toggle handled per payment).
+            foreach ($drawdownPayments as $payment) {
+                $amount = $this->normalize((string) $payment->amount);
+                $rate = $this->normalize((string) ($payment->prepaid_rate ?? $customer->bill));
+                $intendedMonths = $payment->frequency === 'yearly' ? 12 : (int) ($payment->months ?? 0);
+
+                if ($payment->clear_arrears_first) {
+                    $outstanding = $this->compare($arrears, $credit) > 0 ? $this->sub($arrears, $credit) : '0.00';
+                    $cleared = $this->compare($amount, $outstanding) < 0 ? $amount : $outstanding;
+                    $arrears = $this->sub($arrears, $cleared);
+                    if ($this->compare($arrears, '0.00') < 0) {
+                        $arrears = '0.00';
+                    }
+                    $spendable = $this->sub($amount, $cleared);
+                    $monthsBought = $this->wholeMonths($spendable, $rate);
+                } else {
+                    $spendable = $amount;
+                    $monthsBought = min($intendedMonths, $this->wholeMonths($spendable, $rate));
+                }
+
+                $prepaidMonths += $monthsBought;
+                // Anything the whole months didn't consume is loose credit,
+                // drawn at the current rate once the window ends (Q3).
+                $credit = $this->add($credit, $this->sub($spendable, $this->mul((string) $monthsBought, $rate)));
+                if ($this->compare($rate, '0.00') > 0) {
+                    $prepaidRate = $rate;
+                }
+            }
+
+            // 2. Any other eligible payment this period is ordinary income
+            //    against the debt/credit ledger — a customer paying down old
+            //    arrears while prepaid.
+            $otherIncome = $eligibleVerifiedPayments
+                ->reject(fn (Payment $payment): bool => $drawdownPayments->contains($payment))
+                ->reduce(
+                    fn (string $carry, Payment $payment): string => $this->add($carry, $this->normalize((string) $payment->amount)),
+                    '0.00',
+                );
+
+            // 3. Net position WITHOUT this period's monthly charge when a
+            //    prepaid month covers it; WITH it when the window is already
+            //    empty (a new prepayment too small to buy a whole month).
+            $coveredThisPeriod = $prepaidMonths > 0;
+            $chargeThisPeriod = $coveredThisPeriod ? '0.00' : $billDue;
+
+            $net = $this->add(
+                $this->add($this->sub($arrears, $credit), $this->sub($chargeThisPeriod, $otherIncome)),
+                $adjustmentNet,
+            );
+            [$totalArrears, $creditOut] = $this->splitNet($net);
+
+            if ($coveredThisPeriod) {
+                $prepaidMonths -= 1;
+            }
+            if ($prepaidMonths <= 0) {
+                $prepaidRate = null;
+            }
+
+            // Covered period: total_bill is outstanding debt only, no buffer
+            // (they are prepaid). Uncovered edge: fall back to the normal
+            // formula (bill + arrears - credit).
+            $totalBill = $coveredThisPeriod
+                ? $totalArrears
+                : $this->add($billDue, $this->sub($totalArrears, $creditOut));
+            if ($this->compare($totalBill, '0.00') < 0) {
+                $totalBill = '0.00';
+            }
+
+            return new ManuscriptCalculationResult(
+                bill: $billDue,
+                totalArrears: $totalArrears,
+                credit: $creditOut,
+                totalBill: $totalBill,
+                // Draw-down never writes payment_expiration — that field is
+                // the LEGACY freeze branch's carry-forward and re-triggers it
+                // on the next period if set. The "covered through" date is
+                // derived for display from prepaid_months_remaining instead
+                // (register PDF, API, pre-run review).
+                paymentExpiration: null,
+                income: $otherIncome,
+                adjustmentNet: $adjustmentNet,
+                isFirstRun: $isFirstRun,
+                isFrozen: $coveredThisPeriod,
+                frozenReason: $coveredThisPeriod ? 'prepaid' : null,
+                processedPayments: $eligibleVerifiedPayments->values(),
+                processedAdjustments: $processedAdjustments,
+                prepaidMonthsRemaining: max(0, $prepaidMonths),
+                prepaidRate: $prepaidRate,
             );
         }
 
@@ -297,5 +424,24 @@ final class ManuscriptCalculator
     private function compare(string $a, string $b): int
     {
         return bccomp($a, $b, self::SCALE);
+    }
+
+    private function mul(string $a, string $b): string
+    {
+        return bcmul($a, $b, self::SCALE);
+    }
+
+    /**
+     * How many whole billing periods `$amount` buys at `$rate`
+     * (references/prepayment-drawdown.md — draw-down months are whole, no
+     * proration). A non-positive rate buys nothing.
+     */
+    private function wholeMonths(string $amount, string $rate): int
+    {
+        if ($this->compare($rate, '0.00') <= 0 || $this->compare($amount, $rate) < 0) {
+            return 0;
+        }
+
+        return (int) bcdiv($amount, $rate, 0);
     }
 }

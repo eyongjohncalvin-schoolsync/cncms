@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'period', 'command_run_id'])]
+#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'period', 'command_run_id'])]
 #[RouteKey('uuid')]
 class Manuscript extends Model
 {
@@ -24,6 +24,8 @@ class Manuscript extends Model
             'total_arrears' => 'decimal:2',
             'credit' => 'decimal:2',
             'total_bill' => 'decimal:2',
+            'prepaid_months_remaining' => 'integer',
+            'prepaid_rate' => 'decimal:2',
             // `date:Y-m-d`, not bare `date`: the bare cast serializes to a
             // full ISO-8601 datetime ("2026-12-29T00:00:00.000000Z") in
             // Inertia props / API responses, which then renders raw in the

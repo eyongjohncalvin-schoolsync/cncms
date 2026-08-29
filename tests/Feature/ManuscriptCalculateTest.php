@@ -303,40 +303,169 @@ class ManuscriptCalculateTest extends TestCase
         $this->assertTrue($result2->paymentExpiration->isSameDay(Carbon::parse($payment->expiration_date)));
     }
 
-    public function test_a_months_payment_with_no_expiration_date_draws_down_as_credit(): void
+    /**
+     * Creates a post-cutover draw-down prepayment: a months/yearly payment
+     * with NO expiration_date and a locked prepaid_rate
+     * (references/prepayment-drawdown.md).
+     */
+    private function drawdownPayment(Customer $customer, int $months, float $rate, bool $clearArrearsFirst = false, ?float $amount = null): Payment
     {
-        // The draw-down-credit model (prepayment redesign, 2026-08): a
-        // `months`/`yearly` payment that carries NO expiration_date is not a
-        // freeze — it is just a large credit the monthly ledger consumes.
-        // This test pins the CURRENT behaviour so a future cutover has a
-        // baseline: a 6-month (15,000) payment at a 2,500 bill.
-        $customer = CustomerFactory::new()->create([
-            'zone_id' => $this->zone()->id,
-            'bill' => 2500,
-            'others' => 0,
-            'status' => 'active',
-        ]);
-
-        PaymentFactory::new()->months(6, 2500)->create([
+        return PaymentFactory::new()->create([
             'customer_id' => $customer->id,
-            'verification_status' => 'verified',
+            'amount' => $amount ?? $rate * $months,
+            'frequency' => $months === 12 ? 'yearly' : 'months',
+            'months' => $months,
             'expiration_date' => null,
+            'prepaid_rate' => $rate,
+            'clear_arrears_first' => $clearArrearsFirst,
+            'verification_status' => 'verified',
         ]);
+    }
 
-        $totals = [];
-        foreach (['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'] as $period) {
+    public function test_a_drawdown_prepayment_covers_exactly_n_months(): void
+    {
+        // The N-1 trap: routed through the normal ledger a 6-month payment
+        // covered only 5 months. The dedicated draw-down branch covers
+        // exactly 6, tracked by prepaid_months_remaining.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500);
+
+        $expected = [
+            '2026-01' => 5, '2026-02' => 4, '2026-03' => 3,
+            '2026-04' => 2, '2026-05' => 1, '2026-06' => 0,
+        ];
+        foreach ($expected as $period => $remaining) {
             $r = $this->runAndPersist($customer, $period);
-            $this->assertFalse($r->isFrozen, "{$period} must not be a freeze — no expiration_date");
-            $totals[$period] = [(float) $r->credit, (float) $r->totalBill];
+            $this->assertEqualsWithDelta(0.0, (float) $r->totalBill, 0.001, "{$period} is a covered month — total_bill 0");
+            $this->assertSame($remaining, $r->prepaidMonthsRemaining, "{$period} remaining months");
         }
 
-        // KNOWN WART (documented in test_credit_is_consumed_before_arrears):
-        // total_bill = bill + arrears - credit, so the period that exhausts
-        // the credit exactly (net == 0) is billed the full amount anyway.
-        // A 6-month payment therefore yields only 5 free months here, not 6.
-        $this->assertSame(0.0, $totals['2026-05'][1], 'month 5 still covered');
-        $this->assertSame(2500.0, $totals['2026-06'][1], 'month 6 billed — the exhaustion-boundary off-by-one');
-        $this->assertSame(5000.0, $totals['2026-07'][1], 'month 7 billed + month 6 arrears');
+        // Window exhausted — first billed month resumes normal billing.
+        $r7 = $this->runAndPersist($customer, '2026-07');
+        $this->assertFalse($r7->isFrozen);
+        $this->assertSame(0, $r7->prepaidMonthsRemaining);
+        $this->assertEqualsWithDelta(5000.0, (float) $r7->totalBill, 0.001);
+    }
+
+    public function test_a_drawdown_prepaid_customer_is_unaffected_by_a_bill_rate_change(): void
+    {
+        // PD-3 / owner ruling: a rate change never touches a customer inside
+        // a prepaid window — a covered month is not charged at all.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500);
+
+        $this->runAndPersist($customer, '2026-01');
+        $this->runAndPersist($customer, '2026-02');
+
+        $customer->update(['bill' => 3000]); // rate hike mid-window
+
+        foreach (['2026-03', '2026-04', '2026-05', '2026-06'] as $period) {
+            $r = $this->runAndPersist($customer, $period);
+            $this->assertEqualsWithDelta(0.0, (float) $r->totalBill, 0.001, "{$period} still covered at the paid rate");
+        }
+
+        // Only now does the new rate apply.
+        $r7 = $this->runAndPersist($customer, '2026-07');
+        $this->assertEqualsWithDelta(6000.0, (float) $r7->totalBill, 0.001); // 3000 bill + 3000 arrears
+    }
+
+    public function test_stacking_a_second_drawdown_prepayment_adds_months_at_the_new_rate(): void
+    {
+        // PD-5 / Q2: the second payment's months add to the counter and
+        // re-lock prepaid_rate to the newer rate.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 3, 2500);
+
+        $this->runAndPersist($customer, '2026-01'); // remaining 2
+        $this->runAndPersist($customer, '2026-02'); // remaining 1
+
+        $customer->update(['bill' => 3000]);
+        $this->drawdownPayment($customer, 6, 3000); // 18,000
+
+        $r3 = $this->runAndPersist($customer, '2026-03');
+        $this->assertSame(6, $r3->prepaidMonthsRemaining, '1 carried + 6 new, minus this period');
+        $this->assertSame('3000.00', $r3->prepaidRate);
+        $this->assertEqualsWithDelta(0.0, (float) $r3->totalBill, 0.001);
+
+        foreach (['2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09'] as $period) {
+            $this->assertEqualsWithDelta(0.0, (float) $this->runAndPersist($customer, $period)->totalBill, 0.001);
+        }
+        $this->assertEqualsWithDelta(6000.0, (float) $this->runAndPersist($customer, '2026-10')->totalBill, 0.001);
+    }
+
+    public function test_drawdown_overpayment_becomes_credit_drawn_at_the_current_rate(): void
+    {
+        // Q3: amount beyond N*rate is ordinary credit, spent at the current
+        // rate once the prepaid months are gone.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500, amount: 20000); // 5,000 over
+
+        for ($m = 1; $m <= 6; $m++) {
+            $r = $this->runAndPersist($customer, sprintf('2026-%02d', $m));
+            $this->assertEqualsWithDelta(0.0, (float) $r->totalBill, 0.001);
+            $this->assertEqualsWithDelta(5000.0, (float) $r->credit, 0.001, 'overpay held as loose credit through the window');
+        }
+
+        $r7 = $this->runAndPersist($customer, '2026-07');
+        $this->assertEqualsWithDelta(0.0, (float) $r7->totalBill, 0.001, 'credit covers month 7');
+        $this->assertEqualsWithDelta(2500.0, (float) $r7->credit, 0.001);
+    }
+
+    public function test_drawdown_clear_arrears_first_toggle(): void
+    {
+        // Q1: ON pays down arrears then buys fewer months; OFF leaves the
+        // debt standing and buys the full N.
+        $on = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+        $off = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+
+        foreach ([$on, $off] as $c) {
+            $this->runAndPersist($c, '2026-01');
+            $this->runAndPersist($c, '2026-02'); // arrears 5,000 each
+        }
+
+        $this->drawdownPayment($on, 6, 2500, clearArrearsFirst: true);   // 15,000: 5k clears debt, 10k = 4 months
+        $this->drawdownPayment($off, 6, 2500, clearArrearsFirst: false); // 15,000: 6 months, 5k debt stays
+
+        $rOn = $this->runAndPersist($on, '2026-03');
+        $this->assertEqualsWithDelta(0.0, (float) $rOn->totalArrears, 0.001, 'debt cleared');
+        $this->assertSame(3, $rOn->prepaidMonthsRemaining, '4 bought minus this period');
+        $this->assertEqualsWithDelta(0.0, (float) $rOn->totalBill, 0.001);
+
+        $rOff = $this->runAndPersist($off, '2026-03');
+        $this->assertEqualsWithDelta(5000.0, (float) $rOff->totalArrears, 0.001, 'debt still standing');
+        $this->assertSame(5, $rOff->prepaidMonthsRemaining, 'full 6 bought minus this period');
+        $this->assertEqualsWithDelta(5000.0, (float) $rOff->totalBill, 0.001, 'old debt shows; no new monthly charge');
+    }
+
+    public function test_a_drawdown_prepaid_customer_keeps_their_months_across_disconnection(): void
+    {
+        // PD-8: a frozen customer does not consume prepaid months.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500);
+
+        $this->runAndPersist($customer, '2026-01'); // remaining 5
+        $this->runAndPersist($customer, '2026-02'); // remaining 4
+
+        $customer->update(['status' => 'disconnected']);
+        $d3 = $this->runAndPersist($customer, '2026-03');
+        $d4 = $this->runAndPersist($customer, '2026-04');
+        $this->assertSame(4, $d3->prepaidMonthsRemaining, 'disconnected — no month consumed');
+        $this->assertSame(4, $d4->prepaidMonthsRemaining);
+        $this->assertEqualsWithDelta(0.0, (float) $d4->totalBill, 0.001);
+
+        $customer->update(['status' => 'active']);
+        $r5 = $this->runAndPersist($customer, '2026-05');
+        $this->assertSame(3, $r5->prepaidMonthsRemaining, 'reconnected — window resumes with all 4 still there');
     }
 
     public function test_a_prepaid_customers_freeze_lifts_exactly_on_the_expiration_day(): void
