@@ -83,6 +83,9 @@ export interface SyncPushPaymentItem {
     credit?: number | null;
     frequency: PaymentFrequency;
     months?: number | null;
+    /** Draw-down Q1 — agent's "pay down arrears first" toggle for a
+     * months/yearly prepayment (references/prepayment-drawdown.md). */
+    clear_arrears_first?: boolean | null;
     created_at?: string | null;
 }
 
@@ -277,6 +280,11 @@ export interface CustomerManuscriptSummary {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    /** Draw-down (references/prepayment-drawdown.md): whole billing periods
+     * still covered by a months/yearly prepayment, and the rate it was
+     * bought at. 0 / null for a customer not in a prepaid window. */
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
 }
 
@@ -427,6 +435,9 @@ export interface ManuscriptListItemApi {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    /** Draw-down prepaid window state — see CustomerManuscriptSummary. */
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
     status: string;
 }

@@ -312,6 +312,8 @@ class SyncManagerImpl {
             credit: payment.credit,
             frequency: payment.frequency,
             months: payment.months,
+            // SQLite stores this as 0/1; coerce for the JSON payload.
+            clear_arrears_first: !!payment.clear_arrears_first,
             created_at: payment.created_at,
         }));
 

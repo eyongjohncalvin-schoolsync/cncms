@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS payments (
     credit                  REAL NOT NULL DEFAULT 0,
     frequency               TEXT NOT NULL,
     months                  INTEGER,
+    clear_arrears_first     INTEGER NOT NULL DEFAULT 0,
     verification_status     TEXT NOT NULL DEFAULT 'pending',
     rejection_reason        TEXT,
     receipt_local_uri       TEXT,
@@ -165,6 +166,9 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN credit REAL' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_local_uri TEXT' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_server_path TEXT' },
+    // Draw-down (references/prepayment-drawdown.md Q1): the agent's
+    // "pay down arrears first" toggle on a months/yearly prepayment.
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN clear_arrears_first INTEGER NOT NULL DEFAULT 0' },
 ];
 
 /**

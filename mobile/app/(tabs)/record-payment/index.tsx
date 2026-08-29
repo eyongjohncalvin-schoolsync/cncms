@@ -103,6 +103,7 @@ export default function RecordPaymentScreen() {
     const [amount, setAmount] = useState('');
     const [frequency, setFrequency] = useState<PaymentFrequency>('monthly');
     const [months, setMonths] = useState('');
+    const [clearArrearsFirst, setClearArrearsFirst] = useState(false);
     const [creditExpanded, setCreditExpanded] = useState(false);
     const [credit, setCredit] = useState('');
     const [receiptUri, setReceiptUri] = useState<string | null>(null);
@@ -235,6 +236,7 @@ export default function RecordPaymentScreen() {
         setAmount('');
         setFrequency('monthly');
         setMonths('');
+        setClearArrearsFirst(false);
         setCredit('');
         setCreditExpanded(false);
         setReceiptUri(null);
@@ -294,6 +296,10 @@ export default function RecordPaymentScreen() {
                 credit: credit.trim() === '' ? 0 : Number(credit),
                 frequency,
                 months: frequency === 'months' ? validation.monthsValue : null,
+                clear_arrears_first:
+                    (frequency === 'months' || frequency === 'yearly') && (customer.total_arrears ?? 0) > 0
+                        ? clearArrearsFirst
+                        : false,
                 receipt_local_uri: receiptUri,
             });
 
@@ -601,6 +607,25 @@ export default function RecordPaymentScreen() {
                     />
                 ) : null}
 
+                {/* 5b. Clear-arrears-first — only for a prepayment against a
+                    customer who owes (draw-down Q1). */}
+                {(frequency === 'months' || frequency === 'yearly') && arrears > 0 ? (
+                    <Pressable
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: clearArrearsFirst }}
+                        onPress={() => setClearArrearsFirst((value) => !value)}
+                        style={styles.checkboxRow}
+                        hitSlop={6}
+                    >
+                        <View style={[styles.checkbox, clearArrearsFirst && styles.checkboxChecked]}>
+                            {clearArrearsFirst ? <Text style={styles.checkboxTick}>{'✓'}</Text> : null}
+                        </View>
+                        <Text style={styles.checkboxLabel}>
+                            Clear the {formatFcfa(arrears)} arrears first, then buy prepaid months with the rest
+                        </Text>
+                    </Pressable>
+                ) : null}
+
                 {/* 6. Credit — optional, collapsed under a disclosure */}
                 <Pressable
                     accessibilityRole="button"
@@ -653,6 +678,21 @@ export default function RecordPaymentScreen() {
 
 const styles = StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
+
+    checkboxRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: spacing.xs },
+    checkbox: {
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 1,
+    },
+    checkboxChecked: { backgroundColor: colors.accent.payment, borderColor: colors.accent.payment },
+    checkboxTick: { color: colors.background, fontSize: fontSize.sm, fontWeight: '900', lineHeight: fontSize.sm + 2 },
+    checkboxLabel: { flex: 1, fontSize: fontSize.sm, color: colors.textPrimary, lineHeight: fontSize.sm + 6 },
     centerFlex: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
     content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
 
