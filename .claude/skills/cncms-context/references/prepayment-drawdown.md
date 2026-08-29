@@ -5,21 +5,21 @@ Status: **In progress** (branch `prepayment-drawdown-credit`). Owner decision
 handling of `months`/`yearly` in `business-rules.md` §7; retires
 `prepaid-pause-handling.md` (§9).
 
-**Done (committed, calculator verified by a direct in-memory trace — the
-disposable-tenant test suite could not be run to completion this session, DB
-under load):**
-- §10 step 1 — schema (`manuscripts.prepaid_months_remaining` / `prepaid_rate`,
-  `payments.prepaid_rate` / `clear_arrears_first`) + the draw-down branch in
-  `ManuscriptCalculator` + 6 tests.
+**Done (committed; owner ran `tenants:migrate` — swecom data verified unchanged):**
+- §10 step 1 — schema + draw-down branch in `ManuscriptCalculator`.
+  `ManuscriptCalculateTest` **25/25**.
 - §10 step 2 — `PaymentService` locks `prepaid_rate`, stops writing
   `expiration_date`; `clear_arrears_first` plumbed web + offline sync.
-- Resources/controllers/TS types emit the prepaid state; pre-run review rule 3
-  updated; mobile Record Payment has the Q1 toggle.
+  `PaymentTest` (api + web) **61/61**.
+- Resources/controllers/TS types emit the prepaid state; pre-run review rule 3;
+  mobile **and web** Record Payment have the Q1 toggle + split preview.
+- §10 step 5 (display) — register PDF + `Manuscripts/Index` / `Customers/Show`
+  derive the "covered through" label from the counter
+  (`lib/prepaidCoverageLabel.ts`).
 
-**Not done:** §10 steps 3–6 — parallel-run verification, the swecom migration of
-the 22, and the display polish (register PDF + `Manuscripts/Index` /
-`Customers/Show` "N months left"; the web payment-form toggle + split preview).
-Run the `ManuscriptCalculateTest` suite once the DB is healthy.
+**Not done:** §10 step 3 (parallel-run verification on a non-swecom tenant),
+step 4 (seed the counter for swecom's 22 currently-prepaid customers), step 6
+(delete the legacy freeze branch once the last legacy `expiration_date` lapses).
 
 Note: the "boundary bug" first flagged as a prerequisite is NOT a standalone fix
 — see §7. The normal step-5 formula is unchanged; `total_bill = 0` during a
