@@ -24,7 +24,14 @@ class Manuscript extends Model
             'total_arrears' => 'decimal:2',
             'credit' => 'decimal:2',
             'total_bill' => 'decimal:2',
-            'payment_expiration' => 'date',
+            // `date:Y-m-d`, not bare `date`: the bare cast serializes to a
+            // full ISO-8601 datetime ("2026-12-29T00:00:00.000000Z") in
+            // Inertia props / API responses, which then renders raw in the
+            // Manuscripts "Expiry" column and Customers/Show. The PHP-side
+            // value is still a Carbon instance either way (ManuscriptCalculator,
+            // CustomerStatusService, the PDF register's ->format('M y') are
+            // unaffected) — only the JSON shape changes, to a plain date.
+            'payment_expiration' => 'date:Y-m-d',
         ];
     }
 

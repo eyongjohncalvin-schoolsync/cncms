@@ -27,6 +27,7 @@ import { StatusBadge, VerificationBadge, ArrearsAdjustmentStatusBadge } from '@/
 import { CustomerStatusActions } from '@/components/customers/CustomerStatusActions';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { formatMonthYear } from '@/lib/formatMonthYear';
 import type { CustomerDetail } from '@/types';
 
 function initials(name: string): string {
@@ -54,7 +55,7 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
             arrears: formatCurrency(customer.manuscript.total_arrears),
             credit: formatCurrency(customer.manuscript.credit),
             totalBill: formatCurrency(customer.manuscript.total_bill),
-            expires: customer.manuscript.payment_expiration ?? '—',
+            expires: formatMonthYear(customer.manuscript.payment_expiration),
         };
     }, [customer.manuscript]);
 
