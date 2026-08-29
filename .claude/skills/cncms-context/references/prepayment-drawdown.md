@@ -1,13 +1,29 @@
 # Prepayment as Draw-Down Credit — Design Spec
 
-Status: **Approved, rulings complete, ready to implement.** Owner decision
-2026-08-29 following a two-round design deliberation. All four open questions
-resolved (§8). This supersedes the "freeze branch" handling of `months`/`yearly`
-payments in `business-rules.md` §7 and retires `prepaid-pause-handling.md` (§9).
-First implementation step is §10 step 1 — schema + the draw-down branch, one PR.
-Note (2026-08-29): the "boundary bug" first flagged as a prerequisite is NOT a
-standalone fix — see §7. The normal step-5 formula stays as-is; `total_bill = 0`
-during a prepaid window is a property of the new branch.
+Status: **In progress** (branch `prepayment-drawdown-credit`). Owner decision
+2026-08-29, all four rulings folded in (§8). Supersedes the freeze-branch
+handling of `months`/`yearly` in `business-rules.md` §7; retires
+`prepaid-pause-handling.md` (§9).
+
+**Done (committed, calculator verified by a direct in-memory trace — the
+disposable-tenant test suite could not be run to completion this session, DB
+under load):**
+- §10 step 1 — schema (`manuscripts.prepaid_months_remaining` / `prepaid_rate`,
+  `payments.prepaid_rate` / `clear_arrears_first`) + the draw-down branch in
+  `ManuscriptCalculator` + 6 tests.
+- §10 step 2 — `PaymentService` locks `prepaid_rate`, stops writing
+  `expiration_date`; `clear_arrears_first` plumbed web + offline sync.
+- Resources/controllers/TS types emit the prepaid state; pre-run review rule 3
+  updated; mobile Record Payment has the Q1 toggle.
+
+**Not done:** §10 steps 3–6 — parallel-run verification, the swecom migration of
+the 22, and the display polish (register PDF + `Manuscripts/Index` /
+`Customers/Show` "N months left"; the web payment-form toggle + split preview).
+Run the `ManuscriptCalculateTest` suite once the DB is healthy.
+
+Note: the "boundary bug" first flagged as a prerequisite is NOT a standalone fix
+— see §7. The normal step-5 formula is unchanged; `total_bill = 0` during a
+prepaid window is a property of the new branch.
 
 Owner's reasoning, verbatim intent: *"go with the draw-down, it's the best approach
 to avoid long-term problems"* and, on rate changes: *"if some buy six months, then
@@ -71,19 +87,24 @@ This satisfies both owner decisions at once: the money is on one ledger
 
 ### Where the state lives
 
-Carried forward on the manuscript row, the same mechanism `payment_expiration`
-uses today (`ManuscriptCalculator.php:154` reads it off `previousManuscript`):
+Carried forward on the manuscript row:
 
-- `manuscripts.credit` — already exists (`decimal(12,2)`).
-- `manuscripts.prepaid_months_remaining` — **new**, `smallint`, default 0.
-- `manuscripts.prepaid_rate` — **new**, `decimal(12,2)`, nullable (null when
-  `prepaid_months_remaining = 0`).
+- `manuscripts.credit` — already exists (`decimal(12,2)`). Loose money only
+  (overpayment beyond the prepaid months); NOT the prepaid coverage value.
+- `manuscripts.prepaid_months_remaining` — `smallint`, default 0.
+- `manuscripts.prepaid_rate` — `decimal(12,2)`, nullable; null once
+  `prepaid_months_remaining` hits 0. **Reporting / refund only** — a covered
+  month is not charged, so the billing arithmetic never reads it. Deferred
+  revenue = `Σ prepaid_months_remaining · prepaid_rate`.
 
-`payment_expiration` becomes a **derived display value** only — recomputed each run
-as roughly `end-of-period + prepaid_months_remaining months` — kept so the register
-PDF and the API keep showing a "covered through" date. Nothing reads it back as
-logic. `payments.frequency` / `payments.months` stay as the record of what was
-bought; `payments.expiration_date` stops being written for new payments.
+**The draw-down branch must NOT write `manuscripts.payment_expiration`** — that
+field is the *legacy* freeze branch's carry-forward, and any value in it
+re-triggers that branch on the next period (this bit us during implementation).
+`payment_expiration` stays null for draw-down customers. The "covered through
+MMM YY" date is derived for display from `prepaid_months_remaining + period`
+(register PDF / API / frontend — a not-yet-done follow-up, §10 step 5).
+`payments.frequency` / `payments.months` stay as the record of what was bought;
+`payments.expiration_date` stops being written for new payments.
 
 ---
 
