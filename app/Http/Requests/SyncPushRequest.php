@@ -45,6 +45,7 @@ class SyncPushRequest extends FormRequest
             'changes.payments.*.credit' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
             'changes.payments.*.frequency' => ['required', 'string', 'in:monthly,yearly,months'],
             'changes.payments.*.months' => ['nullable', 'integer', 'min:1'],
+            'changes.payments.*.clear_arrears_first' => ['nullable', 'boolean'],
             'changes.payments.*.created_at' => ['nullable', 'date'],
 
             'changes.expenditures' => ['nullable', 'array'],

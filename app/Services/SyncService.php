@@ -293,6 +293,7 @@ class SyncService
                 'credit' => $item['credit'] ?? null,
                 'frequency' => $item['frequency'] ?? null,
                 'months' => $item['months'] ?? null,
+                'clear_arrears_first' => $item['clear_arrears_first'] ?? null,
                 'recorded_offline' => true,
                 'recorded_by_device' => $deviceId,
                 'local_uuid' => $localUuid,
