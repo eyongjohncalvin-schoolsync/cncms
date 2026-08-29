@@ -52,7 +52,7 @@ class CustomerResource extends JsonResource
                 'total_arrears' => $this->latestManuscript->total_arrears,
                 'credit' => $this->latestManuscript->credit,
                 'total_bill' => $this->latestManuscript->total_bill,
-                'payment_expiration' => $this->latestManuscript->payment_expiration,
+                'payment_expiration' => $this->latestManuscript->payment_expiration?->toDateString(),
                 'period' => $this->latestManuscript->period,
             ] : null),
             'recent_payments' => $this->whenLoaded('payments', fn () => $this->payments->map(fn ($payment) => [

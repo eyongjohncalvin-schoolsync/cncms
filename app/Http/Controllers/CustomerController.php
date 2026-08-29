@@ -460,7 +460,7 @@ class CustomerController extends Controller
                 'total_arrears' => $customer->latestManuscript->total_arrears,
                 'credit' => $customer->latestManuscript->credit,
                 'total_bill' => $customer->latestManuscript->total_bill,
-                'payment_expiration' => $customer->latestManuscript->payment_expiration,
+                'payment_expiration' => $customer->latestManuscript->payment_expiration?->toDateString(),
                 'period' => $customer->latestManuscript->period,
             ] : null,
             'recent_payments' => $customer->payments->map(fn (Payment $payment) => $this->shapePayment($payment))->all(),

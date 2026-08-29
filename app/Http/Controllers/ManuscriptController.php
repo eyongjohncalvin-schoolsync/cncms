@@ -61,7 +61,7 @@ class ManuscriptController extends Controller
             'total_arrears' => $manuscript->total_arrears,
             'credit' => $manuscript->credit,
             'total_bill' => $manuscript->total_bill,
-            'payment_expiration' => $manuscript->payment_expiration,
+            'payment_expiration' => $manuscript->payment_expiration?->toDateString(),
             'period' => $manuscript->period,
             'status' => $manuscript->customer->status,
             // Built from THIS row's own manuscript (not necessarily the
