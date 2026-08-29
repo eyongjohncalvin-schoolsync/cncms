@@ -4,7 +4,10 @@ Status: **Approved, rulings complete, ready to implement.** Owner decision
 2026-08-29 following a two-round design deliberation. All four open questions
 resolved (§8). This supersedes the "freeze branch" handling of `months`/`yearly`
 payments in `business-rules.md` §7 and retires `prepaid-pause-handling.md` (§9).
-First implementation step is the §7 boundary-bug fix (its own PR); then §10.
+First implementation step is §10 step 1 — schema + the draw-down branch, one PR.
+Note (2026-08-29): the "boundary bug" first flagged as a prerequisite is NOT a
+standalone fix — see §7. The normal step-5 formula stays as-is; `total_bill = 0`
+during a prepaid window is a property of the new branch.
 
 Owner's reasoning, verbatim intent: *"go with the draw-down, it's the best approach
 to avoid long-term problems"* and, on rate changes: *"if some buy six months, then
@@ -226,25 +229,30 @@ covered months, not six.
 
 ---
 
-## 7. BLOCKER — the ledger exhaustion-boundary bug
+## 7. The "N−1 months" trap — and why it is NOT a standalone fix
 
 `total_bill = bill + total_arrears − credit` (`ManuscriptCalculator.php:217`)
-bills the **full amount** in the period a credit is exhausted exactly (`net == 0`),
-because at that point `credit` has already been spent to 0 and no longer offsets
-the fresh bill. Result: an N-month payment currently yields **N−1** free months.
+deliberately shows a **square customer their upcoming month's bill** — payment
+before service, the customer's slip always names the next month even at zero
+arrears (`business-rules.md` step 5; `test_arrears_accumulate` proves the intent).
+That is correct for a normal monthly customer.
 
-- Confirmed: `ManuscriptCalculateTest::test_a_months_payment_with_no_expiration_date_draws_down_as_credit`.
-- Long acknowledged as a "known wart" in
-  `::test_credit_is_consumed_before_arrears` (see its period-3 comment).
-- The freeze model does not have this bug (dates, not arithmetic), which is why it
-  was tolerable to leave — but draw-down makes it hit **every** prepaid customer.
+The trap: route a multi-month payment through this same normal branch (by nulling
+`expiration_date` and nothing else) and the credit-exhaustion period bills the
+full `bill` — an N-month payment then covers only **N−1** months. Confirmed by
+`ManuscriptCalculateTest::test_a_months_payment_with_no_expiration_date_draws_down_as_credit`.
 
-**Fix direction:** when the customer is square or ahead for the period
-(`net ≤ 0`), `total_bill` must be `0`, not `bill`. This is a small change to one
-formula, but it shifts every credit-exhaustion by a period across the whole
-customer base and every historical recalculation — so it needs the Q4 ruling, a
-before/after diff of the existing arrears/credit tests, and a check of the printed
-bill.
+**This is why nulling `expiration_date` alone is wrong, and why the draw-down
+branch is required.** The draw-down branch (PD-2) sets `total_bill = 0`
+**explicitly** while `prepaid_months_remaining > 0` — those periods never touch
+the step-5 formula, so the boundary is never hit and a 6-month payment covers
+exactly 6 months. Once the counter reaches 0 the customer falls back to the
+normal branch, buffer behaviour and all, unchanged.
+
+So there is **no separate "boundary bug fix"** and no global change to step 5.
+The behaviour Q4 asks for ("a covered month shows 0") is a property of the new
+branch, delivered together with the schema in §10 step 1. Do NOT touch the
+step-5 formula for normal customers.
 
 ---
 
@@ -280,8 +288,9 @@ period where the customer is square or ahead (`net ≤ 0`) bills 0, not `bill`.
 **No retroactive concern:** the owner's standing rule is *no historical
 recalculations* — once a period/payment/manuscript carries a locked marker
 (`prepaid_rate`, a published `command_run`, a locked period) it is **immutable,
-for data integrity**. The boundary fix therefore only has to be correct from the
-cutover forward; it never rewrites a locked past row.
+for data integrity**. Since there is no global step-5 change (§7), locked rows
+are untouched anyway; the draw-down `total_bill = 0` applies only from the
+cutover forward.
 
 ---
 
@@ -302,18 +311,33 @@ cutover forward; it never rewrites a locked past row.
 
 ## 10. Rollout — forward-only, parallel-run verified
 
-1. Fix the §7 boundary bug (own PR, own review, own before/after diff).
-2. Add the two manuscript columns + the payment `prepaid_rate` column (tenant
-   migrations).
-3. New `months`/`yearly` payments stop setting `expiration_date`; start seeding
-   the prepaid counter. Legacy rows keep riding the freeze branch.
-4. **Parallel-run check** against a non-`swecom` tenant (or a disposable schema
-   seeded from real-ish data): run `manuscript:calculate` for several periods both
-   ways, diff the registers, confirm N months = N months and the rate-lock holds.
-5. Migrate the 22 currently-prepaid `swecom` customers: for each, derive
-   `prepaid_months_remaining` from `payment_expiration` vs. now and
-   `prepaid_rate` from the establishing payment; seed onto their current manuscript
-   row via an audited one-off command (like `manuscript:reconcile-prepaid-baseline`).
+1. **Schema + draw-down branch** (one PR):
+   - `manuscripts.prepaid_months_remaining` (smallint, default 0),
+     `manuscripts.prepaid_rate` (decimal 12,2, nullable) — tenant migration.
+   - `payments.prepaid_rate` (decimal, nullable), `payments.clear_arrears_first`
+     (bool, default false) — tenant migration.
+   - `ManuscriptCalculationResult` carries the two new manuscript values.
+   - `ManuscriptCalculator`: a new draw-down branch, entered when the customer
+     has `prepaid_months_remaining > 0` (read off `previousManuscript`) OR an
+     eligible `months`/`yearly` payment this period — charge `prepaid_rate`
+     against `credit`, decrement the counter, `total_bill = 0` (PD-2), apply Q1
+     if `clear_arrears_first`. The legacy `expiration_date` freeze branch stays
+     untouched for pre-cutover payments. No change to the normal branch / step 5.
+   - Tests: N-month payment = N covered months; rate-lock across a mid-window
+     bill change; stacking (PD-5); overpayment → credit (Q3); Q1 both toggles;
+     PD-8 across disconnect/reconnect.
+2. `PaymentService::computeExpirationDate()` returns null for `months`/`yearly`
+   (new payments), and `create()` captures `prepaid_rate` = customer's bill at
+   payment time. `StorePaymentRequest`/`PaymentData` accept `clear_arrears_first`.
+3. **Parallel-run check** against a non-`swecom` tenant (or a disposable schema
+   seeded from real-ish data): run `manuscript:calculate` for several periods,
+   confirm N months = N months and the rate-lock holds.
+4. Migrate the 22 currently-prepaid `swecom` customers: for each, derive
+   `prepaid_months_remaining` from `payment_expiration` vs. now and `prepaid_rate`
+   from the establishing payment; seed onto their current manuscript row via an
+   audited one-off command (like `manuscript:reconcile-prepaid-baseline`).
+5. Frontend: "N months left" line on `Manuscripts/Index` / `Customers/Show`;
+   the `clear_arrears_first` toggle + split preview on the payment form.
 6. Once the last legacy `expiration_date` has lapsed, do the §9 deletions.
 
 **Do not** run `manuscript:calculate` on `swecom` during any of this — the owner
