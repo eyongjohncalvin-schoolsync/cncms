@@ -1,11 +1,10 @@
 # Prepayment as Draw-Down Credit — Design Spec
 
-Status: **Approved direction, not yet implemented.** Owner decision 2026-08-29,
-following a two-round design deliberation (four-agent brainstorm each round). This
-supersedes the "freeze branch" handling of `months`/`yearly` payments in
-`business-rules.md` §7 and makes most of `prepaid-pause-handling.md` unnecessary
-(see §9). Cutover is **blocked** on the ledger boundary bug in §7 until that is
-fixed and the owner rules on the open questions in §8.
+Status: **Approved, rulings complete, ready to implement.** Owner decision
+2026-08-29 following a two-round design deliberation. All four open questions
+resolved (§8). This supersedes the "freeze branch" handling of `months`/`yearly`
+payments in `business-rules.md` §7 and retires `prepaid-pause-handling.md` (§9).
+First implementation step is the §7 boundary-bug fix (its own PR); then §10.
 
 Owner's reasoning, verbatim intent: *"go with the draw-down, it's the best approach
 to avoid long-term problems"* and, on rate changes: *"if some buy six months, then
@@ -89,7 +88,18 @@ bought; `payments.expiration_date` stops being written for new payments.
 
 **PD-1.** A `months`/`yearly` payment credits `amount` to `manuscripts.credit`,
 records `months` prepaid periods, and locks `prepaid_rate` to the customer's bill
-at the moment of payment.
+at the moment of payment. If the payment's `clear_arrears_first` flag is set
+(Q1), `min(amount, previousArrears)` is applied to arrears first and the prepaid
+month count is derived from what's left (`floor(remainder / R)`), remainder to
+credit.
+
+**PD-1a.** Locked state is immutable (Q4): once a period is locked / its
+`command_run` published / a manuscript row carries a `prepaid_rate`, no code path
+rewrites it. Corrections are forward-only — a new payment or an arrears adjustment
+that lands in the current or a future period, never a rewrite of a past one.
+*Reconcile with `RecalculateCustomerManuscriptsForwardJob` during implementation:*
+its forward-replay must start at the earliest **unlocked** period, never re-touch
+a locked row.
 
 **PD-2.** While `prepaid_months_remaining > 0`, each run charges `prepaid_rate`,
 draws it from `credit`, decrements the counter, and sets `total_bill = 0`. The
@@ -197,7 +207,12 @@ covered months, not six.
   and `toManuscriptAttributes()`.
 - **`ManuscriptCalculationResult`** — carry `prepaidMonthsRemaining` /
   `prepaidRate`.
-- **`Payment`** — new nullable `prepaid_rate` column (bill snapshot at payment).
+- **`Payment`** — new nullable `prepaid_rate` column (bill snapshot at payment) +
+  `clear_arrears_first` boolean (Q1, default false, only meaningful for
+  `months`/`yearly`).
+- **`StorePaymentRequest` / `PaymentData` / the payment form** — accept
+  `clear_arrears_first`; the form previews the resulting split (months covered +
+  arrears cleared/remaining) before submit.
 - **`CustomerService::update()` bill change** — no special handling needed (PD-3
   falls out of the locked rate) beyond confirming the calculator ignores
   `customer.bill` while the counter is non-zero.
@@ -233,30 +248,40 @@ bill.
 
 ---
 
-## 8. Open questions for the owner
+## 8. Owner rulings (2026-08-29) — resolved
 
-**Q1 — arrears + exact prepayment.** Customer owes 5,000 arrears, pays exactly
-`15,000` for "6 months". Options:
-- (a) 6 prepaid months stand; the 5,000 arrears waits, reactivating after the
-  window; the bill shows *"arrears 5,000 still outstanding, not covered by
-  prepayment"*. **Recommended** — "6 months" reliably means 6 months.
-- (b) the payment clears the 5,000 arrears first, leaving `10,000` = 4 prepaid
-  months.
+**Q1 — arrears + prepayment → an agent choice at payment time, not a fixed rule.**
+The payment form carries a **"clear outstanding arrears first"** toggle (only shown
+for `months`/`yearly`). The agent sets it in agreement with the customer.
+- **Toggle ON:** the payment first pays down `previousArrears`
+  (`cleared = min(amount, previousArrears)`); the remainder establishes
+  `floor(remainder / R)` prepaid months + any leftover as credit. Fewer prepaid
+  months if the amount didn't also cover the debt.
+- **Toggle OFF (default):** full `amount` → credit + `months` prepaid months; the
+  arrears carry forward untouched and show on the bill as *"arrears X still
+  outstanding, not covered by prepayment"*.
+- The form must **preview the split** before submit — "covers 4 months + clears
+  5,000 arrears" vs "covers 6 months, 5,000 arrears still due" — so the agent and
+  customer see exactly what the toggle does. Store the toggle on the payment
+  (`clear_arrears_first` boolean) for the audit trail.
 
-**Q2 — stacked blocks at different rates.** Customer has 3 prepaid months left at
-2,500, buys 6 more at 3,000. Options:
-- (a) all 9 remaining prepaid months use the newest rate (3,000).
-  **Recommended** — one `prepaid_rate` field, simplest, and the customer chose to
-  renew at the new price.
-- (b) track blocks separately (3 @ 2,500 then 6 @ 3,000) — needs a
-  `prepaid_windows`-style table.
+**Q2 — stacked blocks: single rate.** All remaining prepaid months use the newest
+purchase's rate; `prepaid_rate` is re-locked on each new `months`/`yearly` payment
+(PD-5). One field, no per-block tracking — the owner accepted this as an edge case
+not worth the complexity.
 
-**Q3 — overpayment routing.** `A − N·R > 0` → plain `credit`, drawn at the current
-rate after the prepaid months. **Recommended**, confirm.
+**Q3 — overpayment: ordinary credit.** `amount − N·R > 0` (or the leftover under
+Q1-ON) → plain `credit`, drawn at the current rate once prepaid months are
+exhausted (PD-4). Owner: *"the honest business approach — customers trust the
+system, they're not being cheated."*
 
-**Q4 — boundary-bug semantics.** A period fully covered by credit shows
-`total_bill = 0`. **Recommended**, confirm — this also changes historical
-recalculations.
+**Q4 — a covered period shows `total_bill = 0`.** Fix the §7 boundary bug so a
+period where the customer is square or ahead (`net ≤ 0`) bills 0, not `bill`.
+**No retroactive concern:** the owner's standing rule is *no historical
+recalculations* — once a period/payment/manuscript carries a locked marker
+(`prepaid_rate`, a published `command_run`, a locked period) it is **immutable,
+for data integrity**. The boundary fix therefore only has to be correct from the
+cutover forward; it never rewrites a locked past row.
 
 ---
 
