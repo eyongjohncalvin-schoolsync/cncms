@@ -187,6 +187,18 @@ export interface Customer {
     total_arrears?: string;
     arrears_ratio?: number;
     months_overdue?: number;
+    /**
+     * Customer archiving (customer-deletion deliberation, 2026-08-29).
+     * `has_billing_history` decides "Archive customer" vs "Delete row" in
+     * the list action menu — present on CustomerController::shapeCustomer()
+     * rows (Customers/Index + Show). The archived_* fields are non-null
+     * only for a currently-archived customer (the ?archived=1 view and the
+     * archived detail page).
+     */
+    has_billing_history?: boolean;
+    archived_at?: string | null;
+    archived_by_name?: string | null;
+    archived_reason?: string | null;
 }
 
 export type VerificationStatus = 'pending' | 'verified' | 'rejected';

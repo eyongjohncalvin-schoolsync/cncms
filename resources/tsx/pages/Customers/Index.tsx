@@ -1,6 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
-import { IconCurrencyDollar, IconPlus, IconUpload } from '@tabler/icons-react';
+import { IconArchive, IconCurrencyDollar, IconPlus, IconRestore, IconUpload } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
@@ -16,6 +16,7 @@ import { ImportReportCard } from '@/components/shared/ImportReportCard';
 import { CustomerStatusActions } from '@/components/customers/CustomerStatusActions';
 import { BulkUpdateBillModal } from '@/components/customers/BulkUpdateBillModal';
 import type { BulkBillTarget } from '@/components/customers/BulkUpdateBillModal';
+import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -32,12 +33,14 @@ interface CustomersIndexProps {
     customers: PaginatedResponse<Customer>;
     zones: Zone[];
     filters: CustomersIndexFilters;
+    /** ?archived=1 secondary view — the list shows only archived customers, each with a Restore action. */
+    archived_view: boolean;
 }
 
 const statusOptions: CustomerStatus[] = ['active', 'passive', 'disconnected', 'suspended'];
 const levelOptions: CustomerLevel[] = ['normal', 'Vip', 'Operator'];
 
-export default function CustomersIndex({ customers, zones, filters }: CustomersIndexProps) {
+export default function CustomersIndex({ customers, zones, filters, archived_view: archivedView }: CustomersIndexProps) {
     const { auth, flash } = usePage<PageProps>().props;
     const role = auth.user?.role ?? null;
     // Same super/admin/manager gate as the single-customer edit form
@@ -45,12 +48,16 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
     // the same "can edit customer billing" ability applied to many rows,
     // not a distinct one. See BulkUpdateCustomerBillRequest::authorize().
     const canBulkUpdateBill = role === 'super' || role === 'admin' || role === 'manager';
+    // Archive / restore / delete — CustomerPolicy::archive()/restore()/delete(),
+    // all super/admin/manager.
+    const canArchive = role === 'super' || role === 'admin' || role === 'manager';
 
     const [search, setSearch] = useState(filters.search ?? '');
     const [loading, setLoading] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [bulkBillTarget, setBulkBillTarget] = useState<BulkBillTarget | null>(null);
+    const [archiveTarget, setArchiveTarget] = useState<Customer | null>(null);
     const debouncedSearch = useDebounce(search, 300);
 
     useEffect(() => {
@@ -118,6 +125,7 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
                 status: filters.status ?? undefined,
                 level: filters.level ?? undefined,
                 search: filters.search ?? undefined,
+                archived: archivedView ? '1' : undefined,
                 ...overrides,
             },
             {
@@ -147,21 +155,45 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
 
             <div className="animate-fade-up mb-6 flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900">Customers</h2>
-                    <p className="mt-1 text-sm text-slate-500">Manage subscriber accounts, billing zones, and connection status.</p>
+                    <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+                        {archivedView ? 'Archived customers' : 'Customers'}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                        {archivedView
+                            ? 'Removed from the active register and billing runs. Their history is kept — restore any time.'
+                            : 'Manage subscriber accounts, billing zones, and connection status.'}
+                    </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
-                        <IconUpload size={18} stroke={2} />
-                        Import
-                    </Button>
-                    <Link
-                        href="/customers/create"
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-                    >
-                        <IconPlus size={18} stroke={2} />
-                        Add Customer
-                    </Link>
+                    {archivedView ? (
+                        <Link
+                            href="/customers"
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                        >
+                            ← Active customers
+                        </Link>
+                    ) : (
+                        <>
+                            <Link
+                                href="/customers?archived=1"
+                                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                            >
+                                <IconArchive size={18} stroke={2} />
+                                Archived
+                            </Link>
+                            <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
+                                <IconUpload size={18} stroke={2} />
+                                Import
+                            </Button>
+                            <Link
+                                href="/customers/create"
+                                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                            >
+                                <IconPlus size={18} stroke={2} />
+                                Add Customer
+                            </Link>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -239,7 +271,7 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
                 </div>
             </div>
 
-            {canBulkUpdateBill && (selected.size > 0 || hasActiveFilters) && (
+            {!archivedView && canBulkUpdateBill && (selected.size > 0 || hasActiveFilters) && (
                 <div
                     className="animate-fade-up mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-100 p-3"
                     style={{ animationDelay: '0.07s' }}
@@ -262,7 +294,7 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
                 <Card className="animate-fade-up relative p-0" style={{ animationDelay: '0.1s' }}>
                     <Table>
                         <TableHead>
-                            {canBulkUpdateBill && (
+                            {canBulkUpdateBill && !archivedView && (
                                 <Th className="w-10">
                                     <input
                                         type="checkbox"
@@ -276,15 +308,21 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
                             <Th>Name</Th>
                             <Th>Phone</Th>
                             <Th>Zone</Th>
-                            <Th>Bill</Th>
-                            <Th>Level</Th>
-                            <Th>Status</Th>
+                            {archivedView ? (
+                                <Th>Archived</Th>
+                            ) : (
+                                <>
+                                    <Th>Bill</Th>
+                                    <Th>Level</Th>
+                                    <Th>Status</Th>
+                                </>
+                            )}
                             <Th>Actions</Th>
                         </TableHead>
                         <TableBody>
                             {rows.map(({ customer, formattedBill }) => (
                                 <tr key={customer.uuid} className="transition-colors hover:bg-slate-50/75">
-                                    {canBulkUpdateBill && (
+                                    {canBulkUpdateBill && !archivedView && (
                                         <Td>
                                             <input
                                                 type="checkbox"
@@ -305,26 +343,77 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
                                     </Td>
                                     <Td>{customer.phone ?? '—'}</Td>
                                     <Td>{customer.zone_name}</Td>
-                                    <Td className="font-medium text-slate-900">{formattedBill}</Td>
-                                    <Td className="capitalize">{customer.level}</Td>
-                                    <Td>
-                                        <StatusBadge status={customer.status} />
-                                    </Td>
+                                    {archivedView ? (
+                                        <Td className="text-sm text-slate-500">
+                                            <span className="block text-slate-700">
+                                                {customer.archived_at
+                                                    ? new Date(customer.archived_at).toLocaleDateString()
+                                                    : '—'}
+                                                {customer.archived_by_name ? ` · ${customer.archived_by_name}` : ''}
+                                            </span>
+                                            {customer.archived_reason && (
+                                                <span className="block max-w-xs truncate" title={customer.archived_reason}>
+                                                    {customer.archived_reason}
+                                                </span>
+                                            )}
+                                        </Td>
+                                    ) : (
+                                        <>
+                                            <Td className="font-medium text-slate-900">{formattedBill}</Td>
+                                            <Td className="capitalize">{customer.level}</Td>
+                                            <Td>
+                                                <StatusBadge status={customer.status} />
+                                            </Td>
+                                        </>
+                                    )}
                                     <Td>
                                         <Dropdown label={`Actions for ${customer.name}`}>
                                             <DropdownItem href={`/customers/${customer.uuid}`}>View</DropdownItem>
-                                            <DropdownItem href={`/customers/${customer.uuid}/edit`}>Edit</DropdownItem>
-                                            <DropdownDivider />
-                                            <CustomerStatusActions customer={customer} variant="menu" />
-                                            <DropdownDivider />
-                                            <DropdownItem
-                                                href={`/customers/${customer.uuid}`}
-                                                method="delete"
-                                                onBefore={() => confirm('Delete this customer?')}
-                                                variant="danger"
-                                            >
-                                                Delete
-                                            </DropdownItem>
+                                            {archivedView ? (
+                                                canArchive && (
+                                                    <DropdownItem
+                                                        href={`/customers/${customer.uuid}/restore`}
+                                                        method="patch"
+                                                        icon={<IconRestore size={16} stroke={1.75} />}
+                                                        variant="success"
+                                                    >
+                                                        Restore customer
+                                                    </DropdownItem>
+                                                )
+                                            ) : (
+                                                <>
+                                                    <DropdownItem href={`/customers/${customer.uuid}/edit`}>Edit</DropdownItem>
+                                                    <DropdownDivider />
+                                                    <CustomerStatusActions customer={customer} variant="menu" />
+                                                    {canArchive && (
+                                                        <>
+                                                            <DropdownDivider />
+                                                            {customer.has_billing_history === false ? (
+                                                                <DropdownItem
+                                                                    href={`/customers/${customer.uuid}`}
+                                                                    method="delete"
+                                                                    onBefore={() =>
+                                                                        confirm(
+                                                                            `Delete ${customer.name}? This row has no billing history and will be permanently removed.`,
+                                                                        )
+                                                                    }
+                                                                    variant="danger"
+                                                                >
+                                                                    Delete row
+                                                                </DropdownItem>
+                                                            ) : (
+                                                                <DropdownItem
+                                                                    onClick={() => setArchiveTarget(customer)}
+                                                                    icon={<IconArchive size={16} stroke={1.75} />}
+                                                                    variant="warning"
+                                                                >
+                                                                    Archive customer
+                                                                </DropdownItem>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </>
+                                            )}
                                         </Dropdown>
                                     </Td>
                                 </tr>
@@ -347,6 +436,18 @@ export default function CustomersIndex({ customers, zones, filters }: CustomersI
                     target={bulkBillTarget}
                     onClose={() => setBulkBillTarget(null)}
                     onSuccess={() => setSelected(new Set())}
+                />
+            )}
+
+            {canArchive && (
+                <ArchiveCustomerModal
+                    open={archiveTarget !== null}
+                    onClose={() => setArchiveTarget(null)}
+                    customer={
+                        archiveTarget
+                            ? { uuid: archiveTarget.uuid, name: archiveTarget.name, arrears: archiveTarget.total_arrears ?? null }
+                            : null
+                    }
                 />
             )}
         </AppLayout>
