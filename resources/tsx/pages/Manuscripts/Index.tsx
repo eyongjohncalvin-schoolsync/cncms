@@ -26,7 +26,7 @@ import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustment
 import { PreRunReviewPanel } from '@/components/manuscripts/PreRunReviewPanel';
 import { usePreRunReview } from '@/hooks/usePreRunReview';
 import { formatCurrency } from '@/lib/formatCurrency';
-import { formatMonthYear } from '@/lib/formatMonthYear';
+import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
 import type { Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
 
 interface ManuscriptFilters {
@@ -341,7 +341,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                         <Td>{formattedBill}</Td>
                                         <Td>{formattedArrears}</Td>
                                         <Td>{formattedCredit}</Td>
-                                        <Td>{formatMonthYear(manuscript.payment_expiration)}</Td>
+                                        <Td>{prepaidCoverageLabel(manuscript)}</Td>
                                         <Td>{formattedTotalBill}</Td>
                                         <Td>
                                             <StatusBadge status={manuscript.status} />

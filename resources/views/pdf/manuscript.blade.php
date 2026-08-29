@@ -135,9 +135,16 @@
                 @php
                     $customer = $manuscript->customer;
                     $status = $customer?->status === 'disconnected' ? 'discon...' : $customer?->status;
+                    // Draw-down (references/prepayment-drawdown.md): a prepaid
+                    // customer carries a month counter, not a date — show the
+                    // derived "covered through" month.
                     $expiry = $manuscript->payment_expiration
                         ? $manuscript->payment_expiration->format('M y')
-                        : '-';
+                        : ((int) $manuscript->prepaid_months_remaining > 0
+                            ? \Illuminate\Support\Carbon::createFromFormat('Y-m', $manuscript->period)
+                                ->addMonthsNoOverflow((int) $manuscript->prepaid_months_remaining)
+                                ->format('M y')
+                            : '-');
                 @endphp
                 <tr>
                     <td>{{ $index + 1 }}</td>
