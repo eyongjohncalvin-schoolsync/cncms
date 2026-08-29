@@ -25,6 +25,8 @@ class ManuscriptResource extends JsonResource
             'credit' => $this->credit,
             'total_bill' => $this->total_bill,
             'payment_expiration' => $this->payment_expiration?->toDateString(),
+            'prepaid_months_remaining' => (int) $this->prepaid_months_remaining,
+            'prepaid_rate' => $this->prepaid_rate,
             'period' => $this->period,
             'status' => $this->whenLoaded('customer', fn () => $this->customer->status),
         ];

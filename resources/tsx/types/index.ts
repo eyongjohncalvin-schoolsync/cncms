@@ -249,6 +249,11 @@ export interface Manuscript {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    /** Draw-down (references/prepayment-drawdown.md): whole billing periods
+     * still covered by a months/yearly prepayment, and the rate locked when
+     * it was paid. 0 / null outside a prepaid window. */
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
     status: CustomerStatus;
     /**
@@ -306,6 +311,8 @@ export interface CustomerManuscriptSummary {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
 }
 
