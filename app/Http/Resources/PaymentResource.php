@@ -24,7 +24,12 @@ class PaymentResource extends JsonResource
             'credit' => $this->credit,
             'frequency' => $this->frequency,
             'months' => $this->months,
-            'expiration_date' => $this->expiration_date,
+            'expiration_date' => $this->expiration_date?->toDateString(),
+            // Draw-down (references/prepayment-drawdown.md): rate locked at
+            // payment time on a months/yearly prepayment; the agent's
+            // pay-down-arrears-first toggle.
+            'prepaid_rate' => $this->prepaid_rate,
+            'clear_arrears_first' => (bool) $this->clear_arrears_first,
             'verification_status' => $this->verification_status,
             'recorded_offline' => $this->recorded_offline,
             'created_at' => $this->created_at,

@@ -153,7 +153,7 @@ class PaymentController extends Controller
         // scoped via PaymentService::resolveCustomerId() ->
         // CustomerRepository::findByUuid().
         $customers = $this->customers->allMatching([]);
-        $customers->load('zone');
+        $customers->load(['zone', 'latestManuscript']);
 
         $customers = $customers
             ->map(fn (Customer $customer): array => [
@@ -167,6 +167,9 @@ class PaymentController extends Controller
                 'level' => $customer->level,
                 'status' => $customer->status,
                 'location' => $customer->location,
+                // Current arrears — drives the "clear arrears first" toggle on a
+                // months/yearly prepayment (references/prepayment-drawdown.md Q1).
+                'total_arrears' => (string) ($customer->latestManuscript?->total_arrears ?? '0'),
             ])
             ->values();
 
