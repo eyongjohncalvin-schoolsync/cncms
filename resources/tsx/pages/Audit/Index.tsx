@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Head, router } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import { IconChevronDown, IconHistory, IconScale, IconSearch } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Button } from '@/components/ui/Button';
@@ -387,6 +387,130 @@ function BalanceChange({ row }: { row: ArrearsAdjustmentAuditRow }) {
 }
 
 /**
+ * One row of the Arrears Adjustments sub-tab, plus its expandable Details
+ * panel. Kept as its own component (like AuditLogRow above) so each row owns
+ * its own `expanded` state. The decision buttons are driven purely by the
+ * server-resolved `can_approve`/`can_reject` flags — this component never
+ * re-derives the maker≠checker / two-stage gate. "Second approve" vs
+ * "Approve" is a label-only distinction; both post to the same endpoint and
+ * ArrearsAdjustmentService decides which stage the row is actually at.
+ */
+function ArrearsAdjustmentRow({
+    row,
+    busy,
+    onApprove,
+    onReject,
+}: {
+    row: ArrearsAdjustmentAuditRow;
+    busy: boolean;
+    onApprove: () => void;
+    onReject: () => void;
+}) {
+    const [expanded, setExpanded] = useState(false);
+    const detailId = `arrears-detail-${row.uuid}`;
+    const isSecondApproval = row.status === 'pending_second_approval';
+
+    return (
+        <>
+            <tr className="transition-colors hover:bg-slate-50/70">
+                <Td className="whitespace-nowrap">{row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}</Td>
+                <Td>{row.customer_name ?? '—'}</Td>
+                <Td>{row.target_period}</Td>
+                <Td className="capitalize">
+                    {row.direction === 'decrease' ? '−' : '+'}
+                    {formatCurrency(row.amount)}
+                </Td>
+                <Td>
+                    <BalanceChange row={row} />
+                </Td>
+                <Td className="capitalize">{row.reason_category.replace(/_/g, ' ')}</Td>
+                <Td>{row.requested_by_name ?? '—'}</Td>
+                <Td>
+                    {row.second_approved_by_name ?? row.approved_by_name ?? '—'}
+                    {row.status === 'pending_second_approval' && row.approved_by_name && (
+                        <span className="block text-xs text-slate-400">1st: {row.approved_by_name}</span>
+                    )}
+                </Td>
+                <Td>
+                    <ArrearsAdjustmentStatusBadge status={row.status} />
+                    {row.status === 'rejected' && row.rejection_reason && (
+                        <span className="block max-w-[16rem] text-xs text-slate-400">{row.rejection_reason}</span>
+                    )}
+                </Td>
+                <Td>
+                    <button
+                        type="button"
+                        onClick={() => setExpanded((value) => !value)}
+                        aria-expanded={expanded}
+                        aria-controls={detailId}
+                        className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+                    >
+                        {expanded ? 'Hide' : 'View'}
+                        <span className="sr-only">details for this adjustment</span>
+                        <IconChevronDown size={14} stroke={2} aria-hidden="true" className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                    </button>
+                </Td>
+                <Td>
+                    <div className="flex gap-2">
+                        {row.can_approve && (
+                            <Button
+                                type="button"
+                                variant="primary"
+                                disabled={busy}
+                                onClick={onApprove}
+                                className="px-2.5 py-1.5 text-xs"
+                            >
+                                {isSecondApproval ? 'Second approve' : 'Approve'}
+                            </Button>
+                        )}
+                        {row.can_reject && (
+                            <Button
+                                type="button"
+                                variant="danger"
+                                disabled={busy}
+                                onClick={onReject}
+                                className="px-2.5 py-1.5 text-xs"
+                            >
+                                Reject
+                            </Button>
+                        )}
+                    </div>
+                </Td>
+            </tr>
+            {expanded && (
+                <tr id={detailId}>
+                    <td colSpan={11} className="border-t border-slate-200 bg-slate-50 p-0">
+                        <div className="grid grid-cols-1 gap-x-8 gap-y-3 p-4 text-sm md:grid-cols-2">
+                            <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Reason given</p>
+                                <p className="mt-1 whitespace-pre-wrap text-slate-700">{row.reason_note || '—'}</p>
+                            </div>
+                            <div className="space-y-1 text-slate-600">
+                                <p>
+                                    <span className="text-slate-400">Direction: </span>
+                                    <span className="capitalize">{row.direction}</span> ({row.direction === 'decrease' ? 'reduces' : 'increases'} what the customer owes)
+                                </p>
+                                <p>
+                                    <span className="text-slate-400">Balance at request time: </span>
+                                    {formatCurrency(row.arrears_snapshot)}
+                                </p>
+                                {row.customer_uuid && (
+                                    <p>
+                                        <Link href={`/customers/${row.customer_uuid}`} className="font-medium text-blue-600 hover:text-blue-700">
+                                            Open {row.customer_name ?? 'customer'} →
+                                        </Link>
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            )}
+        </>
+    );
+}
+
+/**
  * The Arrears Adjustment sub-tab (this feature's design doc): its own
  * StatCard row (Pending Approval / Applied This Month / Total Written Off)
  * and table (Date, Customer, Amount, Balance, Reason, Requested by, Approved
@@ -394,8 +518,12 @@ function BalanceChange({ row }: { row: ArrearsAdjustmentAuditRow }) {
  * `can_reject` are resolved server-side per row
  * (App\Policies\ArrearsAdjustmentPolicy is state-dependent on the
  * adjustment's current status), so this component never re-derives who may
- * act. The Balance column (2026-08-28 addendum) is this page's answer to
- * "what changed" — see BalanceChange above.
+ * act. The first-approval button reads "Second approve" once a row is at
+ * `pending_second_approval` — same endpoint, the service decides which
+ * stage it is. Each row expands (Details) to show the requester's
+ * free-text `reason_note` and a link to the customer, the context a
+ * reviewer needs before deciding. The Balance column (2026-08-28 addendum)
+ * is this page's answer to "what changed" — see BalanceChange above.
  */
 function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
     const { stats, adjustments } = data;
@@ -453,62 +581,18 @@ function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
                             <Th>Requested by</Th>
                             <Th>Approved by</Th>
                             <Th>Status</Th>
+                            <Th>Details</Th>
                             <Th>Actions</Th>
                         </TableHead>
                         <TableBody>
                             {adjustments.data.map((row) => (
-                                <tr key={row.uuid} className="transition-colors hover:bg-slate-50/70">
-                                    <Td className="whitespace-nowrap">{row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}</Td>
-                                    <Td>{row.customer_name ?? '—'}</Td>
-                                    <Td>{row.target_period}</Td>
-                                    <Td className="capitalize">
-                                        {row.direction === 'decrease' ? '−' : '+'}
-                                        {formatCurrency(row.amount)}
-                                    </Td>
-                                    <Td>
-                                        <BalanceChange row={row} />
-                                    </Td>
-                                    <Td className="capitalize">{row.reason_category.replace(/_/g, ' ')}</Td>
-                                    <Td>{row.requested_by_name ?? '—'}</Td>
-                                    <Td>
-                                        {row.second_approved_by_name ?? row.approved_by_name ?? '—'}
-                                        {row.status === 'pending_second_approval' && row.approved_by_name && (
-                                            <span className="block text-xs text-slate-400">1st: {row.approved_by_name}</span>
-                                        )}
-                                    </Td>
-                                    <Td>
-                                        <ArrearsAdjustmentStatusBadge status={row.status} />
-                                        {row.status === 'rejected' && row.rejection_reason && (
-                                            <span className="block max-w-[16rem] text-xs text-slate-400">{row.rejection_reason}</span>
-                                        )}
-                                    </Td>
-                                    <Td>
-                                        <div className="flex gap-2">
-                                            {row.can_approve && (
-                                                <Button
-                                                    type="button"
-                                                    variant="primary"
-                                                    disabled={busyUuid === row.uuid}
-                                                    onClick={() => approve(row)}
-                                                    className="px-2.5 py-1.5 text-xs"
-                                                >
-                                                    Approve
-                                                </Button>
-                                            )}
-                                            {row.can_reject && (
-                                                <Button
-                                                    type="button"
-                                                    variant="danger"
-                                                    disabled={busyUuid === row.uuid}
-                                                    onClick={() => setRejecting(row)}
-                                                    className="px-2.5 py-1.5 text-xs"
-                                                >
-                                                    Reject
-                                                </Button>
-                                            )}
-                                        </div>
-                                    </Td>
-                                </tr>
+                                <ArrearsAdjustmentRow
+                                    key={row.uuid}
+                                    row={row}
+                                    busy={busyUuid === row.uuid}
+                                    onApprove={() => approve(row)}
+                                    onReject={() => setRejecting(row)}
+                                />
                             ))}
                         </TableBody>
                     </Table>
