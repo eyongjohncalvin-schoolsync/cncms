@@ -429,6 +429,11 @@ class ArrearsAdjustmentTest extends TestCase
 
     public function test_the_audit_log_arrears_adjustments_tab_lists_pending_and_decided_requests_with_stats(): void
     {
+        // Runs against the real seeded tenant (InteractsWithTenantRoles), which
+        // may already hold adjustments from prior owner activity — assert the
+        // delta from this test's own two rows, not an absolute count.
+        $before = min(ArrearsAdjustment::query()->count(), 25);
+
         $customer = CustomerFactory::new()->active()->create();
         ArrearsAdjustmentFactory::new()
             ->requestedBy($this->seededUserId('divine@shalomtech.dev'))
@@ -446,7 +451,7 @@ class ArrearsAdjustmentTest extends TestCase
                 ->component('Audit/Index')
                 ->where('view', 'arrears_adjustments')
                 ->has('arrears_adjustments.stats')
-                ->has('arrears_adjustments.adjustments.data', 2));
+                ->has('arrears_adjustments.adjustments.data', min($before + 2, 25)));
     }
 
     public function test_the_audit_tab_row_payload_carries_the_context_and_per_row_decision_flags_the_review_ui_needs(): void
@@ -496,6 +501,11 @@ class ArrearsAdjustmentTest extends TestCase
 
     public function test_service_dashboard_counts_reflect_pending_and_applied_totals(): void
     {
+        // Delta assertions — the real seeded tenant may already hold owner
+        // adjustments (see the audit-tab test above).
+        $service = app(\App\Services\ArrearsAdjustmentService::class);
+        $before = $service->dashboard();
+
         $customer = CustomerFactory::new()->active()->create();
 
         ArrearsAdjustmentFactory::new()
@@ -508,10 +518,10 @@ class ArrearsAdjustmentTest extends TestCase
             ->withAmount('3000.00')
             ->create(['customer_id' => $customer->id, 'approved_at' => now()]);
 
-        $dashboard = app(\App\Services\ArrearsAdjustmentService::class)->dashboard();
+        $after = $service->dashboard();
 
-        $this->assertSame(1, $dashboard['pending_approval']);
-        $this->assertSame(1, $dashboard['applied_this_month']);
-        $this->assertSame('3000.00', $dashboard['total_written_off']);
+        $this->assertSame($before['pending_approval'] + 1, $after['pending_approval']);
+        $this->assertSame($before['applied_this_month'] + 1, $after['applied_this_month']);
+        $this->assertSame(bcadd((string) $before['total_written_off'], '3000.00', 2), (string) $after['total_written_off']);
     }
 }
