@@ -492,7 +492,8 @@ All mutations are audit-logged. All responses use UUIDs for entity references.
 - **Task scheduler (manuscript/bill scheduling, chunked jobs):** `references/task-scheduler.md`
 - **In-app notification system:** `references/in-app-notifications.md`
 - **Complaint Desk (web + mobile):** `references/complaint-desk.md`
-- **Prepaid-time preservation across suspend/disconnect:** `references/prepaid-pause-handling.md`
+- **Prepayment as draw-down credit (APPROVED direction, supersedes the freeze branch):** `references/prepayment-drawdown.md`
+- **Prepaid-time preservation across suspend/disconnect (SUPERSEDED by draw-down — do not build):** `references/prepaid-pause-handling.md`
 - **Arrears Adjustment (write-off) — maker-checker workflow, where to find it in the UI:** `references/arrears-adjustment.md`
 - **Backup & restore process (design, not yet implemented):** `references/backup-strategy.md`
 
