@@ -469,26 +469,29 @@ class ArrearsAdjustmentTest extends TestCase
                     ->etc()));
     }
 
-    public function test_a_pending_second_approval_row_surfaces_as_approvable_to_an_eligible_second_approver_and_completes_from_the_list(): void
+    public function test_a_pending_second_approval_row_surfaces_as_approvable_to_an_eligible_second_approver_in_the_review_payload(): void
     {
         $customer = CustomerFactory::new()->active()->create();
-        $adjustment = ArrearsAdjustmentFactory::new()
+        ArrearsAdjustmentFactory::new()
             ->requestedBy($this->seededUserId('divine@shalomtech.dev'))
             ->pendingSecondApproval($this->seededUserId('terence@shalomtech.dev'))
             ->create(['customer_id' => $customer->id]);
 
-        // patience (admin) is neither the requester nor the first approver —
-        // the review list should offer the (Second approve) action, driven
-        // purely by the server-resolved can_approve flag + the row status.
+        // patience (admin) is neither the requester nor the first approver, so
+        // the review list must offer the (relabelled "Second approve") action
+        // — driven purely by the server-resolved can_approve flag on a row
+        // still at the pending_second_approval stage. The end-to-end second
+        // approval itself is already covered by
+        // test_a_large_adjustment_requires_a_second_approval_...().
         $this->actingAsSeededUser('patience@shalomtech.dev');
         $this->get('/audit/logs?view=arrears_adjustments')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('arrears_adjustments.adjustments.data.0.status', 'pending_second_approval')
-                ->where('arrears_adjustments.adjustments.data.0.can_approve', true));
-
-        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertRedirect();
-        $this->assertSame('approved', $adjustment->fresh()->status);
+                ->has('arrears_adjustments.adjustments.data.0', fn (Assert $row) => $row
+                    ->where('status', 'pending_second_approval')
+                    ->where('can_approve', true)
+                    ->where('can_reject', true)
+                    ->etc()));
     }
 
     public function test_service_dashboard_counts_reflect_pending_and_applied_totals(): void
