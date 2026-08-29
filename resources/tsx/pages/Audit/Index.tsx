@@ -530,14 +530,31 @@ function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
     const [busyUuid, setBusyUuid] = useState<string | null>(null);
     const [rejecting, setRejecting] = useState<ArrearsAdjustmentAuditRow | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
+    const [confirmingSelfApproval, setConfirmingSelfApproval] = useState<ArrearsAdjustmentAuditRow | null>(null);
 
     function approve(row: ArrearsAdjustmentAuditRow) {
         setBusyUuid(row.uuid);
         router.post(
             `/arrears-adjustments/${row.uuid}/approve`,
             {},
-            { preserveScroll: true, onFinish: () => setBusyUuid(null) },
+            {
+                preserveScroll: true,
+                onFinish: () => setBusyUuid(null),
+                onSuccess: () => setConfirmingSelfApproval(null),
+            },
         );
+    }
+
+    // A `super` acting on a request they raised themselves bypasses the
+    // second-reviewer check — allowed by ArrearsAdjustmentPolicy, but never
+    // silent. Everyone else's rows approve immediately as before.
+    function onApprove(row: ArrearsAdjustmentAuditRow) {
+        if (row.is_own_request) {
+            setConfirmingSelfApproval(row);
+            return;
+        }
+
+        approve(row);
     }
 
     function submitRejection() {
@@ -590,7 +607,7 @@ function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
                                     key={row.uuid}
                                     row={row}
                                     busy={busyUuid === row.uuid}
-                                    onApprove={() => approve(row)}
+                                    onApprove={() => onApprove(row)}
                                     onReject={() => setRejecting(row)}
                                 />
                             ))}
@@ -636,6 +653,32 @@ function ArrearsAdjustmentsTab({ data }: { data: ArrearsAdjustmentsTabData }) {
                             >
                                 {busyUuid === rejecting.uuid && <LoadingSpinner className="h-4 w-4" />}
                                 Confirm Rejection
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {confirmingSelfApproval && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+                    <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+                        <h3 className="text-base font-semibold text-slate-900">Approve your own request?</h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                            You raised this arrears adjustment. Approving it yourself bypasses the second-reviewer check that
+                            normally applies to other staff. This is recorded in the audit log.
+                        </p>
+                        <div className="mt-4 flex justify-end gap-2">
+                            <Button type="button" variant="secondary" onClick={() => setConfirmingSelfApproval(null)}>
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="primary"
+                                disabled={busyUuid === confirmingSelfApproval.uuid}
+                                onClick={() => approve(confirmingSelfApproval)}
+                            >
+                                {busyUuid === confirmingSelfApproval.uuid && <LoadingSpinner className="h-4 w-4" />}
+                                Approve anyway
                             </Button>
                         </div>
                     </div>

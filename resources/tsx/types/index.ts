@@ -370,6 +370,11 @@ export interface ArrearsAdjustmentAuditRow extends ArrearsAdjustment {
     arrears_snapshot: string;
     can_approve: boolean;
     can_reject: boolean;
+    /** True when the signed-in user raised this request. A `super` may still
+     * approve/reject it (the maker≠checker carve-out in
+     * App\Policies\ArrearsAdjustmentPolicy); the review UI shows a
+     * confirmation step first so the bypass is explicit. */
+    is_own_request: boolean;
 }
 
 export interface CustomerDetail extends Customer {

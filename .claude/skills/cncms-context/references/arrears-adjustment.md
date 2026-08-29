@@ -115,8 +115,8 @@ gap — do not add a `Gate::policy()` call for it.
 |---|---|
 | `viewAny`/`view` | any authenticated tenant user |
 | `create` | any authenticated tenant user, all 5 roles — ungated, same as `ComplaintPolicy::create()` |
-| `approve`/`reject` at `status = 'pending'` | `super`/`admin`/`manager`, actor ≠ requester |
-| `approve`/`reject` at `status = 'pending_second_approval'` | `super`/`admin` only, actor ≠ requester **and** actor ≠ first approver |
+| `approve`/`reject` at `status = 'pending'` | `super`/`admin`/`manager`, actor ≠ requester — **except `super`, who may act on their own request (see §13)** |
+| `approve`/`reject` at `status = 'pending_second_approval'` | `super`/`admin` only, actor ≠ requester **and** actor ≠ first approver — **except `super`, exempt from both identity checks (see §13)** |
 | `approve`/`reject` on any other status | always `false` — nothing left to decide |
 
 The Policy is the single source of truth for "who may act right now" — `ArrearsAdjustmentService`
@@ -496,3 +496,50 @@ asserts the `arrears_adjustments.stats`/`.adjustments.data` keys exist and the r
 enumerate row fields, so it was not expected to (and structurally cannot) break from the new
 `arrears_snapshot` key. A follow-up pass should re-run
 `php artisan test --filter=ArrearsAdjustmentTest` once the stuck session has cleared.
+
+## 13. Addendum, 2026-08-29: the `super` self-approval carve-out
+
+**Problem it fixes.** This is a ~6-person, owner-operated business. The owner (`super`) is the only
+person with unconditional authority, and is also the person who most often raises a small ledger
+correction. The maker≠checker rule in §2/§3 gave the owner no way out: an adjustment they requested
+themselves could be approved by *nobody* if no other `super`/`admin`/`manager` was around to act —
+a permanent deadlock on the owner's own routine corrections. (Concrete case that surfaced this:
+`swecom` adjustment #414 — owner-requested, `pending`, 500 FCFA, `billing_error` — with no
+Approve/Reject buttons rendering for the owner.)
+
+**The fix (deliberately minimal).** `ArrearsAdjustmentPolicy::approve()` (and therefore `reject()`,
+which still just delegates) waives the maker≠checker identity checks **for the `super` role only**,
+at **both** stages:
+
+- `pending`: `super`/`admin`/`manager` as before, but the "actor ≠ requester" clause is now
+  `(actor ≠ requester OR context is super)`.
+- `pending_second_approval`: `super`/`admin` as before, but the two identity checks are now
+  `(context is super OR (actor ≠ requester AND actor ≠ first approver))`.
+
+`admin` and `manager` are **completely unaffected** — they remain fully bound by maker≠checker and
+the two-senior-approver identity rules, exactly as §2/§3 describe. There is **no config flag, no new
+table, no settings screen** — configurable per-tenant permissions are a separate, later effort; this
+is a hardcoded role carve-out and nothing more. The two-approver *threshold* logic
+(`requiresSecondApproval()` — amount / 90-day-repeat / `legacy_migration_error`) is untouched: a
+large owner-requested adjustment still goes to `pending_second_approval`; the carve-out only means
+the same `super` can also give that second approval.
+
+**UI — the bypass is explicit, never silent.** `AuditLogController::arrearsAdjustmentsTabData()` now
+emits `is_own_request` (`bool`, `requested_by === current user id`) per row, added to the
+`ArrearsAdjustmentAuditRow` type. In `Audit/Index.tsx`, clicking **Approve** on a row where
+`is_own_request` is true opens a confirmation modal first (same lightweight fixed-overlay pattern as
+the existing reject modal) — heading "Approve your own request?", body explaining the
+second-reviewer bypass and that it is recorded in the audit log, confirm button "Approve anyway".
+Rows that are not the user's own request approve immediately as before. The reject flow's existing
+modal already covers self-reject. As always, every transition still writes an `audit_logs` row via
+the `Auditable` trait (§1), so a `super` self-approval is fully traceable after the fact.
+
+**Tests** (`tests/Feature/Web/ArrearsAdjustmentTest.php`): a `super` can approve their own request
+and it reaches the ledger via a real recalculation; an `admin` and a `manager` still cannot approve
+their own; an unrelated `admin` still approves a `super`'s request (maker-checker path unbroken); at
+the second stage a `super` who raised *and* first-approved can still give the second approval, while
+an `admin` first approver still cannot. Full `--filter ArrearsAdjustment` run green (31 tests).
+
+**No change to** §4's ledger mechanism, the staleness re-check, the row-lock race close, the
+mobile surfaces (§10 — still no mobile approve/reject), or the API surface (§10). Purely a policy
+clause + one UI confirmation step.

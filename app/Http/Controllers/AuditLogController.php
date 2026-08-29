@@ -121,6 +121,10 @@ class AuditLogController extends Controller
             'created_at' => $adjustment->created_at?->toIso8601String(),
             'can_approve' => $request->user()->can('approve', $adjustment),
             'can_reject' => $request->user()->can('reject', $adjustment),
+            // Drives the web review UI's "approve your own request?" confirm
+            // step — the super self-approval carve-out (ArrearsAdjustmentPolicy)
+            // is allowed, but never silent.
+            'is_own_request' => $adjustment->requested_by === $request->user()->id,
         ]);
 
         return [
