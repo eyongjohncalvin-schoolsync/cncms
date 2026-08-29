@@ -67,18 +67,18 @@ class CustomerManuscriptRecalculationServiceTest extends TestCase
      * @param  array<int, Customer>  $customers
      * @param  array<int, int>  $commandRunIds
      * @param  array<int, string>  $recalculateOnePeriods  Periods any recalculateOne() call in this
-     *                                                      test used — since 2026-08-27 (the audit-trace
-     *                                                      fix, App\Services\CustomerManuscriptRecalculationService's
-     *                                                      class doc) EVERY recalculateOne() call now
-     *                                                      creates its own 'manuscript:recalculate-one'
-     *                                                      command_runs row, which $commandRunIds above
-     *                                                      (populated only from
-     *                                                      ManuscriptGenerationBatchService::dispatch()'s
-     *                                                      returned CommandRun) never captures — cleaned
-     *                                                      up here by (command, period) instead, safe
-     *                                                      because every period this test file uses is a
-     *                                                      fictional far-future one ('2034-*') that can't
-     *                                                      collide with real data.
+     *                                                     test used — since 2026-08-27 (the audit-trace
+     *                                                     fix, App\Services\CustomerManuscriptRecalculationService's
+     *                                                     class doc) EVERY recalculateOne() call now
+     *                                                     creates its own 'manuscript:recalculate-one'
+     *                                                     command_runs row, which $commandRunIds above
+     *                                                     (populated only from
+     *                                                     ManuscriptGenerationBatchService::dispatch()'s
+     *                                                     returned CommandRun) never captures — cleaned
+     *                                                     up here by (command, period) instead, safe
+     *                                                     because every period this test file uses is a
+     *                                                     fictional far-future one ('2034-*') that can't
+     *                                                     collide with real data.
      */
     private function cleanUp(Zone $zone, array $customers, array $commandRunIds = [], array $recalculateOnePeriods = []): void
     {
@@ -90,7 +90,11 @@ class CustomerManuscriptRecalculationServiceTest extends TestCase
 
         Manuscript::query()->whereIn('customer_id', $customerIds)->delete();
         Payment::query()->whereIn('customer_id', $customerIds)->delete();
-        Customer::query()->whereIn('id', $customerIds)->delete();
+        // forceDelete: Customer uses SoftDeletes now, and a plain delete()
+        // would leave the row in place (RESTRICT'd by customers.zone_id),
+        // so the Zone delete on the next line would fail. This fixture
+        // teardown wants the rows genuinely gone.
+        Customer::query()->whereIn('id', $customerIds)->forceDelete();
         Zone::query()->whereKey($zone->id)->delete();
 
         if ($commandRunIds !== []) {
@@ -200,7 +204,7 @@ class CustomerManuscriptRecalculationServiceTest extends TestCase
             // B: recorded a payment but was never passed to recalculateOne —
             // must be entirely unaffected by A's two calls: no manuscript
             // row, payment left un-consumed.
-            $this->assertFalse(Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->exists(), "B must still have no P2 manuscript row — recalculateOne was never called for B.");
+            $this->assertFalse(Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->exists(), 'B must still have no P2 manuscript row — recalculateOne was never called for B.');
             $this->assertNull($paymentB->fresh()->processed_at, "B's payment must be untouched by A's recalculateOne calls.");
             $this->assertNull($paymentB->fresh()->processed_period);
 

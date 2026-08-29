@@ -149,7 +149,7 @@ class LiveManuscriptRecalculationAndBatchConsistencyTest extends TestCase
             Manuscript::query()->where('period', $period)->delete();
             Payment::query()->where('customer_id', $customer->id)->delete();
             CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
+            Customer::query()->whereKey($customer->id)->forceDelete();
             Zone::query()->whereKey($zone->id)->delete();
 
             tenancy()->end();
@@ -244,7 +244,7 @@ class LiveManuscriptRecalculationAndBatchConsistencyTest extends TestCase
             Manuscript::query()->where('period', $period)->delete();
             Payment::query()->where('customer_id', $customer->id)->delete();
             CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
+            Customer::query()->whereKey($customer->id)->forceDelete();
             Zone::query()->whereKey($zone->id)->delete();
 
             tenancy()->end();
@@ -405,7 +405,7 @@ class LiveManuscriptRecalculationAndBatchConsistencyTest extends TestCase
             Manuscript::query()->where('period', $period)->delete();
             Payment::query()->whereIn('customer_id', $customerIds)->delete();
             CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereIn('id', $customerIds)->delete();
+            Customer::query()->whereIn('id', $customerIds)->forceDelete();
             Zone::query()->whereKey($zone->id)->delete();
 
             tenancy()->end();

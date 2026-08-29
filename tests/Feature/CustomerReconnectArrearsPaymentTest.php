@@ -160,7 +160,7 @@ class CustomerReconnectArrearsPaymentTest extends TestCase
             Manuscript::query()->where('customer_id', $customer->id)->delete();
             Payment::query()->where('customer_id', $customer->id)->delete();
             CommandRun::query()->where('command', 'manuscript:calculate')->whereIn('period', [$period1, $period2])->delete();
-            Customer::query()->whereKey($customer->id)->delete();
+            Customer::query()->whereKey($customer->id)->forceDelete();
             Zone::query()->whereKey($zone->id)->delete();
 
             tenancy()->end();
