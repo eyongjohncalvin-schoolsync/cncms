@@ -303,8 +303,11 @@ class CustomerTest extends TestCase
 
         $response->assertRedirect('/customers');
         $response->assertSessionHas('error');
+        // The hard-delete path is now the zero-history-only junk-row path;
+        // a customer with history is meant to be archived, and the FK
+        // backstop message points there (customer-deletion deliberation).
         $this->assertStringContainsString(
-            'cannot be deleted',
+            'Archive the customer instead',
             session('error'),
         );
         $this->assertDatabaseHas('customers', ['id' => $customer->id]);

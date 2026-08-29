@@ -138,7 +138,12 @@ class AuditLogTest extends TestCase
         ]);
         $uuid = $customer->uuid;
         $name = $customer->name;
-        $customer->delete();
+        // Customer uses SoftDeletes now (customer-deletion deliberation) —
+        // a plain ->delete() archives rather than removes, and
+        // AuditableObserver deliberately does not write a 'delete' audit
+        // row for a soft delete. A genuine hard removal is forceDelete(),
+        // which still logs 'delete' exactly as before.
+        $customer->forceDelete();
 
         $token = $this->tokenForRole('manager');
 
