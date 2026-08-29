@@ -67,13 +67,13 @@ class CustomerService
         );
     }
 
-    public function findOrFail(string $uuid): Customer
+    public function findOrFail(string $uuid, bool $withTrashed = false): Customer
     {
         return Cache::remember(
-            "customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all'),
+            "customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all').($withTrashed ? ':trashed' : ''),
             now()->addSeconds(60),
-            function () use ($uuid): Customer {
-                $customer = $this->customers->findByUuid($uuid, ['zone', 'latestManuscript']);
+            function () use ($uuid, $withTrashed): Customer {
+                $customer = $this->customers->findByUuid($uuid, ['zone', 'latestManuscript'], $withTrashed);
 
                 if (! $customer) {
                     throw new ModelNotFoundException("Customer [{$uuid}] not found.");
@@ -110,16 +110,21 @@ class CustomerService
     }
 
     /**
+     * Hard delete — reserved for a customer with ZERO billing history (a
+     * junk import row, a mistyped duplicate, a test record never billed).
+     * The controller only reaches this path when hasBillingHistory() is
+     * false; a customer with any payment/manuscript/message is archived
+     * instead (archive() below), never destroyed.
+     *
      * `payments.customer_id` has always used restrictOnDelete(), and
      * `manuscripts.customer_id`/`messages.customer_id` were fixed to match
      * (2026_08_26_030000_restrict_delete_on_manuscripts_and_messages_
-     * customer_id.php) — the database now refuses to delete a customer with
-     * any payment, manuscript, or message history. That refusal surfaces
-     * here as a QueryException; translate it into a friendly
-     * ValidationException instead of a raw SQL error reaching the
-     * controller/user, mirroring App\Services\BranchService::delete()'s
-     * established pattern for the same restrictOnDelete() situation on
-     * zones.branch_id.
+     * customer_id.php) — the database refuses to delete a customer with any
+     * such history. That refusal is the backstop if the UI guard is ever
+     * bypassed: it surfaces here as a QueryException, translated into a
+     * friendly ValidationException (that now points at archiving) rather
+     * than a raw SQL error, mirroring App\Services\BranchService::delete()'s
+     * pattern for the same restrictOnDelete() situation on zones.branch_id.
      *
      * The delete is wrapped in DB::transaction() for the same reason as
      * BranchService::delete(): Postgres refuses every further statement on a
@@ -127,10 +132,9 @@ class CustomerService
      * would otherwise break the ->count() lookups below (and, in tests, the
      * outer per-test transaction).
      *
-     * A customer with zero history (no payments, manuscripts, or messages —
-     * e.g. a freshly-imported or test record never billed) still deletes
-     * normally: no constraint is ever violated for that case, so this
-     * doesn't block legitimate deletions.
+     * `$customer->forceDelete()` (not `delete()`): Customer now uses
+     * SoftDeletes, and a genuinely-empty junk row should actually leave the
+     * table, not become an archived tombstone.
      */
     public function delete(Customer $customer): void
     {
@@ -154,9 +158,63 @@ class CustomerService
             $detail = $parts === [] ? 'billing history' : implode(', ', $parts);
 
             throw ValidationException::withMessages([
-                'customer' => ["Cannot delete {$customer->name} — this customer has billing history ({$detail}) and cannot be deleted."],
+                'customer' => ["Cannot delete {$customer->name} — this customer has billing history ({$detail}). Archive the customer instead to keep the history for auditing."],
             ]);
         }
+
+        $this->forgetShowCache($customer->uuid);
+    }
+
+    /**
+     * Whether this customer has any billing history that must be preserved —
+     * the signal the UI uses to offer "Archive customer" instead of
+     * "Delete row", and the guard the controller checks before delete().
+     * Any payment, manuscript, or message counts; a customer with none is a
+     * junk/never-billed row that can be hard-deleted with nothing lost.
+     */
+    public function hasBillingHistory(Customer $customer): bool
+    {
+        return $customer->payments()->exists()
+            || $customer->manuscripts()->exists()
+            || $customer->messages()->exists();
+    }
+
+    /**
+     * Archive (soft-delete) a customer — the terminal state for a real
+     * customer who has left. Every payment/manuscript/message row stays
+     * physically in place (all four customer_id FKs are restrictOnDelete()
+     * and simply become unreachable); the SoftDeletes global scope drops
+     * the customer from active lists, the dashboard, manuscript runs, and
+     * disconnection-eligibility scans. Fully reversible via restore().
+     *
+     * `archived_by`/`archived_reason` are persisted with an explicit save()
+     * FIRST, so the Auditable trait records one 'update' row that
+     * AuditLogService::summarizeCustomer() renders as "Archived customer:
+     * NAME" (the reason is in new_values). The subsequent soft delete()
+     * fires its own `deleted` event, but AuditableObserver skips the audit
+     * row for a soft delete (not a forceDelete) — the 'update' row above
+     * already IS the archive record, and a second "deleted" row would just
+     * be noise.
+     */
+    public function archive(Customer $customer, int $actorId, string $reason): void
+    {
+        DB::transaction(fn () => $this->customers->archive($customer, $actorId, $reason));
+
+        $this->forgetShowCache($customer->uuid);
+    }
+
+    /**
+     * Bring an archived customer back — they reappear in the register and
+     * the next manuscript run resumes from wherever their ledger was left.
+     * Clearing `archived_by`/`archived_reason` before restore() means the
+     * single save() inside SoftDeletes::restore() persists all three column
+     * changes (deleted_at → null, archived_by → null, archived_reason →
+     * null) in one `updated` event — AuditLogService::summarizeCustomer()
+     * reads the archived_by → null transition as "Restored customer: NAME".
+     */
+    public function restore(Customer $customer): void
+    {
+        DB::transaction(fn () => $this->customers->restore($customer));
 
         $this->forgetShowCache($customer->uuid);
     }
@@ -176,8 +234,10 @@ class CustomerService
      */
     private function forgetShowCache(string $uuid): void
     {
-        Cache::forget("customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all'));
-        Cache::forget("customers:show:{$uuid}:all");
+        foreach (['', ':trashed'] as $suffix) {
+            Cache::forget("customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all').$suffix);
+            Cache::forget("customers:show:{$uuid}:all".$suffix);
+        }
     }
 
     private function resolveZoneId(?string $zoneUuid): int

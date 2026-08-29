@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\DataTransferObjects\CustomerData;
 use App\Exports\CustomerImportTemplateExport;
+use App\Http\Requests\ArchiveCustomerRequest;
 use App\Http\Requests\BulkUpdateCustomerBillRequest;
 use App\Http\Requests\DisconnectCustomerRequest;
 use App\Http\Requests\ImportCustomersRequest;
@@ -28,10 +29,10 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
-use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
@@ -59,11 +60,18 @@ class CustomerController extends Controller
     {
         $this->authorize('viewAny', Customer::class);
 
+        // ?archived=1 is a secondary view (mirrors /disconnections?eligible=1),
+        // not a status filter — archived is orthogonal to active/passive/
+        // disconnected/suspended. When on, the list shows ONLY archived
+        // customers, each with a Restore action.
+        $archived = $request->boolean('archived');
+
         $filters = $request->only(['zone_uuid', 'status', 'level', 'search']);
 
-        $paginator = $this->customers->list($filters, 15);
+        $paginator = $this->customers->list([...$filters, 'archived' => $archived], 15);
 
         return Inertia::render('Customers/Index', [
+            'archived_view' => $archived,
             'customers' => [
                 'data' => collect($paginator->items())
                     ->map(fn (Customer $customer) => $this->shapeCustomer($customer))
@@ -163,11 +171,47 @@ class CustomerController extends Controller
     {
         $this->authorize('view', $customer);
 
-        $customer = $this->customers->findOrFail($customer->uuid);
+        // withTrashed: an archived customer's detail page stays viewable
+        // (read-only, with a Restore banner) — the concrete payoff of
+        // "archived, not deleted". Every other customer route keeps the
+        // default binding and 404s a trashed uuid.
+        $customer = $this->customers->findOrFail($customer->uuid, withTrashed: true);
+
+        if ($customer->trashed()) {
+            $customer->loadMissing('archivedBy');
+        }
 
         return Inertia::render('Customers/Show', [
             'customer' => $this->shapeCustomerDetail($customer),
         ]);
+    }
+
+    /**
+     * PATCH /customers/{customer}/archive. Body: {name: string (must match
+     * the customer's name exactly — the type-to-confirm gate), reason:
+     * string}. Archives (soft-deletes) a customer with billing history so
+     * the history stays auditable; see App\Services\CustomerService::
+     * archive() and CustomerPolicy::archive().
+     */
+    public function archive(ArchiveCustomerRequest $request, Customer $customer): RedirectResponse
+    {
+        $this->customers->archive($customer, $request->user()->id, $request->validated('reason'));
+
+        return redirect()->route('customers.index')->with('success', "{$customer->name} archived. Their billing history is kept — restore them any time.");
+    }
+
+    /**
+     * PATCH /customers/{customer}/restore. Binds a trashed customer
+     * (->withTrashed() on the route). Brings an archived customer back into
+     * the active register.
+     */
+    public function restore(Customer $customer): RedirectResponse
+    {
+        $this->authorize('restore', $customer);
+
+        $this->customers->restore($customer);
+
+        return redirect()->route('customers.show', $customer->uuid)->with('success', "{$customer->name} restored.");
     }
 
     /**
@@ -442,7 +486,42 @@ class CustomerController extends Controller
             // reconnection"/"...still running" note near the status badge.
             'status_changed_at' => $customer->status_changed_at?->toISOString(),
             'prepaid_paused' => $customer->prepaid_paused,
+            // Archiving (customer-deletion deliberation, 2026-08-29).
+            // `has_billing_history` drives "Archive customer" vs "Delete
+            // row" in the list; the archived_* fields are null unless the
+            // customer is currently archived.
+            'has_billing_history' => $this->resolveHasBillingHistory($customer),
+            'archived_at' => $customer->deleted_at?->toISOString(),
+            'archived_by_name' => $customer->relationLoaded('archivedBy') ? $customer->archivedBy?->name : null,
+            'archived_reason' => $customer->archived_reason,
         ];
+    }
+
+    /**
+     * True if the customer has any payment/manuscript/message history that
+     * archiving must preserve. Uses the withExists() attributes
+     * (`*_exists`) the list query loads when they're present — one row, no
+     * extra query — and falls back to a direct existence check on the
+     * detail/edit path where withExists() didn't run.
+     */
+    private function resolveHasBillingHistory(Customer $customer): bool
+    {
+        $attributes = $customer->getAttributes();
+        $withExistsRan = false;
+
+        foreach (['payments_exists', 'manuscripts_exists', 'messages_exists'] as $attr) {
+            if (! array_key_exists($attr, $attributes)) {
+                continue;
+            }
+
+            $withExistsRan = true;
+
+            if ($customer->getAttribute($attr)) {
+                return true;
+            }
+        }
+
+        return $withExistsRan ? false : $this->customers->hasBillingHistory($customer);
     }
 
     /**

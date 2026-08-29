@@ -46,6 +46,26 @@ class CustomerPolicy
     }
 
     /**
+     * Archive (soft-delete) / restore a customer — the customer-deletion
+     * deliberation's reversible, non-financial lifecycle action. Same
+     * super/admin/manager gate as delete() and the reversible status
+     * actions (disconnect/suspend/reconnect): archiving moves no ledger
+     * figure, so it deliberately does NOT go through the arrears-adjustment
+     * maker-checker (that is the money-movement control, not the
+     * destructive-action control). The type-the-name confirm + required
+     * reason on the modal, plus the full audit row, are the safety here.
+     */
+    public function archive(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    public function restore(User $user): bool
+    {
+        return $this->context->isAnyOf('super', 'admin', 'manager');
+    }
+
+    /**
      * Printing a customer's bill slip (business-rules.md section 3 /
      * api-spec.md section 9.1): role table row "Print bills" allows
      * super/admin/manager/agent — workers cannot print.

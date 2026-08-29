@@ -23,6 +23,13 @@ Route::get('customers/import/template', [CustomerController::class, 'importTempl
 Route::get('customers/{customer}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
 Route::patch('customers/{customer}', [CustomerController::class, 'update'])->name('customers.update');
 Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->name('customers.destroy');
+// Archive / restore (customer-deletion deliberation, 2026-08-29). A
+// customer with billing history is archived (soft-deleted), never
+// hard-deleted — destroy() above stays the zero-history junk-row path.
+// restore() must resolve an already-archived customer, so its binding
+// (and show()'s, further down) opts into trashed rows via ->withTrashed().
+Route::patch('customers/{customer}/archive', [CustomerController::class, 'archive'])->name('customers.archive');
+Route::patch('customers/{customer}/restore', [CustomerController::class, 'restore'])->name('customers.restore')->withTrashed();
 // Dedicated status actions (App\Services\CustomerStatusService) — a fast
 // alternative to the generic update() route above, distinct the same way
 // payments/{payment}/verify is distinct from a generic payment edit.
@@ -39,4 +46,4 @@ Route::get('customers/{customer}/bill/print', [CustomerController::class, 'print
 // Lightweight JSON lookup (not an Inertia page) for the Record Payment
 // form's info panel — see CustomerController::lastPayment()'s doc comment.
 Route::get('customers/{customer}/last-payment', [CustomerController::class, 'lastPayment'])->name('customers.last-payment');
-Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
+Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show')->withTrashed();

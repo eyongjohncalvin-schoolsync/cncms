@@ -38,6 +38,16 @@ class AuditableObserver
 
     public function deleted(Model $model): void
     {
+        // A soft delete is customer archiving (Customer is the only
+        // SoftDeletes model). App\Services\CustomerService::archive() writes
+        // an explicit "Archived customer" update row immediately before the
+        // soft delete, so this `deleted` event would just be a redundant
+        // second row — skip it. A genuine row removal (a plain delete() on a
+        // non-SoftDeletes model, or ->forceDelete()) still logs.
+        if (method_exists($model, 'isForceDeleting') && ! $model->isForceDeleting()) {
+            return;
+        }
+
         $this->writeAudit($model, 'delete');
     }
 

@@ -108,12 +108,13 @@ class SyncService
             'changes' => [
                 'customers' => [
                     'upserted' => $this->upsertedCustomers($sinceAt),
-                    // Customer has no deleted_at/tombstone column (see
-                    // App\Models\Customer) — there is no soft-delete
-                    // mechanism to source deletions from, so this is
-                    // always empty rather than a fabricated tombstone
-                    // system. See report note.
-                    'deleted' => [],
+                    // Archived (soft-deleted) customers are real tombstones
+                    // now (customer-deletion deliberation, 2026-08-29) — a
+                    // device that has one cached must drop it. Restoring a
+                    // customer later re-surfaces them through `upserted` on
+                    // the next pull (their updated_at moves), so the two
+                    // directions stay consistent.
+                    'deleted' => $this->deletedCustomers($sinceAt),
                 ],
                 'payments' => [
                     'verified' => $this->changedPayments('verified', $sinceAt),
@@ -507,6 +508,32 @@ class SyncService
                 'total_arrears' => $customer->latestManuscript?->total_arrears,
                 'credit' => $customer->latestManuscript?->credit,
             ])
+            ->all();
+    }
+
+    /**
+     * Customers archived (soft-deleted) since the client's last sync —
+     * returned as bare uuids for the device to evict from its local cache.
+     * Same zone/branch fence as upsertedCustomers() above. `onlyTrashed()`
+     * escapes the SoftDeletes global scope; the window is `deleted_at`, not
+     * `updated_at`, so a customer archived long ago isn't re-sent forever.
+     *
+     * @return array<int, string>
+     */
+    private function deletedCustomers(?Carbon $sinceAt): array
+    {
+        $zoneId = TenantContext::currentZoneId();
+        $branchId = TenantContext::currentBranchId();
+
+        return Customer::query()
+            ->onlyTrashed()
+            ->when($sinceAt, fn ($query) => $query->where('deleted_at', '>=', $sinceAt))
+            ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
+            ->when(
+                $zoneId === null && $branchId !== null,
+                fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId))
+            )
+            ->pluck('uuid')
             ->all();
     }
 
