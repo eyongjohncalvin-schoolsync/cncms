@@ -1,13 +1,30 @@
+@php
+    // Register orientation — defaults to portrait (fits more customer rows per
+    // page); landscape is the admin-selectable alternative. Anything other than
+    // an explicit "landscape" falls back to portrait.
+    $orientation = (($orientation ?? 'portrait') === 'landscape') ? 'landscape' : 'portrait';
+
+    // Fixed-layout column widths (percent, MUST sum to 100), in header order:
+    // No, Name, Code, Zone, Bill, Arrears, Credit, Total Bill, Paid, Status, Expiry.
+    // Portrait is the tight case and is tuned first; landscape just gets the
+    // slack spread back into Name/Zone.
+    $cols = $orientation === 'landscape'
+        ? [3, 20, 7, 11, 9, 10, 9, 10, 11, 5, 5]
+        : [3, 17, 7, 9, 10, 10, 10, 11, 12, 5, 6];
+
+    // Display-only status abbreviations to save column width — stored data is untouched.
+    $statusAbbr = ['disconnected' => 'disc', 'suspended' => 'susp'];
+@endphp
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>Manuscript {{ $period }}</title>
     <style>
-        @page { margin: 14px 16px; }
+        @page { size: a4 {{ $orientation }}; margin: 14px 16px; }
         body {
             font-family: Helvetica, Arial, sans-serif;
-            font-size: 8.5px;
+            font-size: {{ $orientation === 'landscape' ? '8.5px' : '7.5px' }};
             color: #111;
             margin: 0;
         }
@@ -44,17 +61,6 @@
         }
         /* Blank column the manager fills in by hand after collecting. */
         table.register th.paid, table.register td.paid { border-left: 1px solid #999; }
-        col.c-no { width: 3%; }
-        col.c-name { width: 19%; }
-        col.c-code { width: 7%; }
-        col.c-zone { width: 9%; }
-        col.c-bill { width: 9%; }
-        col.c-arrears { width: 10%; }
-        col.c-credit { width: 9%; }
-        col.c-total { width: 10%; }
-        col.c-paid { width: 12%; }
-        col.c-status { width: 5%; }
-        col.c-expiry { width: 7%; }
     </style>
 </head>
 <body>
@@ -94,16 +100,9 @@
         </tr>
     </table>
 
-    @php
-        // Display-only status abbreviations to save column width — stored data is untouched.
-        $statusAbbr = ['disconnected' => 'disc', 'suspended' => 'susp'];
-    @endphp
-
     <table class="register">
         <colgroup>
-            <col class="c-no"><col class="c-name"><col class="c-code"><col class="c-zone">
-            <col class="c-bill"><col class="c-arrears"><col class="c-credit"><col class="c-total">
-            <col class="c-paid"><col class="c-status"><col class="c-expiry">
+            @foreach ($cols as $w)<col style="width: {{ $w }}%">@endforeach
         </colgroup>
         <thead>
             <tr>

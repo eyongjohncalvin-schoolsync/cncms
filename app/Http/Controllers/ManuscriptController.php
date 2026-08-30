@@ -118,8 +118,17 @@ class ManuscriptController extends Controller
         ini_set('memory_limit', '1024M');
         set_time_limit(120);
 
-        return Pdf::loadView('pdf.manuscript', $data)
-            ->setPaper('a4', 'landscape')
+        // Register orientation is an admin choice, defaulting to portrait —
+        // portrait fits more customer rows per page, which is what the owner
+        // wants for the monthly register; landscape stays available for the
+        // wider view. Fed to both dompdf's paper setup and the blade (which
+        // switches its fixed column widths on it). A hand-crafted value other
+        // than the two allowed is a hard 422 rather than a silent coercion.
+        $orientation = (string) $request->query('orientation', 'portrait');
+        abort_unless(in_array($orientation, ['portrait', 'landscape'], true), 422, 'orientation must be portrait or landscape.');
+
+        return Pdf::loadView('pdf.manuscript', [...$data, 'orientation' => $orientation])
+            ->setPaper('a4', $orientation)
             ->stream('manuscript-'.$data['period'].'.pdf');
     }
 

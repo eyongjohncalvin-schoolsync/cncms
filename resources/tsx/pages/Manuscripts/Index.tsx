@@ -254,14 +254,28 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                             {/* Plain <a download> anchors, not Inertia <Link>s / DropdownItem's
                                 href branch — these are file downloads the browser must handle
                                 itself, not client-side visits. */}
+                            {/* Portrait is the default register layout (fits more
+                                customer rows per page); landscape is the wider
+                                alternative — both map to ?orientation on the same
+                                export route. */}
                             <MenuItem>
                                 <a
-                                    href={`/manuscripts/export?${exportParams.toString()}`}
+                                    href={`/manuscripts/export?${exportParams.toString()}&orientation=portrait`}
                                     download
                                     className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
                                 >
                                     <IconFileTypePdf size={16} stroke={1.75} />
-                                    Download PDF
+                                    Download PDF (Portrait)
+                                </a>
+                            </MenuItem>
+                            <MenuItem>
+                                <a
+                                    href={`/manuscripts/export?${exportParams.toString()}&orientation=landscape`}
+                                    download
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                >
+                                    <IconFileTypePdf size={16} stroke={1.75} />
+                                    Download PDF (Landscape)
                                 </a>
                             </MenuItem>
                             <MenuItem>

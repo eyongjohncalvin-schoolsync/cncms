@@ -245,6 +245,74 @@ class ManuscriptTest extends TestCase
     }
 
     /**
+     * The register PDF defaults to A4 portrait (fits more customer rows per
+     * page — the owner's call); `?orientation=landscape` opts into the wide
+     * layout, and anything else is a 422. See ManuscriptController::export().
+     */
+    public function test_the_register_pdf_orientation_is_a_validated_optional_param(): void
+    {
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+        $customer = CustomerFactory::new()->create();
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+
+        $this->actingAsRole('manager');
+
+        // No orientation -> defaults to portrait, still a clean PDF stream.
+        $this->get('/manuscripts/export?period='.$period)
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+
+        // Explicit landscape is honored.
+        $this->get('/manuscripts/export?period='.$period.'&orientation=landscape')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+
+        // Explicit portrait is accepted too.
+        $this->get('/manuscripts/export?period='.$period.'&orientation=portrait')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+
+        // Anything else is rejected rather than silently coerced.
+        $this->get('/manuscripts/export?period='.$period.'&orientation=sideways')
+            ->assertStatus(422);
+    }
+
+    /**
+     * The blade switches both the dompdf `@page` size and its fixed
+     * column-width set on the orientation, defaulting to portrait. Asserted
+     * at the rendered-HTML level since the PDF stream itself is opaque binary.
+     */
+    public function test_the_register_blade_switches_page_size_and_columns_on_orientation(): void
+    {
+        $base = [
+            'period' => '2026-08',
+            'company' => null,
+            'manuscripts' => collect(),
+            'summary' => [
+                'total_customers' => 0,
+                'total_bill' => '0',
+                'total_arrears' => '0',
+                'total_credit' => '0',
+                'total_collected' => '0',
+                'collection_rate' => 0.0,
+            ],
+        ];
+
+        $default = view('pdf.manuscript', $base)->render();
+        $this->assertStringContainsString('size: a4 portrait', $default);
+        $this->assertStringContainsString('width: 17%', $default); // portrait Name column
+
+        $landscape = view('pdf.manuscript', [...$base, 'orientation' => 'landscape'])->render();
+        $this->assertStringContainsString('size: a4 landscape', $landscape);
+        $this->assertStringContainsString('width: 20%', $landscape); // landscape Name column
+
+        // Unknown values fall back to portrait, never render a bare "a4 ".
+        $bogus = view('pdf.manuscript', [...$base, 'orientation' => 'sideways'])->render();
+        $this->assertStringContainsString('size: a4 portrait', $bogus);
+    }
+
+    /**
      * Stage 3 (task-scheduler.md's 2026-08-27 "manual/scheduled convergence"
      * addendum): the manual trigger no longer auto-publishes — it now lands
      * at 'pending_review' behind the same gate the scheduled path already
