@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateScheduledTaskRequest;
+use App\Models\ArrearsAdjustment;
+use App\Models\AuditLog;
 use App\Models\CommandRun;
 use App\Models\Manuscript;
+use App\Models\Payment;
 use App\Models\ScheduledTask;
 use App\Services\ManuscriptGenerationBatchService;
 use App\Services\ManuscriptRunLockService;
@@ -111,6 +114,10 @@ class SettingsCommandRunController extends Controller
             // reused) — gates the new Delete/Rollback action
             // (task-scheduler.md's 2026-08-28 addendum).
             'canRollback' => Auth::user()?->can('publish', CommandRun::class) ?? false,
+            // Same ability once more — gates the Unpublish action (an
+            // "undo a publish, fix, re-generate" flow distinct from
+            // Delete/Rollback; see unpublish() below).
+            'canUnpublish' => Auth::user()?->can('publish', CommandRun::class) ?? false,
         ]);
     }
 
@@ -291,5 +298,135 @@ class SettingsCommandRunController extends Controller
         $this->manuscripts->forgetSummaryCache($run->period);
 
         return redirect()->route('settings.command-runs.index')->with('success', "Manuscript period {$run->period}'s run was deleted/rolled back — its manuscript rows were removed. Re-run the calculation to recompute this period.");
+    }
+
+    /**
+     * Unpublish a `published` `manuscript:calculate` run (task-scheduler.md's
+     * 2026-08-28 manuscript-run-management addendum — the product owner's
+     * "undo a publish, fix an error, re-generate — without affecting any
+     * other month" ask). Deliberately distinct from rollback() above in
+     * three ways that matter:
+     *
+     *  1. Restricted to `published` runs only. rollback() also accepts
+     *     pending_review/failed; unpublish() is specifically the "this is
+     *     LIVE and I need to take it back" action.
+     *  2. It ALSO restores the idempotency stamps every payment and arrears
+     *     adjustment this run consumed — `processed_period` / `processed_at`
+     *     back to NULL — using the exact id lists the run recorded on
+     *     `computed_result['customers'][*]['processed_payment_ids' /
+     *     'processed_adjustment_ids']`. Without this, a fresh
+     *     manuscript:calculate for the period would treat those payments as
+     *     already billed (App\Models\Payment::scopeEligibleForPeriod) and
+     *     recompute wrong figures. rollback() deliberately does NOT do this —
+     *     it is a teardown, not a redo.
+     *  3. It writes one explicit audit_logs row for the command_runs record
+     *     (who unpublished, when, rows deleted, stamps restored). CommandRun
+     *     is not an Auditable model and the mass DELETE/UPDATE below fire no
+     *     Eloquent events, so this is the operation's only trace in the audit
+     *     trail.
+     *
+     * Same two gates as rollback()/publish(): CommandRunPolicy::publish()
+     * (super/admin) and App\Services\ManuscriptRunLockService::isPeriodLocked()
+     * — a published run for a period that has already elapsed is immutable
+     * history and can never be unpublished. Same
+     * `command === 'manuscript:calculate'` restriction.
+     *
+     * Landing status is 'rolled_back' — terminal, and both non-'published'
+     * (so App\Services\ManuscriptRerunGuard does not refuse a re-run) and
+     * outside idx_command_runs_period_inflight's
+     * `status IN ('queued','pending_review')` predicate (so it never blocks
+     * the next in-flight run). The net effect: `manuscript:calculate <period>`
+     * — CLI or the web batch — runs again immediately with NO
+     * --force / confirmed_rerun, and a later re-run + re-publish simply
+     * creates a fresh command_runs row, exactly the "re-run-and-republish
+     * after a data fix" case the in-flight index migration already documents
+     * as expected and fine.
+     */
+    public function unpublish(CommandRun $run): RedirectResponse
+    {
+        $this->authorize('publish', CommandRun::class);
+
+        abort_unless($run->command === 'manuscript:calculate', 404);
+
+        if ($this->lock->isPeriodLocked($run->period)) {
+            return redirect()->route('settings.command-runs.index')->with('error', "Manuscript period {$run->period} has already passed and is locked — a published run for a past period can no longer be unpublished.");
+        }
+
+        if (! $run->isPublished()) {
+            return redirect()->route('settings.command-runs.index')->with('error', 'Only a published run can be unpublished.');
+        }
+
+        $customers = $run->computed_result['customers'] ?? [];
+
+        $paymentIds = [];
+        $adjustmentIds = [];
+
+        foreach ($customers as $entry) {
+            $paymentIds = [...$paymentIds, ...($entry['processed_payment_ids'] ?? [])];
+            $adjustmentIds = [...$adjustmentIds, ...($entry['processed_adjustment_ids'] ?? [])];
+        }
+
+        $paymentIds = array_values(array_unique(array_map('intval', $paymentIds)));
+        $adjustmentIds = array_values(array_unique(array_map('intval', $adjustmentIds)));
+
+        DB::transaction(function () use ($run, $paymentIds, $adjustmentIds): void {
+            // Precise scoping by command_run_id — never by period alone (a
+            // sibling run may hold rows for the same period). See rollback()'s
+            // doc comment and the 2026_08_28_010000 migration's doc comment.
+            $manuscriptsDeleted = Manuscript::query()->where('command_run_id', $run->id)->delete();
+
+            // Restore the idempotency stamps so a fresh calculation for this
+            // period reconsumes these payments/adjustments correctly. Guarded
+            // to this run's own period so a stamp that (somehow) belongs to a
+            // different period is never cleared — mirrors publish()'s own
+            // defensive `processed_period` guarding.
+            $paymentsRestored = $paymentIds === [] ? 0 : Payment::query()
+                ->whereIn('id', $paymentIds)
+                ->where('processed_period', $run->period)
+                ->update(['processed_period' => null, 'processed_at' => null]);
+
+            $adjustmentsRestored = $adjustmentIds === [] ? 0 : ArrearsAdjustment::query()
+                ->whereIn('id', $adjustmentIds)
+                ->where('processed_period', $run->period)
+                ->update(['processed_period' => null, 'processed_at' => null]);
+
+            $run->update([
+                'status' => 'rolled_back',
+                'metadata' => [
+                    ...($run->metadata ?? []),
+                    'unpublished_by' => Auth::id(),
+                    'unpublished_at' => now()->toIso8601String(),
+                    'unpublished_manuscripts_deleted' => $manuscriptsDeleted,
+                    'unpublished_payments_restored' => $paymentsRestored,
+                    'unpublished_adjustments_restored' => $adjustmentsRestored,
+                ],
+            ]);
+
+            AuditLog::create([
+                'tenant_id' => tenant()->id,
+                'table_name' => 'command_runs',
+                'record_uuid' => $run->uuid,
+                'record_id' => $run->getKey(),
+                'action' => 'update',
+                'old_values' => ['status' => 'published', 'period' => $run->period],
+                'new_values' => [
+                    'status' => 'rolled_back',
+                    'period' => $run->period,
+                    'reason' => 'unpublished',
+                    'unpublished_by' => Auth::id(),
+                    'manuscripts_deleted' => $manuscriptsDeleted,
+                    'payments_restored' => $paymentsRestored,
+                    'adjustments_restored' => $adjustmentsRestored,
+                ],
+                'user_id' => Auth::id(),
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+                'device_id' => request()->header('X-Device-ID'),
+            ]);
+        });
+
+        $this->manuscripts->forgetSummaryCache($run->period);
+
+        return redirect()->route('settings.command-runs.index')->with('success', "Manuscript period {$run->period} was unpublished — its manuscript rows were removed and its payments and adjustments freed. Re-run the calculation to regenerate this period.");
     }
 }

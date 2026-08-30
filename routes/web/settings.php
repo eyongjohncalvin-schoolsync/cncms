@@ -44,6 +44,11 @@ Route::post('settings/command-runs/{run}/cancel', [SettingsCommandRunController:
 // 2026-08-28 manuscript-run-management rationale.
 Route::post('settings/command-runs/{run}/rollback', [SettingsCommandRunController::class, 'rollback'])->name('settings.command-runs.rollback');
 
+// Unpublish a published run — deletes its manuscript rows AND restores the
+// payment/adjustment idempotency stamps so the period can be fixed and
+// re-generated with no --force. See SettingsCommandRunController::unpublish().
+Route::post('settings/command-runs/{run}/unpublish', [SettingsCommandRunController::class, 'unpublish'])->name('settings.command-runs.unpublish');
+
 // Language switcher (resources/tsx/layouts/AppLayout.tsx) — updates the
 // caller's own `users.locale`, available to every authenticated tenant
 // member regardless of role (unlike the routes above, which are

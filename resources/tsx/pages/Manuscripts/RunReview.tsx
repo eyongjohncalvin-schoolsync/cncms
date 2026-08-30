@@ -86,6 +86,23 @@ export default function ManuscriptsRunReview({ run, computed_rows: computedRows,
         router.post(`/settings/command-runs/${run.uuid}/publish`, {}, { preserveScroll: true });
     }
 
+    // Unpublish a published period (2026-08-28 manuscript-run-management
+    // addendum) — deletes the manuscript rows this run wrote and restores the
+    // payment/adjustment idempotency stamps, so the period can be fixed and
+    // re-generated with no --force. Gated to the same ability as Publish
+    // (CommandRunPolicy::publish()); the backend also refuses it for a
+    // locked/past period regardless of what renders here.
+    function unpublish() {
+        if (
+            !window.confirm(
+                `Unpublish the ${run.period} manuscript? This deletes the rows this run wrote and frees its payments and adjustments so you can fix and re-run the calculation.`,
+            )
+        ) {
+            return;
+        }
+        router.post(`/settings/command-runs/${run.uuid}/unpublish`, {}, { preserveScroll: true });
+    }
+
     const [rowSearch, setRowSearch] = useState('');
     const [rowFilter, setRowFilter] = useState<RowFilter>('all');
 
@@ -140,6 +157,7 @@ export default function ManuscriptsRunReview({ run, computed_rows: computedRows,
                 {run.status === 'pending_review' && <Badge tone="yellow">Awaiting Review</Badge>}
                 {run.status === 'published' && <Badge tone="green">Published</Badge>}
                 {run.status === 'failed' && <Badge tone="red">Failed</Badge>}
+                {run.status === 'rolled_back' && <Badge tone="slate">Rolled Back</Badge>}
             </div>
 
             {run.status === 'queued' && (
@@ -326,6 +344,31 @@ export default function ManuscriptsRunReview({ run, computed_rows: computedRows,
                         <p className="text-sm font-medium text-slate-700">Period {run.period} is published.</p>
                         <Link href={`/manuscripts?period=${run.period}`} className="text-sm font-medium text-blue-600 hover:text-blue-700">
                             View the manuscript
+                        </Link>
+                        {canPublish && (
+                            <div className="mt-2 flex flex-col items-center gap-1.5">
+                                <Button type="button" variant="warning" onClick={unpublish}>
+                                    Unpublish this period
+                                </Button>
+                                <p className="max-w-sm text-xs text-slate-400">
+                                    Removes this run&apos;s manuscript rows and frees the payments and adjustments it
+                                    consumed, so you can correct the data and run the calculation again.
+                                </p>
+                            </div>
+                        )}
+                    </CardBody>
+                </Card>
+            )}
+
+            {run.status === 'rolled_back' && (
+                <Card className="animate-fade-up">
+                    <CardBody className="flex flex-col items-center gap-3 py-10 text-center">
+                        <IconAlertTriangle size={32} className="text-slate-400" stroke={1.75} />
+                        <p className="text-sm font-medium text-slate-700">
+                            This run was rolled back — period {run.period} is no longer published.
+                        </p>
+                        <Link href="/manuscripts" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+                            Back to Manuscripts
                         </Link>
                     </CardBody>
                 </Card>

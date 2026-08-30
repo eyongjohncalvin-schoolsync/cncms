@@ -1,6 +1,6 @@
 import { Form, Head, Link, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
-import { IconTerminal2, IconEye, IconCheck, IconClock, IconCalendarTime, IconLock, IconBan, IconTrash } from '@tabler/icons-react';
+import { IconTerminal2, IconEye, IconCheck, IconClock, IconCalendarTime, IconLock, IconBan, IconTrash, IconArrowBackUp } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { SettingsTabs } from '@/components/settings/SettingsTabs';
 import { Badge } from '@/components/ui/Badge';
@@ -90,6 +90,7 @@ interface SettingsCommandRunsProps {
     canPublish: boolean;
     canCancel: boolean;
     canRollback: boolean;
+    canUnpublish: boolean;
 }
 
 export default function SettingsCommandRuns({
@@ -99,6 +100,7 @@ export default function SettingsCommandRuns({
     canPublish,
     canCancel,
     canRollback,
+    canUnpublish,
 }: SettingsCommandRunsProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [previewRun, setPreviewRun] = useState<CommandRunEntry | null>(null);
@@ -148,6 +150,23 @@ export default function SettingsCommandRuns({
             return;
         }
         router.post(`/settings/command-runs/${run.uuid}/rollback`, {}, { preserveScroll: true });
+    }
+
+    // Unpublish (2026-08-28 manuscript-run-management addendum) — the clean
+    // "undo a publish, fix it, re-generate" path for a live period: unlike
+    // Delete/Rollback it also restores the payment/adjustment idempotency
+    // stamps this run consumed, so a fresh manuscript:calculate recomputes
+    // correct figures with no --force. Same is_locked gating and same
+    // lightweight confirm()-gated router.post as the other row actions here.
+    function unpublish(run: CommandRunEntry) {
+        if (
+            !confirm(
+                `Unpublish the ${run.period} manuscript? This deletes the manuscript rows this run wrote and frees its payments and adjustments so you can fix and re-run the calculation. The published figures are gone until you re-generate.`,
+            )
+        ) {
+            return;
+        }
+        router.post(`/settings/command-runs/${run.uuid}/unpublish`, {}, { preserveScroll: true });
     }
 
     return (
@@ -300,11 +319,12 @@ export default function SettingsCommandRuns({
                                                 (() => {
                                                     const showPublish = run.status === 'pending_review' && canPublish;
                                                     const showCancel = run.status === 'queued' && canCancel;
+                                                    const showUnpublish = run.status === 'published' && canUnpublish;
                                                     const showRollback =
                                                         (run.status === 'pending_review' || run.status === 'published' || run.status === 'failed') &&
                                                         canRollback;
 
-                                                    if (!showPublish && !showCancel && !showRollback) {
+                                                    if (!showPublish && !showCancel && !showUnpublish && !showRollback) {
                                                         return null;
                                                     }
 
@@ -324,7 +344,16 @@ export default function SettingsCommandRuns({
                                                                     Cancel
                                                                 </DropdownItem>
                                                             )}
-                                                            {(showPublish || showCancel) && showRollback && <DropdownDivider />}
+                                                            {(showPublish || showCancel) && (showUnpublish || showRollback) && <DropdownDivider />}
+                                                            {showUnpublish && (
+                                                                <DropdownItem
+                                                                    onClick={() => unpublish(run)}
+                                                                    variant="warning"
+                                                                    icon={<IconArrowBackUp size={16} stroke={1.75} />}
+                                                                >
+                                                                    Unpublish
+                                                                </DropdownItem>
+                                                            )}
                                                             {showRollback && (
                                                                 <DropdownItem
                                                                     onClick={() => rollback(run)}
