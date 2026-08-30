@@ -27,7 +27,7 @@ import {
     markComplaintFailed,
     markComplaintSynced,
 } from '../db/complaints';
-import { upsertCustomers } from '../db/customers';
+import { deleteCustomers, upsertCustomers } from '../db/customers';
 import { getPendingAcknowledgements, markAckConfirmed, markAckPending, upsertNotifications } from '../db/notifications';
 import { refreshNotificationsState } from '../notifications/notificationStore';
 import { clearLastSyncAt, getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
@@ -375,6 +375,7 @@ class SyncManagerImpl {
         const response = await pullChanges(since);
 
         await upsertCustomers(response.changes.customers.upserted);
+        await deleteCustomers(response.changes.customers.deleted);
         await applyVerificationUpdates(response.changes.payments.verified, 'verified');
         await applyVerificationUpdates(response.changes.payments.rejected, 'rejected');
 

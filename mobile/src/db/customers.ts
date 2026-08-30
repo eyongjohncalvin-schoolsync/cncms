@@ -50,6 +50,25 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
     });
 }
 
+/**
+ * Evicts customers the server has archived (soft-deleted) — pull()'s
+ * `changes.customers.deleted` (App\Services\SyncService::deletedCustomers()).
+ * The `customers` cache is read-only and rebuilt from the server, so a
+ * straight delete is safe: if the customer is later restored server-side,
+ * the next pull re-adds them via `upserted`. Any locally-queued payment
+ * that referenced them is untouched — it still syncs on its own uuid.
+ */
+export async function deleteCustomers(uuids: string[]): Promise<void> {
+    if (uuids.length === 0) {
+        return;
+    }
+
+    const db = await getDatabase();
+    const placeholders = uuids.map(() => '?').join(', ');
+
+    await db.runAsync(`DELETE FROM customers WHERE uuid IN (${placeholders})`, uuids);
+}
+
 export async function getAllCustomers(): Promise<LocalCustomer[]> {
     const db = await getDatabase();
 
