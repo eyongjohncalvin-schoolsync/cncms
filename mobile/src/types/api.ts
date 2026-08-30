@@ -538,13 +538,26 @@ export interface ExpenseCategoryListResponse {
 
 export type ArrearsAdjustmentDirection = 'decrease' | 'increase';
 
+/** Which side of `net = arrears - credit` a correction lands on. Added
+ * 2026-08-30 alongside the web ArrearsAdjustmentModal's target toggle — a
+ * `credit` correction touches ONLY the loose credit figure, never prepaid
+ * coverage (prepaid_months_remaining / prepaid_rate). Optional/defaulted
+ * server-side (StoreArrearsAdjustmentRequest: `nullable|in:arrears,credit`),
+ * so an older client that never sends it still gets the `arrears` default. */
+export type ArrearsAdjustmentTarget = 'arrears' | 'credit';
+
 export type ArrearsAdjustmentReasonCategory =
     | 'legacy_migration_error'
     | 'billing_error'
     | 'goodwill_service_outage'
     | 'bad_debt_writeoff'
     | 'credit_clawback'
-    | 'other';
+    | 'other'
+    // Credit-specific categories — offered only when target = 'credit'
+    // (StoreArrearsAdjustmentRequest::rules() accepts all nine values).
+    | 'credit_correction'
+    | 'duplicate_credit'
+    | 'migration_credit_error';
 
 export type ArrearsAdjustmentStatus = 'pending' | 'pending_second_approval' | 'approved' | 'rejected';
 
@@ -554,6 +567,9 @@ export type ArrearsAdjustmentStatus = 'pending' | 'pending_second_approval' | 'a
 export interface RequestArrearsAdjustmentPayload {
     customer_uuid: string;
     target_period: string;
+    /** Omit (or send 'arrears') for an arrears correction — the server
+     * defaults it. Send 'credit' to correct the loose credit figure. */
+    target?: ArrearsAdjustmentTarget;
     direction: ArrearsAdjustmentDirection;
     amount: string;
     reason_category: ArrearsAdjustmentReasonCategory;
@@ -567,10 +583,13 @@ export interface ArrearsAdjustmentApi {
     customer_name: string;
     target_period: string;
     direction: ArrearsAdjustmentDirection;
+    target: ArrearsAdjustmentTarget;
     amount: string;
     reason_category: ArrearsAdjustmentReasonCategory;
     reason_note: string;
     arrears_snapshot: string;
+    /** Null on older rows / arrears-target requests. */
+    credit_snapshot: string | null;
     status: ArrearsAdjustmentStatus;
     requested_by: { uuid: string; name: string } | null;
     created_at: string;

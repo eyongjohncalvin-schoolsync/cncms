@@ -14,17 +14,45 @@ import { validateArrearsAdjustmentForm, type ArrearsAdjustmentFormErrors } from 
 import { colors } from '../../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../../src/theme/tokens';
 import { formatFcfa } from '../../src/utils/format';
-import type { ArrearsAdjustmentDirection, ArrearsAdjustmentReasonCategory, CustomerDetailApi } from '../../src/types/api';
+import type {
+    ArrearsAdjustmentDirection,
+    ArrearsAdjustmentReasonCategory,
+    ArrearsAdjustmentTarget,
+    CustomerDetailApi,
+} from '../../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting' | 'success';
 
-const REASON_CATEGORIES: Array<{ value: ArrearsAdjustmentReasonCategory; label: string }> = [
-    { value: 'billing_error', label: 'Billing error' },
-    { value: 'goodwill_service_outage', label: 'Goodwill — outage' },
-    { value: 'bad_debt_writeoff', label: 'Bad debt write-off' },
-    { value: 'credit_clawback', label: 'Credit clawback' },
-    { value: 'legacy_migration_error', label: 'Legacy migration error' },
-    { value: 'other', label: 'Other' },
+const REASON_LABELS: Record<ArrearsAdjustmentReasonCategory, string> = {
+    legacy_migration_error: 'Legacy migration error',
+    billing_error: 'Billing error',
+    goodwill_service_outage: 'Goodwill — outage',
+    bad_debt_writeoff: 'Bad debt write-off',
+    credit_clawback: 'Credit clawback',
+    other: 'Other',
+    credit_correction: 'Credit correction',
+    duplicate_credit: 'Duplicate credit',
+    migration_credit_error: 'Migration credit error',
+};
+
+// Arrears corrections and credit corrections offer different reason menus —
+// mirrors resources/tsx/components/customers/ArrearsAdjustmentModal.tsx's
+// arrearsReasonOrder / creditReasonOrder exactly. 'other' is shared.
+const ARREARS_REASONS: ArrearsAdjustmentReasonCategory[] = [
+    'billing_error',
+    'goodwill_service_outage',
+    'bad_debt_writeoff',
+    'credit_clawback',
+    'legacy_migration_error',
+    'other',
+];
+
+const CREDIT_REASONS: ArrearsAdjustmentReasonCategory[] = [
+    'credit_correction',
+    'duplicate_credit',
+    'migration_credit_error',
+    'billing_error',
+    'other',
 ];
 
 function currentPeriod(): string {
@@ -33,13 +61,33 @@ function currentPeriod(): string {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function toNumberOrNull(value: string | null | undefined): number | null {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+
+    const parsed = Number(value);
+
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
 /**
- * "Adjust Arrears" — the mobile REQUEST side of the maker-checker write-off
- * workflow (references/arrears-adjustment.md). Mirrors
+ * "Adjust Arrears / Credit" — the mobile REQUEST side of the maker-checker
+ * ledger-correction workflow (references/arrears-adjustment.md). Mirrors
  * resources/tsx/components/customers/ArrearsAdjustmentModal.tsx's fields and
- * copy closely: reason category, direction, target period, amount, a
- * required note, the "this does not record a payment" explanatory note, and
- * the same current-balance/balance-after guidance display.
+ * copy closely: a target toggle (arrears vs loose credit), reason category,
+ * direction, target period, amount, a required note, the "this does not
+ * record a payment" explanatory note, and the current-balance/balance-after
+ * guidance display.
+ *
+ * TARGET TOGGLE (2026-08-30 addendum, mirroring the identical web addition):
+ * a correction lands on EITHER the customer's `total_arrears` OR their loose
+ * `credit` figure — the latter is the fallback for the 2026-08 baseline
+ * credit corruption (see arrears-adjustment.md). A credit correction touches
+ * ONLY the loose credit amount, never prepaid coverage
+ * (prepaid_months_remaining / prepaid_rate). "Clear all arrears" / "Clear
+ * credit" are pure pre-fill conveniences — direction + amount only, nothing
+ * auto-submits, and they change nothing about the maker-checker workflow.
  *
  * REQUEST-ONLY, ON PURPOSE — there is no approve/reject UI anywhere in this
  * screen or app. ArrearsAdjustmentPolicy::create() is ungated for all 5
@@ -53,9 +101,9 @@ function currentPeriod(): string {
  * disconnections.
  *
  * ONLINE-ONLY, same reasoning as reconnect/[uuid].tsx and disconnect/[uuid].tsx:
- * the current-arrears figure shown as read-only context has to be the real,
- * fresh server-side number (fetchCustomerDetail), not a stale locally
- * cached value, and the submit itself is a real API call with no
+ * the current-arrears/credit figures shown as read-only context have to be
+ * the real, fresh server-side numbers (fetchCustomerDetail), not stale
+ * locally cached values, and the submit itself is a real API call with no
  * local_uuid idempotency support — so this is not queued through the
  * offline /sync/push protocol.
  *
@@ -66,12 +114,6 @@ function currentPeriod(): string {
  * change, submitting this request does NOT change the customer's balance
  * yet — it only starts the maker-checker review. The copy is explicit that
  * office approval is still needed before anything takes effect.
- *
- * The "Clear all arrears" chip above the amount field (2026-08-28 addendum,
- * mirroring the identical web addition on ArrearsAdjustmentModal.tsx) is a
- * pure pre-fill convenience — direction+amount only, nothing auto-submits,
- * and it changes nothing about the maker-checker workflow above. See
- * clearAllArrears() below.
  */
 export default function AdjustArrearsScreen() {
     const { uuid } = useLocalSearchParams<{ uuid: string }>();
@@ -82,6 +124,7 @@ export default function AdjustArrearsScreen() {
     const [customer, setCustomer] = useState<CustomerDetailApi | null>(null);
     const phaseRef = useRef<Phase>('loading');
 
+    const [target, setTarget] = useState<ArrearsAdjustmentTarget>('arrears');
     const [reasonCategory, setReasonCategory] = useState<ArrearsAdjustmentReasonCategory>('billing_error');
     const [direction, setDirection] = useState<ArrearsAdjustmentDirection>('decrease');
     const [targetPeriod, setTargetPeriod] = useState(currentPeriod());
@@ -136,45 +179,63 @@ export default function AdjustArrearsScreen() {
         }, [load]),
     );
 
-    const currentBalance = customer?.manuscript?.total_arrears ?? null;
+    const isCredit = target === 'credit';
+    const currentArrears = customer?.manuscript?.total_arrears ?? null;
+    const currentCredit = customer?.manuscript?.credit ?? null;
+    const activeBalance = isCredit ? currentCredit : currentArrears;
+    const activeBalanceNumber = toNumberOrNull(activeBalance);
 
     // Mirrors ArrearsAdjustmentModal.tsx's balanceAfter memo exactly — a
     // simple, display-only guidance figure, not the real credit/arrears-net
     // calculation ManuscriptCalculator performs. That real calculation only
-    // ever runs once this request is approved.
+    // ever runs once this request is approved. For an arrears target:
+    // 'decrease' writes off, 'increase' corrects up. For a credit target:
+    // 'increase' claws credit back (reduces it), 'decrease' grants credit.
     const balanceAfter = useMemo(() => {
-        if (currentBalance === null || amountText.trim() === '') {
-            return null;
-        }
-
-        const balance = Number(currentBalance);
+        const balance = activeBalanceNumber;
         const amount = Number(amountText);
 
-        if (!Number.isFinite(balance) || !Number.isFinite(amount) || amount <= 0) {
+        if (balance === null || amountText.trim() === '' || !Number.isFinite(amount) || amount <= 0) {
             return null;
         }
 
-        return direction === 'decrease' ? Math.max(0, balance - amount) : balance + amount;
-    }, [currentBalance, amountText, direction]);
+        const reduces = isCredit ? direction === 'increase' : direction === 'decrease';
 
-    // "Clear all arrears" quick-fill — a faster path to the single most
-    // common case (writing off the customer's ENTIRE current balance),
-    // matching resources/tsx/components/customers/ArrearsAdjustmentModal.tsx's
-    // identical addition. Pre-fills direction+amount only; reason category
-    // and notes are left for the agent to fill in themselves (a write-off
-    // still needs a real justification), and this never submits on its own
-    // — Submit Request below is still a separate, explicit step. Reuses the
-    // `currentBalance` this screen already fetched fresh via
-    // fetchCustomerDetail() (see this screen's own class doc) rather than a
-    // second live fetch, since that figure is already the real current
-    // server-side number this screen is built around.
-    function clearAllArrears() {
-        if (currentBalance === null) {
+        return reduces ? Math.max(0, balance - amount) : balance + amount;
+    }, [activeBalanceNumber, amountText, direction, isCredit]);
+
+    // Switching target resets the fields whose sensible default depends on it
+    // — direction (write-off for arrears, claw-back for credit — the 2026-08
+    // corruption case), reason category, and the amount. Mirrors the web
+    // modal's switchTarget().
+    function switchTarget(next: ArrearsAdjustmentTarget) {
+        if (next === target) {
             return;
         }
 
-        setDirection('decrease');
-        setAmountText(currentBalance);
+        setTarget(next);
+        setDirection(next === 'credit' ? 'increase' : 'decrease');
+        setReasonCategory(next === 'credit' ? 'credit_correction' : 'billing_error');
+        setAmountText('');
+        setErrors((prev) => ({ ...prev, amount: undefined }));
+    }
+
+    // "Clear all arrears" / "Clear credit" quick-fill — a faster path to the
+    // single most common case (zeroing the whole balance on the active
+    // side), matching the web modal's clearActiveBalance(). Pre-fills
+    // direction + amount only; reason category and notes are left for the
+    // agent (a correction still needs a real justification), and this never
+    // submits on its own — Submit Request is still a separate step. Reuses
+    // the figure this screen already fetched fresh via fetchCustomerDetail()
+    // (see this screen's own class doc); approval-time staleness re-checks
+    // re-derive the true server-side value regardless.
+    function clearActiveBalance() {
+        if (activeBalance === null || activeBalanceNumber === null || activeBalanceNumber <= 0) {
+            return;
+        }
+
+        setDirection(isCredit ? 'increase' : 'decrease');
+        setAmountText(String(activeBalance));
         setErrors((prev) => ({ ...prev, amount: undefined }));
     }
 
@@ -198,6 +259,7 @@ export default function AdjustArrearsScreen() {
             await requestArrearsAdjustment({
                 customer_uuid: uuid,
                 target_period: targetPeriod.trim(),
+                target,
                 direction,
                 amount: result.amount.toFixed(2),
                 reason_category: reasonCategory,
@@ -228,7 +290,7 @@ export default function AdjustArrearsScreen() {
     if (phase === 'loading') {
         return (
             <View style={styles.center}>
-                <Stack.Screen options={{ title: 'Adjust Arrears' }} />
+                <Stack.Screen options={{ title: 'Adjust Arrears / Credit' }} />
                 <ActivityIndicator size="large" color={colors.accent.arrears} />
             </View>
         );
@@ -237,7 +299,7 @@ export default function AdjustArrearsScreen() {
     if (phase === 'offline') {
         return (
             <View style={styles.flex}>
-                <Stack.Screen options={{ title: 'Adjust Arrears' }} />
+                <Stack.Screen options={{ title: 'Adjust Arrears / Credit' }} />
                 <EmptyState
                     title="Requires an internet connection"
                     subtitle="This needs the customer's real current balance from the server and can't be prepared offline. Connect and this screen will pick up automatically."
@@ -251,7 +313,7 @@ export default function AdjustArrearsScreen() {
     if (phase === 'error' || !customer) {
         return (
             <View style={styles.flex}>
-                <Stack.Screen options={{ title: 'Adjust Arrears' }} />
+                <Stack.Screen options={{ title: 'Adjust Arrears / Credit' }} />
                 <EmptyState title="Couldn't load this customer" subtitle={errorMessage ?? undefined} actionLabel="Try again" onAction={load} />
             </View>
         );
@@ -260,11 +322,11 @@ export default function AdjustArrearsScreen() {
     if (phase === 'success') {
         return (
             <View style={styles.confirmFlex}>
-                <Stack.Screen options={{ title: 'Adjust Arrears' }} />
+                <Stack.Screen options={{ title: 'Adjust Arrears / Credit' }} />
                 <Badge label="Submitted — pending approval" tone="pending" />
                 <Text style={styles.confirmTitle}>{customer.name}</Text>
                 <Text style={styles.confirmBody}>
-                    {direction === 'decrease' ? 'Write-off' : 'Correction'} request for {formatFcfa(Number(amountText) || 0)} sent.
+                    {isCredit ? 'Credit' : 'Arrears'} correction request for {formatFcfa(Number(amountText) || 0)} sent.
                 </Text>
                 <Text style={styles.confirmHint}>
                     This does not change the customer's balance yet — it needs office approval before it takes
@@ -276,10 +338,11 @@ export default function AdjustArrearsScreen() {
     }
 
     const submitting = phase === 'submitting';
+    const reasons = isCredit ? CREDIT_REASONS : ARREARS_REASONS;
 
     return (
         <ScrollView style={styles.flex} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Stack.Screen options={{ title: 'Adjust Arrears' }} />
+            <Stack.Screen options={{ title: 'Adjust Arrears / Credit' }} />
 
             <Card>
                 <Text style={styles.customerName}>{customer.name}</Text>
@@ -289,26 +352,60 @@ export default function AdjustArrearsScreen() {
             <Card accentColor={colors.accent.arrears} style={styles.noteCard}>
                 <Text style={styles.noteText}>
                     This does not record a payment. No money changes hands here — this requests a correction to{' '}
-                    <Text style={styles.noteTextStrong}>{customer.name}</Text>'s arrears balance, which an office
-                    reviewer must approve before it takes effect.
+                    <Text style={styles.noteTextStrong}>{customer.name}</Text>'s {isCredit ? 'credit' : 'arrears'}{' '}
+                    balance, which an office reviewer must approve before it takes effect.
                 </Text>
             </Card>
 
             <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Reason category</Text>
+                <Text style={styles.sectionLabel}>What are you correcting?</Text>
                 <View style={styles.chipRow}>
-                    {REASON_CATEGORIES.map((option) => {
-                        const active = reasonCategory === option.value;
+                    {(['arrears', 'credit'] as ArrearsAdjustmentTarget[]).map((option) => {
+                        const active = target === option;
+                        const figure = option === 'arrears' ? currentArrears : currentCredit;
 
                         return (
                             <Pressable
-                                key={option.value}
+                                key={option}
                                 accessibilityRole="button"
                                 accessibilityState={{ selected: active }}
-                                onPress={() => setReasonCategory(option.value)}
+                                onPress={() => switchTarget(option)}
+                                style={[styles.targetChip, active && styles.chipActive]}
+                            >
+                                <Text style={[styles.targetChipTitle, active && styles.chipTextActive]}>
+                                    {option === 'arrears' ? 'Arrears' : 'Credit'}
+                                </Text>
+                                <Text style={styles.targetChipFigure}>
+                                    {figure === null ? 'no figure yet' : formatFcfa(Number(figure))}
+                                </Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
+                {isCredit ? (
+                    <Text style={styles.helperText}>
+                        Corrects only the loose credit figure — not prepaid coverage (prepaid months / rate).
+                    </Text>
+                ) : null}
+            </View>
+
+            <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Reason category</Text>
+                <View style={styles.chipRow}>
+                    {reasons.map((value) => {
+                        const active = reasonCategory === value;
+
+                        return (
+                            <Pressable
+                                key={value}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: active }}
+                                onPress={() => setReasonCategory(value)}
                                 style={[styles.chip, active && styles.chipActive]}
                             >
-                                <Text style={[styles.chipText, active && styles.chipTextActive]}>{option.label}</Text>
+                                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                                    {REASON_LABELS[value]}
+                                </Text>
                             </Pressable>
                         );
                     })}
@@ -325,7 +422,7 @@ export default function AdjustArrearsScreen() {
                         style={[styles.directionChip, direction === 'decrease' && styles.chipActive]}
                     >
                         <Text style={[styles.chipText, direction === 'decrease' && styles.chipTextActive]}>
-                            Decrease (write off)
+                            {isCredit ? 'Grant (increase credit)' : 'Decrease (write off)'}
                         </Text>
                     </Pressable>
                     <Pressable
@@ -335,7 +432,7 @@ export default function AdjustArrearsScreen() {
                         style={[styles.directionChip, direction === 'increase' && styles.chipActive]}
                     >
                         <Text style={[styles.chipText, direction === 'increase' && styles.chipTextActive]}>
-                            Increase (correct up)
+                            {isCredit ? 'Claw back (reduce credit)' : 'Increase (correct up)'}
                         </Text>
                     </Pressable>
                 </View>
@@ -355,18 +452,20 @@ export default function AdjustArrearsScreen() {
                 error={errors.targetPeriod}
             />
 
-            {currentBalance !== null && Number(currentBalance) > 0 ? (
+            {activeBalanceNumber !== null && activeBalanceNumber > 0 ? (
                 <Pressable
                     accessibilityRole="button"
-                    onPress={clearAllArrears}
+                    onPress={clearActiveBalance}
                     style={styles.quickFillButton}
                 >
-                    <Text style={styles.quickFillText}>Clear all arrears ({formatFcfa(Number(currentBalance))})</Text>
+                    <Text style={styles.quickFillText}>
+                        {isCredit ? 'Clear credit' : 'Clear all arrears'} ({formatFcfa(activeBalanceNumber)})
+                    </Text>
                 </Pressable>
             ) : null}
 
             <UiTextInput
-                label="Arrears amount to adjust (FCFA)"
+                label={`${isCredit ? 'Credit' : 'Arrears'} amount to adjust (FCFA)`}
                 placeholder="0.00"
                 value={amountText}
                 onChangeText={(text) => {
@@ -391,14 +490,14 @@ export default function AdjustArrearsScreen() {
                 error={errors.reasonNote}
             />
 
-            {currentBalance !== null ? (
+            {activeBalanceNumber !== null ? (
                 <Card>
                     <View style={styles.lineRow}>
-                        <Text style={styles.lineLabel}>Current balance</Text>
-                        <Text style={styles.lineValue}>{formatFcfa(Number(currentBalance))}</Text>
+                        <Text style={styles.lineLabel}>Current {isCredit ? 'credit' : 'arrears'}</Text>
+                        <Text style={styles.lineValue}>{formatFcfa(activeBalanceNumber)}</Text>
                     </View>
                     <View style={styles.lineRow}>
-                        <Text style={styles.lineLabel}>Balance after</Text>
+                        <Text style={styles.lineLabel}>{isCredit ? 'Credit' : 'Balance'} after</Text>
                         <Text style={styles.lineValue}>{balanceAfter === null ? '—' : formatFcfa(balanceAfter)}</Text>
                     </View>
                     <Text style={styles.readOnlyHint}>Guidance only — the real figure is set by the billing engine once approved.</Text>
@@ -447,6 +546,7 @@ const styles = StyleSheet.create({
     noteCard: { backgroundColor: '#F3E8FF' },
     noteText: { fontSize: fontSize.sm, color: colors.textPrimary },
     noteTextStrong: { fontWeight: '700' },
+    helperText: { fontSize: fontSize.xs, color: colors.textSecondary },
     section: { gap: spacing.sm },
     sectionLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
@@ -472,13 +572,30 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
         backgroundColor: colors.surface,
     },
+    // Target toggle chip — flex:1 two-up, stacks a bold label over the
+    // customer's current figure on that side of the ledger.
+    targetChip: {
+        flex: 1,
+        gap: 2,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+        minHeight: touchTarget.floor,
+        justifyContent: 'center',
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.surface,
+    },
+    targetChipTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textPrimary },
+    targetChipFigure: { fontSize: fontSize.xs, color: colors.textSecondary },
     chipActive: {
         borderColor: colors.accent.arrears,
         backgroundColor: '#F3E8FF',
     },
-    // "Clear all arrears" quick-fill chip — same border/tint pattern as
-    // chipActive above (violet accent), 48dp floor since this is a
-    // secondary convenience action, not the screen's primary CTA.
+    // "Clear all arrears" / "Clear credit" quick-fill chip — same
+    // border/tint pattern as chipActive above (violet accent), 48dp floor
+    // since this is a secondary convenience action, not the screen's
+    // primary CTA.
     quickFillButton: {
         alignSelf: 'flex-start',
         minHeight: touchTarget.floor,

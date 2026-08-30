@@ -267,7 +267,7 @@ export default function CustomerDetailScreen() {
                 ) : null}
 
                 <Button
-                    title="Adjust Arrears"
+                    title="Adjust Arrears / Credit"
                     variant="secondary"
                     onPress={() => router.push(`/adjust-arrears/${uuid}`)}
                     style={styles.arrearsButton}

@@ -146,7 +146,7 @@ function RootNavigation() {
             */}
             <Stack.Screen
                 name="adjust-arrears/[uuid]"
-                options={{ presentation: 'modal', headerShown: true, title: 'Adjust Arrears' }}
+                options={{ presentation: 'modal', headerShown: true, title: 'Adjust Arrears / Credit' }}
             />
             {/*
               2026-08-27: 7 new screens landed in parallel this session (see
