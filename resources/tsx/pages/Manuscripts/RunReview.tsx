@@ -1,20 +1,45 @@
 import { Head, Link, router, usePoll } from '@inertiajs/react';
-import { useEffect } from 'react';
-import { IconArrowLeft, IconCircleCheck, IconAlertTriangle, IconClock } from '@tabler/icons-react';
+import { useEffect, useMemo, useState } from 'react';
+import { IconArrowLeft, IconCircleCheck, IconAlertTriangle, IconClock, IconSearch } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { TextInput } from '@/components/ui/TextInput';
+import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
 import { ManuscriptRunSummary } from '@/components/manuscripts/ManuscriptRunSummary';
 import { PreRunReviewPanel } from '@/components/manuscripts/PreRunReviewPanel';
 import { usePreRunReview } from '@/hooks/usePreRunReview';
+import { formatCurrency } from '@/lib/formatCurrency';
 import type { CommandRunEntry } from '@/types';
+
+interface ComputedRow {
+    customer_uuid: string | null;
+    customer_name: string;
+    customer_code: string | null;
+    phone: string | null;
+    zone_name: string | null;
+    level: string | null;
+    status: string | null;
+    is_frozen: boolean;
+    bill: string | null;
+    total_arrears: string | null;
+    credit: string | null;
+    total_bill: string | null;
+    payment_expiration: string | null;
+    prepaid_months_remaining: number;
+    payments_applied: number;
+    adjustments_applied: number;
+}
 
 interface ManuscriptsRunReviewProps {
     run: CommandRunEntry;
+    computed_rows: ComputedRow[] | null;
     canPublish: boolean;
 }
+
+type RowFilter = 'all' | 'frozen' | 'arrears' | 'credit' | 'adjusted';
 
 /**
  * The new, lightweight "just clicked Calculate — watch it compute, then
@@ -32,7 +57,7 @@ interface ManuscriptsRunReviewProps {
  * numbers below read exactly like that page's, just for one run instead of
  * a paginated list.
  */
-export default function ManuscriptsRunReview({ run, canPublish }: ManuscriptsRunReviewProps) {
+export default function ManuscriptsRunReview({ run, computed_rows: computedRows, canPublish }: ManuscriptsRunReviewProps) {
     // Same job_batches-backed progress poll SettingsCommandRunController's
     // 'queued' rows already surface (batch_progress), polled here via
     // Inertia's usePoll — the identical primitive AppLayout.tsx's
@@ -60,6 +85,30 @@ export default function ManuscriptsRunReview({ run, canPublish }: ManuscriptsRun
     function publish() {
         router.post(`/settings/command-runs/${run.uuid}/publish`, {}, { preserveScroll: true });
     }
+
+    const [rowSearch, setRowSearch] = useState('');
+    const [rowFilter, setRowFilter] = useState<RowFilter>('all');
+
+    const visibleRows = useMemo(() => {
+        if (!computedRows) return [];
+        const q = rowSearch.trim().toLowerCase();
+        return computedRows.filter((r) => {
+            if (q && !r.customer_name.toLowerCase().includes(q) && !(r.phone ?? '').includes(q)) return false;
+            if (rowFilter === 'frozen') return r.is_frozen;
+            if (rowFilter === 'arrears') return Number(r.total_arrears ?? 0) > 0;
+            if (rowFilter === 'credit') return Number(r.credit ?? 0) > 0;
+            if (rowFilter === 'adjusted') return r.adjustments_applied > 0;
+            return true;
+        });
+    }, [computedRows, rowSearch, rowFilter]);
+
+    const rowFilters: { key: RowFilter; label: string }[] = [
+        { key: 'all', label: 'All' },
+        { key: 'frozen', label: 'Frozen' },
+        { key: 'arrears', label: 'Has arrears' },
+        { key: 'credit', label: 'Has credit' },
+        { key: 'adjusted', label: 'Adjusted' },
+    ];
 
     const progress = run.batch_progress;
     const progressLabel =
@@ -128,7 +177,111 @@ export default function ManuscriptsRunReview({ run, canPublish }: ManuscriptsRun
                         </CardBody>
                     </Card>
 
-                    <Card className="animate-fade-up [animation-delay:60ms]">
+                    {computedRows && computedRows.length > 0 && (
+                        <Card className="animate-fade-up [animation-delay:60ms]">
+                            <CardHeader>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <h2 className="text-sm font-semibold text-slate-900">
+                                        Computed Manuscript — Preview ({computedRows.length} customers)
+                                    </h2>
+                                </div>
+                            </CardHeader>
+                            <CardBody className="flex flex-col gap-3">
+                                <p className="text-xs text-slate-500">
+                                    The exact per-customer figures Publish will write. Nothing here is live yet — query the
+                                    period after publishing to see it in Manuscripts.
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <div className="relative">
+                                        <IconSearch
+                                            size={14}
+                                            stroke={1.75}
+                                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                                        />
+                                        <TextInput
+                                            id="row-search"
+                                            placeholder="Name or phone"
+                                            value={rowSearch}
+                                            onChange={(e) => setRowSearch(e.target.value)}
+                                            className="w-52 pl-8"
+                                        />
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                        {rowFilters.map((f) => (
+                                            <button
+                                                key={f.key}
+                                                type="button"
+                                                onClick={() => setRowFilter(f.key)}
+                                                className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                                                    rowFilter === f.key
+                                                        ? 'bg-blue-600 text-white'
+                                                        : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-300 hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                {f.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <span className="text-xs text-slate-400">{visibleRows.length} shown</span>
+                                </div>
+                                <div className="max-h-[32rem] overflow-auto rounded-lg ring-1 ring-slate-200">
+                                    <Table>
+                                        <TableHead>
+                                            <Th>Name</Th>
+                                            <Th>Zone</Th>
+                                            <Th>Bill</Th>
+                                            <Th>Arrears</Th>
+                                            <Th>Credit</Th>
+                                            <Th>Total Bill</Th>
+                                            <Th>Prepaid</Th>
+                                            <Th>Applied</Th>
+                                        </TableHead>
+                                        <TableBody>
+                                            {visibleRows.map((r) => (
+                                                <tr key={r.customer_uuid ?? r.customer_name} className="hover:bg-slate-50/70">
+                                                    <Td>
+                                                        <span className="font-medium text-slate-800">{r.customer_name}</span>
+                                                        {r.is_frozen && (
+                                                            <span className="ml-1.5 inline-flex items-center rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                                                                frozen
+                                                            </span>
+                                                        )}
+                                                        {r.phone && <span className="block text-xs text-slate-400">{r.phone}</span>}
+                                                    </Td>
+                                                    <Td className="text-xs text-slate-500">{r.zone_name ?? '—'}</Td>
+                                                    <Td>{r.bill ? formatCurrency(r.bill) : '—'}</Td>
+                                                    <Td className={Number(r.total_arrears ?? 0) > 0 ? 'font-medium text-red-700' : ''}>
+                                                        {r.total_arrears ? formatCurrency(r.total_arrears) : '—'}
+                                                    </Td>
+                                                    <Td className={Number(r.credit ?? 0) > 0 ? 'font-medium text-green-700' : ''}>
+                                                        {r.credit ? formatCurrency(r.credit) : '—'}
+                                                    </Td>
+                                                    <Td className="font-semibold text-slate-900">
+                                                        {r.total_bill ? formatCurrency(r.total_bill) : '—'}
+                                                    </Td>
+                                                    <Td className="text-xs text-slate-500">
+                                                        {r.prepaid_months_remaining > 0
+                                                            ? `${r.prepaid_months_remaining} mo`
+                                                            : r.payment_expiration
+                                                              ? r.payment_expiration
+                                                              : '—'}
+                                                    </Td>
+                                                    <Td className="text-xs text-slate-500">
+                                                        {r.payments_applied > 0 && `${r.payments_applied} pmt`}
+                                                        {r.payments_applied > 0 && r.adjustments_applied > 0 && ', '}
+                                                        {r.adjustments_applied > 0 && `${r.adjustments_applied} adj`}
+                                                        {r.payments_applied === 0 && r.adjustments_applied === 0 && '—'}
+                                                    </Td>
+                                                </tr>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                            </CardBody>
+                        </Card>
+                    )}
+
+                    <Card className="animate-fade-up [animation-delay:80ms]">
                         <CardHeader>
                             <h2 className="text-sm font-semibold text-slate-900">Who Still Isn&apos;t Covered</h2>
                         </CardHeader>

@@ -217,8 +217,65 @@ class ManuscriptController extends Controller
                 'batch_progress' => $batchProgressById[$run->batch_id] ?? null,
                 'published_at' => $run->published_at,
             ],
+            // The full per-customer preview of what Publish would commit —
+            // the computed figures sit on the run's computed_result already,
+            // just never surfaced before. Only present once a run is
+            // computed (pending_review / published); null while still queued.
+            'computed_rows' => $this->computedRows($run),
             'canPublish' => Auth::user()?->can('publish', CommandRun::class) ?? false,
         ]);
+    }
+
+    /**
+     * Joins `command_runs.computed_result['customers']` (keyed by
+     * customer_id) with customer name/zone/phone so RunReview.tsx can render
+     * a scannable, filterable table of exactly what Publish will write —
+     * the missing "preview before you commit" step. Returns null when the
+     * run hasn't produced a computed_result yet.
+     *
+     * @return array<int, array<string, mixed>>|null
+     */
+    private function computedRows(CommandRun $run): ?array
+    {
+        $customers = $run->computed_result['customers'] ?? null;
+
+        if (! is_array($customers) || $customers === []) {
+            return null;
+        }
+
+        $byId = Customer::query()
+            ->with('zone')
+            ->whereIn('id', array_map('intval', array_keys($customers)))
+            ->get()
+            ->keyBy('id');
+
+        return collect($customers)
+            ->map(function (array $entry, int|string $customerId) use ($byId): array {
+                $customer = $byId->get((int) $customerId);
+                $a = $entry['attributes'] ?? [];
+
+                return [
+                    'customer_uuid' => $customer?->uuid,
+                    'customer_name' => $customer?->name ?? "#{$customerId}",
+                    'customer_code' => $customer ? substr($customer->uuid, 0, 8) : null,
+                    'phone' => $customer?->phone,
+                    'zone_name' => $customer?->zone?->name,
+                    'level' => $customer?->level,
+                    'status' => $customer?->status,
+                    'is_frozen' => (bool) ($entry['is_frozen'] ?? false),
+                    'bill' => $a['bill'] ?? null,
+                    'total_arrears' => $a['total_arrears'] ?? null,
+                    'credit' => $a['credit'] ?? null,
+                    'total_bill' => $a['total_bill'] ?? null,
+                    'payment_expiration' => $a['payment_expiration'] ?? null,
+                    'prepaid_months_remaining' => (int) ($a['prepaid_months_remaining'] ?? 0),
+                    'payments_applied' => count($entry['processed_payment_ids'] ?? []),
+                    'adjustments_applied' => count($entry['processed_adjustment_ids'] ?? []),
+                ];
+            })
+            ->sortBy('customer_name', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values()
+            ->all();
     }
 
     /**
