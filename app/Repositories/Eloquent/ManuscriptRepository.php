@@ -123,6 +123,12 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
             ->when(
                 $filters['status'] ?? null,
                 fn (Builder $query, string $status) => $query->whereHas('customer', fn (Builder $inner) => $inner->where('status', $status))
+            )
+            ->when(
+                $filters['search'] ?? null,
+                fn (Builder $query, string $search) => $query->whereHas('customer', fn (Builder $inner) => $inner->where(
+                    fn ($w) => $w->where('name', 'ILIKE', "%{$search}%")->orWhere('phone', 'LIKE', "%{$search}%")
+                ))
             );
     }
 
@@ -171,6 +177,12 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
             ->when(
                 $filters['status'] ?? null,
                 fn (Builder $query, string $status) => $query->whereHas('customer', fn (Builder $inner) => $inner->where('status', $status))
+            )
+            ->when(
+                $filters['search'] ?? null,
+                fn (Builder $query, string $search) => $query->whereHas('customer', fn (Builder $inner) => $inner->where(
+                    fn ($w) => $w->where('name', 'ILIKE', "%{$search}%")->orWhere('phone', 'LIKE', "%{$search}%")
+                ))
             )
             ->sum('amount');
 

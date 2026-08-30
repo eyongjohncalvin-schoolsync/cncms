@@ -35,7 +35,12 @@ class ManuscriptService
     ) {}
 
     /**
-     * @param  array<string, mixed>  $filters  Supported keys: 'period', 'zone_uuid', 'status'.
+     * @param  array<string, mixed>  $filters  Supported keys: 'period', 'zone_uuid', 'status', 'search'.
+     *                                         'search' matches the customer's name (ILIKE, partial)
+     *                                         or phone (LIKE, partial) — same shape as the Customers
+     *                                         list. It is folded into listCacheKey()/summaryCacheKey()
+     *                                         via scopedFilters() (json_encode'd whole), so a searched
+     *                                         view never serves a cached unsearched page.
      */
     public function list(array $filters, int $perPage): LengthAwarePaginator
     {

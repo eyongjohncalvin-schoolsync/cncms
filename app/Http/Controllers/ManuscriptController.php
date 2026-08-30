@@ -45,7 +45,7 @@ class ManuscriptController extends Controller
     {
         $this->authorize('viewAny', Manuscript::class);
 
-        $filters = $request->only(['period', 'zone_uuid', 'status']);
+        $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
         $period = (string) ($filters['period'] ?? now()->format('Y-m'));
 
         $paginated = $this->manuscripts->list($filters, 25);
@@ -90,7 +90,7 @@ class ManuscriptController extends Controller
     {
         $this->authorize('export', Manuscript::class);
 
-        $filters = $request->only(['period', 'zone_uuid', 'status']);
+        $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
 
         $data = $this->manuscripts->exportData($filters);
 

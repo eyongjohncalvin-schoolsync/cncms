@@ -8,6 +8,7 @@ import {
     IconDownload,
     IconReceipt2,
     IconScale,
+    IconSearch,
     IconUsers,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -33,6 +34,7 @@ interface ManuscriptFilters {
     period?: string;
     zone_uuid?: string;
     status?: string;
+    search?: string;
 }
 
 interface ManuscriptsIndexProps {
@@ -77,6 +79,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
 
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
+    const [search, setSearch] = useState(filters.search ?? '');
 
     const calculateForm = useForm({ period: upcomingPeriod(), confirmed_rerun: false });
 
@@ -135,6 +138,10 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
         );
     }
 
+    function submitSearch() {
+        applyFilter({ search: search.trim() || undefined });
+    }
+
     function submitCalculate() {
         calculateForm.post('/manuscripts/calculate', {
             onSuccess: () => setConfirmOpen(false),
@@ -163,8 +170,9 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
         params.set('period', period);
         if (filters.zone_uuid) params.set('zone_uuid', filters.zone_uuid);
         if (filters.status) params.set('status', filters.status);
+        if (filters.search) params.set('search', filters.search);
         return params;
-    }, [period, filters.zone_uuid, filters.status]);
+    }, [period, filters.zone_uuid, filters.status, filters.search]);
 
     // Consolidated down to 3 compact cards (was 6, one of them an
     // oversized "hero" card) — the owner's explicit call was fewer/smaller
@@ -304,6 +312,21 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                         <option value="disconnected">Disconnected</option>
                         <option value="suspended">Suspended</option>
                     </SelectInput>
+                    <div className="flex items-end gap-2">
+                        <TextInput
+                            id="search"
+                            label="Search"
+                            placeholder="Customer name or phone"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
+                            className="rounded-lg bg-white"
+                        />
+                        <Button type="button" variant="secondary" onClick={submitSearch} className="h-[38px]">
+                            <IconSearch size={15} stroke={1.75} />
+                            Search
+                        </Button>
+                    </div>
                     {isFiltering && <LoadingSpinner className="mb-2 text-slate-400" />}
                 </div>
             </div>

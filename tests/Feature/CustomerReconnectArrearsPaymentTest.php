@@ -157,7 +157,15 @@ class CustomerReconnectArrearsPaymentTest extends TestCase
                 tenancy()->initialize($tenant);
             }
 
-            Manuscript::query()->where('customer_id', $customer->id)->delete();
+            // `manuscript:calculate --tenant=swecom` above runs against the
+            // WHOLE tenant, so it writes a row for every one of swecom's ~446
+            // real customers for these fictional far-future periods — not
+            // just this fixture's customer. Delete ALL rows for $period1/
+            // $period2 (safe: nobody runs 2031-* in production), matching
+            // LiveManuscriptRecalculationAndBatchConsistencyTest's cleanup.
+            // Scoping this to $customer->id (the old bug) leaked 445 bogus
+            // 2031 manuscript rows into swecom on every run.
+            Manuscript::query()->whereIn('period', [$period1, $period2])->delete();
             Payment::query()->where('customer_id', $customer->id)->delete();
             CommandRun::query()->where('command', 'manuscript:calculate')->whereIn('period', [$period1, $period2])->delete();
             Customer::query()->whereKey($customer->id)->forceDelete();

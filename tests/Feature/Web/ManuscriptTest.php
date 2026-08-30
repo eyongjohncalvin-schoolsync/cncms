@@ -90,6 +90,28 @@ class ManuscriptTest extends TestCase
                 ->has('zones'));
     }
 
+    public function test_index_search_filters_the_row_list_to_the_matching_customer(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        $zone = ZoneFactory::new()->create();
+
+        $wanted = CustomerFactory::new()->create(['zone_id' => $zone->id, 'name' => 'Zephaniah Ndip', 'phone' => '677111222']);
+        $other = CustomerFactory::new()->create(['zone_id' => $zone->id, 'name' => 'Marceline Ako', 'phone' => '699333444']);
+
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $wanted->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $other->id]);
+
+        $this->actingAsRole('manager');
+
+        $response = $this->get('/manuscripts?period='.$period.'&zone_uuid='.$zone->uuid.'&search=zephan');
+
+        $response->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Manuscripts/Index')
+                ->has('manuscripts.data', 1)
+                ->where('manuscripts.data.0.customer_name', 'Zephaniah Ndip'));
+    }
+
     public function test_manager_can_export_the_manuscript_register_as_a_pdf(): void
     {
         CompanyFactory::new()->create();
