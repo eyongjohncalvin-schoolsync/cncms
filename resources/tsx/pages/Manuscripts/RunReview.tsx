@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { TextInput } from '@/components/ui/TextInput';
-import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
+import { Td } from '@/components/ui/Table';
 import { ManuscriptRunSummary } from '@/components/manuscripts/ManuscriptRunSummary';
 import { PreRunReviewPanel } from '@/components/manuscripts/PreRunReviewPanel';
 import { usePreRunReview } from '@/hooks/usePreRunReview';
@@ -224,58 +224,79 @@ export default function ManuscriptsRunReview({ run, computed_rows: computedRows,
                                     </div>
                                     <span className="text-xs text-slate-400">{visibleRows.length} shown</span>
                                 </div>
-                                <div className="max-h-[32rem] overflow-auto rounded-lg ring-1 ring-slate-200">
-                                    <Table>
-                                        <TableHead>
-                                            <Th>Name</Th>
-                                            <Th>Zone</Th>
-                                            <Th>Bill</Th>
-                                            <Th>Arrears</Th>
-                                            <Th>Credit</Th>
-                                            <Th>Total Bill</Th>
-                                            <Th>Prepaid</Th>
-                                            <Th>Applied</Th>
-                                        </TableHead>
-                                        <TableBody>
-                                            {visibleRows.map((r) => (
+                                <div className="max-h-[75vh] overflow-auto rounded-lg ring-1 ring-slate-200">
+                                    <table className="min-w-full divide-y divide-slate-100 text-sm">
+                                        <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase [&_th]:px-4 [&_th]:py-2.5">
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Name</th>
+                                                <th>Code</th>
+                                                <th>Phone</th>
+                                                <th>Zone</th>
+                                                <th>Level</th>
+                                                <th>Bill</th>
+                                                <th>Arrears</th>
+                                                <th>Credit</th>
+                                                <th>Expiry</th>
+                                                <th>Total Bill</th>
+                                                <th>Status</th>
+                                                <th>Applied</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {visibleRows.map((r, i) => (
                                                 <tr key={r.customer_uuid ?? r.customer_name} className="hover:bg-slate-50/70">
-                                                    <Td>
-                                                        <span className="font-medium text-slate-800">{r.customer_name}</span>
-                                                        {r.is_frozen && (
-                                                            <span className="ml-1.5 inline-flex items-center rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
-                                                                frozen
-                                                            </span>
-                                                        )}
-                                                        {r.phone && <span className="block text-xs text-slate-400">{r.phone}</span>}
-                                                    </Td>
+                                                    <Td className="text-slate-400">{i + 1}</Td>
+                                                    <Td className="font-medium text-slate-800">{r.customer_name}</Td>
+                                                    <Td className="font-mono text-xs uppercase text-slate-500">{r.customer_code ?? '—'}</Td>
+                                                    <Td className="text-slate-500">{r.phone ?? '—'}</Td>
                                                     <Td className="text-xs text-slate-500">{r.zone_name ?? '—'}</Td>
+                                                    <Td className="capitalize text-slate-500">{r.level ?? '—'}</Td>
                                                     <Td>{r.bill ? formatCurrency(r.bill) : '—'}</Td>
-                                                    <Td className={Number(r.total_arrears ?? 0) > 0 ? 'font-medium text-red-700' : ''}>
+                                                    <Td className={Number(r.total_arrears ?? 0) > 0 ? 'font-medium text-red-700' : 'text-slate-400'}>
                                                         {r.total_arrears ? formatCurrency(r.total_arrears) : '—'}
                                                     </Td>
-                                                    <Td className={Number(r.credit ?? 0) > 0 ? 'font-medium text-green-700' : ''}>
+                                                    <Td className={Number(r.credit ?? 0) > 0 ? 'font-medium text-green-700' : 'text-slate-400'}>
                                                         {r.credit ? formatCurrency(r.credit) : '—'}
+                                                    </Td>
+                                                    <Td className="text-xs text-slate-500">
+                                                        {r.prepaid_months_remaining > 0
+                                                            ? `${r.prepaid_months_remaining} mo left`
+                                                            : (r.payment_expiration ?? '—')}
                                                     </Td>
                                                     <Td className="font-semibold text-slate-900">
                                                         {r.total_bill ? formatCurrency(r.total_bill) : '—'}
                                                     </Td>
-                                                    <Td className="text-xs text-slate-500">
-                                                        {r.prepaid_months_remaining > 0
-                                                            ? `${r.prepaid_months_remaining} mo`
-                                                            : r.payment_expiration
-                                                              ? r.payment_expiration
-                                                              : '—'}
+                                                    <Td>
+                                                        <span
+                                                            className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                                                r.is_frozen
+                                                                    ? 'bg-slate-200 text-slate-600'
+                                                                    : 'bg-blue-100 text-blue-700'
+                                                            }`}
+                                                        >
+                                                            {r.is_frozen ? 'frozen' : (r.status ?? 'active')}
+                                                        </span>
                                                     </Td>
                                                     <Td className="text-xs text-slate-500">
-                                                        {r.payments_applied > 0 && `${r.payments_applied} pmt`}
-                                                        {r.payments_applied > 0 && r.adjustments_applied > 0 && ', '}
-                                                        {r.adjustments_applied > 0 && `${r.adjustments_applied} adj`}
-                                                        {r.payments_applied === 0 && r.adjustments_applied === 0 && '—'}
+                                                        {[
+                                                            r.payments_applied > 0 ? `${r.payments_applied} pmt` : null,
+                                                            r.adjustments_applied > 0 ? `${r.adjustments_applied} adj` : null,
+                                                        ]
+                                                            .filter(Boolean)
+                                                            .join(', ') || '—'}
                                                     </Td>
                                                 </tr>
                                             ))}
-                                        </TableBody>
-                                    </Table>
+                                            {visibleRows.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={13} className="px-4 py-8 text-center text-sm text-slate-400">
+                                                        No customers match this filter.
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </CardBody>
                         </Card>
