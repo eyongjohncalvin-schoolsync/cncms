@@ -16,6 +16,7 @@
         .registration { font-size: 8px; color: #444; }
         .logo { max-height: 38px; max-width: 120px; margin-bottom: 4px; }
         table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        table.register { table-layout: fixed; }
         table.summary { margin-bottom: 10px; }
         table.summary td {
             padding: 3px 6px;
@@ -35,6 +36,25 @@
             border-bottom: 1px solid #ddd;
         }
         table.register th.num, table.register td.num { text-align: right; }
+        /* Narrowed text columns: clip rather than let the fixed table overflow A4. */
+        table.register td.clip {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        /* Blank column the manager fills in by hand after collecting. */
+        table.register th.paid, table.register td.paid { border-left: 1px solid #999; }
+        col.c-no { width: 3%; }
+        col.c-name { width: 19%; }
+        col.c-code { width: 7%; }
+        col.c-zone { width: 9%; }
+        col.c-bill { width: 9%; }
+        col.c-arrears { width: 10%; }
+        col.c-credit { width: 9%; }
+        col.c-total { width: 10%; }
+        col.c-paid { width: 12%; }
+        col.c-status { width: 5%; }
+        col.c-expiry { width: 7%; }
     </style>
 </head>
 <body>
@@ -74,7 +94,17 @@
         </tr>
     </table>
 
+    @php
+        // Display-only status abbreviations to save column width — stored data is untouched.
+        $statusAbbr = ['disconnected' => 'disc', 'suspended' => 'susp'];
+    @endphp
+
     <table class="register">
+        <colgroup>
+            <col class="c-no"><col class="c-name"><col class="c-code"><col class="c-zone">
+            <col class="c-bill"><col class="c-arrears"><col class="c-credit"><col class="c-total">
+            <col class="c-paid"><col class="c-status"><col class="c-expiry">
+        </colgroup>
         <thead>
             <tr>
                 <th>No</th>
@@ -85,6 +115,7 @@
                 <th class="num">Arrears</th>
                 <th class="num">Credit</th>
                 <th class="num">Total Bill</th>
+                <th class="num paid">Paid</th>
                 <th>Status</th>
                 <th>Expiry</th>
             </tr>
@@ -93,14 +124,15 @@
             @foreach ($manuscripts as $index => $manuscript)
                 <tr>
                     <td>{{ $index + 1 }}</td>
-                    <td>{{ $manuscript->customer?->name }}</td>
+                    <td class="clip">{{ $manuscript->customer?->name }}</td>
                     <td>{{ substr($manuscript->customer?->uuid ?? '', 0, 8) }}</td>
-                    <td>{{ $manuscript->customer?->zone?->name }}</td>
+                    <td class="clip">{{ $manuscript->customer?->zone?->name }}</td>
                     <td class="num">{{ number_format((float) $manuscript->bill, 2) }}</td>
                     <td class="num">{{ number_format((float) $manuscript->total_arrears, 2) }}</td>
                     <td class="num">{{ number_format((float) $manuscript->credit, 2) }}</td>
                     <td class="num">{{ number_format((float) $manuscript->total_bill, 2) }}</td>
-                    <td>{{ $manuscript->customer?->status === 'disconnected' ? 'discon.' : $manuscript->customer?->status }}</td>
+                    <td class="paid"></td>
+                    <td>{{ $statusAbbr[$manuscript->customer?->status] ?? $manuscript->customer?->status }}</td>
                     <td>{{ $manuscript->expiryLabel() }}</td>
                 </tr>
             @endforeach

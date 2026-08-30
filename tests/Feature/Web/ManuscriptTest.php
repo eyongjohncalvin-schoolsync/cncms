@@ -212,6 +212,39 @@ class ManuscriptTest extends TestCase
     }
 
     /**
+     * The register carries a blank "Paid" column (between "Total Bill" and
+     * "Status") that the manager fills in by hand after collecting — see
+     * ManuscriptRegisterExport's class doc and the PDF blade. It must ship as
+     * a real, empty column in the workbook, not be silently dropped.
+     */
+    public function test_the_export_carries_a_blank_paid_column(): void
+    {
+        Excel::fake();
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+
+        $this->actingAsRole('manager');
+
+        $this->get('/manuscripts/export?format=xlsx&period='.$period.'&zone_uuid='.$zone->uuid)
+            ->assertOk();
+
+        Excel::assertDownloaded(
+            'manuscript-'.$period.'.xlsx',
+            function (ManuscriptRegisterExport $export): bool {
+                $paidIndex = array_search('Paid', $export->headings(), true);
+
+                return $paidIndex === 8
+                    && $export->headings()[$paidIndex + 1] === 'Status'
+                    && $export->array()[0][$paidIndex] === null;
+            },
+        );
+    }
+
+    /**
      * Stage 3 (task-scheduler.md's 2026-08-27 "manual/scheduled convergence"
      * addendum): the manual trigger no longer auto-publishes — it now lands
      * at 'pending_review' behind the same gate the scheduled path already

@@ -25,6 +25,11 @@ use Maatwebsite\Excel\Concerns\WithTitle;
  * Money columns are written as real numbers (not number_format() strings)
  * so the recipient can sum/filter them in Excel; the PDF keeps them as
  * formatted text because it's a fixed printed artifact.
+ *
+ * The "Paid" column is intentionally blank in both exports — the manager
+ * fills in what each customer actually paid after collecting. "Status" is
+ * written in full here (it stays filterable in Excel); the PDF abbreviates
+ * it (disconnected -> disc, suspended -> susp) purely to save print width.
  */
 final class ManuscriptRegisterExport implements Export, FromArray, ShouldAutoSize, WithHeadings, WithTitle
 {
@@ -43,7 +48,7 @@ final class ManuscriptRegisterExport implements Export, FromArray, ShouldAutoSiz
      */
     public function headings(): array
     {
-        return ['No', 'Name', 'Code', 'Zone', 'Bill', 'Arrears', 'Credit', 'Total Bill', 'Status', 'Expiry'];
+        return ['No', 'Name', 'Code', 'Zone', 'Bill', 'Arrears', 'Credit', 'Total Bill', 'Paid', 'Status', 'Expiry'];
     }
 
     /**
@@ -62,6 +67,8 @@ final class ManuscriptRegisterExport implements Export, FromArray, ShouldAutoSiz
                 (float) $manuscript->total_arrears,
                 (float) $manuscript->credit,
                 (float) $manuscript->total_bill,
+                // Blank "Paid" column — filled in by hand after collection, mirrors the PDF register.
+                null,
                 $manuscript->customer?->status,
                 $manuscript->expiryLabel(),
             ])
