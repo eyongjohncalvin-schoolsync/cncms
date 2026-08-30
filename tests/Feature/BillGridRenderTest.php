@@ -70,14 +70,31 @@ class BillGridRenderTest extends TestCase
 
         $this->assertCount($customerCount, $bills, 'billDataForCustomers() should return one entry per customer with a manuscript.');
 
-        $pdfBytes = Pdf::loadView('pdf.bills._grid', [
+        $perPage = in_array($density, [1, 2, 3, 4], true) ? $density : 1;
+
+        $pdf = Pdf::loadView('pdf.bills._grid', [
             'bills' => $bills,
             'density' => $density,
             'template' => 'classic',
-        ])->output();
+        ]);
+
+        $pdfBytes = $pdf->output();
 
         $this->assertNotEmpty($pdfBytes);
         $this->assertStringStartsWith('%PDF-', $pdfBytes, "Grid render at density {$density} did not produce a real PDF.");
+
+        // The N-up sheet geometry (resources/views/pdf/bills/_grid.blade.php)
+        // must fit exactly one sheet per physical page: a filling set of
+        // bills has to produce precisely ceil(N / perPage) pages, with no
+        // phantom blank page from a row overflowing the A4 sheet.
+        $expectedPages = (int) ceil($customerCount / $perPage);
+        $actualPages = $pdf->getDomPDF()->getCanvas()->get_page_count();
+
+        $this->assertSame(
+            $expectedPages,
+            $actualPages,
+            "Grid at density {$density} with {$customerCount} bills should render {$expectedPages} pages (ceil(N/perPage)), got {$actualPages} — a row is likely overflowing the 297mm A4 sheet."
+        );
     }
 
     public function test_grid_renders_a_real_multi_customer_pdf_at_density_1(): void
@@ -122,12 +139,14 @@ class BillGridRenderTest extends TestCase
         // 7 bills at 3-up => 3 sheets (3 + 3 + 1), so 3 <table class="sheet-grid">.
         $this->assertSame(3, substr_count($html, 'class="sheet-grid"'));
         // Each grid cell carries this exact inline style: a single full-width
-        // column (100%), one third of the 297mm A4 portrait height (99mm).
-        // 3 rows x 1 col x 3 sheets => 9 cells (padded cells on the ragged
-        // last sheet still emit their <td>). Matching this string also proves
-        // the cell is NOT the 148mm 2-up/4-up height.
-        $this->assertSame(9, substr_count($html, 'width: 100.0000%; height: 99mm;'));
-        $this->assertStringNotContainsString('148mm', $html);
+        // column (100%), one third of the 297mm A4 portrait height MINUS the
+        // ~3.4mm of per-row cell chrome (6px+6px padding + border) that dompdf
+        // adds on top of the content-box `height` — 99mm - 3.4mm floored to
+        // 95mm. 3 rows x 1 col x 3 sheets => 9 cells (padded cells on the
+        // ragged last sheet still emit their <td>). Matching this string also
+        // proves the cell is NOT the 144mm 2-up/4-up height.
+        $this->assertSame(9, substr_count($html, 'width: 100.0000%; height: 95mm;'));
+        $this->assertStringNotContainsString('144mm', $html);
     }
 
     /**
