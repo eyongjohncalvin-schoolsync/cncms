@@ -441,6 +441,16 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                                             >
                                                                 Send Bill
                                                             </DropdownItem>
+                                                        ) : manuscript.status !== 'active' ? (
+                                                            // A null wa_link for a non-active customer is the
+                                                            // server refusing to send a bill (owner decision,
+                                                            // 2026-08 — BillNotificationService::composeMessage()),
+                                                            // NOT a missing phone. Say so plainly; the server
+                                                            // refusal in ManuscriptController::sendBill() stays
+                                                            // the real guard.
+                                                            <DropdownItem disabled icon={<IconBrandWhatsapp size={16} stroke={1.75} />}>
+                                                                Customer not active
+                                                            </DropdownItem>
                                                         ) : (
                                                             <DropdownItem disabled icon={<IconBrandWhatsapp size={16} stroke={1.75} />}>
                                                                 No phone on file

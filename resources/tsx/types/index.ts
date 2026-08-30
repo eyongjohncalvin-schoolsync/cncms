@@ -271,8 +271,9 @@ export interface Manuscript {
     /**
      * wa.me deep link pre-filled with this customer's bill reminder
      * (App\Services\BillNotificationService::waLink()), or null when they
-     * have no usable phone number on file or no manuscript to remind them
-     * about — see Manuscripts/Index.tsx's "Send Bill" action.
+     * have no usable phone number on file, no manuscript to remind them
+     * about, or are not an active customer (bills are only sent to active
+     * customers) — see Manuscripts/Index.tsx's "Send Bill" action.
      */
     wa_link: string | null;
 }

@@ -28,8 +28,16 @@ final class BillNotificationService
      * Plain-text bill reminder for $customer, built from a Manuscript
      * (defaults to $customer->latestManuscript — see that relation's doc
      * comment on App\Models\Customer for why it's ordered by `period`, not
-     * `created_at`) and the tenant's Company record. Returns null when the
-     * customer has no manuscript yet — nothing real to remind them about.
+     * `created_at`) and the tenant's Company record. Returns null when:
+     *  - the customer is not ACTIVE (owner decision, 2026-08): a
+     *    disconnected/suspended/passive customer is frozen with a 0
+     *    total_bill, so sending them a bill reminder is wrong. This is the
+     *    single guard both the web (ManuscriptController::index's wa_link
+     *    column / ::sendBill()) and API (Api\BillController::whatsappMessage())
+     *    paths inherit — mirrors ManuscriptService::billData()'s refusal for
+     *    the printed slip.
+     *  - the customer has no manuscript yet — nothing real to remind them
+     *    about.
      *
      * $manuscript can be passed explicitly by a caller that already has one
      * loaded (e.g. Manuscripts/Index's per-row listing, which is scoped to
@@ -38,6 +46,10 @@ final class BillNotificationService
      */
     public function composeMessage(Customer $customer, ?Manuscript $manuscript = null): ?string
     {
+        if ($customer->status !== 'active') {
+            return null;
+        }
+
         $manuscript ??= $customer->latestManuscript;
 
         if (! $manuscript instanceof Manuscript) {
@@ -78,7 +90,8 @@ final class BillNotificationService
      *    silently produce a broken link), or
      *  - their phone number doesn't normalize to a plausible Cameroon
      *    mobile number (see normalizePhoneForWhatsapp()), or
-     *  - they have no manuscript yet (composeMessage() returned null).
+     *  - composeMessage() returned null — they have no manuscript yet, or
+     *    they are not an active customer (see that method).
      *
      * See composeMessage() for the optional $manuscript parameter.
      */

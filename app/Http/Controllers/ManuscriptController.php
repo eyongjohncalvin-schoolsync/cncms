@@ -429,6 +429,17 @@ class ManuscriptController extends Controller
     {
         $this->authorize('sendBill', Manuscript::class);
 
+        // A bill reminder is only ever sent to an ACTIVE customer (owner
+        // decision, 2026-08) — a disconnected/suspended/passive customer is
+        // frozen with a 0 total_bill. Refuse here the same way
+        // CustomerController::printBill() refuses the printed slip, and do
+        // NOT log a `messages` row claiming we reminded them. BillNotificationService
+        // ::composeMessage() also guards this, but we want a status-specific
+        // flash rather than the generic "no manuscript" one below.
+        if ($customer->status !== 'active') {
+            return redirect()->back()->with('error', "Bills are only sent for active customers. {$customer->name} is {$customer->status}.");
+        }
+
         $content = $this->billNotifications->composeMessage($customer);
 
         if ($content === null) {

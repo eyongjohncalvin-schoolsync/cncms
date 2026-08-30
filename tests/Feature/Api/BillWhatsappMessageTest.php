@@ -11,6 +11,7 @@ use Database\Factories\ManuscriptFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -38,7 +39,10 @@ class BillWhatsappMessageTest extends TestCase
     private function customerWithManuscript(array $customerAttributes = [], array $manuscriptAttributes = []): Customer
     {
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create([
+        // ->active(): CustomerFactory's default status is random (~20%
+        // 'disconnected'), and whatsappMessage() now refuses a non-active
+        // customer with a 422 — a bill is only sent to an active one.
+        $customer = CustomerFactory::new()->active()->create([
             'zone_id' => $zone->id,
             'phone' => '677440670',
             ...$customerAttributes,
@@ -148,7 +152,7 @@ class BillWhatsappMessageTest extends TestCase
     {
         CompanyFactory::new()->create();
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'phone' => '677440670']);
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'phone' => '677440670']);
         $token = $this->tokenForRole('manager');
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")
@@ -159,6 +163,40 @@ class BillWhatsappMessageTest extends TestCase
         $response->assertJsonPath('data.available', false);
         $response->assertJsonPath('data.reason', 'no_manuscript');
         $response->assertJsonPath('data.message', null);
+    }
+
+    /**
+     * A bill reminder is only ever sent to an ACTIVE customer (owner
+     * decision, 2026-08) — same rule as the printed slip
+     * (ManuscriptService::billData()). This endpoint refuses a non-active
+     * customer with a 422 ValidationException, the same shape the
+     * printed-slip API refusal uses — not a soft `reason` the mobile UI
+     * would otherwise treat as "try again later".
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function nonActiveStatusProvider(): array
+    {
+        return [
+            'disconnected' => ['disconnected'],
+            'suspended' => ['suspended'],
+            'passive' => ['passive'],
+        ];
+    }
+
+    #[DataProvider('nonActiveStatusProvider')]
+    public function test_whatsapp_message_is_refused_for_a_non_active_customer(string $status): void
+    {
+        CompanyFactory::new()->create();
+        $customer = $this->customerWithManuscript();
+        $customer->update(['status' => $status]);
+        $token = $this->tokenForRole('manager');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson("/api/v1/bills/{$customer->uuid}/whatsapp-message");
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['customer']);
+        $this->assertStringContainsString('only sent for active customers', $response->json('message'));
     }
 
     public function test_agent_can_fetch_the_whatsapp_message_same_as_bill_print_access(): void
