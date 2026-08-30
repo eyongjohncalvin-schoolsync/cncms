@@ -1,4 +1,4 @@
-import { Form, Head, router } from '@inertiajs/react';
+import { Form, Head, Link, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import { IconTerminal2, IconEye, IconCheck, IconClock, IconCalendarTime, IconLock, IconBan, IconTrash } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -358,6 +358,18 @@ export default function SettingsCommandRuns({
                             publish time, so these numbers won&apos;t drift even if new payments arrive before then.
                         </p>
                         <ManuscriptRunSummary summary={previewRun.computed_result_summary} />
+                        {previewRun.command === 'manuscript:calculate' && (
+                            <Link
+                                href={`/manuscripts/runs/${previewRun.uuid}`}
+                                className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+                            >
+                                <span>
+                                    <IconEye size={15} stroke={1.75} className="mr-1.5 -mt-0.5 inline" />
+                                    See the full per-customer breakdown before publishing
+                                </span>
+                                <span aria-hidden="true">→</span>
+                            </Link>
+                        )}
                         {previewRun.status === 'pending_review' && canPublish && (
                             <Button
                                 type="button"
