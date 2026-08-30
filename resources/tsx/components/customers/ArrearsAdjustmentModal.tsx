@@ -360,7 +360,7 @@ export function ArrearsAdjustmentModal({
                         </div>
                     )}
 
-                    <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                    <div className="sticky -bottom-5 -mx-5 -mb-5 mt-2 flex justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4">
                         <button
                             type="button"
                             onClick={close}

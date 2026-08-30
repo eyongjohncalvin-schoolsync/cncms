@@ -35,9 +35,9 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
                         leaveFrom="opacity-100 scale-100"
                         leaveTo="opacity-0 scale-95"
                     >
-                        <DialogPanel className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/5">
+                        <DialogPanel className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/5">
                             {title && (
-                                <div className="mb-3 flex items-center justify-between gap-4">
+                                <div className="sticky -top-5 z-10 -mx-5 -mt-5 mb-3 flex items-center justify-between gap-4 border-b border-slate-100 bg-white px-5 pt-5 pb-3">
                                     <DialogTitle className="text-base font-semibold text-slate-900">{title}</DialogTitle>
                                     <button
                                         type="button"
