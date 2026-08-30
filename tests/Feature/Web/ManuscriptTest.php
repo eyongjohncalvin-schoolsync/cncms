@@ -8,6 +8,7 @@ use App\Exports\ManuscriptRegisterExport;
 use App\Models\CommandRun;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Services\ManuscriptService;
 use Database\Factories\CompanyFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
@@ -15,6 +16,7 @@ use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Maatwebsite\Excel\Facades\Excel;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
@@ -242,6 +244,109 @@ class ManuscriptTest extends TestCase
                     && $export->array()[0][$paidIndex] === null;
             },
         );
+    }
+
+    /**
+     * "Download Bills" (Manuscripts → Export menu) streams a real PDF of the
+     * period's active-customer bill slips, tiled N-up via the bulk grid.
+     * Scoped to a fresh zone so it renders only this test's two fixtures,
+     * not every real customer in the shared tenant.
+     */
+    public function test_download_bills_streams_a_real_pdf(): void
+    {
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+
+        $zone = ZoneFactory::new()->create();
+        foreach (['Ada', 'Ben'] as $name) {
+            $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'name' => $name, 'bill' => 2500]);
+            ManuscriptFactory::new()->forPeriod($period)->create([
+                'customer_id' => $customer->id, 'bill' => 2500, 'total_bill' => 2500,
+            ]);
+        }
+
+        $this->actingAsRole('manager');
+
+        $response = $this->get('/manuscripts/bills?period='.$period.'&zone_uuid='.$zone->uuid);
+
+        $response->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF-', $response->getContent());
+    }
+
+    /**
+     * 404 rather than an empty PDF when nobody active has a bill for the
+     * period+filter (here: the only customer in this fresh zone is
+     * disconnected).
+     */
+    public function test_download_bills_404s_when_no_active_customer_has_a_bill(): void
+    {
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'disconnected']);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+
+        $this->actingAsRole('manager');
+
+        $this->get('/manuscripts/bills?period='.$period.'&zone_uuid='.$zone->uuid)->assertNotFound();
+    }
+
+    /**
+     * A worker is outside the export roles (super/admin/manager) — the bulk
+     * bill download is gated the same as the register export.
+     */
+    public function test_download_bills_is_denied_to_a_worker(): void
+    {
+        CompanyFactory::new()->create();
+
+        $this->actingAsRole('worker');
+
+        $this->get('/manuscripts/bills?period='.Carbon::now()->format('Y-m'))->assertForbidden();
+    }
+
+    /**
+     * The owner's ordering ask (2026-08-30): bills come out grouped by zone
+     * (zones alphabetical), customers alphabetical within each zone, so an
+     * agent's zone is one contiguous stack. Asserted at the
+     * ManuscriptService::billRecipients() level since the PDF stream itself
+     * is opaque.
+     */
+    public function test_bill_recipients_are_ordered_by_zone_then_customer_name(): void
+    {
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+
+        // Zone names carry a unique prefix so this assertion isn't perturbed
+        // by whatever real zones the shared tenant already has — the two sit
+        // adjacent in the global alphabetical order regardless.
+        $prefix = 'ZZ '.Str::random(6).' ';
+        $alpha = ZoneFactory::new()->create(['name' => $prefix.'Alpha']);
+        $beta = ZoneFactory::new()->create(['name' => $prefix.'Beta']);
+
+        $seed = [
+            [$beta, 'Bob'],
+            [$alpha, 'Zoe'],
+            [$alpha, 'amy'], // lower-case: ordering is case-insensitive
+        ];
+        $mine = [];
+        foreach ($seed as [$zone, $name]) {
+            $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'name' => $name]);
+            ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+            $mine[] = $customer->id;
+        }
+
+        $recipients = app(ManuscriptService::class)->billRecipients(['period' => $period]);
+
+        // Filter the full recipient list down to just this test's three, then
+        // assert their relative order — zone (alpha before beta), then name.
+        $ordered = $recipients['customers']
+            ->whereIn('id', $mine)
+            ->pluck('name')
+            ->values()
+            ->all();
+
+        $this->assertSame(['amy', 'Zoe', 'Bob'], $ordered);
     }
 
     /**

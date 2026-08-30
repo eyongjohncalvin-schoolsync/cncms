@@ -288,6 +288,24 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                     Download Excel
                                 </a>
                             </MenuItem>
+
+                            <div className="my-1 h-px bg-slate-200" />
+
+                            {/* The actual customer bill slips (not the register) — every
+                                active customer's bill for this period, tiled N-up per the
+                                Bill Printing setting and ordered by zone then name so an
+                                agent's zone comes out as one contiguous stack. Honours the
+                                same period/zone/status/search filters. */}
+                            <MenuItem>
+                                <a
+                                    href={`/manuscripts/bills?${exportParams.toString()}`}
+                                    download
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                >
+                                    <IconReceipt2 size={16} stroke={1.75} />
+                                    Download Bills (by zone)
+                                </a>
+                            </MenuItem>
                         </Dropdown>
                     )}
                     {canCalculate && (

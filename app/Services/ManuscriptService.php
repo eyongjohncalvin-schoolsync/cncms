@@ -106,6 +106,42 @@ class ManuscriptService
     }
 
     /**
+     * The active customers who should receive a printed bill for
+     * $filters['period'] (same period/zone/status/search keys as list()),
+     * ordered by zone name then customer name — feeds
+     * ManuscriptController::downloadBills() and the bulk N-up grid
+     * (resources/views/pdf/bills/_grid.blade.php).
+     *
+     * ACTIVE ONLY: a disconnected / suspended / passive customer is frozen
+     * with a 0 total_bill, so a printed slip for them is wrong — the same
+     * rule billData() enforces on the single-print path. billDataForCustomers()
+     * trusts its caller to have filtered (see its doc comment), so the filter
+     * lives here.
+     *
+     * ORDER (owner's ask, 2026-08-30): grouped by zone, zones alphabetical,
+     * customers alphabetical within each zone, so an agent walking a zone
+     * gets that zone's bills as one contiguous run. Case-insensitive; a
+     * customer with no zone sorts to the front under an empty key.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{period: string, customers: Collection<int, Customer>}
+     */
+    public function billRecipients(array $filters): array
+    {
+        $scoped = $this->scopedFilters($filters);
+
+        $customers = $this->manuscripts->all($scoped)
+            ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active')
+            ->sortBy(fn (Manuscript $manuscript): string => mb_strtolower(
+                ($manuscript->customer?->zone?->name ?? '')."\0".($manuscript->customer?->name ?? '')
+            ))
+            ->map(fn (Manuscript $manuscript): Customer => $manuscript->customer)
+            ->values();
+
+        return ['period' => $scoped['period'], 'customers' => $customers];
+    }
+
+    /**
      * Everything needed to render a single customer's bill slip
      * (resources/views/pdf/bills/{classic,compact,modern}.blade.php via
      * pdf/bills/show.blade.php). See business-rules.md section 3.

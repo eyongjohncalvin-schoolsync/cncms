@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Exports\ManuscriptRegisterExport;
 use App\Models\CommandRun;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Message;
@@ -130,6 +131,49 @@ class ManuscriptController extends Controller
         return Pdf::loadView('pdf.manuscript', [...$data, 'orientation' => $orientation])
             ->setPaper('a4', $orientation)
             ->stream('manuscript-'.$data['period'].'.pdf');
+    }
+
+    /**
+     * "Download Bills" (Manuscripts index → Export menu) — every active
+     * customer's printable bill for the shown period, tiled onto A4 at the
+     * tenant's configured N-up density (Settings → Bill Printing,
+     * companies.bills_per_page) via resources/views/pdf/bills/_grid.blade.php.
+     *
+     * ORDERING (owner's explicit ask, 2026-08-30): bills come out grouped by
+     * zone, zones alphabetical, customers alphabetical within each zone — so
+     * an agent walking a zone gets that zone's bills as one contiguous run
+     * and never has to sort a shuffled stack.
+     *
+     * ACTIVE ONLY — a disconnected / suspended / passive customer is frozen
+     * with a 0 total_bill, so a printed slip for them is wrong. Same rule
+     * ManuscriptService::billData() enforces on the single-print path;
+     * billDataForCustomers() trusts the caller to have filtered (see its doc
+     * comment), so the filter lives here.
+     *
+     * Respects the same period / zone_uuid / status / search filters as the
+     * register export — "Download Bills" with a zone filter applied gives you
+     * just that zone's bills. Raises memory/time like export() does: dompdf
+     * rendering hundreds of full bill templates is heavier than the register.
+     */
+    public function downloadBills(Request $request): Response
+    {
+        $this->authorize('export', Manuscript::class);
+
+        $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
+        ['period' => $period, 'customers' => $customers] = $this->manuscripts->billRecipients($filters);
+
+        abort_if($customers->isEmpty(), 404, 'No active customers have a bill for this period.');
+
+        ini_set('memory_limit', '1024M');
+        set_time_limit(180);
+
+        $company = Company::cached();
+
+        return Pdf::loadView('pdf.bills._grid', [
+            'bills' => $this->manuscripts->billDataForCustomers($customers, $period),
+            'density' => $company?->bills_per_page ?? 1,
+            'template' => $company?->bill_template ?? 'classic',
+        ])->setPaper('a4', 'portrait')->stream('bills-'.$period.'.pdf');
     }
 
     /**
