@@ -301,11 +301,11 @@ class ManuscriptTest extends TestCase
 
         $default = view('pdf.manuscript', $base)->render();
         $this->assertStringContainsString('size: a4 portrait', $default);
-        $this->assertStringContainsString('width: 17%', $default); // portrait Name column
+        $this->assertStringContainsString('width: 18%', $default); // portrait Name column
 
         $landscape = view('pdf.manuscript', [...$base, 'orientation' => 'landscape'])->render();
         $this->assertStringContainsString('size: a4 landscape', $landscape);
-        $this->assertStringContainsString('width: 20%', $landscape); // landscape Name column
+        $this->assertStringContainsString('width: 22%', $landscape); // landscape Name column
 
         // Unknown values fall back to portrait, never render a bare "a4 ".
         $bogus = view('pdf.manuscript', [...$base, 'orientation' => 'sideways'])->render();

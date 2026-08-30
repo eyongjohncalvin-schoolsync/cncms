@@ -7,10 +7,21 @@
     // Fixed-layout column widths (percent, MUST sum to 100), in header order:
     // No, Name, Code, Zone, Bill, Arrears, Credit, Total Bill, Paid, Status, Expiry.
     // Portrait is the tight case and is tuned first; landscape just gets the
-    // slack spread back into Name/Zone.
+    // slack spread back into Name/Zone. Applied directly on the <th> cells:
+    // dompdf's table-layout:fixed reads column widths off the first row, and
+    // honours per-cell width far more reliably than <colgroup><col> (which it
+    // was silently ignoring here — every column came out equal, so "No" had a
+    // huge gap and long names spilled over "Code").
     $cols = $orientation === 'landscape'
-        ? [3, 20, 7, 11, 9, 10, 9, 10, 11, 5, 5]
-        : [3, 17, 7, 9, 10, 10, 10, 11, 12, 5, 6];
+        ? [3, 22, 8, 12, 9, 9, 9, 9, 10, 5, 4]
+        : [3, 18, 8, 10, 9, 9, 9, 10, 11, 7, 6];
+
+    // dompdf does not clip overflowing text (overflow:hidden / text-overflow
+    // are no-ops on its table cells), so a long name still draws over the next
+    // column even at the right width. Truncate in PHP instead — budget scaled
+    // to the Name/Zone column widths above and the per-orientation font size.
+    $nameLimit = $orientation === 'landscape' ? 34 : 26;
+    $zoneLimit = $orientation === 'landscape' ? 20 : 15;
 
     // Display-only status abbreviations to save column width — stored data is untouched.
     $statusAbbr = ['disconnected' => 'disc', 'suspended' => 'susp'];
@@ -51,14 +62,13 @@
         table.register td {
             padding: 2px 4px;
             border-bottom: 1px solid #ddd;
+            text-align: left;
+            vertical-align: top;
         }
         table.register th.num, table.register td.num { text-align: right; }
-        /* Narrowed text columns: clip rather than let the fixed table overflow A4. */
-        table.register td.clip {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+        /* Narrowed text columns — content is already truncated in PHP; keep it
+           on one line so a stray long value can't wrap and stagger the row. */
+        table.register td.clip { white-space: nowrap; }
         /* Blank column the manager fills in by hand after collecting. */
         table.register th.paid, table.register td.paid { border-left: 1px solid #999; }
     </style>
@@ -101,31 +111,28 @@
     </table>
 
     <table class="register">
-        <colgroup>
-            @foreach ($cols as $w)<col style="width: {{ $w }}%">@endforeach
-        </colgroup>
         <thead>
             <tr>
-                <th>No</th>
-                <th>Name</th>
-                <th>Code</th>
-                <th>Zone</th>
-                <th class="num">Bill</th>
-                <th class="num">Arrears</th>
-                <th class="num">Credit</th>
-                <th class="num">Total Bill</th>
-                <th class="num paid">Paid</th>
-                <th>Status</th>
-                <th>Expiry</th>
+                <th style="width: {{ $cols[0] }}%">No</th>
+                <th style="width: {{ $cols[1] }}%">Name</th>
+                <th style="width: {{ $cols[2] }}%">Code</th>
+                <th style="width: {{ $cols[3] }}%">Zone</th>
+                <th class="num" style="width: {{ $cols[4] }}%">Bill</th>
+                <th class="num" style="width: {{ $cols[5] }}%">Arrears</th>
+                <th class="num" style="width: {{ $cols[6] }}%">Credit</th>
+                <th class="num" style="width: {{ $cols[7] }}%">Total Bill</th>
+                <th class="num paid" style="width: {{ $cols[8] }}%">Paid</th>
+                <th style="width: {{ $cols[9] }}%">Status</th>
+                <th style="width: {{ $cols[10] }}%">Expiry</th>
             </tr>
         </thead>
         <tbody>
             @foreach ($manuscripts as $index => $manuscript)
                 <tr>
                     <td>{{ $index + 1 }}</td>
-                    <td class="clip">{{ $manuscript->customer?->name }}</td>
+                    <td class="clip">{{ \Illuminate\Support\Str::limit($manuscript->customer?->name ?? '', $nameLimit, '…') }}</td>
                     <td>{{ substr($manuscript->customer?->uuid ?? '', 0, 8) }}</td>
-                    <td class="clip">{{ $manuscript->customer?->zone?->name }}</td>
+                    <td class="clip">{{ \Illuminate\Support\Str::limit($manuscript->customer?->zone?->name ?? '', $zoneLimit, '…') }}</td>
                     <td class="num">{{ number_format((float) $manuscript->bill, 2) }}</td>
                     <td class="num">{{ number_format((float) $manuscript->total_arrears, 2) }}</td>
                     <td class="num">{{ number_format((float) $manuscript->credit, 2) }}</td>
