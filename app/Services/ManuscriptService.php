@@ -113,10 +113,26 @@ class ManuscriptService
      * Resolves the manuscript for the given period, or the customer's most
      * recently calculated manuscript when no period is given.
      *
+     * A bill slip is only ever printed for an ACTIVE customer (owner
+     * decision, 2026-08): a disconnected / suspended / passive customer is
+     * frozen — their manuscript carries a 0 total_bill — so handing them a
+     * printable slip is wrong. This is the single guard behind both print
+     * paths (CustomerController::printBill and Api\BillController::print);
+     * it throws a friendly ValidationException that the web controller
+     * catches into a flash 'error' and the API surfaces as a 422. The bulk
+     * N-up grid (billDataForCustomers()) filters upstream instead, and
+     * sampleBillData()/the monthly register never come through here.
+     *
      * @return array{company: ?Company, customer: Customer, manuscript: Manuscript, period: string, period_label: string, deadline: string, account_code: string, bill_number: string, logo_data_uri: ?string}
      */
     public function billData(Customer $customer, ?string $period): array
     {
+        if ($customer->status !== 'active') {
+            throw ValidationException::withMessages([
+                'customer' => ["Bills are only printed for active customers. {$customer->name} is {$customer->status}."],
+            ]);
+        }
+
         $manuscript = $this->resolveManuscript($customer, $period);
         $company = Company::cached();
 

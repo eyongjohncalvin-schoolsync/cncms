@@ -404,7 +404,19 @@ class CustomerController extends Controller
 
         $period = $request->string('period')->value() ?: null;
 
-        $data = $this->manuscripts->billData($customer, $period);
+        // A bill slip only ever prints for an ACTIVE customer — a
+        // disconnected/suspended/passive customer is frozen with a 0
+        // total_bill (owner decision, 2026-08). ManuscriptService::billData()
+        // is the guard; catch its friendly ValidationException into a flash
+        // 'error' and bounce back to the customer page, the same shape as
+        // destroy()'s catch of CustomerService::delete().
+        try {
+            $data = $this->manuscripts->billData($customer, $period);
+        } catch (ValidationException $e) {
+            return redirect()->route('customers.show', $customer->uuid)
+                ->with('error', collect($e->errors())->flatten()->first());
+        }
+
         $template = $this->resolveBillTemplate($data['company'] ?? null);
 
         return Pdf::loadView('pdf.bills.show', [...$data, 'template' => $template])->stream("bill-{$customer->uuid}.pdf");

@@ -159,16 +159,24 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                             <CustomerStatusActions customer={customer} />
                             <ArrearsAdjustmentModal customer={customer} />
-                            <a
-                                href={`/customers/${customer.uuid}/bill/print`}
-                                target="_blank"
-                                rel="noreferrer"
-                                title="Print bill"
-                                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-                            >
-                                <IconPrinter size={16} stroke={2} />
-                                Print Bill
-                            </a>
+                            {/* Bills only ever print for an active customer — a
+                                disconnected/suspended/passive customer is frozen
+                                with a 0 total_bill (owner decision, 2026-08). The
+                                server (CustomerController::printBill) is the real
+                                guard; this just hides a button that would only
+                                bounce back with an error. */}
+                            {customer.status === 'active' && (
+                                <a
+                                    href={`/customers/${customer.uuid}/bill/print`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title="Print bill"
+                                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                                >
+                                    <IconPrinter size={16} stroke={2} />
+                                    Print Bill
+                                </a>
+                            )}
                             <Link
                                 href={`/customers/${customer.uuid}/edit`}
                                 className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"

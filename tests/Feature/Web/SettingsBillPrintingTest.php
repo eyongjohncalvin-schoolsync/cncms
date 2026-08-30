@@ -235,7 +235,10 @@ class SettingsBillPrintingTest extends TestCase
         Company::forgetCache();
 
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        // ->active(): CustomerController::printBill() now refuses a
+        // non-active customer (ManuscriptService::billData()), and the
+        // factory default status is random (~20% 'disconnected').
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
         ManuscriptFactory::new()
             ->forPeriod(now()->format('Y-m'))
             ->create(['customer_id' => $customer->id, 'bill' => 2500, 'total_bill' => 2500]);
