@@ -36,10 +36,12 @@ import type { ManuscriptListItemApi, ManuscriptSummaryApi, TenantRole } from '..
  * calendar period as 'YYYY-MM', which the server independently re-validates
  * (App\Services\ManuscriptService::scopedFilters()). The month stepper
  * (2026-08-30 addendum) lets the viewer page between months, but only ever
- * within a hard [EARLIEST_PERIOD .. currentPeriod()] window computed from
- * real calendar arithmetic (shiftPeriod()) — never past the current month
- * (nothing is billed for the future) and never before v2's first real run.
- * It is still "an explicit calendar period", never "whatever sorts highest".
+ * within a hard [EARLIEST_PERIOD .. latestPeriod()] window computed from
+ * real calendar arithmetic (shiftPeriod()) — latestPeriod() is one month
+ * ahead of today, since the cycle generates next month's manuscript in
+ * advance (the September register exists and is reviewed during August),
+ * but never further, and never before v2's first real run. It is still
+ * "an explicit calendar period", never "whatever sorts highest".
  *
  * ZONE SAFETY — this screen sends no zone_uuid at all. The server
  * force-scopes an `agent` caller to their own zone regardless of what's
@@ -87,9 +89,9 @@ const VIEW_ALLOWED_ROLES = new Set<TenantRole>(['super', 'admin', 'manager', 'ag
 
 // The first period v2's monthly cycle actually produced (see
 // project-manuscript-monthly-cycle: the imported "2026-08" baseline is v1's
-// 2026-07-22 run, and September 2026 was the first native v2 run). There is
-// nothing to show before this, so the month stepper stops here rather than
-// letting an agent page back through empty months forever.
+// 2026-07-22 run). There is nothing to show before this, so the month
+// stepper stops here rather than letting an agent page back through empty
+// months forever.
 const EARLIEST_PERIOD = '2026-08';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready';
@@ -111,6 +113,18 @@ function shiftPeriod(period: string, delta: number): string {
     const date = new Date(year, (month || 1) - 1 + delta, 1);
 
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * The furthest-ahead period the stepper allows — one month past the current
+ * calendar month. The billing cycle runs a month early: the run executed
+ * near the end of month M produces month M+1's manuscript (the bills that
+ * go out before M+1 begins — see project-manuscript-monthly-cycle), so
+ * during August the September manuscript already exists and must be
+ * reachable. Nothing is ever generated further ahead than that.
+ */
+function latestPeriod(): string {
+    return shiftPeriod(currentPeriod(), 1);
 }
 
 export default function ManuscriptScreen() {
@@ -197,14 +211,13 @@ export default function ManuscriptScreen() {
         [authorized],
     );
 
-    // Step the stepper. Capped at EARLIEST_PERIOD .. current calendar month
-    // — there is no manuscript before the first and none billed for the
-    // future.
+    // Step the stepper. Capped at EARLIEST_PERIOD .. latestPeriod() (one
+    // month ahead — the cycle generates next month's manuscript in advance).
     const changeMonth = useCallback(
         (delta: number) => {
             const next = shiftPeriod(periodRef.current, delta);
 
-            if (next < EARLIEST_PERIOD || next > currentPeriod()) {
+            if (next < EARLIEST_PERIOD || next > latestPeriod()) {
                 return;
             }
 
@@ -236,7 +249,7 @@ export default function ManuscriptScreen() {
     );
 
     const canGoPrev = shiftPeriod(period, -1) >= EARLIEST_PERIOD;
-    const canGoNext = shiftPeriod(period, 1) <= currentPeriod();
+    const canGoNext = shiftPeriod(period, 1) <= latestPeriod();
 
     function renderItem({ item }: { item: ManuscriptListItemApi }) {
         const arrears = Number(item.total_arrears);
