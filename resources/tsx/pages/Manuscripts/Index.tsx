@@ -80,6 +80,15 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
     const [search, setSearch] = useState(filters.search ?? '');
+    // Adjust-Arrears modal target. Held at page level, NOT inside the row
+    // <Dropdown> — a Headless UI menu unmounts its contents the instant an
+    // item is clicked, which would tear the modal down mid-open ("flashes
+    // and disappears, backdrop stuck").
+    const [adjustCustomer, setAdjustCustomer] = useState<{
+        uuid: string;
+        name: string;
+        manuscript: { total_arrears: string; credit: string };
+    } | null>(null);
 
     const calculateForm = useForm({ period: upcomingPeriod(), confirmed_rerun: false });
 
@@ -204,14 +213,14 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                 formattedArrears: formatCurrency(manuscript.total_arrears),
                 formattedCredit: formatCurrency(manuscript.credit),
                 formattedTotalBill: formatCurrency(manuscript.total_bill),
-                // Mapped into the `{uuid, name, manuscript: {total_arrears}}`
+                // Mapped into the `{uuid, name, manuscript: {total_arrears, credit}}`
                 // shape ArrearsAdjustmentModal expects (same shape
                 // Customers/Show.tsx already passes it) — trivial reshaping
                 // of fields this row already carries, not a new fetch.
                 arrearsCustomer: {
                     uuid: manuscript.customer_uuid,
                     name: manuscript.customer_name,
-                    manuscript: { total_arrears: manuscript.total_arrears },
+                    manuscript: { total_arrears: manuscript.total_arrears, credit: manuscript.credit },
                 },
             })),
         [manuscripts.data],
@@ -375,14 +384,12 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                                 pre-existing Send Bill action alongside the new Adjust Arrears
                                                 entry, one dropdown per row, distinctly labeled. */}
                                             <Dropdown label={`Actions for ${manuscript.customer_name}`}>
-                                                <ArrearsAdjustmentModal
-                                                    customer={arrearsCustomer}
-                                                    trigger={(open) => (
-                                                        <DropdownItem onClick={open} icon={<IconScale size={16} stroke={1.75} />}>
-                                                            Adjust Arrears
-                                                        </DropdownItem>
-                                                    )}
-                                                />
+                                                <DropdownItem
+                                                    onClick={() => setAdjustCustomer(arrearsCustomer)}
+                                                    icon={<IconScale size={16} stroke={1.75} />}
+                                                >
+                                                    Adjust Arrears
+                                                </DropdownItem>
                                                 {canSendBill && (
                                                     <>
                                                         <DropdownDivider />
@@ -508,6 +515,19 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                     </Button>
                 </div>
             </Modal>
+
+            {/* Rendered here, outside the table/Dropdown, so clicking the
+                menu item (which closes the Dropdown) can't unmount it.
+                Keyed by uuid + only mounted while a target is selected, so
+                each open starts with a clean form for the right customer. */}
+            {adjustCustomer && (
+                <ArrearsAdjustmentModal
+                    key={adjustCustomer.uuid}
+                    customer={adjustCustomer}
+                    open
+                    onClose={() => setAdjustCustomer(null)}
+                />
+            )}
         </AppLayout>
     );
 }

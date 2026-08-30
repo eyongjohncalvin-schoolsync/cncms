@@ -77,6 +77,13 @@ function toNumberOrNull(value: string | null | undefined): number | null {
  * `trigger` is an optional render prop letting a caller swap in its own
  * button while reusing everything else here unchanged.
  *
+ * Controlled mode: pass `open` + `onClose` and the component renders ONLY
+ * the dialog (no trigger of its own) — the caller owns the open state. This
+ * is mandatory when the launch control lives inside something that unmounts
+ * on click (e.g. a Headless UI menu / our <Dropdown>): an internal `open`
+ * state would be destroyed together with the menu the instant the item is
+ * clicked, so the dialog "flashes and vanishes". See Manuscripts/Index.tsx.
+ *
  * Target toggle (2026-08-30 addendum): a correction lands on EITHER the
  * customer's `total_arrears` OR their loose `credit` figure — the latter is
  * the fallback for the 2026-08 baseline-credit corruption (see
@@ -89,11 +96,18 @@ function toNumberOrNull(value: string | null | undefined): number | null {
 export function ArrearsAdjustmentModal({
     customer,
     trigger,
+    open: controlledOpen,
+    onClose: controlledOnClose,
 }: {
     customer: CustomerForAdjustment;
     trigger?: (open: () => void) => ReactNode;
+    /** Controlled mode — when provided, the caller owns the open state and no trigger is rendered. */
+    open?: boolean;
+    onClose?: () => void;
 }) {
-    const [open, setOpen] = useState(false);
+    const isControlled = controlledOpen !== undefined;
+    const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+    const open = isControlled ? controlledOpen : uncontrolledOpen;
 
     const { data, setData, post, processing, errors, reset } = useForm({
         customer_uuid: customer.uuid,
@@ -162,7 +176,11 @@ export function ArrearsAdjustmentModal({
 
     function close() {
         reset();
-        setOpen(false);
+        if (isControlled) {
+            controlledOnClose?.();
+        } else {
+            setUncontrolledOpen(false);
+        }
     }
 
     function submit(e: FormEvent) {
@@ -179,18 +197,19 @@ export function ArrearsAdjustmentModal({
 
     return (
         <>
-            {trigger ? (
-                trigger(() => setOpen(true))
-            ) : (
-                <button
-                    type="button"
-                    onClick={() => setOpen(true)}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-purple-600/20 transition-all duration-150 hover:bg-purple-700 hover:shadow-purple-600/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600 active:scale-[0.98]"
-                >
-                    <IconScale size={16} stroke={1.75} />
-                    Adjust Arrears
-                </button>
-            )}
+            {!isControlled &&
+                (trigger ? (
+                    trigger(() => setUncontrolledOpen(true))
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => setUncontrolledOpen(true)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-purple-600/20 transition-all duration-150 hover:bg-purple-700 hover:shadow-purple-600/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600 active:scale-[0.98]"
+                    >
+                        <IconScale size={16} stroke={1.75} />
+                        Adjust Arrears
+                    </button>
+                ))}
 
             <Modal open={open} onClose={close} title="Request Ledger Adjustment">
                 <form onSubmit={submit} className="flex flex-col gap-4">
