@@ -1,11 +1,15 @@
 import { Head, router, useForm, usePage } from '@inertiajs/react';
+import { MenuItem } from '@headlessui/react';
 import { useMemo, useState } from 'react';
 import {
     IconAlertTriangle,
     IconBrandWhatsapp,
     IconCalculator,
     IconCash,
+    IconChevronDown,
     IconDownload,
+    IconFileTypePdf,
+    IconFileTypeXls,
     IconReceipt2,
     IconScale,
     IconSearch,
@@ -237,13 +241,40 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                 </div>
                 <div className="flex gap-2">
                     {canExport && (
-                        <a
-                            href={`/manuscripts/export?${exportParams.toString()}`}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
+                        <Dropdown
+                            align="end"
+                            trigger={
+                                <span className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50">
+                                    <IconDownload size={18} stroke={1.75} />
+                                    Export
+                                    <IconChevronDown size={16} stroke={1.75} />
+                                </span>
+                            }
                         >
-                            <IconDownload size={18} stroke={1.75} />
-                            Export
-                        </a>
+                            {/* Plain <a download> anchors, not Inertia <Link>s / DropdownItem's
+                                href branch — these are file downloads the browser must handle
+                                itself, not client-side visits. */}
+                            <MenuItem>
+                                <a
+                                    href={`/manuscripts/export?${exportParams.toString()}`}
+                                    download
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                >
+                                    <IconFileTypePdf size={16} stroke={1.75} />
+                                    Download PDF
+                                </a>
+                            </MenuItem>
+                            <MenuItem>
+                                <a
+                                    href={`/manuscripts/export?${exportParams.toString()}&format=xlsx`}
+                                    download
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                >
+                                    <IconFileTypeXls size={16} stroke={1.75} />
+                                    Download Excel
+                                </a>
+                            </MenuItem>
+                        </Dropdown>
                     )}
                     {canCalculate && (
                         <Button onClick={openConfirm} className="rounded-lg px-3.5 py-2.5 text-sm font-semibold shadow-sm shadow-blue-600/20">

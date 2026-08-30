@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
 #[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'period', 'command_run_id'])]
 #[RouteKey('uuid')]
@@ -40,6 +41,32 @@ class Manuscript extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * The single source of truth for the "covered through" / expiry label
+     * shown in the manuscript register (both the PDF blade and
+     * App\Exports\ManuscriptRegisterExport render this so the two exports can
+     * never disagree). A post-paid customer carries an explicit
+     * payment_expiration date; a prepaid customer carries only a month
+     * counter (references/prepayment-drawdown.md), so derive the covered-
+     * through month from this row's own period + prepaid_months_remaining.
+     */
+    public function expiryLabel(): string
+    {
+        if ($this->payment_expiration !== null) {
+            return $this->payment_expiration->format('M y');
+        }
+
+        $prepaidMonths = (int) $this->prepaid_months_remaining;
+
+        if ($prepaidMonths > 0) {
+            return Carbon::createFromFormat('Y-m', $this->period)
+                ->addMonthsNoOverflow($prepaidMonths)
+                ->format('M y');
+        }
+
+        return '-';
     }
 
     /**

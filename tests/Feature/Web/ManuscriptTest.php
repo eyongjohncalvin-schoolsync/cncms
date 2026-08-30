@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Exports\ManuscriptRegisterExport;
 use App\Models\CommandRun;
 use App\Models\TenantUser;
 use App\Models\User;
@@ -15,6 +16,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
+use Maatwebsite\Excel\Facades\Excel;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
@@ -139,6 +141,74 @@ class ManuscriptTest extends TestCase
         $response = $this->get('/manuscripts/export?period='.$period);
 
         $response->assertStatus(403);
+    }
+
+    public function test_manager_can_export_the_manuscript_register_as_excel(): void
+    {
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+
+        $this->actingAsRole('manager');
+
+        // Scoped to the freshly-created zone so the workbook only renders
+        // this test's own row, not the tenant's ~hundreds of real seeded
+        // manuscripts for the current period.
+        $response = $this->get('/manuscripts/export?format=xlsx&period='.$period.'&zone_uuid='.$zone->uuid);
+
+        $response->assertOk();
+        $response->assertHeader(
+            'content-type',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+        $this->assertGreaterThan(0, $response->getFile()->getSize());
+    }
+
+    public function test_agent_cannot_export_the_manuscript_register_as_excel(): void
+    {
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+        $customer = CustomerFactory::new()->create();
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+
+        $this->actingAsRole('agent');
+
+        $this->get('/manuscripts/export?format=xlsx&period='.$period)->assertStatus(403);
+    }
+
+    /**
+     * Both export formats run off the same ManuscriptService::exportData()
+     * payload, so the period/zone/status filtering is shared — proven here
+     * against the Excel export (its row set is directly inspectable via
+     * Excel::fake(), unlike the PDF's binary stream): filtering to one zone
+     * yields exactly that zone's row, not the other zone's.
+     */
+    public function test_the_export_respects_a_zone_filter(): void
+    {
+        Excel::fake();
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+
+        $wantedZone = ZoneFactory::new()->create();
+        $otherZone = ZoneFactory::new()->create();
+
+        $wanted = CustomerFactory::new()->create(['zone_id' => $wantedZone->id]);
+        $other = CustomerFactory::new()->create(['zone_id' => $otherZone->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $wanted->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $other->id]);
+
+        $this->actingAsRole('manager');
+
+        $this->get('/manuscripts/export?format=xlsx&period='.$period.'&zone_uuid='.$wantedZone->uuid)
+            ->assertOk();
+
+        Excel::assertDownloaded(
+            'manuscript-'.$period.'.xlsx',
+            fn (ManuscriptRegisterExport $export): bool => count($export->array()) === 1
+                && $export->array()[0][1] === $wanted->name,
+        );
     }
 
     /**

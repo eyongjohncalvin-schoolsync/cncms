@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Exports\ManuscriptRegisterExport;
 use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
@@ -22,6 +23,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
+use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -83,8 +85,20 @@ class ManuscriptController extends Controller
     }
 
     /**
-     * Mirrors Api\ManuscriptController::export() — same PDF, streamed
-     * directly instead of behind a JSON envelope.
+     * The monthly billing register, downloadable as either a PDF or an Excel
+     * workbook (?format=xlsx) — one branch, one policy gate, one
+     * throttle:exports ceiling. Both formats are fed the IDENTICAL
+     * ManuscriptService::exportData() result (same rows, same period/zone/
+     * status/search filtering), so the PDF and the spreadsheet can never
+     * disagree.
+     *
+     * The PDF branch raises PHP's memory_limit and execution time for the
+     * duration of this one request: dompdf's layout of the full register
+     * (one row per customer — hundreds of rows for a real tenant) blows
+     * past the default 128M / 30s. The API sibling
+     * (Api\ManuscriptController::export()) already did this; this web
+     * variant historically omitted it, which is exactly why the "Export"
+     * link 500'd — the reported break.
      */
     public function export(Request $request): Response
     {
@@ -93,6 +107,16 @@ class ManuscriptController extends Controller
         $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
 
         $data = $this->manuscripts->exportData($filters);
+
+        if ($request->query('format') === 'xlsx') {
+            return Excel::download(
+                new ManuscriptRegisterExport($data),
+                'manuscript-'.$data['period'].'.xlsx',
+            );
+        }
+
+        ini_set('memory_limit', '1024M');
+        set_time_limit(120);
 
         return Pdf::loadView('pdf.manuscript', $data)
             ->setPaper('a4', 'landscape')
