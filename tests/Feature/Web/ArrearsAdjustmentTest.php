@@ -692,4 +692,12 @@ class ArrearsAdjustmentTest extends TestCase
         $this->assertSame($before['applied_this_month'] + 1, $after['applied_this_month']);
         $this->assertSame(bcadd((string) $before['total_written_off'], '3000.00', 2), (string) $after['total_written_off']);
     }
+
+    // Credit-target corrections + the imported-baseline delta-vs-recalc branch
+    // (2026-08-30 addendum) are covered in
+    // tests/Feature/Web/ArrearsAdjustmentCreditTargetTest.php — that file uses
+    // UsesDisposableTenant because it needs the freshly-added
+    // `arrears_adjustments.target` / `credit_snapshot` columns, exactly like
+    // CommandRunRollbackTest needed `manuscripts.command_run_id` (the real
+    // swecom schema is deliberately not altered while building this feature).
 }

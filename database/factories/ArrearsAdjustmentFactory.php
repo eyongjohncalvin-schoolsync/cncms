@@ -30,6 +30,7 @@ class ArrearsAdjustmentFactory extends Factory
             'customer_id' => CustomerFactory::new(),
             'target_period' => now()->format('Y-m'),
             'direction' => 'decrease',
+            'target' => 'arrears',
             'amount' => '5000.00',
             'reason_category' => 'billing_error',
             'reason_note' => fake()->sentence(),
@@ -74,6 +75,28 @@ class ArrearsAdjustmentFactory extends Factory
     {
         return $this->state(fn (array $attributes): array => [
             'arrears_snapshot' => $snapshot,
+        ]);
+    }
+
+    /**
+     * A credit-target correction (2026-08-30) — touches manuscripts.credit
+     * rather than total_arrears. Defaults direction to 'increase' (claw
+     * back) and reason_category to a credit-specific one; callers override
+     * as needed.
+     */
+    public function creditTarget(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'target' => 'credit',
+            'direction' => 'increase',
+            'reason_category' => 'credit_correction',
+        ]);
+    }
+
+    public function withCreditSnapshot(string $snapshot): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'credit_snapshot' => $snapshot,
         ]);
     }
 

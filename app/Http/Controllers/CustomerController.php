@@ -224,6 +224,7 @@ class CustomerController extends Controller
                 'uuid' => $adjustment->uuid,
                 'target_period' => $adjustment->target_period,
                 'direction' => $adjustment->direction,
+                'target' => $adjustment->target,
                 'amount' => $adjustment->amount,
                 'reason_category' => $adjustment->reason_category,
                 'reason_note' => $adjustment->reason_note,

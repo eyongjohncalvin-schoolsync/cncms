@@ -52,10 +52,18 @@ class StoreArrearsAdjustmentRequest extends FormRequest
                 },
             ],
             'direction' => ['required', Rule::in(['decrease', 'increase'])],
+            // Which side of `net = arrears - credit` this correction lands on.
+            // Optional/defaulted so every existing caller (and the JSON API)
+            // stays valid without sending it — see ArrearsAdjustmentData.
+            'target' => ['nullable', Rule::in(['arrears', 'credit'])],
             'amount' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
+            // Original arrears categories PLUS the credit-correction set
+            // (2026-08-30) — the column has no DB CHECK constraint, this is
+            // the single enforcement point for the allowed values.
             'reason_category' => ['required', Rule::in([
                 'legacy_migration_error', 'billing_error', 'goodwill_service_outage',
                 'bad_debt_writeoff', 'credit_clawback', 'other',
+                'credit_correction', 'duplicate_credit', 'migration_credit_error',
             ])],
             'reason_note' => ['required', 'string'],
             'complaint_uuid' => ['nullable', 'uuid'],

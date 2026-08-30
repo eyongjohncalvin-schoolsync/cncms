@@ -40,6 +40,7 @@ class ArrearsAdjustmentService
         private readonly CustomerRepositoryInterface $customers,
         private readonly CustomerManuscriptRecalculationService $recalculator,
         private readonly NotificationService $notifications,
+        private readonly ManuscriptRunLockService $runLock,
     ) {}
 
     /**
@@ -114,6 +115,10 @@ class ArrearsAdjustmentService
             'customer_id' => $customer->id,
             'complaint_id' => $complaintId,
             'arrears_snapshot' => $this->arrearsFor($customer, $data->targetPeriod),
+            // Both snapshots are captured for every request (cheap, and keeps
+            // the two staleness checks symmetric) — approve() only compares
+            // the one that matches this adjustment's `target`.
+            'credit_snapshot' => $this->creditFor($customer, $data->targetPeriod),
             'status' => 'pending',
         ]);
 
@@ -139,8 +144,8 @@ class ArrearsAdjustmentService
      *      the ledger effect (see applyLedgerEffect()).
      *
      * @throws ValidationException if the adjustment is not currently pending
-     *                              (either stage), or if the staleness
-     *                              re-check trips.
+     *                             (either stage), or if the staleness
+     *                             re-check trips.
      */
     public function approve(ArrearsAdjustment $adjustment, User $actor): ArrearsAdjustment
     {
@@ -163,16 +168,37 @@ class ArrearsAdjustmentService
             }
 
             $customer = Customer::query()->findOrFail($adjustment->customer_id);
-            $currentArrears = $this->arrearsFor($customer, $adjustment->target_period);
 
-            if (bccomp($currentArrears, (string) $adjustment->arrears_snapshot, 2) !== 0) {
-                throw ValidationException::withMessages([
-                    'status' => [
-                        "This customer's arrears figure for {$adjustment->target_period} has changed since this ".
-                        "request was made (was {$adjustment->arrears_snapshot} FCFA, now {$currentArrears} FCFA). ".
-                        'Reject this request and have a fresh one submitted against the current figure rather than applying it blindly.',
-                    ],
-                ]);
+            // Staleness re-check — on the dimension this adjustment targets.
+            // A 'credit' adjustment is refused if the customer's credit for
+            // target_period has drifted since the request (mirrors the
+            // original arrears check); an 'arrears' adjustment keeps the
+            // exact original behavior.
+            if ($adjustment->targetsCredit()) {
+                $currentCredit = $this->creditFor($customer, $adjustment->target_period);
+                $snapshot = $adjustment->credit_snapshot === null ? null : (string) $adjustment->credit_snapshot;
+
+                if ($snapshot === null || bccomp($currentCredit, $snapshot, 2) !== 0) {
+                    throw ValidationException::withMessages([
+                        'status' => [
+                            "This customer's credit figure for {$adjustment->target_period} has changed since this ".
+                            'request was made (was '.($snapshot ?? 'not captured')." FCFA, now {$currentCredit} FCFA). ".
+                            'Reject this request and have a fresh one submitted against the current figure rather than applying it blindly.',
+                        ],
+                    ]);
+                }
+            } else {
+                $currentArrears = $this->arrearsFor($customer, $adjustment->target_period);
+
+                if (bccomp($currentArrears, (string) $adjustment->arrears_snapshot, 2) !== 0) {
+                    throw ValidationException::withMessages([
+                        'status' => [
+                            "This customer's arrears figure for {$adjustment->target_period} has changed since this ".
+                            "request was made (was {$adjustment->arrears_snapshot} FCFA, now {$currentArrears} FCFA). ".
+                            'Reject this request and have a fresh one submitted against the current figure rather than applying it blindly.',
+                        ],
+                    ]);
+                }
             }
 
             if ($adjustment->status === 'pending' && $this->requiresSecondApproval($adjustment)) {
@@ -290,12 +316,41 @@ class ArrearsAdjustmentService
     }
 
     /**
+     * The credit-side counterpart of arrearsFor() — the customer's `credit`
+     * for $period (or their latest manuscript's, or '0.00'). Shared by
+     * create() (the request-time `credit_snapshot`) and approve() (the
+     * approval-time re-check for `target = 'credit'`) so the two can never
+     * disagree on what "the credit figure" means.
+     */
+    private function creditFor(Customer $customer, string $period): string
+    {
+        $manuscript = Manuscript::query()
+            ->where('customer_id', $customer->id)
+            ->where('period', $period)
+            ->first();
+
+        $manuscript ??= Manuscript::query()
+            ->where('customer_id', $customer->id)
+            ->orderByDesc('period')
+            ->first();
+
+        return $manuscript ? bcadd((string) $manuscript->credit, '0.00', 2) : '0.00';
+    }
+
+    /**
      * The single most important correctness step: once an adjustment is
-     * fully approved, its effect only actually lands on the ledger via a
-     * REAL ManuscriptCalculator run, never a direct write to `manuscripts` —
-     * see App\Services\CustomerManuscriptRecalculationService and
-     * App\Jobs\RecalculateCustomerManuscriptsForwardJob's class docs for the
-     * synchronous-current-period + queued-forward-sweep split.
+     * fully approved, its effect lands on the ledger by one of two routes,
+     * chosen by the state of the `target_period` manuscript row:
+     *
+     *   - Normal case (no row yet, or a live row in the current/next
+     *     period): a REAL ManuscriptCalculator run, never a direct write —
+     *     see App\Services\CustomerManuscriptRecalculationService and
+     *     App\Jobs\RecalculateCustomerManuscriptsForwardJob's class docs for
+     *     the synchronous-current-period + queued-forward-sweep split.
+     *   - Imported-baseline row (`command_run_id IS NULL`): a bounded,
+     *     audited DELTA to that one row (applyDirectDelta()) — a from-scratch
+     *     recompute of a v1-imported figure re-reads settled v1 history and
+     *     corrupts it (the 2026-08 incident). See the branch below.
      *
      * $actorId (the approving admin — the second/only approver, per
      * approve()'s own doc comment) is threaded through both recalculation
@@ -310,6 +365,64 @@ class ArrearsAdjustmentService
      */
     private function applyLedgerEffect(ArrearsAdjustment $adjustment, Customer $customer, int $actorId): void
     {
+        $targetPeriod = $adjustment->target_period;
+
+        $targetManuscript = Manuscript::query()
+            ->where('customer_id', $customer->id)
+            ->where('period', $targetPeriod)
+            ->first();
+
+        // --- Delta-vs-recalc branch (2026-08-30, the credit-correction
+        // addendum in this feature's design doc) --------------------------
+        //
+        // The 2026-08 `swecom` incident: an approved adjustment against an
+        // IMPORTED-BASELINE manuscript row (`command_run_id IS NULL` — a v1
+        // register figure written verbatim, with no v2 payment-processing
+        // history behind it) went through the normal recalc path below.
+        // recalculateOne() re-derived that period from scratch —
+        // `net = previousNet + (bill - income) ± adjustment`, where `income`
+        // is the sum of every not-yet-consumed verified payment — so ~42,000
+        // FCFA of historical v1 payments were re-counted as fresh August
+        // income, `net` went hugely negative, and a bogus `credit` of ~40,000
+        // was fabricated. The correct baseline `credit` was 0.
+        //
+        // Rule: a ledger correction must NOT trigger a from-scratch recompute
+        // of a period whose manuscript row is an imported baseline or whose
+        // period has closed. Instead:
+        //
+        //   1. Imported baseline (`command_run_id IS NULL`, row present):
+        //      apply a bounded, audited DELTA to that one row — through an
+        //      Eloquent save so the Auditable trait records old/new values —
+        //      and do NOT call recalculateOne() or dispatch the forward job.
+        //   2. Closed period whose row WAS finalised by a real
+        //      manuscript:calculate run: refuse the approval with a clear
+        //      error (immutability — a published, elapsed period is never
+        //      rewritten in place).
+        //   3. Everything else (no row yet, or a live row in the current /
+        //      next period): the original recalc path, unchanged.
+        if ($targetManuscript !== null
+            && $targetManuscript->command_run_id !== null
+            && $this->runLock->isPeriodLocked($targetPeriod)) {
+            throw ValidationException::withMessages([
+                'status' => [
+                    "Billing period {$targetPeriod} is closed and its manuscript was finalised by a published ".
+                    'calculation run — it cannot be corrected automatically. Have the owner apply a manual, '.
+                    'audited ledger fix for this period instead.',
+                ],
+            ]);
+        }
+
+        if ($targetManuscript !== null && $targetManuscript->command_run_id === null) {
+            // No $actorId needed here: this runs inside approve()'s web
+            // request, so App\Observers\AuditableObserver already attributes
+            // the manuscripts + adjustment writes to the authenticated
+            // approver via auth()->id().
+            $this->applyDirectDelta($adjustment, $targetManuscript);
+
+            return;
+        }
+
+        // --- Normal path (unchanged) ------------------------------------
         $currentPeriod = Carbon::now()->format('Y-m');
 
         $this->recalculator->recalculateOne(
@@ -320,6 +433,63 @@ class ArrearsAdjustmentService
         );
 
         RecalculateCustomerManuscriptsForwardJob::dispatch($customer->id, $adjustment->target_period, $adjustment->id, $actorId);
+    }
+
+    /**
+     * Applies an approved adjustment as a bounded, audited delta to a single
+     * imported-baseline `manuscripts` row — never a from-scratch recompute
+     * (see applyLedgerEffect()'s doc for why). The write goes through the
+     * Eloquent model so App\Traits\Auditable records the before/after
+     * `manuscripts` values, and the adjustment is stamped processed so a
+     * later run for the same period treats it as already consumed.
+     *
+     * Direction semantics (identical sign convention to ManuscriptCalculator,
+     * `net = arrears - credit`):
+     *   - target 'arrears': 'decrease' → total_arrears -= amount (clamped 0);
+     *                       'increase' → total_arrears += amount.
+     *   - target 'credit':  'increase' → credit -= amount (clamped 0) — a
+     *                       claw-back of credit that should not exist;
+     *                       'decrease' → credit += amount — granting credit.
+     * total_bill is kept internally consistent as
+     * `max(0, bill + total_arrears - credit)`.
+     */
+    private function applyDirectDelta(ArrearsAdjustment $adjustment, Manuscript $manuscript): void
+    {
+        $amount = bcadd((string) $adjustment->amount, '0.00', 2);
+        $arrears = bcadd((string) $manuscript->total_arrears, '0.00', 2);
+        $credit = bcadd((string) $manuscript->credit, '0.00', 2);
+        $bill = bcadd((string) $manuscript->bill, '0.00', 2);
+
+        if ($adjustment->targetsCredit()) {
+            $credit = $adjustment->direction === 'increase'
+                ? $this->clampZero(bcsub($credit, $amount, 2))
+                : bcadd($credit, $amount, 2);
+        } else {
+            $arrears = $adjustment->direction === 'decrease'
+                ? $this->clampZero(bcsub($arrears, $amount, 2))
+                : bcadd($arrears, $amount, 2);
+        }
+
+        $totalBill = $this->clampZero(bcsub(bcadd($bill, $arrears, 2), $credit, 2));
+
+        // Eloquent update → Auditable `updated` observer → audit_logs row
+        // with old/new values. command_run_id stays NULL (still an imported
+        // baseline, now with one audited correction on top).
+        $manuscript->update([
+            'total_arrears' => $arrears,
+            'credit' => $credit,
+            'total_bill' => $totalBill,
+        ]);
+
+        $adjustment->forceFill([
+            'processed_at' => Carbon::now(),
+            'processed_period' => $adjustment->target_period,
+        ])->save();
+    }
+
+    private function clampZero(string $value): string
+    {
+        return bccomp($value, '0.00', 2) < 0 ? '0.00' : bcadd($value, '0.00', 2);
     }
 
     private function notifyApproved(ArrearsAdjustment $adjustment): void

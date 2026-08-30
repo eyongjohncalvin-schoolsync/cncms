@@ -23,6 +23,7 @@ final readonly class ArrearsAdjustmentData
         public string $amount,
         public string $reasonCategory,
         public string $reasonNote,
+        public string $target = 'arrears',
         public ?string $complaintUuid = null,
     ) {}
 
@@ -35,6 +36,7 @@ final readonly class ArrearsAdjustmentData
             amount: (string) $data['amount'],
             reasonCategory: $data['reason_category'],
             reasonNote: $data['reason_note'],
+            target: $data['target'] ?? 'arrears',
             complaintUuid: $data['complaint_uuid'] ?? null,
         );
     }
@@ -49,6 +51,7 @@ final readonly class ArrearsAdjustmentData
         return [
             'target_period' => $this->targetPeriod,
             'direction' => $this->direction,
+            'target' => $this->target,
             'amount' => $this->amount,
             'reason_category' => $this->reasonCategory,
             'reason_note' => $this->reasonNote,

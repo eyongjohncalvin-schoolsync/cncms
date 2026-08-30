@@ -368,6 +368,7 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                         <Table>
                             <TableHead>
                                 <Th>Period</Th>
+                                <Th>Target</Th>
                                 <Th>Direction</Th>
                                 <Th>Amount</Th>
                                 <Th>Reason</Th>
@@ -378,6 +379,7 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                                 {customer.arrears_adjustments.map((adjustment) => (
                                     <tr key={adjustment.uuid} className="transition-colors hover:bg-slate-50/75">
                                         <Td>{adjustment.target_period}</Td>
+                                        <Td className="capitalize">{adjustment.target ?? 'arrears'}</Td>
                                         <Td className="capitalize">{adjustment.direction}</Td>
                                         <Td>{formatCurrency(adjustment.amount)}</Td>
                                         <Td className="capitalize">{adjustment.reason_category.replace(/_/g, ' ')}</Td>

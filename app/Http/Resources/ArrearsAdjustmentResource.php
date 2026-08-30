@@ -32,10 +32,12 @@ class ArrearsAdjustmentResource extends JsonResource
             'customer_name' => $this->whenLoaded('customer', fn () => $this->customer?->name),
             'target_period' => $this->target_period,
             'direction' => $this->direction,
+            'target' => $this->target,
             'amount' => (string) $this->amount,
             'reason_category' => $this->reason_category,
             'reason_note' => $this->reason_note,
             'arrears_snapshot' => (string) $this->arrears_snapshot,
+            'credit_snapshot' => $this->credit_snapshot === null ? null : (string) $this->credit_snapshot,
             'status' => $this->status,
             'requested_by' => $this->whenLoaded('requestedBy', fn () => $this->requestedBy ? [
                 'uuid' => $this->requestedBy->uuid,

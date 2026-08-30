@@ -338,13 +338,20 @@ export interface CustomerRecentPayment {
 }
 
 export type ArrearsAdjustmentDirection = 'decrease' | 'increase';
+/** Which side of `net = arrears - credit` a correction lands on. 'credit'
+ * touches only the loose manuscripts.credit figure — never prepaid coverage
+ * (prepaid_months_remaining / prepaid_rate), which is out of scope. */
+export type ArrearsAdjustmentTarget = 'arrears' | 'credit';
 export type ArrearsAdjustmentReasonCategory =
     | 'legacy_migration_error'
     | 'billing_error'
     | 'goodwill_service_outage'
     | 'bad_debt_writeoff'
     | 'credit_clawback'
-    | 'other';
+    | 'other'
+    | 'credit_correction'
+    | 'duplicate_credit'
+    | 'migration_credit_error';
 export type ArrearsAdjustmentStatus = 'pending' | 'pending_second_approval' | 'approved' | 'rejected';
 
 /**
@@ -356,6 +363,10 @@ export interface ArrearsAdjustment {
     uuid: string;
     target_period: string;
     direction: ArrearsAdjustmentDirection;
+    /** 'arrears' (default) or 'credit'. Absent on rows created before the
+     * 2026-08-30 credit-correction addendum — treat a missing value as
+     * 'arrears'. */
+    target: ArrearsAdjustmentTarget;
     amount: string;
     reason_category: ArrearsAdjustmentReasonCategory;
     reason_note: string;
@@ -380,6 +391,10 @@ export interface ArrearsAdjustmentAuditRow extends ArrearsAdjustment {
     /** The customer's arrears balance for target_period at request time —
      * the "before" figure. See ArrearsAdjustmentModal's identical field. */
     arrears_snapshot: string;
+    /** The credit-side counterpart of arrears_snapshot — the "before" figure
+     * for a `target === 'credit'` row. Null for arrears-target rows and for
+     * rows created before the 2026-08-30 addendum. */
+    credit_snapshot: string | null;
     can_approve: boolean;
     can_reject: boolean;
     /** True when the signed-in user raised this request. A `super` may still

@@ -543,3 +543,144 @@ an `admin` first approver still cannot. Full `--filter ArrearsAdjustment` run gr
 **No change to** §4's ledger mechanism, the staleness re-check, the row-lock race close, the
 mobile surfaces (§10 — still no mobile approve/reject), or the API surface (§10). Purely a policy
 clause + one UI confirmation step.
+
+## 14. Addendum, 2026-08-30: credit-target corrections + the delta-vs-recalc rule
+
+### The incident this fixes
+
+The owner imported a fixed **August 2026 manuscript baseline** into the real `swecom` tenant —
+`manuscripts` rows for `period = '2026-08'`, `command_run_id = NULL`, figures copied verbatim from
+the v1 register (`august_manuscript.csv` / `ManuscriptImportAugust`). These rows have **no v2
+payment-processing history behind them** — no `payments.processed_period` was ever stamped for the
+historical v1 payments they summarise.
+
+Then two arrears adjustments were approved: **#414 MA TE (customer 24, −500, `billing_error`)** and
+**#518 FON CHRISTINA (customer 39, −2500, `bad_debt_writeoff`)**. `ArrearsAdjustmentService::
+applyLedgerEffect()` responded the way §4 describes — `CustomerManuscriptRecalculationService::
+recalculateOne($customer, '2026-08')` (current period) plus the forward job. But `recalculateOne()`
+**recomputes the period from scratch**: `net = previousNet + (bill - income) ± adjustment`, where
+`income` is the sum of every not-yet-consumed verified payment. With no prior manuscript row and
+`customers.others = 0`, `previousNet` was 0 and `income` was **~42,000 FCFA of historical v1
+payments** re-counted as fresh August income. `net` went hugely negative, `splitNet()` turned it
+into a bogus `credit` of **40,000 (MA TE)** and **32,500 (FON CHRISTINA)**. The correct baseline
+`credit` for both is **0**.
+
+The synthetic guard `command_runs` row (id 1438, `manuscript:calculate` / `2026-08` / `published`,
+`metadata.synthetic = true`) that `ManuscriptReconcilePrepaidBaseline` inserts blocks a *tenant-wide*
+`manuscript:calculate 2026-08` rerun via `ManuscriptRerunGuard` — but **`ManuscriptRerunGuard` is
+not consulted by `recalculateOne()` or by the arrears-adjustment path at all**, and neither is
+`ManuscriptRunLockService`. Nothing in `recalculateOne()` / `ManuscriptCalculator` has any notion of
+"this period's row is a locked/imported baseline — don't re-derive it from payments." That is the
+gap this addendum closes.
+
+**Root lesson: a ledger correction must NOT trigger a from-scratch recompute of a period whose
+manuscript row is an imported baseline (`command_run_id IS NULL`) or whose period has already
+closed. That re-reads history that was already settled in v1.**
+
+### `target` — arrears vs credit
+
+`arrears_adjustments` gains a `target` column: `'arrears'` (default — every existing row and every
+existing code path unchanged) or `'credit'`. `net = arrears - credit`, so an adjustment already
+moves both sides via the sign; `target` just picks which **column** the correction lands on:
+
+| `target` | `direction` | effect on the `manuscripts` row |
+|---|---|---|
+| `arrears` (default) | `decrease` | `total_arrears -= amount` (clamped at 0) — write-off |
+| `arrears` | `increase` | `total_arrears += amount` — correct up |
+| `credit` | `increase` | `credit -= amount` (clamped at 0) — **claw back** a credit that should not exist (the incident case) |
+| `credit` | `decrease` | `credit += amount` — grant credit |
+
+New `reason_category` values, credit-only: `credit_correction`, `duplicate_credit`,
+`migration_credit_error` (the original arrears categories stay valid for `target = 'arrears'`). The
+column has **no DB CHECK constraint** — `StoreArrearsAdjustmentRequest`'s `Rule::in(...)` is the
+single enforcement point (the migration drops the `enum()`-generated check on `reason_category`).
+
+`credit_snapshot` (nullable `decimal(12,2)`) is the credit-side counterpart of `arrears_snapshot`,
+captured at request time for **every** request. `ArrearsAdjustmentService::approve()`'s
+approval-time staleness re-check now runs on the dimension the adjustment targets: a `target =
+'credit'` adjustment is refused if the customer's credit for `target_period` has drifted since the
+request; `target = 'arrears'` keeps the exact original arrears check.
+
+### Scope: loose `credit` only
+
+A credit adjustment touches **only** the loose `manuscripts.credit` figure. The prepayment draw-down
+model (`references/prepayment-drawdown.md`) also represents prepaid coverage as
+`prepaid_months_remaining × prepaid_rate` — **correcting those is explicitly out of scope**. Noted in
+the request modal's UI ("Corrects only the loose credit figure — not prepaid coverage") and here.
+
+### The delta-vs-recalc branch (the key rule)
+
+`ArrearsAdjustmentService::applyLedgerEffect()` now inspects the `manuscripts` row for the
+adjustment's `target_period` (customer + period) and picks one of three paths:
+
+1. **Imported-baseline row — `command_run_id IS NULL`, row present:** apply the correction as a
+   **bounded, audited DELTA** to that one row — `total_arrears` / `credit` moved by exactly
+   `amount` (clamped at 0), `total_bill` recomputed as `max(0, bill + total_arrears - credit)` —
+   through an Eloquent `->update()` so the `Auditable` trait records old/new `manuscripts` values.
+   The adjustment is stamped `processed_at` / `processed_period`. **`recalculateOne()` is NOT called
+   and the forward job is NOT dispatched.** This is `applyDirectDelta()`.
+2. **Closed period whose row was finalised by a real run — `command_run_id` set AND
+   `ManuscriptRunLockService::isPeriodLocked(target_period)`:** approval is **refused** with a clear
+   `ValidationException` ("period is closed and its manuscript was finalised by a published
+   calculation run … have the owner apply a manual, audited ledger fix"). The request row stays as a
+   permanent artifact; the reviewer sees the error via the controller's existing flash handling.
+3. **Everything else — no row yet, or a live row in the current / next period:** the **original**
+   recalc path from §4, entirely unchanged (synchronous current-period `recalculateOne()` + queued
+   `RecalculateCustomerManuscriptsForwardJob`).
+
+"Imported baseline" is detected purely by `command_run_id IS NULL` on the target-period row —
+`recalculateOne()` itself clears `command_run_id` to NULL (see its doc), and `ManuscriptImportAugust`
+never sets it, so a baseline row stays NULL-linked even after one audited correction on top.
+
+**Residual risk (documented, not closed here):** a forward sweep triggered by a *different*
+adjustment against an *earlier* period still runs `recalculateOne()` for every period up to today,
+including a NULL-linked baseline period in that range — which would recompute it from scratch. The
+`command_run_id IS NULL` guard lives in `applyLedgerEffect()`, not in `recalculateOne()` /
+`RecalculateCustomerManuscriptsForwardJob`. For `swecom` this is contained by the synthetic guard row
++ the fact that `2026-08` is the earliest period; a fuller fix would push the baseline check down
+into `recalculateOne()`.
+
+### "Clear credit" quick-fill
+
+Mirrors §11's "Clear all arrears": a chip in `ArrearsAdjustmentModal` (visible when `credit > 0`)
+that pre-fills `target = 'credit'`, `direction = 'increase'`, `amount =` the customer's current
+credit, then stops. Still a full maker-checker request → approve, never a one-click bypass.
+
+### UI
+
+- `ArrearsAdjustmentModal.tsx` — a target toggle (Arrears / Credit) showing both current figures;
+  target-aware direction labels ("Claw back (reduce credit)" / "Grant (increase credit)"),
+  reason-category menu, amount label, and current/after guidance block; the scope note; the "Clear
+  credit" chip.
+- Audit Log → Arrears Adjustments sub-tab (`Audit/Index.tsx`, `AuditLogController::
+  arrearsAdjustmentsTabData()`) — `target` + `credit_snapshot` in the row payload; `BalanceChange`
+  branches on `target` (credit "before → after" from `credit_snapshot`); a "credit" tag on the
+  amount cell; the details panel's Direction/Target/"at request time" lines are target-aware.
+- Customer Show page adjustments list (`CustomerController::shapeArrearsAdjustments()`) — a Target
+  column.
+- `ArrearsAdjustmentResource` (JSON API) — `target` + `credit_snapshot` added.
+- TS types (`resources/tsx/types/index.ts`) — `ArrearsAdjustmentTarget`, the three new reason
+  categories, `ArrearsAdjustment.target`, `ArrearsAdjustmentAuditRow.credit_snapshot`.
+
+### The `swecom` correction (deliver, do not auto-run)
+
+`php artisan arrears:fix-baseline-credit-corruption` (`App\Console\Commands\
+ArrearsFixBaselineCreditCorruption`) — restores the correct `2026-08` figures for customers 24 (MA
+TE) and 39 (FON CHRISTINA): `bill 2500, total_arrears 2500, credit 0, total_bill 5000` for both
+(CSV baseline arrears 3000/5000 minus the approved −500/−2500 of #414/#518). Each write goes through
+the Eloquent model → `audit_logs` row. Idempotent (a row already at target is skipped; both →
+"nothing to do"), guarded (refuses any tenant ≠ `swecom` without `--force`, aborts if a row is
+linked to a `command_run` or missing), dry-run by default. Run:
+`php artisan arrears:fix-baseline-credit-corruption --apply`. Safe to delete once run.
+
+### Migration / test note
+
+The migration (`database/migrations/tenant/2026_08_30_000000_add_target_and_credit_snapshot_to_
+arrears_adjustments_table.php`) is additive/nullable/backfill-safe. It must be applied
+(`php artisan tenants:migrate`) before `phpunit --filter ArrearsAdjustment` — the new tests, and the
+existing ones via the factory/`create()` path, reference `target` / `credit_snapshot`. New tests:
+credit-target reduces only `manuscripts.credit`; a credit adjustment against a baseline period
+applies as a direct delta and creates **no** `manuscript:recalculate-one` `command_run` and does
+**not** consume payments; an arrears adjustment against a baseline period does the same (the literal
+incident shape); the credit staleness re-check trips on drift; "clear credit" produces
+`amount == current credit`.

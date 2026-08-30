@@ -352,36 +352,57 @@ const AuditLogRow = memo(function AuditLogRow({ log }: { log: AuditLogEntry }) {
     );
 });
 
+function describeDirection(row: ArrearsAdjustmentAuditRow): string {
+    if (row.target === 'credit') {
+        return row.direction === 'increase' ? 'claws credit back' : 'grants credit';
+    }
+    return row.direction === 'decrease' ? 'reduces what the customer owes' : 'increases what the customer owes';
+}
+
 /**
  * Before/after balance for one row of the Arrears Adjustments audit table
  * (2026-08-28 addendum — the audit-trail request: "what changes were made
- * to a customer's arrears"). `arrears_snapshot` (the "before" figure) is a
- * real, permanently stored fact captured at request time — always shown.
- * "After" is only ever shown for `status === 'approved'` rows: that is the
- * one point at which `arrears_snapshot ± amount` is the actual resulting
- * `total_arrears` for `target_period` (ArrearsAdjustmentService::approve()
- * applies exactly this delta via a real ManuscriptCalculator run — see
- * arrears-adjustment.md §4). For anything still pending, or rejected,
- * nothing has been applied to the ledger yet — showing a computed "after"
- * there would misstate this table's own contract of showing only what
- * genuinely happened, not a projection (that guidance-only preview already
- * exists in the request form itself, ArrearsAdjustmentModal's balanceAfter).
+ * to a customer's arrears"; 2026-08-30 — target-aware for credit rows). The
+ * "before" figure is `arrears_snapshot` (or `credit_snapshot` for a
+ * `target === 'credit'` row) — a real, permanently stored fact captured at
+ * request time. "After" is only ever shown for `status === 'approved'` rows:
+ * that is the one point at which `snapshot ± amount` is the actual resulting
+ * figure for `target_period` (ArrearsAdjustmentService::approve() applies
+ * exactly this delta — via a real ManuscriptCalculator run, or, for an
+ * imported baseline, a bounded direct write; see arrears-adjustment.md §4 and
+ * §14). For anything still pending, or rejected, nothing has been applied to
+ * the ledger yet — showing a computed "after" there would misstate this
+ * table's own contract of showing only what genuinely happened, not a
+ * projection (that guidance-only preview already exists in the request form
+ * itself, ArrearsAdjustmentModal's balanceAfter).
  */
 function BalanceChange({ row }: { row: ArrearsAdjustmentAuditRow }) {
-    const before = formatCurrency(row.arrears_snapshot);
+    const isCredit = row.target === 'credit';
+    // The "before" figure is the snapshot for the side this row corrects.
+    // A credit row's credit_snapshot can be null on very old rows — fall back
+    // to a dash rather than rendering "NaN".
+    const snapshot = isCredit ? row.credit_snapshot : row.arrears_snapshot;
+
+    if (snapshot === null || snapshot === undefined) {
+        return <span className="text-slate-400">—</span>;
+    }
+
+    const before = formatCurrency(snapshot);
 
     if (row.status !== 'approved') {
         return <span className="text-slate-500">{before}</span>;
     }
 
-    const beforeNumber = Number(row.arrears_snapshot);
+    const beforeNumber = Number(snapshot);
     const amountNumber = Number(row.amount);
-    const after =
-        row.direction === 'decrease' ? Math.max(0, beforeNumber - amountNumber) : beforeNumber + amountNumber;
+    // Arrears: 'decrease' reduces. Credit: 'increase' (claw back) reduces.
+    const reduces = isCredit ? row.direction === 'increase' : row.direction === 'decrease';
+    const after = reduces ? Math.max(0, beforeNumber - amountNumber) : beforeNumber + amountNumber;
 
     return (
         <span className="whitespace-nowrap text-slate-700">
             {before} <span className="text-slate-400">→</span> <span className="font-semibold text-slate-900">{formatCurrency(String(after))}</span>
+            <span className="ml-1 text-xs text-slate-400">{isCredit ? 'credit' : 'arrears'}</span>
         </span>
     );
 }
@@ -416,9 +437,12 @@ function ArrearsAdjustmentRow({
                 <Td className="whitespace-nowrap">{row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}</Td>
                 <Td>{row.customer_name ?? '—'}</Td>
                 <Td>{row.target_period}</Td>
-                <Td className="capitalize">
+                <Td className="whitespace-nowrap">
                     {row.direction === 'decrease' ? '−' : '+'}
                     {formatCurrency(row.amount)}
+                    {row.target === 'credit' && (
+                        <span className="ml-1 rounded bg-purple-100 px-1 text-xs font-medium text-purple-700">credit</span>
+                    )}
                 </Td>
                 <Td>
                     <BalanceChange row={row} />
@@ -487,12 +511,20 @@ function ArrearsAdjustmentRow({
                             </div>
                             <div className="space-y-1 text-slate-600">
                                 <p>
-                                    <span className="text-slate-400">Direction: </span>
-                                    <span className="capitalize">{row.direction}</span> ({row.direction === 'decrease' ? 'reduces' : 'increases'} what the customer owes)
+                                    <span className="text-slate-400">Target: </span>
+                                    <span className="capitalize">{row.target ?? 'arrears'}</span>
                                 </p>
                                 <p>
-                                    <span className="text-slate-400">Balance at request time: </span>
-                                    {formatCurrency(row.arrears_snapshot)}
+                                    <span className="text-slate-400">Direction: </span>
+                                    <span className="capitalize">{row.direction}</span> ({describeDirection(row)})
+                                </p>
+                                <p>
+                                    <span className="text-slate-400">{row.target === 'credit' ? 'Credit' : 'Arrears'} at request time: </span>
+                                    {row.target === 'credit'
+                                        ? row.credit_snapshot === null
+                                            ? '—'
+                                            : formatCurrency(row.credit_snapshot)
+                                        : formatCurrency(row.arrears_snapshot)}
                                 </p>
                                 {row.customer_uuid && (
                                     <p>
