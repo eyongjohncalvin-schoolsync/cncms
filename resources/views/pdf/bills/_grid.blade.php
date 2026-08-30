@@ -13,6 +13,8 @@
       - density 1 -> 1x1 (one full-page bill per sheet).
         density 2 -> 1 column x 2 rows (bill cards are portrait-ish, so
           stacking beats side-by-side for 2-up).
+        density 3 -> 1 column x 3 rows (same single-column stack as 2-up,
+          one card per third of the sheet).
         density 4 -> 2 columns x 2 rows.
       - The final, possibly-ragged chunk is padded with empty <td>s so every
         row is rectangular — ragged rows destabilize dompdf's table layout.
@@ -57,11 +59,16 @@
 </head>
 <body>
 @php
-    $perPage = in_array((int) $density, [1, 2, 4], true) ? (int) $density : 1;
+    $perPage = in_array((int) $density, [1, 2, 3, 4], true) ? (int) $density : 1;
     $effectiveTemplate = $perPage > 1 ? 'compact' : $template;
 
+    // Cell height = the A4 portrait page height (297mm; body margin is 0 in
+    // the <style> above and no @page margin is configured) divided by the
+    // row count, floored to whole mm: 297/2 -> 148, 297/3 -> 99, 297/2 (the
+    // 4-up's two rows) -> 148. dompdf treats this as the row's target height.
     $geometry = match ($perPage) {
         2 => ['rows' => 2, 'cols' => 1, 'height' => '148mm'],
+        3 => ['rows' => 3, 'cols' => 1, 'height' => '99mm'],
         4 => ['rows' => 2, 'cols' => 2, 'height' => '148mm'],
         default => ['rows' => 1, 'cols' => 1, 'height' => '297mm'],
     };

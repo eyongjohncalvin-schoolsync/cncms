@@ -90,9 +90,44 @@ class BillGridRenderTest extends TestCase
         $this->assertGridRendersRealPdf(density: 2, customerCount: 5);
     }
 
+    public function test_grid_renders_a_real_multi_customer_pdf_at_density_3(): void
+    {
+        $this->assertGridRendersRealPdf(density: 3, customerCount: 7);
+    }
+
     public function test_grid_renders_a_real_multi_customer_pdf_at_density_4(): void
     {
         $this->assertGridRendersRealPdf(density: 4, customerCount: 7);
+    }
+
+    /**
+     * Grid geometry for density 3: a single-column, 3-rows-per-sheet stack
+     * (the same column layout as 2-up, one card per third of the sheet),
+     * with each cell targeting one third of the 297mm A4 portrait height.
+     * Asserts the generated markup directly rather than the rendered PDF.
+     */
+    public function test_density_3_tiles_three_rows_in_one_column_per_sheet(): void
+    {
+        CompanyFactory::new()->create();
+
+        $customers = $this->customersWithManuscripts(7);
+        $bills = app(ManuscriptService::class)->billDataForCustomers($customers, null);
+
+        $html = view('pdf.bills._grid', [
+            'bills' => $bills,
+            'density' => 3,
+            'template' => 'classic',
+        ])->render();
+
+        // 7 bills at 3-up => 3 sheets (3 + 3 + 1), so 3 <table class="sheet-grid">.
+        $this->assertSame(3, substr_count($html, 'class="sheet-grid"'));
+        // Each grid cell carries this exact inline style: a single full-width
+        // column (100%), one third of the 297mm A4 portrait height (99mm).
+        // 3 rows x 1 col x 3 sheets => 9 cells (padded cells on the ragged
+        // last sheet still emit their <td>). Matching this string also proves
+        // the cell is NOT the 148mm 2-up/4-up height.
+        $this->assertSame(9, substr_count($html, 'width: 100.0000%; height: 99mm;'));
+        $this->assertStringNotContainsString('148mm', $html);
     }
 
     /**

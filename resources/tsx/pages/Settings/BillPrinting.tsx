@@ -51,11 +51,12 @@ function DensityDiagram({ density }: { density: number }) {
         );
     }
 
-    if (density === 2) {
+    if (density === 2 || density === 3) {
         return (
             <div className="flex h-16 w-12 flex-col gap-1">
-                <div className={`${cellClass} flex-1`} />
-                <div className={`${cellClass} flex-1`} />
+                {Array.from({ length: density }, (_, i) => (
+                    <div key={i} className={`${cellClass} flex-1`} />
+                ))}
             </div>
         );
     }
@@ -176,7 +177,7 @@ export default function SettingsBillPrinting({
                                     </p>
                                 </CardHeader>
                                 <CardBody className="p-6">
-                                    <div className="grid gap-4 sm:grid-cols-3">
+                                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                                         {bills_per_page_options.map((option) => (
                                             <label
                                                 key={option}

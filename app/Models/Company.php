@@ -34,10 +34,11 @@ class Company extends Model implements HasMedia
 
     /**
      * Valid N-up densities for the bulk bill grid (resources/views/pdf/
-     * bills/_grid.blade.php) — 1 bill per sheet, or 2/4 tiled onto one
-     * sheet using the 'compact' template.
+     * bills/_grid.blade.php) — 1 bill per sheet, or 2/3/4 tiled onto one
+     * sheet using the 'compact' template (2 and 3 stack in a single
+     * column, 4 is a 2x2 grid).
      */
-    public const array BILLS_PER_PAGE_OPTIONS = [1, 2, 4];
+    public const array BILLS_PER_PAGE_OPTIONS = [1, 2, 3, 4];
 
     protected function casts(): array
     {
