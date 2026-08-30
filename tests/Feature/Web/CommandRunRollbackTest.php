@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\Zone;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
@@ -119,6 +120,25 @@ class CommandRunRollbackTest extends TestCase
             'period' => $period,
             'command_run_id' => $run->id,
         ]);
+    }
+
+    /**
+     * Regression: the Settings > Command Runs listing resolves batch
+     * progress for any run carrying a `batch_id` (a chunked/scheduled
+     * generation run). `job_batches` is a central-schema-only table, so the
+     * lookup MUST run on the central connection — a bare DB::table() hits
+     * the tenant connection while tenancy is initialized and 500s with
+     * "relation job_batches does not exist". See
+     * App\Support\ResolvesCommandRunBatchProgress.
+     */
+    public function test_command_runs_listing_renders_when_a_run_carries_a_batch_id(): void
+    {
+        $this->actingAsRole('admin');
+
+        $run = $this->commandRun(now()->format('Y-m'), 'queued');
+        $run->update(['batch_id' => (string) Str::uuid()]);
+
+        $this->get('/settings/command-runs')->assertOk();
     }
 
     public function test_an_admin_can_roll_back_a_published_run_against_the_current_period_and_only_its_own_rows_are_removed(): void
