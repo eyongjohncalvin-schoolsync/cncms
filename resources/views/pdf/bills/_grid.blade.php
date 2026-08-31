@@ -11,11 +11,11 @@
         no CSS Grid/Flexbox support — confirmed via GitHub issue research
         this session — so this deliberately does NOT attempt either).
       - density 1 -> 1x1 (one full-page bill per sheet).
-        density 2 -> 1 column x 2 rows (bill cards are portrait-ish, so
-          stacking beats side-by-side for 2-up).
-        density 3 -> 1 column x 3 rows (same single-column stack as 2-up,
-          one card per third of the sheet).
-        density 4 -> 2 columns x 2 rows.
+        density 2/3/4 -> ONE ROW of 2/3/4 side-by-side full-height columns
+          (owner's ask: "stack horizontally ... so that when printed they
+          come out long"). Each column is a tall narrow strip you cut apart
+          down the thick vertical rules — traditional bill-book style. The
+          bill sits at the top of its strip; the rest is blank and trimmed.
       - The final, possibly-ragged chunk is padded with empty <td>s so every
         row is rectangular — ragged rows destabilize dompdf's table layout.
       - Page breaks between sheets use page-break-after: always on a
@@ -39,11 +39,9 @@
     <meta charset="utf-8">
     <title>Bills</title>
     <style>
-        /* dompdf ships a UA default of `@page { margin: 1.2cm }`, so without
-           this the usable sheet is only 273mm x 186mm and every N-up row
-           height computed against 297mm overflows. Zero it out — the grid
-           is full-bleed by design (the cut lines are the dashed cell
-           borders) and `body { margin: 0 }` already assumes this. */
+        /* dompdf ships a UA default of `@page { margin: 1.2cm }` — zero it
+           out so the strips run the full sheet and `body { margin: 0 }`
+           holds. */
         @page {
             margin: 0;
         }
@@ -60,14 +58,16 @@
         }
         table.sheet-grid td {
             vertical-align: top;
-            /* dompdf 3.x has NO `box-sizing` support (it throws on the
-               property), so `height` below is the CONTENT box — the 6px
-               padding (top+bottom) and the collapsed 0.5px border add
-               ~3.4mm of chrome per row ON TOP of it. The per-density
-               heights computed below already subtract that chrome so
-               N rows still sum to <= 297mm. */
-            padding: 6px;
-            border: 0.5px dashed #999;
+            /* Each cell is one full-height A4 strip. Separator between the
+               side-by-side bills is a single THICK vertical rule (owner's
+               ask: "separated from the next by just a thick line") — cut
+               along it. No box around the cell; the trailing strip's right
+               rule sits at the sheet edge. dompdf has no `box-sizing`, so
+               keep padding tiny to leave the content width close to the
+               nominal 1/N of the page. */
+            padding: 3px 4px;
+            border: 0;
+            border-right: 1.75pt solid #000;
             overflow: hidden;
         }
     </style>
@@ -77,27 +77,12 @@
     $perPage = in_array((int) $density, [1, 2, 3, 4], true) ? (int) $density : 1;
     $effectiveTemplate = $perPage > 1 ? 'compact' : $template;
 
-    // Row height math. The usable sheet is the full A4 portrait page —
-    // 297mm — because `@page { margin: 0 }` in the <style> above cancels
-    // dompdf's 1.2cm UA default and `body` has no margin/padding.
-    //
-    // `height` on a <td> is dompdf's CONTENT box (it has no `box-sizing`),
-    // and each cell adds ~3.4mm of chrome on top: 6px+6px padding (=9pt
-    // =3.18mm) plus the collapsed 0.5px dashed border. So the CONTENT
-    // height per row must be (297mm / rows) - 3.4mm, then rounded down a
-    // little more so dompdf's sub-pixel rounding can't tip a row over:
-    //   1-up: 297   - 3.4 -> 293mm
-    //   2-up: 148.5 - 3.4 -> 144mm  (2 x (144 + 3.4) = 294.8mm <= 297)
-    //   3-up: 99    - 3.4 -> 95mm   (3 x (95  + 3.4) = 295.2mm <= 297)
-    //   4-up: 148.5 - 3.4 -> 144mm  (two rows, same as 2-up)
-    // Result: every density fits one sheet per page, N bills -> exactly
-    // ceil(N / perPage) pages, nothing clipped or past the edge.
-    $geometry = match ($perPage) {
-        2 => ['rows' => 2, 'cols' => 1, 'height' => '144mm'],
-        3 => ['rows' => 3, 'cols' => 1, 'height' => '95mm'],
-        4 => ['rows' => 2, 'cols' => 2, 'height' => '144mm'],
-        default => ['rows' => 1, 'cols' => 1, 'height' => '293mm'],
-    };
+    // Layout: 1-up fills the page; 2/3/4-up put that many bills SIDE BY SIDE
+    // in a single row of full-height (293mm content box) strips. The bill
+    // sits at the top of its strip (vertical-align: top); everything below
+    // is blank and trimmed after cutting down the vertical rules.
+    $cols = $perPage;
+    $stripHeight = $perPage === 1 ? '293mm' : '290mm';
 
     $chunks = collect($bills)->chunk($perPage)->values();
     $lastChunkIndex = $chunks->count() - 1;
@@ -105,7 +90,7 @@
 @foreach ($chunks as $chunkIndex => $chunk)
     @php
         $cells = $chunk->values();
-        // Pad the final, possibly-short chunk with nulls so every row is a
+        // Pad the final, possibly-short chunk with nulls so the row is a
         // full rectangle of <td>s — see this file's doc comment above.
         while ($cells->count() < $perPage) {
             $cells->push(null);
@@ -115,18 +100,15 @@
     <div @if (! $isLastSheet) style="page-break-after: always;" @endif>
         <table class="sheet-grid">
             <tbody>
-                @for ($row = 0; $row < $geometry['rows']; $row++)
-                    <tr>
-                        @for ($col = 0; $col < $geometry['cols']; $col++)
-                            @php $cell = $cells->get($row * $geometry['cols'] + $col); @endphp
-                            <td style="width: {{ number_format(100 / $geometry['cols'], 4) }}%; height: {{ $geometry['height'] }};">
-                                @if ($cell)
-                                    @include('pdf.bills.'.$effectiveTemplate, $cell)
-                                @endif
-                            </td>
-                        @endfor
-                    </tr>
-                @endfor
+                <tr>
+                    @foreach ($cells as $cell)
+                        <td style="width: {{ number_format(100 / $cols, 4) }}%; height: {{ $stripHeight }};">
+                            @if ($cell)
+                                @include('pdf.bills.'.$effectiveTemplate, $cell + ['grid_columns' => $cols])
+                            @endif
+                        </td>
+                    @endforeach
+                </tr>
             </tbody>
         </table>
     </div>

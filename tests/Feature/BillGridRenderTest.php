@@ -119,12 +119,12 @@ class BillGridRenderTest extends TestCase
     }
 
     /**
-     * Grid geometry for density 3: a single-column, 3-rows-per-sheet stack
-     * (the same column layout as 2-up, one card per third of the sheet),
-     * with each cell targeting one third of the 297mm A4 portrait height.
-     * Asserts the generated markup directly rather than the rendered PDF.
+     * Grid geometry for density 3: ONE ROW of 3 side-by-side full-height
+     * strips per sheet (owner's "stack horizontally ... come out long"
+     * ask), cut apart down the thick vertical rules. Asserts the generated
+     * markup directly rather than the rendered PDF.
      */
-    public function test_density_3_tiles_three_rows_in_one_column_per_sheet(): void
+    public function test_density_3_tiles_three_side_by_side_strips_per_sheet(): void
     {
         CompanyFactory::new()->create();
 
@@ -139,15 +139,9 @@ class BillGridRenderTest extends TestCase
 
         // 7 bills at 3-up => 3 sheets (3 + 3 + 1), so 3 <table class="sheet-grid">.
         $this->assertSame(3, substr_count($html, 'class="sheet-grid"'));
-        // Each grid cell carries this exact inline style: a single full-width
-        // column (100%), one third of the 297mm A4 portrait height MINUS the
-        // ~3.4mm of per-row cell chrome (6px+6px padding + border) that dompdf
-        // adds on top of the content-box `height` — 99mm - 3.4mm floored to
-        // 95mm. 3 rows x 1 col x 3 sheets => 9 cells (padded cells on the
-        // ragged last sheet still emit their <td>). Matching this string also
-        // proves the cell is NOT the 144mm 2-up/4-up height.
-        $this->assertSame(9, substr_count($html, 'width: 100.0000%; height: 95mm;'));
-        $this->assertStringNotContainsString('144mm', $html);
+        // 3 equal-width (33.3333%) full-height (290mm) strip cells per sheet
+        // x 3 sheets = 9, padded cells on the ragged last sheet included.
+        $this->assertSame(9, substr_count($html, 'width: 33.3333%; height: 290mm;'));
     }
 
     /**
