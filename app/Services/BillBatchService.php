@@ -14,6 +14,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Bus\Batch;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -160,9 +161,7 @@ class BillBatchService
             return;
         }
 
-        if ($billBatch->batch_id !== null) {
-            Bus::findBatch($billBatch->batch_id)?->cancel();
-        }
+        $this->cancelBusBatch($billBatch->batch_id);
 
         $billBatch->update(['status' => 'cancelled', 'completed_at' => now()]);
 
@@ -177,13 +176,37 @@ class BillBatchService
      */
     public function delete(BillBatch $billBatch): void
     {
-        if (! $billBatch->isTerminal() && $billBatch->batch_id !== null) {
-            Bus::findBatch($billBatch->batch_id)?->cancel();
+        if (! $billBatch->isTerminal()) {
+            $this->cancelBusBatch($billBatch->batch_id);
         }
 
         $this->discardArtifacts($billBatch);
 
         $billBatch->delete();
+    }
+
+    /**
+     * Marks the underlying Bus batch cancelled so any not-yet-run job
+     * no-ops (each guards on `batch()?->cancelled()`).
+     *
+     * `Bus::findBatch()` reads `job_batches` on the default connection,
+     * which is the tenant-scoped one while tenancy is initialized — and
+     * `job_batches` lives ONLY in the central schema (see
+     * App\Support\ResolvesCommandRunBatchProgress for the same hazard). So
+     * pin to the central connection and set `cancelled_at` directly, exactly
+     * as Illuminate\Bus\Batch::cancel() does.
+     */
+    private function cancelBusBatch(?string $batchId): void
+    {
+        if ($batchId === null) {
+            return;
+        }
+
+        DB::connection(config('tenancy.database.central_connection'))
+            ->table('job_batches')
+            ->where('id', $batchId)
+            ->whereNull('cancelled_at')
+            ->update(['cancelled_at' => now()->getTimestamp()]);
     }
 
     /**

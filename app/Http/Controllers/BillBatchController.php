@@ -74,9 +74,12 @@ class BillBatchController extends Controller
     {
         $this->authorize('export', Manuscript::class);
 
+        $period = $billBatch->period;
         $this->batches->cancel($billBatch);
 
-        return back()->with('success', 'Bill generation cancelled.');
+        return redirect()
+            ->route('manuscripts.index', ['period' => $period])
+            ->with('success', 'Bill generation cancelled.');
     }
 
     /**
@@ -88,9 +91,12 @@ class BillBatchController extends Controller
     {
         $this->authorize('export', Manuscript::class);
 
+        $period = $billBatch->period;
         $this->batches->delete($billBatch);
 
-        return back()->with('success', 'Generated bills cleared.');
+        return redirect()
+            ->route('manuscripts.index', ['period' => $period])
+            ->with('success', 'Generated bills cleared.');
     }
 
     /**
