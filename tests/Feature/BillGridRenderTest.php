@@ -119,12 +119,13 @@ class BillGridRenderTest extends TestCase
     }
 
     /**
-     * Grid geometry for density 3: ONE ROW of 3 side-by-side full-height
-     * strips per sheet (owner's "stack horizontally ... come out long"
-     * ask), cut apart down the thick vertical rules. Asserts the generated
-     * markup directly rather than the rendered PDF.
+     * Grid geometry for density 3: a single-column, 3-rows-per-sheet stack.
+     * Each cell HUGS the compact bill (~78mm of content, 82mm cell) instead
+     * of dividing the sheet into equal thirds, so the bills sit close
+     * together (owner: "the spacing between the bills is too wide"). Asserts
+     * the generated markup directly rather than the rendered PDF.
      */
-    public function test_density_3_tiles_three_side_by_side_strips_per_sheet(): void
+    public function test_density_3_tiles_three_rows_in_one_column_per_sheet(): void
     {
         CompanyFactory::new()->create();
 
@@ -139,9 +140,10 @@ class BillGridRenderTest extends TestCase
 
         // 7 bills at 3-up => 3 sheets (3 + 3 + 1), so 3 <table class="sheet-grid">.
         $this->assertSame(3, substr_count($html, 'class="sheet-grid"'));
-        // 3 equal-width (33.3333%) full-height (290mm) strip cells per sheet
-        // x 3 sheets = 9, padded cells on the ragged last sheet included.
-        $this->assertSame(9, substr_count($html, 'width: 33.3333%; height: 290mm;'));
+        // Full-width (100%) single column, content-hugging 82mm cells. 3 rows
+        // x 1 col x 3 sheets => 9 cells (padded cells on the ragged last sheet
+        // still emit their <td>).
+        $this->assertSame(9, substr_count($html, 'width: 100.0000%; height: 82mm;'));
     }
 
     /**

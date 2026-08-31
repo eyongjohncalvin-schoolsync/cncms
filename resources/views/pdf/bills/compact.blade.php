@@ -1,28 +1,21 @@
 {{--
-    "Kumba Compact" — receipt-style, the template forced by the bulk N-up
-    grid whenever bills_per_page > 1 (see pdf/bills/_grid.blade.php). In the
-    grid it renders inside one of 2/3/4 side-by-side full-height strips, so
-    it scales its type down as the strips get narrower ($grid_columns).
-    Single column, condensed, TOTAL AMOUNT DUE reversed out white-on-black
-    (survives weak toner / photocopying), no amount-in-words, no signature
-    stub, minimal logo. Self-contained fragment scoped under .bill-compact.
+    "Kumba Compact" — receipt-style, sized to fit a ~1/2 or 1/4 A4 cell
+    (this is the template forced by the bulk N-up grid whenever
+    bills_per_page > 1 — see pdf/bills/_grid.blade.php). Single column,
+    condensed, TOTAL AMOUNT DUE reversed out white-on-black (survives weak
+    toner and photocopying, grayscale-native), no amount-in-words, no
+    signature stub, minimal logo. Self-contained fragment, scoped under
+    .bill-compact — see classic.blade.php's doc comment for why.
 
-    Expects the same variables as classic.blade.php, plus an optional
-    $grid_columns (1 when printed alone, 2/3/4 from the N-up grid).
+    Expects the same variables as classic.blade.php.
 --}}
-@php
-    $gc = (int) ($grid_columns ?? 1);
-    // Base type scale shrinks as the strip narrows so a 1/3 or 1/4-width
-    // column doesn't wrap every field onto three lines.
-    $fs = match (true) { $gc >= 4 => 6.5, $gc >= 3 => 7.5, $gc >= 2 => 8.0, default => 8.5 };
-@endphp
 <style>
     .bill-compact {
         font-family: 'DejaVu Sans', sans-serif;
-        font-size: {{ $fs }}px;
+        font-size: 8.5px;
         color: #111;
         border: 1px solid #333;
-        padding: {{ $gc >= 3 ? 4 : 6 }}px;
+        padding: 6px;
     }
     .bill-compact .kc-sample-flag {
         text-align: center;
@@ -31,7 +24,7 @@
         border: 1px dashed #b91c1c;
         padding: 2px;
         margin-bottom: 4px;
-        font-size: {{ $fs - 1 }}px;
+        font-size: 7.5px;
     }
     .bill-compact table.kc-head {
         width: 100%;
@@ -40,20 +33,20 @@
         margin-bottom: 4px;
     }
     .bill-compact .kc-logo {
-        max-height: {{ $gc >= 3 ? 20 : 26 }}px;
-        max-width: {{ $gc >= 3 ? 28 : 36 }}px;
+        max-height: 26px;
+        max-width: 36px;
     }
     .bill-compact .kc-name {
-        font-size: {{ $fs + 2 }}px;
+        font-size: 11px;
         font-weight: bold;
     }
     .bill-compact .kc-sub {
-        font-size: {{ $fs - 1 }}px;
+        font-size: 7.5px;
         color: #333;
     }
     .bill-compact .kc-title {
         text-align: right;
-        font-size: {{ $fs }}px;
+        font-size: 9px;
         font-weight: bold;
     }
     .bill-compact table.kc-fields {
@@ -94,15 +87,15 @@
     }
     .bill-compact table.kc-due-inner td.kc-due-val {
         text-align: right;
-        font-size: {{ $fs + 3 }}px;
+        font-size: 12px;
         font-family: 'DejaVu Sans Mono', monospace;
     }
     .bill-compact .kc-warning {
-        font-size: {{ $fs - 1.5 }}px;
+        font-size: 7px;
         margin-bottom: 3px;
     }
     .bill-compact .kc-footer {
-        font-size: {{ $fs - 2 }}px;
+        font-size: 6.5px;
         color: #444;
         border-top: 1px solid #ccc;
         padding-top: 2px;
@@ -115,23 +108,16 @@
 
     <table class="kc-head">
         <tr>
-            @if ($logo_data_uri && $gc < 4)
-                <td style="width: {{ $gc >= 3 ? 30 : 40 }}px; vertical-align: top;"><img src="{{ $logo_data_uri }}" class="kc-logo" alt="logo"></td>
+            @if ($logo_data_uri)
+                <td style="width: 40px; vertical-align: top;"><img src="{{ $logo_data_uri }}" class="kc-logo" alt="logo"></td>
             @endif
             <td style="vertical-align: top;">
                 <div class="kc-name">{{ $company?->name }}</div>
                 <div class="kc-sub">{{ $company?->location }}</div>
-                {{-- Narrow strips can't spare a third column for the title —
-                     fold it under the company name. --}}
-                @if ($gc >= 3)
-                    <div class="kc-sub" style="font-weight: bold; color: #111;">BILL &mdash; {{ $period_label }}</div>
-                @endif
             </td>
-            @if ($gc < 3)
-                <td class="kc-title" style="vertical-align: top;">
-                    BILL<br>{{ $period_label }}
-                </td>
-            @endif
+            <td class="kc-title" style="vertical-align: top;">
+                BILL<br>{{ $period_label }}
+            </td>
         </tr>
     </table>
 
