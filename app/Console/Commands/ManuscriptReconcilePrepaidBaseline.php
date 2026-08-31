@@ -65,8 +65,10 @@ class ManuscriptReconcilePrepaidBaseline extends Command
             return self::FAILURE;
         }
 
-        $nextPeriod = Carbon::createFromFormat('Y-m', $baseline)->addMonthNoOverflow()->format('Y-m');
-        $nextPeriodStart = Carbon::createFromFormat('Y-m', $nextPeriod)->startOfMonth()->toDateString();
+        // `!Y-m` pins the parse to day 01 — otherwise running this on the
+        // 29th–31st keeps that day and rolls a short month forward.
+        $nextPeriod = Carbon::createFromFormat('!Y-m', $baseline)->addMonthNoOverflow()->format('Y-m');
+        $nextPeriodStart = Carbon::createFromFormat('!Y-m', $nextPeriod)->startOfMonth()->toDateString();
 
         tenancy()->initialize($tenant);
 

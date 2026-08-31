@@ -309,7 +309,15 @@ class ManuscriptService
         $customer->loadMissing('zone');
 
         $billPeriod = $period ?? $manuscript->period;
-        $periodLabel = Carbon::createFromFormat('Y-m', $billPeriod)->format('F Y');
+        // `!Y-m` resets day/time to the epoch base (day 01, 00:00) BEFORE the
+        // year/month are applied — without the `!`, createFromFormat keeps
+        // TODAY's day-of-month, so on the 29th–31st a short target month
+        // silently rolls forward (e.g. generating a 2026-09 bill on Aug 31
+        // produced "October 2026"). Every 'Y-m' period parse in this app has
+        // the same hazard — see the identical fix in BillNotificationService,
+        // ReportService, ResourcesDashboardService, ManuscriptRepository and
+        // Manuscript::expiryLabel().
+        $periodLabel = Carbon::createFromFormat('!Y-m', $billPeriod)->format('F Y');
 
         return [
             'company' => $company,

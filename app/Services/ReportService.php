@@ -466,7 +466,9 @@ class ReportService
         $payload = [
             'tier' => 'monthly',
             'period' => $period,
-            'label' => Carbon::createFromFormat('Y-m', $period)->format('F Y'),
+            // `!Y-m` — pin to the 1st; a bare 'Y-m' parse keeps today's day
+            // and rolls a short month forward on the 29th–31st.
+            'label' => Carbon::createFromFormat('!Y-m', $period)->format('F Y'),
             'is_current' => $period === Carbon::now(BusinessTimezone::WAT)->format('Y-m'),
             // Deliberately distinct key/heading from the billing/P&L blocks
             // below — see this method's class doc and the task spec's
@@ -983,8 +985,11 @@ class ReportService
      */
     private function monthBoundsUtc(string $period): array
     {
-        $start = Carbon::createFromFormat('Y-m', $period, BusinessTimezone::WAT)->startOfMonth()->setTimezone('UTC');
-        $end = Carbon::createFromFormat('Y-m', $period, BusinessTimezone::WAT)->endOfMonth()->setTimezone('UTC');
+        // `!Y-m` resets the day to 01 during the parse — a bare 'Y-m' keeps
+        // today's day-of-month, so startOfMonth()/endOfMonth() run against an
+        // already-overflowed month on the 29th–31st.
+        $start = Carbon::createFromFormat('!Y-m', $period, BusinessTimezone::WAT)->startOfMonth()->setTimezone('UTC');
+        $end = Carbon::createFromFormat('!Y-m', $period, BusinessTimezone::WAT)->endOfMonth()->setTimezone('UTC');
 
         return [$start, $end];
     }

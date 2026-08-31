@@ -159,10 +159,13 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
      */
     private function collectedForPeriod(array $filters): string
     {
-        $start = Carbon::createFromFormat('Y-m', $filters['period'], BusinessTimezone::WAT)
+        // `!Y-m` resets the day to 01 in the parse — a bare 'Y-m' keeps
+        // today's day-of-month and overflows a short month on the 29th–31st
+        // before startOfMonth()/endOfMonth() run, skewing the collected total.
+        $start = Carbon::createFromFormat('!Y-m', $filters['period'], BusinessTimezone::WAT)
             ->startOfMonth()
             ->setTimezone('UTC');
-        $end = Carbon::createFromFormat('Y-m', $filters['period'], BusinessTimezone::WAT)
+        $end = Carbon::createFromFormat('!Y-m', $filters['period'], BusinessTimezone::WAT)
             ->endOfMonth()
             ->setTimezone('UTC');
 

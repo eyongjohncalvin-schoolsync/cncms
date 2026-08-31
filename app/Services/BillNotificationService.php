@@ -57,7 +57,10 @@ final class BillNotificationService
         }
 
         $company = Company::cached();
-        $periodLabel = Carbon::createFromFormat('Y-m', $manuscript->period)->format('F Y');
+        // `!Y-m` — reset day/time to base first so a short target month never
+        // rolls forward when this runs on the 29th–31st (see the fuller note
+        // in ManuscriptService::buildBillData()).
+        $periodLabel = Carbon::createFromFormat('!Y-m', $manuscript->period)->format('F Y');
         $deadline = '05 '.$periodLabel;
 
         // total_bill (bill + total_arrears - credit, clamped to 0 — see

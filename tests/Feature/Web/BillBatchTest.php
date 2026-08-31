@@ -11,6 +11,7 @@ use App\Models\BillBatchFile;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Services\BillBatchService;
+use App\Services\ManuscriptService;
 use Database\Factories\CompanyFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
@@ -333,6 +334,34 @@ class BillBatchTest extends TestCase
         $this->delete(route('manuscripts.bills.destroy', $batch->uuid))->assertForbidden();
 
         $this->assertNotNull(BillBatch::find($batch->id));
+    }
+
+    /**
+     * Regression: generating September bills on Aug 31 rendered a
+     * "October 2026" label — `Carbon::createFromFormat('Y-m', '2026-09')`
+     * kept the current day (31), and 2026-09-31 rolls to 2026-10-01. The
+     * `!Y-m` fix pins the parse to the 1st.
+     */
+    public function test_bill_period_label_does_not_roll_forward_when_generated_on_a_31st(): void
+    {
+        Carbon::setTestNow('2026-08-31 12:00:00');
+
+        try {
+            CompanyFactory::new()->create();
+            $zone = ZoneFactory::new()->create(['name' => 'ZZ '.Str::random(6)]);
+            $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+            ManuscriptFactory::new()->forPeriod('2026-09')->create([
+                'customer_id' => $customer->id, 'bill' => 2500, 'total_bill' => 2500,
+            ]);
+
+            $bills = app(ManuscriptService::class)->billDataForCustomers(collect([$customer]), '2026-09');
+
+            $this->assertNotEmpty($bills);
+            $this->assertSame('September 2026', $bills[0]['period_label']);
+            $this->assertSame('05 September 2026', $bills[0]['deadline']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_download_streams_a_stored_artifact_and_denies_a_worker(): void

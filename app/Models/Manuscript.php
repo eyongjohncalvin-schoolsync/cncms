@@ -61,7 +61,10 @@ class Manuscript extends Model
         $prepaidMonths = (int) $this->prepaid_months_remaining;
 
         if ($prepaidMonths > 0) {
-            return Carbon::createFromFormat('Y-m', $this->period)
+            // `!Y-m` pins the parse to the 1st of $period — without it,
+            // createFromFormat keeps today's day-of-month and a run on the
+            // 29th–31st shifts the base month forward before the add.
+            return Carbon::createFromFormat('!Y-m', $this->period)
                 ->addMonthsNoOverflow($prepaidMonths)
                 ->format('M y');
         }
