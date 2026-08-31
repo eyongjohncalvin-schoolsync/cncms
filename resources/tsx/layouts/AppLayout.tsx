@@ -146,6 +146,19 @@ const ELIGIBILITY_NAV_ROLES = ['agent'];
 const reportsNavItem = { href: '/reports', labelKey: 'common.reports', icon: IconChartBar, accent: 'orange' as const };
 const REPORTS_ROLES = ['super', 'admin', 'manager', 'agent'];
 
+/** First letters of the first two words, e.g. "Ebai Kelvin" -> "EK". */
+function initials(name: string): string {
+    return (
+        name
+            .trim()
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((w) => w[0] ?? '')
+            .join('')
+            .toUpperCase() || '?'
+    );
+}
+
 export function AppLayout({
     title,
     children,
@@ -212,9 +225,9 @@ export function AppLayout({
                     <div className="absolute -top-16 left-1/2 h-52 w-52 -translate-x-1/2 rounded-full bg-blue-200/25 blur-3xl" />
                 </div>
 
-                <div className="relative flex h-14 shrink-0 items-center gap-2.5 border-b border-slate-200/70 px-4">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white shadow-md shadow-blue-600/25 ring-1 ring-blue-600/10">
-                        <IconBroadcast size={18} stroke={1.75} />
+                <div className="relative flex h-16 shrink-0 items-center gap-2.5 border-b border-slate-200/70 px-4">
+                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-md shadow-blue-600/25 ring-1 ring-white/20">
+                        <IconBroadcast size={19} stroke={1.75} />
                     </span>
                     <div className="leading-tight">
                         <p className="font-display text-lg text-slate-900">CNCMS</p>
@@ -258,43 +271,61 @@ export function AppLayout({
 
             <div className="flex flex-1 flex-col">
                 <header
-                    className={`sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-white/85 px-4 backdrop-blur-md transition-shadow duration-200 md:px-6 ${
-                        scrolled ? 'border-slate-200/80 shadow-sm shadow-slate-900/5' : 'border-slate-200/60'
+                    className={`sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b px-4 backdrop-blur-md transition-all duration-200 md:px-6 ${
+                        scrolled
+                            ? 'border-slate-200/80 bg-white/85 shadow-sm shadow-slate-900/[0.04]'
+                            : 'border-slate-200/60 bg-white/70'
                     }`}
                 >
                     {/* Hairline blue accent tying the header to the sidebar's
                         blue-slate palette (matches the auth pages). */}
                     <span
                         aria-hidden="true"
-                        className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-blue-600 via-blue-500 to-transparent"
+                        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-blue-500/70 via-blue-400/30 to-transparent"
                     />
-                    <h1 className="font-display text-xl text-slate-900">{title}</h1>
-                    <div className="flex items-center gap-2 sm:gap-3">
+
+                    <div className="min-w-0">
+                        <h1 className="font-display truncate text-xl leading-none tracking-tight text-slate-900">
+                            {title}
+                        </h1>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1">
                         {auth.user && (
                             <>
                                 {auth.user.is_landlord && (
                                     <Link
                                         href="/landlord/tenants"
-                                        className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
+                                        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
                                         title={t('common.landlord')}
                                     >
                                         <IconBuildingSkyscraper size={16} stroke={1.75} />
-                                        <span className="hidden sm:inline">{t('common.landlord')}</span>
+                                        <span className="hidden lg:inline">{t('common.landlord')}</span>
                                     </Link>
                                 )}
-                                <NotificationBell />
-                                <LanguageSwitcher />
-                                <div className="flex items-center gap-2 rounded-full bg-slate-100 py-1 pr-1 pl-3">
+
+                                <div className="flex items-center gap-0.5 text-slate-500 [&_button]:rounded-lg [&_button:hover]:bg-slate-100">
+                                    <NotificationBell />
+                                    <LanguageSwitcher />
+                                </div>
+
+                                <span aria-hidden="true" className="mx-1.5 hidden h-6 w-px bg-slate-200 sm:block" />
+
+                                <div className="flex items-center gap-2 rounded-full py-1 pr-1 pl-1 transition-colors hover:bg-slate-100/70">
+                                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-[11px] font-semibold text-white shadow-sm shadow-blue-600/20 ring-1 ring-white/40">
+                                        {initials(auth.user.name)}
+                                    </span>
                                     <span className="hidden text-sm font-medium text-slate-700 sm:inline">
                                         {auth.user.name}
                                     </span>
                                     <RoleBadge role={auth.user.role} />
                                 </div>
+
                                 <Link
                                     href="/logout"
                                     method="post"
                                     as="button"
-                                    className="rounded-md p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                                    className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
                                     title={t('common.log_out')}
                                 >
                                     <IconLogout size={18} stroke={1.75} />
