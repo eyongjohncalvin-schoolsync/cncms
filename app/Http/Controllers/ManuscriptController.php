@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Exports\ManuscriptRegisterExport;
+use App\Models\BillBatch;
+use App\Models\BillBatchFile;
 use App\Models\CommandRun;
-use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Message;
@@ -82,7 +83,58 @@ class ManuscriptController extends Controller
             'manuscripts' => $this->paginatorProps($paginated),
             'summary' => $this->manuscripts->summary($filters),
             'zones' => $this->zones->all(),
+            // Asynchronous bill-generation runs for this period (owner's
+            // 2026-08-30 ask — App\Services\BillBatchService). Polled from
+            // the page with router.reload({ only: ['billBatches'] }) while
+            // any run is still queued/processing.
+            'billBatches' => $this->billBatchesForPeriod($period),
         ]);
+    }
+
+    /**
+     * The period's bill-generation runs, newest first, with per-file
+     * download links — feeds the "Bills" surface on Manuscripts/Index.tsx.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function billBatchesForPeriod(string $period): array
+    {
+        return BillBatch::query()
+            ->with('files')
+            ->where('period', $period)
+            ->latest('id')
+            ->limit(10)
+            ->get()
+            ->map(fn (BillBatch $batch): array => [
+                'uuid' => $batch->uuid,
+                'status' => $batch->status,
+                'period' => $batch->period,
+                'density' => $batch->density,
+                'template' => $batch->template,
+                'total_bills' => $batch->total_bills,
+                'total_zones' => $batch->total_zones,
+                'error_message' => $batch->error_message,
+                'created_at' => $batch->created_at,
+                'completed_at' => $batch->completed_at,
+                'files' => $batch->files
+                    ->sortBy(fn (BillBatchFile $file): string => match ($file->kind) {
+                        'bulk' => '0',
+                        'zip' => '1',
+                        default => '2'.mb_strtolower($file->zone_name ?? ''),
+                    })
+                    ->map(fn (BillBatchFile $file): array => [
+                        'uuid' => $file->uuid,
+                        'kind' => $file->kind,
+                        'zone_name' => $file->zone_name,
+                        'bill_count' => $file->bill_count,
+                        'page_count' => $file->page_count,
+                        'size_bytes' => $file->size_bytes,
+                        'download_url' => route('manuscripts.bills.download', [$batch->uuid, $file->uuid]),
+                    ])
+                    ->values()
+                    ->all(),
+            ])
+            ->all();
     }
 
     /**
@@ -131,49 +183,6 @@ class ManuscriptController extends Controller
         return Pdf::loadView('pdf.manuscript', [...$data, 'orientation' => $orientation])
             ->setPaper('a4', $orientation)
             ->stream('manuscript-'.$data['period'].'.pdf');
-    }
-
-    /**
-     * "Download Bills" (Manuscripts index → Export menu) — every active
-     * customer's printable bill for the shown period, tiled onto A4 at the
-     * tenant's configured N-up density (Settings → Bill Printing,
-     * companies.bills_per_page) via resources/views/pdf/bills/_grid.blade.php.
-     *
-     * ORDERING (owner's explicit ask, 2026-08-30): bills come out grouped by
-     * zone, zones alphabetical, customers alphabetical within each zone — so
-     * an agent walking a zone gets that zone's bills as one contiguous run
-     * and never has to sort a shuffled stack.
-     *
-     * ACTIVE ONLY — a disconnected / suspended / passive customer is frozen
-     * with a 0 total_bill, so a printed slip for them is wrong. Same rule
-     * ManuscriptService::billData() enforces on the single-print path;
-     * billDataForCustomers() trusts the caller to have filtered (see its doc
-     * comment), so the filter lives here.
-     *
-     * Respects the same period / zone_uuid / status / search filters as the
-     * register export — "Download Bills" with a zone filter applied gives you
-     * just that zone's bills. Raises memory/time like export() does: dompdf
-     * rendering hundreds of full bill templates is heavier than the register.
-     */
-    public function downloadBills(Request $request): Response
-    {
-        $this->authorize('export', Manuscript::class);
-
-        $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
-        ['period' => $period, 'customers' => $customers] = $this->manuscripts->billRecipients($filters);
-
-        abort_if($customers->isEmpty(), 404, 'No active customers have a bill for this period.');
-
-        ini_set('memory_limit', '1024M');
-        set_time_limit(180);
-
-        $company = Company::cached();
-
-        return Pdf::loadView('pdf.bills._grid', [
-            'bills' => $this->manuscripts->billDataForCustomers($customers, $period),
-            'density' => $company?->bills_per_page ?? 1,
-            'template' => $company?->bill_template ?? 'classic',
-        ])->setPaper('a4', 'portrait')->stream('bills-'.$period.'.pdf');
     }
 
     /**

@@ -43,6 +43,7 @@ require __DIR__.'/web/landlord.php';
 Route::middleware(['auth', 'tenant.web', 'throttle:web'])->group(function () {
     require __DIR__.'/web/dashboard.php';
     require __DIR__.'/web/manuscripts.php';
+    require __DIR__.'/web/bills.php';
     require __DIR__.'/web/agents.php';
     require __DIR__.'/web/payments.php';
     require __DIR__.'/web/customers.php';

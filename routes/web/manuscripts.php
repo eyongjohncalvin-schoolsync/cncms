@@ -15,15 +15,10 @@ Route::get('manuscripts/export', [ManuscriptController::class, 'export'])
     ->name('manuscripts.export')
     ->middleware('throttle:exports');
 
-// "Download Bills" — every active customer's printable bill for the period,
-// tiled N-up and ordered by zone (alphabetical), then customer name within
-// each zone. Same export throttle as the register. Registered above the
-// POST manuscripts/{customer}/send-bill route to keep this file's
-// "most-specific path first" ordering, though the differing method/segments
-// mean Laravel's matcher wouldn't confuse them anyway.
-Route::get('manuscripts/bills', [ManuscriptController::class, 'downloadBills'])
-    ->name('manuscripts.bills')
-    ->middleware('throttle:exports');
+// Bill generation moved to an asynchronous (queued) Bus::batch that writes
+// downloadable PDF artifacts — the synchronous GET /manuscripts/bills (which
+// rendered every bill inside the web request behind a 1024M/180s ceiling)
+// is gone. See routes/web/bills.php and App\Services\BillBatchService.
 
 Route::post('manuscripts/calculate', [ManuscriptController::class, 'calculate'])->name('manuscripts.calculate');
 
