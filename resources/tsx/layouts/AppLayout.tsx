@@ -200,32 +200,25 @@ export function AppLayout({
 
     return (
         <div className="flex min-h-screen bg-slate-50">
-            {/* Sidebar — carries the same dark blue-slate identity as the
-                public auth pages (AuthLayout): slate-950 → blue-950 wash, a
-                faint dot grid, the auth logo chip, and blue-on-dark nav
-                items. Each item keeps its own faint accent-tinted icon at
-                rest so the list doesn't read as monochrome; the active/hover
-                state resolves to the unified blue. */}
-            <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto bg-slate-950 md:flex">
+            {/* Sidebar — light and airy, on the same blue-slate family as
+                the auth pages: a soft white → slate → blue-50 gradient with
+                a faint blue glow, a hairline right edge, the auth logo chip,
+                and smooth soft-blue nav states. Each item keeps its own
+                accent-tinted icon at rest so the list isn't monochrome; the
+                active state is a gentle blue pill. */}
+            <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r border-slate-200/70 bg-slate-50 md:flex">
                 <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-screen">
-                    <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-blue-950/70 to-slate-950" />
-                    <div
-                        className="absolute inset-0 opacity-[0.18]"
-                        style={{
-                            backgroundImage: 'radial-gradient(circle at center, #334155 1px, transparent 1px)',
-                            backgroundSize: '22px 22px',
-                        }}
-                    />
-                    <div className="absolute -top-20 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-blue-600/15 blur-3xl" />
+                    <div className="absolute inset-0 bg-gradient-to-b from-white via-slate-50 to-blue-50/50" />
+                    <div className="absolute -top-16 left-1/2 h-52 w-52 -translate-x-1/2 rounded-full bg-blue-200/25 blur-3xl" />
                 </div>
 
-                <div className="relative flex h-14 shrink-0 items-center gap-2.5 border-b border-white/10 px-4">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white shadow-lg shadow-blue-950/40 ring-1 ring-white/10">
+                <div className="relative flex h-14 shrink-0 items-center gap-2.5 border-b border-slate-200/70 px-4">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white shadow-md shadow-blue-600/25 ring-1 ring-blue-600/10">
                         <IconBroadcast size={18} stroke={1.75} />
                     </span>
                     <div className="leading-tight">
-                        <p className="font-display text-lg text-white">CNCMS</p>
-                        <p className="text-[10px] font-medium tracking-wide text-blue-200/50">SWECOM PLC</p>
+                        <p className="font-display text-lg text-slate-900">CNCMS</p>
+                        <p className="text-[10px] font-medium tracking-wide text-slate-400">SWECOM PLC</p>
                     </div>
                 </div>
                 <nav className="relative flex-1 space-y-0.5 px-2 py-4">
@@ -245,16 +238,16 @@ export function AppLayout({
                             <Link
                                 key={item.href}
                                 href={item.href}
-                                className={`flex items-center gap-2.5 rounded-md border-l-[3px] px-2.5 py-2 text-sm font-medium transition-colors ${
+                                className={`flex items-center gap-2.5 rounded-lg border-l-[3px] px-2.5 py-2 text-sm font-medium transition-all duration-150 ${
                                     active
-                                        ? 'border-blue-400 bg-blue-500/15 text-white'
-                                        : 'border-transparent text-blue-100/60 hover:bg-white/5 hover:text-white'
+                                        ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm shadow-blue-600/[0.06]'
+                                        : 'border-transparent text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm hover:shadow-slate-900/[0.04]'
                                 }`}
                             >
                                 <Icon
                                     size={18}
                                     stroke={1.75}
-                                    className={active ? 'text-blue-300' : accent.icon}
+                                    className={active ? 'text-blue-600' : accent.icon}
                                 />
                                 {t(item.labelKey)}
                             </Link>
