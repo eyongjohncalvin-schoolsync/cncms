@@ -113,7 +113,17 @@ export default function SettingsCompany({ company }: { company: Company | null }
                     <Form action="/settings/company" method="patch">
                         {({ errors, processing, recentlySuccessful }) => (
                             <div className="space-y-6">
-                                {activeSection === 'general' && (
+                                {/*
+                                    Every section stays MOUNTED and is toggled with `hidden`,
+                                    not conditionally rendered. Inertia's <Form> serializes only
+                                    the inputs currently in the DOM — if inactive sections were
+                                    unmounted, saving from any tab but "General" would POST a
+                                    partial payload and 422 on the untouched `required` fields
+                                    (name/location/phone/reconnection_fine/…). Same one-form,
+                                    all-fields-present pattern as Settings/Notifications and
+                                    Settings/BillPrinting.
+                                */}
+                                <div className={activeSection === 'general' ? '' : 'hidden'}>
                                     <Card className="animate-fade-up">
                                         <CardHeader className="border-b border-slate-100">
                                             <div className="flex items-center gap-3">
@@ -173,9 +183,9 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                             </div>
                                         </CardBody>
                                     </Card>
-                                )}
+                                </div>
 
-                                {activeSection === 'contact' && (
+                                <div className={activeSection === 'contact' ? '' : 'hidden'}>
                                     <Card className="animate-fade-up">
                                         <CardHeader className="border-b border-slate-100">
                                             <div className="flex items-center gap-3">
@@ -239,9 +249,9 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                             </div>
                                         </CardBody>
                                     </Card>
-                                )}
+                                </div>
 
-                                {activeSection === 'payments' && (
+                                <div className={activeSection === 'payments' ? '' : 'hidden'}>
                                     <Card className="animate-fade-up">
                                         <CardHeader className="border-b border-slate-100">
                                             <div className="flex items-center gap-3">
@@ -323,9 +333,9 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                             </div>
                                         </CardBody>
                                     </Card>
-                                )}
+                                </div>
 
-                                {activeSection === 'legal' && (
+                                <div className={activeSection === 'legal' ? '' : 'hidden'}>
                                     <Card className="animate-fade-up">
                                         <CardHeader className="border-b border-slate-100">
                                             <div className="flex items-center gap-3">
@@ -371,9 +381,9 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                             </div>
                                         </CardBody>
                                     </Card>
-                                )}
+                                </div>
 
-                                {activeSection === 'branding' && (
+                                <div className={activeSection === 'branding' ? '' : 'hidden'}>
                                     <Card className="animate-fade-up">
                                         <CardHeader className="border-b border-slate-100">
                                             <div className="flex items-center gap-3">
@@ -435,7 +445,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                             </div>
                                         </CardBody>
                                     </Card>
-                                )}
+                                </div>
 
                                 {/* Action Bar */}
                                 <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 p-4">

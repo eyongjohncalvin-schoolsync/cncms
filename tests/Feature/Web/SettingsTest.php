@@ -76,6 +76,7 @@ class SettingsTest extends TestCase
             'momo_number' => '676876509/672528022',
             'momo_name' => 'MUNGWAN HANS/KELVIN MEKUME',
             'reconnection_fine' => '2000',
+            'arrears_second_approval_threshold' => '20000',
             'rccm_number' => 'RC/DLA/2019/PM/127651',
             'niu' => 'M012345678901A',
         ]);
@@ -103,6 +104,7 @@ class SettingsTest extends TestCase
             'location' => '3/CORNERS',
             'phone' => '676876509/672528022',
             'reconnection_fine' => '2000',
+            'arrears_second_approval_threshold' => '20000',
             'logo' => $logo,
         ]);
 
@@ -138,6 +140,7 @@ class SettingsTest extends TestCase
             'location' => '3/CORNERS',
             'phone' => '676876509/672528022',
             'reconnection_fine' => '2000',
+            'arrears_second_approval_threshold' => '20000',
             'logo' => UploadedFile::fake()->image('new-logo.png'),
         ]);
 
