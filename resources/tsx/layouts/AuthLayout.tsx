@@ -1,147 +1,139 @@
 import { ReactNode } from 'react';
-import { IconBroadcast, IconRouteAltLeft, IconReceipt2, IconChartBar } from '@tabler/icons-react';
+import {
+    IconAntenna,
+    IconBroadcast,
+    IconChartBar,
+    IconDeviceTvOld,
+    IconPlugConnected,
+    IconReceipt2,
+    IconRouteAltLeft,
+    IconRouter,
+    IconSatellite,
+    IconTopologyStar3,
+} from '@tabler/icons-react';
 
 /**
  * Public-facing shell for Welcome/Login/Register/RegisterWorkspace/Pending —
  * the only screens that render before (or between) authentication.
  *
- * Split-screen: a dark broadcast-themed brand panel on the left (lg+ only),
- * the form column on the right. The panel carries the identity so every
- * public page inherits it for free; pages only provide their own heading +
- * form as `children`. Stays on the app's slate/blue palette and the
- * Instrument Serif / Instrument Sans pairing so stepping into the admin UI
- * afterwards doesn't feel like a different product (per
- * self-service-onboarding.md's "same product" brief and
- * frontend-design-system.md). The one memorable touch: the concentric
- * broadcast-signal rings behind the wordmark — a quiet nod to what a cable
- * operator actually does, no motion required.
+ * A single bounded card, centered on the page: a dark equipment-themed
+ * brand panel on the left (lg+), the form on the right. Bounding the whole
+ * unit (max-w-5xl) keeps the panel from ballooning on wide monitors and
+ * shoving the form into a sliver — panel and form each stay a sane share of
+ * ~1024px. On mobile the panel collapses to a slim header strip.
+ *
+ * Stays on the app's slate/blue palette and the Instrument Serif /
+ * Instrument Sans pairing (per self-service-onboarding.md's "same product"
+ * brief). Decoration is an original scatter of line-art CATV/fiber glyphs
+ * (Tabler, already a dependency) plus a couple of "fiber run" lines — no
+ * external images, nothing copyrighted.
  */
 
 const CAPABILITIES = [
-    { icon: IconReceipt2, title: 'Billing that runs itself', body: 'Monthly manuscripts, arrears, credit, and printable bills — one calculation.' },
-    { icon: IconRouteAltLeft, title: 'Every zone, every agent', body: 'Field collection, disconnections, and reconnections tracked to the customer.' },
-    { icon: IconChartBar, title: 'Money you can see', body: 'Collection rate, P&L, and a full audit trail for every payment.' },
+    { icon: IconReceipt2, text: 'Monthly billing, arrears & printable bills' },
+    { icon: IconRouteAltLeft, text: 'Every zone, agent & disconnection tracked' },
+    { icon: IconChartBar, text: 'Collection rate, P&L & a full audit trail' },
+];
+
+/** Decorative equipment glyphs scattered behind the panel content. */
+const GLYPHS: { icon: typeof IconSatellite; size: number; top: string; left: string; opacity: number; rotate: number }[] = [
+    { icon: IconSatellite, size: 132, top: '-4%', left: '58%', opacity: 0.06, rotate: -12 },
+    { icon: IconDeviceTvOld, size: 96, top: '16%', left: '-8%', opacity: 0.07, rotate: 8 },
+    { icon: IconRouter, size: 88, top: '44%', left: '70%', opacity: 0.06, rotate: -6 },
+    { icon: IconAntenna, size: 110, top: '68%', left: '4%', opacity: 0.06, rotate: 10 },
+    { icon: IconPlugConnected, size: 72, top: '84%', left: '62%', opacity: 0.07, rotate: -18 },
+    { icon: IconTopologyStar3, size: 120, top: '30%', left: '30%', opacity: 0.045, rotate: 4 },
 ];
 
 export function AuthLayout({ children }: { children: ReactNode }) {
     return (
-        <div className="flex min-h-screen bg-slate-50">
-            {/* ------------------------------------------------------------------ */}
-            {/* Brand panel — lg+ only                                             */}
-            {/* ------------------------------------------------------------------ */}
-            <aside className="relative hidden flex-1 overflow-hidden bg-slate-950 lg:flex">
-                {/* Layered background: deep blue-slate gradient + faint dot grid +
-                    concentric signal rings anchored top-left. All decorative. */}
-                <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-                    <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950" />
-                    <div
-                        className="absolute inset-0 opacity-30"
-                        style={{
-                            backgroundImage: 'radial-gradient(circle at center, #334155 1px, transparent 1px)',
-                            backgroundSize: '22px 22px',
-                        }}
-                    />
-                    {[420, 640, 880, 1140].map((size, i) => (
+        <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 sm:p-6">
+            <div className="w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-xl shadow-slate-900/[0.08] ring-1 ring-slate-900/5 lg:grid lg:min-h-[36rem] lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1fr)]">
+                {/* -------------------------------------------------------------- */}
+                {/* Brand panel — full on lg+, a slim strip below it              */}
+                {/* -------------------------------------------------------------- */}
+                <aside className="relative overflow-hidden bg-slate-950 px-6 py-6 lg:px-10 lg:py-12">
+                    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+                        <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950" />
                         <div
-                            key={size}
-                            className="absolute rounded-full border border-blue-400/10"
+                            className="absolute inset-0 opacity-25"
                             style={{
-                                width: size,
-                                height: size,
-                                top: 96 - size / 2,
-                                left: 112 - size / 2,
-                                borderColor: `rgba(96,165,250,${0.14 - i * 0.03})`,
+                                backgroundImage: 'radial-gradient(circle at center, #334155 1px, transparent 1px)',
+                                backgroundSize: '22px 22px',
                             }}
                         />
-                    ))}
-                    <div className="absolute -bottom-32 -left-24 h-96 w-96 rounded-full bg-blue-600/20 blur-3xl" />
-                    <div className="absolute -right-24 top-1/3 h-80 w-80 rounded-full bg-indigo-500/10 blur-3xl" />
-                </div>
-
-                <div className="relative z-10 flex w-full flex-col justify-between p-12 xl:p-14">
-                    <div className="animate-fade-up flex items-center gap-3">
-                        <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-950/40 ring-1 ring-white/10">
-                            <IconBroadcast size={24} stroke={1.75} />
-                        </span>
-                        <div className="leading-tight">
-                            <p className="font-display text-2xl text-white">CNCMS</p>
-                            <p className="text-xs font-medium tracking-wide text-blue-200/60">SWECOM PLC</p>
-                        </div>
-                    </div>
-
-                    <div className="max-w-md">
-                        <h2
-                            className="animate-fade-up font-display text-4xl leading-[1.15] text-white xl:text-5xl"
-                            style={{ animationDelay: '80ms' }}
-                        >
-                            The cable operator&apos;s
-                            <br />
-                            control room.
-                        </h2>
-                        <p
-                            className="animate-fade-up mt-4 text-[15px] leading-relaxed text-blue-100/70"
-                            style={{ animationDelay: '140ms' }}
-                        >
-                            Subscriptions, billing, zones, and payments for a real network — in one
-                            workspace.
-                        </p>
-
-                        <ul className="mt-10 flex flex-col gap-6">
-                            {CAPABILITIES.map(({ icon: Icon, title, body }, i) => (
-                                <li
-                                    key={title}
-                                    className="animate-fade-up flex gap-4"
-                                    style={{ animationDelay: `${200 + i * 70}ms` }}
-                                >
-                                    <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5 text-blue-300 ring-1 ring-inset ring-white/10">
-                                        <Icon size={18} stroke={1.75} />
-                                    </span>
-                                    <div>
-                                        <p className="text-sm font-semibold text-white">{title}</p>
-                                        <p className="mt-0.5 text-[13px] leading-relaxed text-blue-100/55">{body}</p>
-                                    </div>
-                                </li>
+                        {/* fiber runs */}
+                        <div className="absolute -left-1/4 top-1/4 h-px w-[150%] rotate-[24deg] bg-gradient-to-r from-transparent via-blue-400/30 to-transparent" />
+                        <div className="absolute -left-1/4 top-2/3 h-px w-[150%] -rotate-[16deg] bg-gradient-to-r from-transparent via-cyan-300/20 to-transparent" />
+                        {/* equipment glyphs — lg+ only, they crowd the mobile strip */}
+                        <div className="absolute inset-0 hidden lg:block">
+                            {GLYPHS.map(({ icon: Icon, size, top, left, opacity, rotate }, i) => (
+                                <Icon
+                                    key={i}
+                                    size={size}
+                                    stroke={1}
+                                    className="absolute text-blue-200"
+                                    style={{ top, left, opacity, transform: `rotate(${rotate}deg)` }}
+                                />
                             ))}
-                        </ul>
+                        </div>
+                        <div className="absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-blue-600/20 blur-3xl" />
                     </div>
 
-                    <p
-                        className="animate-fade-up text-xs text-blue-200/40"
-                        style={{ animationDelay: '440ms' }}
-                    >
-                        Built by ShalomTech · Kumba 3, Cameroon
-                    </p>
-                </div>
-            </aside>
+                    <div className="relative z-10 flex h-full flex-col">
+                        <div className="animate-fade-up flex items-center gap-2.5">
+                            <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-950/40 ring-1 ring-white/10">
+                                <IconBroadcast size={22} stroke={1.75} />
+                            </span>
+                            <div className="leading-tight">
+                                <p className="font-display text-xl text-white">CNCMS</p>
+                                <p className="text-[11px] font-medium tracking-wide text-blue-200/60">SWECOM PLC</p>
+                            </div>
+                        </div>
 
-            {/* ------------------------------------------------------------------ */}
-            {/* Form column                                                        */}
-            {/* ------------------------------------------------------------------ */}
-            <main className="relative flex w-full shrink-0 flex-col overflow-y-auto bg-gradient-to-b from-slate-50 via-white to-slate-50 px-5 py-8 sm:px-8 lg:w-[30rem] lg:px-12 xl:w-[33rem]">
-                {/* Faint decorative wash, mobile + tablet where the brand panel
-                    is hidden — keeps the surface from reading as flat white. */}
-                <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 overflow-hidden lg:hidden"
-                >
-                    <div className="absolute -top-24 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-blue-400/10 blur-3xl" />
-                </div>
-
-                <div className="relative mx-auto flex w-full max-w-[400px] flex-1 flex-col justify-center py-4">
-                    {/* Compact wordmark — only where the brand panel isn't shown. */}
-                    <div className="animate-fade-up mb-8 flex items-center gap-2.5 lg:hidden">
-                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/20 ring-4 ring-blue-600/10">
-                            <IconBroadcast size={22} stroke={1.75} />
-                        </span>
-                        <div className="leading-tight">
-                            <p className="font-display text-xl text-slate-900">CNCMS</p>
-                            <p className="text-xs font-medium text-slate-400">SWECOM PLC — Cable Network Management</p>
+                        {/* Pitch + capability list — lg+ only */}
+                        <div className="mt-auto hidden lg:block">
+                            <h2
+                                className="animate-fade-up font-display text-3xl leading-[1.15] text-white"
+                                style={{ animationDelay: '80ms' }}
+                            >
+                                The cable operator&apos;s
+                                <br />
+                                control room.
+                            </h2>
+                            <ul className="mt-7 flex flex-col gap-3.5">
+                                {CAPABILITIES.map(({ icon: Icon, text }, i) => (
+                                    <li
+                                        key={text}
+                                        className="animate-fade-up flex items-center gap-3 text-[13px] text-blue-100/70"
+                                        style={{ animationDelay: `${150 + i * 60}ms` }}
+                                    >
+                                        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/5 text-blue-300 ring-1 ring-inset ring-white/10">
+                                            <Icon size={15} stroke={1.75} />
+                                        </span>
+                                        {text}
+                                    </li>
+                                ))}
+                            </ul>
+                            <p
+                                className="animate-fade-up mt-9 text-[11px] text-blue-200/40"
+                                style={{ animationDelay: '380ms' }}
+                            >
+                                Built by ShalomTech · Kumba 3, Cameroon
+                            </p>
                         </div>
                     </div>
+                </aside>
 
-                    {children}
-                </div>
-            </main>
+                {/* -------------------------------------------------------------- */}
+                {/* Form                                                          */}
+                {/* -------------------------------------------------------------- */}
+                <main className="flex flex-col overflow-y-auto bg-white px-6 py-9 sm:px-10 lg:px-14 lg:py-12">
+                    <div className="mx-auto flex w-full max-w-[400px] flex-1 flex-col justify-center">
+                        {children}
+                    </div>
+                </main>
+            </div>
         </div>
     );
 }
