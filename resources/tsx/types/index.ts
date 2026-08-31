@@ -521,6 +521,32 @@ export interface CommandRunEntry {
     is_locked: boolean;
 }
 
+/** One downloadable artifact from an async bill-generation run (App\Services\BillBatchService). */
+export interface BillBatchFile {
+    uuid: string;
+    kind: 'zone' | 'bulk' | 'zip';
+    zone_name: string | null;
+    bill_count: number;
+    page_count: number | null;
+    size_bytes: number;
+    download_url: string;
+}
+
+/** An asynchronous (queued) bill-generation run for a period (owner's 2026-08-30 ask). */
+export interface BillBatch {
+    uuid: string;
+    status: 'queued' | 'processing' | 'completed' | 'partial' | 'failed';
+    period: string;
+    density: number;
+    template: string;
+    total_bills: number;
+    total_zones: number;
+    error_message: string | null;
+    created_at: string;
+    completed_at: string | null;
+    files: BillBatchFile[];
+}
+
 /** Settings > Command Runs' manuscript_generation schedule config (task-scheduler.md section 4). */
 export interface ManuscriptSchedule {
     enabled: boolean;

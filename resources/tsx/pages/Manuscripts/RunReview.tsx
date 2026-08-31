@@ -86,6 +86,13 @@ export default function ManuscriptsRunReview({ run, computed_rows: computedRows,
         router.post(`/settings/command-runs/${run.uuid}/publish`, {}, { preserveScroll: true });
     }
 
+    // Kicks off the async bill-generation batch for this period, then lands
+    // on the Manuscripts page where the "Generated Bills" panel polls it to
+    // completion (App\Services\BillBatchService).
+    function generateBills() {
+        router.post('/manuscripts/bills/generate', { period: run.period });
+    }
+
     // Unpublish a published period (2026-08-28 manuscript-run-management
     // addendum) — deletes the manuscript rows this run wrote and restores the
     // payment/adjustment idempotency stamps, so the period can be fixed and
@@ -345,6 +352,17 @@ export default function ManuscriptsRunReview({ run, computed_rows: computedRows,
                         <Link href={`/manuscripts?period=${run.period}`} className="text-sm font-medium text-blue-600 hover:text-blue-700">
                             View the manuscript
                         </Link>
+                        {canPublish && (
+                            <div className="mt-2 flex flex-col items-center gap-1.5">
+                                <Button type="button" onClick={generateBills}>
+                                    Generate bills for {run.period}
+                                </Button>
+                                <p className="max-w-sm text-xs text-slate-400">
+                                    Renders every active customer&apos;s bill in the background — per-zone PDFs plus one
+                                    bulk PDF. Download links appear on the Manuscripts page once ready.
+                                </p>
+                            </div>
+                        )}
                         {canPublish && (
                             <div className="mt-2 flex flex-col items-center gap-1.5">
                                 <Button type="button" variant="warning" onClick={unpublish}>

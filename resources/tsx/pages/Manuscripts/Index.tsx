@@ -1,6 +1,6 @@
-import { Head, router, useForm, usePage } from '@inertiajs/react';
+import { Head, router, useForm, usePage, usePoll } from '@inertiajs/react';
 import { MenuItem } from '@headlessui/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     IconAlertTriangle,
     IconBrandWhatsapp,
@@ -14,8 +14,14 @@ import {
     IconScale,
     IconSearch,
     IconUsers,
+    IconFileTypeZip,
+    IconLayoutGrid,
+    IconClock,
+    IconCircleCheck,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
+import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
 import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
 import { Pagination } from '@/components/ui/Pagination';
 import { StatCard } from '@/components/ui/StatCard';
@@ -32,7 +38,7 @@ import { PreRunReviewPanel } from '@/components/manuscripts/PreRunReviewPanel';
 import { usePreRunReview } from '@/hooks/usePreRunReview';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
-import type { Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
+import type { BillBatch, Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
 
 interface ManuscriptFilters {
     period?: string;
@@ -47,6 +53,13 @@ interface ManuscriptsIndexProps {
     manuscripts: PaginatedResponse<Manuscript>;
     summary: ManuscriptSummary;
     zones: Zone[];
+    billBatches: BillBatch[];
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -74,7 +87,7 @@ const CALCULATE_ROLES = ['super', 'admin'];
 // are, rather than assuming that alignment holds forever.
 const SEND_BILL_ROLES = ['super', 'admin', 'manager', 'agent'];
 
-export default function ManuscriptsIndex({ period, filters, manuscripts, summary, zones }: ManuscriptsIndexProps) {
+export default function ManuscriptsIndex({ period, filters, manuscripts, summary, zones, billBatches }: ManuscriptsIndexProps) {
     const { auth } = usePage<PageProps>().props;
     const role = auth.user?.role ?? null;
     const canExport = role !== null && EXPORT_ROLES.includes(role);
@@ -173,6 +186,42 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
             `/manuscripts/${customerUuid}/send-bill`,
             {},
             { preserveScroll: true, preserveState: true },
+        );
+    }
+
+    // Async bill generation (owner's 2026-08-30 ask). The heavy PDF render
+    // moved off the web request into a Bus::batch (App\Services\BillBatchService);
+    // this page kicks a run off and polls it to completion — the same
+    // lightweight router.reload({ only: [...] }) primitive RunReview.tsx uses
+    // for the compute batch. Only polls while a run is still working.
+    const billBatchesWorking = billBatches.some((b) => b.status === 'queued' || b.status === 'processing');
+    const { start: startBillPoll, stop: stopBillPoll } = usePoll(4000, { only: ['billBatches'] }, { autoStart: false });
+
+    useEffect(() => {
+        if (billBatchesWorking) {
+            startBillPoll();
+        } else {
+            stopBillPoll();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [billBatchesWorking]);
+
+    const [generatingBills, setGeneratingBills] = useState(false);
+
+    function generateBills() {
+        router.post(
+            '/manuscripts/bills/generate',
+            {
+                period,
+                zone_uuid: filters.zone_uuid,
+                status: filters.status,
+                search: filters.search,
+            },
+            {
+                preserveScroll: true,
+                onStart: () => setGeneratingBills(true),
+                onFinish: () => setGeneratingBills(false),
+            },
         );
     }
 
@@ -291,20 +340,21 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
 
                             <div className="my-1 h-px bg-slate-200" />
 
-                            {/* The actual customer bill slips (not the register) — every
-                                active customer's bill for this period, tiled N-up per the
-                                Bill Printing setting and ordered by zone then name so an
-                                agent's zone comes out as one contiguous stack. Honours the
-                                same period/zone/status/search filters. */}
+                            {/* The actual customer bill slips (not the register). The
+                                render moved off the web request into a background
+                                Bus::batch — this kicks a run off; the artifacts show
+                                up in the "Generated Bills" panel below once ready.
+                                Honours the same period/zone/status/search filters. */}
                             <MenuItem>
-                                <a
-                                    href={`/manuscripts/bills?${exportParams.toString()}`}
-                                    download
-                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                <button
+                                    type="button"
+                                    onClick={generateBills}
+                                    disabled={generatingBills}
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100 disabled:opacity-50"
                                 >
                                     <IconReceipt2 size={16} stroke={1.75} />
-                                    Download Bills (by zone)
-                                </a>
+                                    Generate Bills (background)
+                                </button>
                             </MenuItem>
                         </Dropdown>
                     )}
@@ -402,6 +452,96 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                     {isFiltering && <LoadingSpinner className="mb-2 text-slate-400" />}
                 </div>
             </div>
+
+            {canExport && billBatches.length > 0 && (
+                <Card className="animate-fade-up mb-4" style={{ animationDelay: '0.28s' }}>
+                    <CardHeader>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h2 className="text-sm font-semibold text-slate-900">Generated Bills — {period}</h2>
+                            {billBatchesWorking && (
+                                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600">
+                                    <LoadingSpinner className="h-3.5 w-3.5" />
+                                    Generating… (runs in the background — keep the queue worker running)
+                                </span>
+                            )}
+                        </div>
+                    </CardHeader>
+                    <CardBody className="flex flex-col gap-4">
+                        {billBatches.map((batch) => {
+                            const tone =
+                                batch.status === 'completed'
+                                    ? 'green'
+                                    : batch.status === 'partial'
+                                      ? 'yellow'
+                                      : batch.status === 'failed'
+                                        ? 'red'
+                                        : 'blue';
+                            return (
+                                <div key={batch.uuid} className="rounded-lg border border-slate-200 p-3">
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <Badge tone={tone}>
+                                            {batch.status === 'queued' || batch.status === 'processing' ? (
+                                                <IconClock size={12} className="mr-1 inline" stroke={2} />
+                                            ) : batch.status === 'completed' ? (
+                                                <IconCircleCheck size={12} className="mr-1 inline" stroke={2} />
+                                            ) : (
+                                                <IconAlertTriangle size={12} className="mr-1 inline" stroke={2} />
+                                            )}
+                                            {batch.status}
+                                        </Badge>
+                                        <span className="text-xs text-slate-500">
+                                            {batch.total_bills} bills · {batch.total_zones} zones · {batch.template} ×{batch.density}
+                                        </span>
+                                    </div>
+
+                                    {batch.error_message && (
+                                        <p className="mb-2 text-xs text-red-600">{batch.error_message}</p>
+                                    )}
+
+                                    {batch.status === 'queued' || batch.status === 'processing' ? (
+                                        <p className="text-xs text-slate-400">
+                                            The PDFs are being rendered in the background. This panel refreshes itself.
+                                        </p>
+                                    ) : batch.files.length === 0 ? (
+                                        <p className="text-xs text-slate-400">No artifacts were produced.</p>
+                                    ) : (
+                                        <div className="flex flex-col gap-1">
+                                            {batch.files.map((file) => (
+                                                <a
+                                                    key={file.uuid}
+                                                    href={file.download_url}
+                                                    download
+                                                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50"
+                                                >
+                                                    {file.kind === 'bulk' ? (
+                                                        <IconLayoutGrid size={16} stroke={1.75} />
+                                                    ) : file.kind === 'zip' ? (
+                                                        <IconFileTypeZip size={16} stroke={1.75} />
+                                                    ) : (
+                                                        <IconReceipt2 size={16} stroke={1.75} />
+                                                    )}
+                                                    <span>
+                                                        {file.kind === 'bulk'
+                                                            ? 'All zones — single bulk PDF'
+                                                            : file.kind === 'zip'
+                                                              ? 'All per-zone PDFs (ZIP)'
+                                                              : `Zone: ${file.zone_name ?? 'Unzoned'}`}
+                                                    </span>
+                                                    <span className="text-xs font-normal text-slate-400">
+                                                        {file.bill_count} bills
+                                                        {file.page_count ? ` · ${file.page_count}p` : ''} ·{' '}
+                                                        {formatBytes(file.size_bytes)}
+                                                    </span>
+                                                </a>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </CardBody>
+                </Card>
+            )}
 
             <div className="animate-fade-up" style={{ animationDelay: '0.3s' }}>
                 {manuscripts.data.length === 0 ? (
