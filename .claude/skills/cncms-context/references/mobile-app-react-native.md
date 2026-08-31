@@ -1143,3 +1143,34 @@ intervention is needed for the *normal* recalculation case). Direct DB intervent
 followed by a deliberate resync signal to affected clients (this new "Force full refresh" button is
 now that signal for mobile) rather than assumed to be invisible-and-fine — this is a process
 recommendation, not something further code can fully substitute for.
+
+## 16. Credit target on Adjust Arrears + Manuscript month stepper — 2026-08-30/31 (commits 122f4f0b, a7ce0b97)
+
+Two mobile changes tracking web features shipped the same days.
+
+**`app/adjust-arrears/[uuid].tsx` → "Adjust Arrears / Credit"** — mirrors the web
+`ArrearsAdjustmentModal`'s 2026-08-30 `target` toggle (see `arrears-adjustment.md`). A correction
+now lands on EITHER `total_arrears` OR the loose `credit` figure. Switching target resets the
+direction default (write-off for arrears, claw-back for credit), the reason category, and the
+amount; credit gets its own reason menu (`credit_correction` / `duplicate_credit` /
+`migration_credit_error`) and direction labels ("Grant (increase credit)" / "Claw back (reduce
+credit)"). "Clear all arrears" becomes "Clear credit" on the credit side. `src/types/api.ts`
+gained `ArrearsAdjustmentTarget`, the credit reason categories, `target?` on
+`RequestArrearsAdjustmentPayload`, and `credit_snapshot` on `ArrearsAdjustmentApi` — all already
+accepted by `StoreArrearsAdjustmentRequest`. The `_layout.tsx` title and the Customer Detail
+button label both became "Adjust Arrears / Credit". Still REQUEST-only; still online-only.
+
+**`app/manuscript.tsx` — month stepper.** The screen was locked to `currentPeriod()`. Added
+prev/next arrows around the period label (`shiftPeriod()` — plain calendar arithmetic, never
+"latest of any period", per §13's incident). Bounds: `[EARLIEST_PERIOD '2026-08' .. latestPeriod()]`
+where `latestPeriod()` is **one month past the current calendar month** — the cycle generates
+next month's manuscript in advance, so during August the September register must be reachable
+(the first cap I shipped, `currentPeriod()`, left both arrows disabled since today == earliest).
+Stepping does a silent re-fetch that keeps the current list visible under a small spinner
+(`switching` state) instead of the full-screen loader; a stale response is dropped if the viewer
+steps again mid-flight. On screen focus the stepper snaps back to the real current month.
+`fetchManuscripts(period)` already took the param; the server (`ManuscriptService::scopedFilters`)
+validates format only, no future guard, so a past/next period just works.
+
+Verification: `npx tsc --noEmit` clean bar the two pre-existing `src/api/devices.ts` errors;
+`validation.test.ts` 24/24.

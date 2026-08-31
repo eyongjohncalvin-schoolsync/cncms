@@ -625,6 +625,54 @@ See `references/offline-sync-strategy.md` for the full sync protocol.
 
 ---
 
+## bill_batches / bill_batch_files
+
+**New tables** (tenant-scoped, migration `2026_08_30_120000_create_bill_batches_tables.php`,
+already run on `swecom` + `multimedia-digital-cable-network`). Back the async bulk bill
+generation — see `bill-printing.md` §4.
+
+```sql
+CREATE TABLE bill_batches (
+    id            BIGSERIAL PRIMARY KEY,
+    uuid          UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    period        VARCHAR(7) NOT NULL,                 -- 'YYYY-MM'
+    status        VARCHAR(20) NOT NULL DEFAULT 'queued', -- queued|processing|completed|partial|failed|cancelled
+    density       SMALLINT NOT NULL DEFAULT 1,         -- bills_per_page snapshot (1-4)
+    template      VARCHAR(32) NOT NULL DEFAULT 'classic',
+    filters       JSONB,                               -- {period, zone_uuid?, status?, search?}
+    total_bills   INTEGER NOT NULL DEFAULT 0,
+    total_zones   INTEGER NOT NULL DEFAULT 0,          -- expected per-zone PDF count (completed vs partial)
+    generated_by  BIGINT REFERENCES public.users(id) ON DELETE SET NULL,  -- cross-schema FK
+    batch_id      VARCHAR(255),                        -- Illuminate\Bus\Batch id (job_batches, central schema)
+    error_message TEXT,
+    started_at    TIMESTAMPTZ,
+    completed_at  TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ,
+    updated_at    TIMESTAMPTZ
+);
+CREATE INDEX idx_bill_batches_period ON bill_batches (period, created_at);
+CREATE INDEX idx_bill_batches_generated_by ON bill_batches (generated_by);
+
+CREATE TABLE bill_batch_files (
+    id            BIGSERIAL PRIMARY KEY,
+    uuid          UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    bill_batch_id BIGINT NOT NULL REFERENCES bill_batches(id) ON DELETE CASCADE,
+    zone_id       BIGINT REFERENCES zones(id) ON DELETE SET NULL,  -- NULL = the bulk PDF or the ZIP
+    zone_name     VARCHAR(255),                        -- denormalized (stable if a zone is renamed/deleted)
+    kind          VARCHAR(16) NOT NULL DEFAULT 'zone', -- zone | bulk | zip
+    disk          VARCHAR(32) NOT NULL DEFAULT 'local',
+    path          VARCHAR(255) NOT NULL,               -- bill-batches/{tenantId}/{batchUuid}/...
+    bill_count    INTEGER NOT NULL DEFAULT 0,
+    page_count    INTEGER,
+    size_bytes    BIGINT NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ,
+    updated_at    TIMESTAMPTZ
+);
+CREATE INDEX idx_bill_batch_files_batch ON bill_batch_files (bill_batch_id);
+```
+
+---
+
 ## user_activitylogs
 
 Session/activity tracking per user (existing, enhanced).
