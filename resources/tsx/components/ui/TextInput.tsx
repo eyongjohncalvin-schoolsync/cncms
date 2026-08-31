@@ -3,10 +3,12 @@ import { InputHTMLAttributes, forwardRef } from 'react';
 interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string;
     error?: string;
+    /** Small helper line under the field. Hidden while `error` is showing. */
+    hint?: string;
 }
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
-    ({ label, error, className = '', id, ...props }, ref) => (
+    ({ label, error, hint, className = '', id, ...props }, ref) => (
         <div className="flex flex-col gap-1.5">
             {label && (
                 <label htmlFor={id} className="text-sm font-medium text-slate-700">
@@ -26,7 +28,11 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
                 } ${className}`}
                 {...props}
             />
-            {error && <p className="text-xs text-red-600">{error}</p>}
+            {error ? (
+                <p className="text-xs text-red-600">{error}</p>
+            ) : (
+                hint && <p className="text-xs text-slate-400">{hint}</p>
+            )}
         </div>
     ),
 );

@@ -29,7 +29,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             {/* ------------------------------------------------------------------ */}
             {/* Brand panel — lg+ only                                             */}
             {/* ------------------------------------------------------------------ */}
-            <aside className="relative hidden w-[44%] shrink-0 overflow-hidden bg-slate-950 lg:flex xl:w-[40%]">
+            <aside className="relative hidden flex-1 overflow-hidden bg-slate-950 lg:flex">
                 {/* Layered background: deep blue-slate gradient + faint dot grid +
                     concentric signal rings anchored top-left. All decorative. */}
                 <div aria-hidden="true" className="pointer-events-none absolute inset-0">
@@ -117,7 +117,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             {/* ------------------------------------------------------------------ */}
             {/* Form column                                                        */}
             {/* ------------------------------------------------------------------ */}
-            <main className="relative flex flex-1 flex-col items-center overflow-y-auto bg-gradient-to-b from-slate-50 via-white to-slate-50 px-4 py-10 sm:px-8">
+            <main className="relative flex w-full shrink-0 flex-col overflow-y-auto bg-gradient-to-b from-slate-50 via-white to-slate-50 px-5 py-8 sm:px-8 lg:w-[30rem] lg:px-12 xl:w-[33rem]">
                 {/* Faint decorative wash, mobile + tablet where the brand panel
                     is hidden — keeps the surface from reading as flat white. */}
                 <div
@@ -127,7 +127,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
                     <div className="absolute -top-24 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-blue-400/10 blur-3xl" />
                 </div>
 
-                <div className="relative flex w-full max-w-[420px] flex-1 flex-col justify-center">
+                <div className="relative mx-auto flex w-full max-w-[400px] flex-1 flex-col justify-center py-4">
                     {/* Compact wordmark — only where the brand panel isn't shown. */}
                     <div className="animate-fade-up mb-8 flex items-center gap-2.5 lg:hidden">
                         <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/20 ring-4 ring-blue-600/10">
