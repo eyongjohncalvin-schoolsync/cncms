@@ -48,12 +48,22 @@ use ZipArchive;
  */
 class BillBatchService
 {
-    /** Where per-batch artifacts live on the private `local` disk. */
-    private const DISK = 'local';
-
     public function __construct(
         private readonly ManuscriptService $manuscripts,
     ) {}
+
+    /**
+     * Where per-batch PDF/ZIP artifacts are written. Follows the app's
+     * configured default disk — `local` (private) on the VPS deploy, an
+     * object-storage disk on an ephemeral host like Laravel Cloud (set
+     * FILESYSTEM_DISK there, or the generated files vanish on redeploy).
+     * The `bill_batch_files.disk` column records what each file actually
+     * used, so the download route stays correct if this later changes.
+     */
+    private function disk(): string
+    {
+        return (string) config('filesystems.default', 'local');
+    }
 
     /**
      * Creates the bill_batches row and dispatches the batch. Returns
@@ -217,7 +227,7 @@ class BillBatchService
      */
     private function discardArtifacts(BillBatch $billBatch): void
     {
-        Storage::disk(self::DISK)->deleteDirectory($this->basePath($billBatch));
+        Storage::disk($this->disk())->deleteDirectory($this->basePath($billBatch));
 
         $billBatch->files()->delete();
     }
@@ -243,13 +253,13 @@ class BillBatchService
         [$content, $pageCount] = $this->renderPdf($bills, $billBatch->density, $billBatch->template);
 
         $path = $this->basePath($billBatch).'/zone-'.($zoneId ?? 'unzoned').'.pdf';
-        Storage::disk(self::DISK)->put($path, $content);
+        Storage::disk($this->disk())->put($path, $content);
 
         BillBatchFile::updateOrCreate(
             ['bill_batch_id' => $billBatch->id, 'kind' => 'zone', 'zone_id' => $zoneId],
             [
                 'zone_name' => $zoneName,
-                'disk' => self::DISK,
+                'disk' => $this->disk(),
                 'path' => $path,
                 'bill_count' => count($bills),
                 'page_count' => $pageCount,
@@ -277,13 +287,13 @@ class BillBatchService
         [$content, $pageCount] = $this->renderPdf($bills, $billBatch->density, $billBatch->template);
 
         $path = $this->basePath($billBatch).'/bulk.pdf';
-        Storage::disk(self::DISK)->put($path, $content);
+        Storage::disk($this->disk())->put($path, $content);
 
         BillBatchFile::updateOrCreate(
             ['bill_batch_id' => $billBatch->id, 'kind' => 'bulk', 'zone_id' => null],
             [
                 'zone_name' => null,
-                'disk' => self::DISK,
+                'disk' => $this->disk(),
                 'path' => $path,
                 'bill_count' => count($bills),
                 'page_count' => $pageCount,
@@ -431,17 +441,17 @@ class BillBatchService
             $zip->close();
 
             $path = $this->basePath($billBatch).'/by-zone.zip';
-            Storage::disk(self::DISK)->put($path, (string) file_get_contents($tmp));
+            Storage::disk($this->disk())->put($path, (string) file_get_contents($tmp));
 
             BillBatchFile::updateOrCreate(
                 ['bill_batch_id' => $billBatch->id, 'kind' => 'zip', 'zone_id' => null],
                 [
                     'zone_name' => null,
-                    'disk' => self::DISK,
+                    'disk' => $this->disk(),
                     'path' => $path,
                     'bill_count' => (int) $zoneFiles->sum('bill_count'),
                     'page_count' => null,
-                    'size_bytes' => (int) (Storage::disk(self::DISK)->size($path) ?? 0),
+                    'size_bytes' => (int) (Storage::disk($this->disk())->size($path) ?? 0),
                 ],
             );
         } finally {

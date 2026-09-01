@@ -13,6 +13,15 @@ deploy.sh, backup-db.sh, nginx/cncms.conf, systemd/cncms-worker.service, cron/cn
 sudoers.d/cncms, .env.production.example). `config/tenancy.php`'s `central_domains` now reads
 `CENTRAL_DOMAIN` / the `APP_URL` host so the domain is env-only.
 
+**Second track (2026-09-01): the owner also uploaded the app to Laravel Cloud and wants to
+test there.** `deploy/LARAVEL-CLOUD.md` covers the Cloud-specific config — env vars, deploy
+commands (`migrate --force` + **`tenants:migrate --force`** + `optimize`), a Worker resource
+(`queue:work`), the managed scheduler, and the key gotcha: **Cloud's filesystem is ephemeral.**
+`BillBatchService` now writes to `config('filesystems.default')` (was hardcoded `local`), so
+`FILESYSTEM_DISK=s3` fixes generated bill PDFs — but the `public`-disk uploads (company logos,
+receipt/agent photos, via `Storage::disk('public')` in many call sites) are still local-only
+and would not survive a Cloud redeploy. Follow-up: move those to the default/remote disk.
+
 Web + API resolve the tenant from the **logged-in user's membership**
 (`ResolveTenant`/`ResolveTenantWeb` via `TenantUserIndex`), NOT the request domain — so ONE
 domain serves the app, the landlord area, and registration. No per-tenant subdomains needed.

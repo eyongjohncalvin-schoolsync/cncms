@@ -2,6 +2,9 @@
 
 Manual-VPS deployment kit for CNCMS. Full walkthrough: **`../DEPLOYMENT.md`**.
 
+**On Laravel Cloud instead?** → **`LARAVEL-CLOUD.md`** (none of the scripts /
+Nginx / systemd files below apply; Cloud manages all that).
+
 | Path | What it is |
 |---|---|
 | `scripts/provision.sh` | One-time Ubuntu 24.04 setup: PHP 8.4, PostgreSQL 18, Nginx, Composer, Node 20, certbot, the `cncms` user, the `cncms` DB + role, opcache tuning, UFW. Prints a generated DB password. |
