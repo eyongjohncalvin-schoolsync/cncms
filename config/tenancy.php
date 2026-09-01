@@ -22,12 +22,19 @@ return [
     /**
      * The list of domains hosting your central app.
      *
-     * Only relevant if you're using the domain or subdomain identification middleware.
+     * Only relevant if you're using the domain or subdomain identification
+     * middleware. CNCMS resolves the tenant from the authenticated user's
+     * membership (ResolveTenant/ResolveTenantWeb), not the request domain,
+     * so in practice this only feeds PreventAccessFromCentralDomains. The
+     * production host is added via CENTRAL_DOMAIN so deployment stays
+     * env-only.
      */
-    'central_domains' => [
+    'central_domains' => array_values(array_filter([
         '127.0.0.1',
         'localhost',
-    ],
+        env('CENTRAL_DOMAIN'),
+        env('APP_URL') ? parse_url((string) env('APP_URL'), PHP_URL_HOST) : null,
+    ])),
 
     /**
      * Tenancy bootstrappers are executed when tenancy is initialized.

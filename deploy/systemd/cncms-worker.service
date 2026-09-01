@@ -1,0 +1,32 @@
+# /etc/systemd/system/cncms-worker.service
+# The queue worker. MANDATORY — manuscript runs and bill generation both
+# dispatch Bus::batch jobs onto the database queue.
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cncms-worker
+# Logs: journalctl -u cncms-worker -f
+#
+# Run a second worker if runs feel slow:
+#   sudo cp cncms-worker.service /etc/systemd/system/cncms-worker@.service
+#   (change ExecStart to add --name=%i), then `enable --now cncms-worker@1`.
+
+[Unit]
+Description=CNCMS queue worker
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=cncms
+Group=cncms
+WorkingDirectory=/var/www/cncms
+# --max-time recycles the process hourly so long-lived memory / stale
+# tenancy state can't accumulate; systemd restarts it immediately.
+ExecStart=/usr/bin/php /var/www/cncms/artisan queue:work --sleep=3 --tries=3 --backoff=10 --max-time=3600 --timeout=1800
+Restart=always
+RestartSec=5
+# Bill generation raises its own memory_limit inside the job; give the
+# process room and let it, rather than OOM-killing mid-render.
+MemoryHigh=768M
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target
