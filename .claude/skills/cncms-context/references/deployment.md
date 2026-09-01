@@ -1,13 +1,28 @@
 # Deployment, Hosting & the Landlord Context — prep notes
 
-Status: **Not started — next work session.** The owner ("when I come back we shall handle
-deployment and hosting … and also finish the landlord context"). This file captures what is
-known so the next session doesn't re-derive it. Nothing here is decided; treat the open
-questions as questions for the owner.
+Status: **Deployment kit BUILT 2026-09-01 — not yet run against a real server.** The landlord
+context is still unfinished (§3).
+
+**Decisions made (2026-09-01):** bare Ubuntu 24.04 VPS, manual setup (no Forge/Ploi) · one box
+for everything · PostgreSQL **on the same server** · files on local disk, nightly `pg_dump`
+copied **off-server** by the owner · the owner **has a domain** (value not yet in the repo —
+`YOUR_DOMAIN` placeholder throughout).
+
+**The kit lives in the repo:** `DEPLOYMENT.md` (the runbook) + `deploy/` (provision.sh,
+deploy.sh, backup-db.sh, nginx/cncms.conf, systemd/cncms-worker.service, cron/cncms.cron,
+sudoers.d/cncms, .env.production.example). `config/tenancy.php`'s `central_domains` now reads
+`CENTRAL_DOMAIN` / the `APP_URL` host so the domain is env-only.
+
+Web + API resolve the tenant from the **logged-in user's membership**
+(`ResolveTenant`/`ResolveTenantWeb` via `TenantUserIndex`), NOT the request domain — so ONE
+domain serves the app, the landlord area, and registration. No per-tenant subdomains needed.
+
+Deploy target branch is `prepayment-drawdown-credit` until it's merged to `main`
+(`deploy/scripts/deploy.sh` has the branch name).
 
 ---
 
-## 1. What "deployment and hosting" has to cover
+## 1. What "deployment and hosting" has to cover (all handled in the kit unless noted)
 
 The app runs only locally today (`127.0.0.1:8000`, Herd on the owner's Windows box; standalone
 PostgreSQL 18 at `C:\Program Files\PostgreSQL\18`, NOT Herd's bundled one). To go live:
