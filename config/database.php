@@ -115,6 +115,11 @@ return [
 
         'default' => [
             'url' => env('REDIS_URL'),
+            // `tls` for a managed Redis with in-transit encryption (Upstash,
+            // Redis Cloud, ElastiCache encrypt-in-transit). With phpredis
+            // this prefixes the host with tls://; predis reads the rediss://
+            // in REDIS_URL directly and ignores this. Default `tcp` = plain.
+            'scheme' => env('REDIS_SCHEME', 'tcp'),
             'host' => env('REDIS_HOST', '127.0.0.1'),
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
@@ -128,10 +133,14 @@ return [
 
         'cache' => [
             'url' => env('REDIS_URL'),
+            'scheme' => env('REDIS_SCHEME', 'tcp'),
             'host' => env('REDIS_HOST', '127.0.0.1'),
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
+            // Upstash exposes only DB 0 — set REDIS_CACHE_DB=0 there. Local
+            // Redis keeps the default DB-1 split so `cache:clear` doesn't
+            // wipe sessions/queue.
             'database' => env('REDIS_CACHE_DB', '1'),
             'max_retries' => env('REDIS_MAX_RETRIES', 3),
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
