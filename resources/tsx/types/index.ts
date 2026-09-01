@@ -78,6 +78,12 @@ export interface PageProps {
         user: AuthUser | null;
     };
     /**
+     * The logged-in user's tenant company name — for the app chrome only.
+     * `null` on the public auth pages (which are platform-branded, never
+     * tenant-branded). Set by HandleInertiaRequests::share().
+     */
+    company: { name: string | null } | null;
+    /**
      * Resolved locale for this request ('en' | 'fr'), set by
      * App\Http\Middleware\ResolveLocale and shared by
      * HandleInertiaRequests::share(). Fed into i18next at bootstrap (see

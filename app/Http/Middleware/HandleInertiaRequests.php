@@ -70,6 +70,15 @@ class HandleInertiaRequests extends Middleware
                     'is_investor' => (bool) $context?->tenantUser->is_investor,
                 ] : null,
             ],
+            // The resolved tenant's company name, for the app chrome
+            // (AppLayout's sidebar). null before a tenant is resolved — the
+            // public auth pages are platform-branded, NOT tenant-branded, so
+            // they must never show a company name. Closure so it's only
+            // resolved (and only queries the tenant `companies` table) when
+            // tenancy is actually initialized.
+            'company' => $context
+                ? fn () => ['name' => \App\Models\Company::cached()?->name ?? tenant()?->name]
+                : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

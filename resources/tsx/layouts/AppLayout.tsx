@@ -173,7 +173,7 @@ export function AppLayout({
      */
     breadcrumbs?: BreadcrumbItem[];
 }) {
-    const { auth, flash, notifications } = usePage<PageProps>().props;
+    const { auth, flash, notifications, company } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
     const role = auth.user?.role ?? null;
     const { t } = useTranslation();
@@ -229,9 +229,13 @@ export function AppLayout({
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-md shadow-blue-600/25 ring-1 ring-white/20">
                         <IconBroadcast size={19} stroke={1.75} />
                     </span>
-                    <div className="leading-tight">
+                    <div className="min-w-0 leading-tight">
                         <p className="font-display text-lg text-slate-900">CNCMS</p>
-                        <p className="text-[10px] font-medium tracking-wide text-slate-400">SWECOM PLC</p>
+                        {company?.name && (
+                            <p className="truncate text-[10px] font-medium tracking-wide text-slate-400">
+                                {company.name}
+                            </p>
+                        )}
                     </div>
                 </div>
                 <nav className="relative flex-1 space-y-0.5 px-2 py-4">

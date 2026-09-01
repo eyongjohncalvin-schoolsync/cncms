@@ -85,7 +85,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
                         </span>
                         <div className="leading-tight">
                             <p className="font-display text-xl text-white">CNCMS</p>
-                            <p className="text-[11px] font-medium tracking-wide text-blue-200/60">SWECOM PLC</p>
+                            <p className="text-[11px] font-medium tracking-wide text-blue-200/60">Cable Network Management</p>
                         </div>
                     </div>
 
@@ -116,7 +116,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
                             className="animate-fade-up mt-10 text-[11px] text-blue-200/40"
                             style={{ animationDelay: '380ms' }}
                         >
-                            Built by ShalomTech · Kumba 3, Cameroon
+                            A OneTech product
                         </p>
                     </div>
                 </div>
