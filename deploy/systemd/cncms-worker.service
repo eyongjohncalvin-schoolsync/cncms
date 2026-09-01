@@ -18,9 +18,12 @@ Type=simple
 User=cncms
 Group=cncms
 WorkingDirectory=/var/www/cncms
+# --queue order = priority: tenant creation + small jobs (notifications,
+#   audit) on `default` are served before the heavy `manuscripts` /
+#   `bills` batch work, so a registration never waits behind a bill render.
 # --max-time recycles the process hourly so long-lived memory / stale
-# tenancy state can't accumulate; systemd restarts it immediately.
-ExecStart=/usr/bin/php /var/www/cncms/artisan queue:work --sleep=3 --tries=3 --backoff=10 --max-time=3600 --timeout=1800
+#   tenancy state can't accumulate; systemd restarts it immediately.
+ExecStart=/usr/bin/php /var/www/cncms/artisan queue:work --queue=default,manuscripts,bills --sleep=3 --tries=3 --backoff=10 --max-time=3600 --timeout=1800
 Restart=always
 RestartSec=5
 # Bill generation raises its own memory_limit inside the job; give the

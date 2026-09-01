@@ -130,6 +130,10 @@ class BillBatchService
 
         $batch = Bus::batch($jobs)
             ->name("bill_generation:{$resolvedPeriod}:{$billBatchId}")
+            // Own queue — dompdf over every zone is the slowest work in the
+            // app and must never block tenant creation / notifications on
+            // the default queue. Worker: `--queue=default,manuscripts,bills`.
+            ->onQueue('bills')
             ->allowFailures()
             ->catch(function (Batch $batch, Throwable $e) use ($billBatchId): void {
                 app(self::class)->handleBatchFailed($billBatchId, $e);

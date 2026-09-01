@@ -139,9 +139,13 @@ nginx` after.
 
 ## 6. The queue worker (MANDATORY)
 
-`QUEUE_CONNECTION=database`. **"Run Manuscript Calculation" and "Generate
-Bills" both dispatch `Bus::batch` jobs — without a running worker they sit at
-`queued` forever.** This is not optional.
+`QUEUE_CONNECTION=database`. **Tenant creation (self-service registration),
+"Run Manuscript Calculation", and "Generate Bills" all run on the queue now
+— without a running worker they sit `queued` forever.** Not optional.
+
+The unit runs `queue:work --queue=default,manuscripts,bills` — priority
+order, so tenant creation + small jobs on `default` are served before the
+heavy manuscript/bill batches.
 
 ```bash
 sudo cp /tmp/deploy/systemd/cncms-worker.service /etc/systemd/system/

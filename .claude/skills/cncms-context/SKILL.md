@@ -512,6 +512,7 @@ All mutations are audit-logged. All responses use UUIDs for entity references.
 - **Backup & restore process (design, not yet implemented):** `references/backup-strategy.md`
 - **Bill printing — slips, the monthly register PDF/Excel, the N-up grid, async bulk generation (`BillBatch`), cancel/clear:** `references/bill-printing.md`
 - **Deployment / hosting prep + the unfinished landlord (platform) context — NEXT work session:** `references/deployment.md`
+- **SWECOM real-data migration into production (zones/customers/agents/payments/manuscripts imports) — planned, own session:** `references/swecom-data-migration.md`
 
 Note: this file and `.ai/skills/cncms-context/SKILL.md` are kept byte-identical; a third,
 older copy at `.ai/skills/cncms/cncms-context/` has drifted (different tenancy-model wording, a

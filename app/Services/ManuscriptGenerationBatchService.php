@@ -161,6 +161,11 @@ class ManuscriptGenerationBatchService
         // chunk jobs themselves.
         $batch = Bus::batch($jobs)
             ->name("manuscript_generation:{$tenantId}:{$period}:{$commandRunId}")
+            // Heavy, non-time-critical work on its own queue so it never
+            // sits in front of a tenant-creation / notification job on the
+            // default queue — the worker is run as
+            // `--queue=default,manuscripts,bills` (see DEPLOYMENT.md).
+            ->onQueue('manuscripts')
             ->allowFailures()
             ->then(function (Batch $batch) use ($commandRunId, $autoPublish, $actingUserId): void {
                 app(self::class)->handleBatchSucceeded($commandRunId, $autoPublish, $actingUserId);

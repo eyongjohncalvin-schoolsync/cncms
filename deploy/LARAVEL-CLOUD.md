@@ -126,11 +126,13 @@ php artisan optimize
 
 - **Worker**: add a **Worker** resource. Command:
   ```
-  php artisan queue:work --sleep=3 --tries=3 --backoff=10 --max-time=3600 --timeout=1800
+  php artisan queue:work --queue=default,manuscripts,bills --sleep=3 --tries=3 --backoff=10 --max-time=3600 --timeout=1800
   ```
-  Without it, "Run Manuscript Calculation" and "Generate Bills" sit at
-  `queued` forever (both dispatch `Bus::batch` jobs). One worker is fine to
-  start.
+  `--queue` order is priority: tenant creation + small jobs (notifications,
+  audit) on `default` are served before the heavy `manuscripts` / `bills`
+  batches, so a registration never waits behind a bill render. One worker
+  is fine to start. Without a worker, tenant creation, "Run Manuscript
+  Calculation", and "Generate Bills" all sit `queued` forever.
 - **Scheduler**: Laravel Cloud runs the scheduler for you — just make sure
   it's enabled for the environment. It ticks `routes/console.php` (currently
   `tasks:run-due` every 15 min).
