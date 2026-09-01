@@ -70,8 +70,16 @@ class GoogleAuthController extends Controller
 
         Auth::login($user);
 
-        $hasTenant = TenantUserIndex::query()->where('user_id', $user->id)->exists();
+        if (TenantUserIndex::query()->where('user_id', $user->id)->exists()) {
+            return redirect()->route('dashboard');
+        }
 
-        return redirect()->route($hasTenant ? 'dashboard' : 'register.workspace');
+        // A landlord with no workspace belongs in the platform area, not the
+        // "create your workspace" form.
+        if ($user->is_landlord) {
+            return redirect()->route('landlord.tenants.index');
+        }
+
+        return redirect()->route('register.workspace');
     }
 }
