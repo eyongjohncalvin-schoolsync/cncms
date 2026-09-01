@@ -30,12 +30,16 @@ class TenancyServiceProvider extends ServiceProvider
                     Jobs\MigrateDatabase::class,
                     Jobs\SeedDatabase::class,
 
-                    // Your own jobs to prepare the tenant.
-                    // Provision API keys, create S3 buckets, anything you want!
+                    // Self-service registration: after the schema is built +
+                    // seeded, write the owner's tenant_users membership and
+                    // their submitted company details (stashed on
+                    // tenants.data by WorkspaceProvisioningService). No-op
+                    // for Landlord-created tenants.
+                    \App\Jobs\FinalizeWorkspaceProvisioning::class,
 
                 ])->send(function (Events\TenantCreated $event) {
                     return $event->tenant;
-                })->shouldBeQueued(false), // `false` by default, but you probably want to make this `true` for production.
+                })->shouldBeQueued(true), // Queued: creating a tenant runs every tenant migration; doing that inline blows past the HTTP/FastCGI timeout on a pooled remote DB. Needs the queue worker running.
             ],
             Events\SavingTenant::class => [],
             Events\TenantSaved::class => [],

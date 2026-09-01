@@ -25,7 +25,11 @@ class WorkspaceController extends Controller
         $entry = TenantUserIndex::query()->where('user_id', $request->user()->id)->first();
         $tenant = $entry ? Tenant::find($entry->tenant_id) : null;
 
+        // No index entry yet = App\Jobs\FinalizeWorkspaceProvisioning hasn't
+        // run — the tenant schema is still being built on the queue. The
+        // page polls this endpoint and advances once it flips.
         return Inertia::render('Workspace/Pending', [
+            'provisioning' => $entry === null,
             'status' => $tenant?->registration_status ?? 'pending',
             'workspace_name' => $tenant?->name,
         ]);
