@@ -43,7 +43,10 @@ REDIS_URL=rediss://default:<pw>@<endpoint>.upstash.io:6379
 REDIS_CACHE_DB=0
 ```
 
-- `rediss://` turns on TLS; phpredis on Cloud handles it (no `predis`).
+- `rediss://` turns on TLS. `predis/predis` is bundled (composer), so
+  either `REDIS_CLIENT=predis` (Cloud's Upstash integration sets this) or
+  `REDIS_CLIENT=phpredis` works. Without the package you get
+  "Class Predis\Client not found" on the first rate-limited request.
 - **`REDIS_CACHE_DB=0`** — Laravel's cache connection defaults to DB 1 and
   Upstash only has DB 0, so without this every cache op fails.
 - **Free tier = 10k commands/day.** A `queue:work` Redis worker polls every
