@@ -41,12 +41,17 @@ DB_SSLMODE=require
 ```
 REDIS_URL=rediss://default:<pw>@<endpoint>.upstash.io:6379
 REDIS_CACHE_DB=0
+REDIS_CLIENT=predis          # or phpredis + REDIS_SCHEME=tls (see below)
 ```
 
-- `rediss://` turns on TLS. `predis/predis` is bundled (composer), so
-  either `REDIS_CLIENT=predis` (Cloud's Upstash integration sets this) or
-  `REDIS_CLIENT=phpredis` works. Without the package you get
-  "Class Predis\Client not found" on the first rate-limited request.
+- **TLS.** Upstash is TLS-only.
+  - `predis` (bundled via composer) reads the `rediss://` in `REDIS_URL`
+    and just works. Simplest — set `REDIS_CLIENT=predis`.
+  - `phpredis` does NOT infer TLS from `rediss://`; it opens a plaintext
+    socket and you get `read error on connection to …:6379`. For phpredis
+    you must also set **`REDIS_SCHEME=tls`** (added to `config/database.php`).
+  - Without `predis/predis` installed you'd instead get
+    "Class Predis\Client not found" — it's in composer now.
 - **`REDIS_CACHE_DB=0`** — Laravel's cache connection defaults to DB 1 and
   Upstash only has DB 0, so without this every cache op fails.
 - **Free tier = 10k commands/day.** A `queue:work` Redis worker polls every
