@@ -179,11 +179,13 @@ nightly, both as the `cncms` user.
 - [ ] `https://YOUR_DOMAIN/login` loads over HTTPS, no cert warning.
 - [ ] `https://YOUR_DOMAIN/register` loads; a test sign-up creates a
       workspace (it lands on "awaiting approval" — a landlord approves it).
-- [ ] Grant yourself landlord access, then delete the test tenant:
+- [ ] Register yourself at `/register`, then grant landlord access and
+      approve/delete the test tenant:
       ```bash
-      php artisan tinker --execute="\$u=App\Models\User::where('email','YOU@YOUR_DOMAIN')->firstOrFail(); \$u->is_landlord=true; \$u->landlord_granted_at=now(); \$u->save();"
+      php artisan cncms:grant-landlord you@your-domain.com
       ```
-      Then `/landlord/tenants` works.
+      Then `/landlord/tenants` works. There is no landlord until you run
+      this — the flag has no UI and isn't seeded.
 - [ ] `sudo systemctl is-active cncms-worker` → `active`.
 - [ ] `php artisan queue:work --once` processes a job (or watch the journal
       while you trigger a manuscript run).

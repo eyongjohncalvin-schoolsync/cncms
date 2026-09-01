@@ -163,15 +163,41 @@ and file a follow-up to move the `public`-disk uploads onto the same bucket
 call sites for the default disk + signed URLs). Until then, logos/receipts
 uploaded on Cloud won't survive a redeploy.
 
-## 5. Testing checklist
+## 5. First landlord + the swecom data
 
-- [ ] `https://<cloud-url>/login` and `/register` load.
-- [ ] A test sign-up lands on "awaiting approval".
-- [ ] Grant yourself `is_landlord` (dashboard → Commands, or a one-off
-      `tinker` run) → `/landlord/tenants` works → approve or delete the test
-      tenant.
+**Landlord.** A fresh deploy has zero landlords — `users.is_landlord` has no
+UI and isn't seeded. Bootstrap it:
+
+1. Register yourself at `https://<cloud-url>/register` (this also creates a
+   pending workspace — ignore it or delete it later).
+2. Dashboard → the environment → **Commands**, run:
+   ```
+   php artisan cncms:grant-landlord you@your-email.com
+   ```
+3. `/landlord/tenants` now works. From there you approve/reject workspaces.
+
+**swecom's existing data.** The Supabase database starts empty; swecom's
+~450 customers / manuscripts / payments live only in the dev box's local
+Postgres (schema `tenantswecom`). Two-phase:
+
+- *For this test:* don't migrate it. Validate the deploy with fresh
+  self-service data + a small xlsx import. Faster, and nothing to lose.
+- *For real production:* a scripted data migration — after `tenants:migrate`
+  builds the empty `tenantswecom` schema on Supabase, load a
+  **data-only** `pg_dump` of that schema plus the swecom-related `public`
+  rows (`tenants`, `users`, `tenant_user_indexes`, `personal_access_tokens`,
+  `domains`), then reset sequences. Do it **before creating any Cloud users**
+  to avoid email/PK collisions, and rehearse it against a throwaway Supabase
+  project first. Building `tenants:migrate` first then loading data-only
+  sidesteps the PG18→Supabase version gap (only data moves, not DDL).
+
+## 6. Testing checklist
+
+- [ ] `https://<cloud-url>/login` and `/register` load; a test sign-up
+      lands on "awaiting approval".
+- [ ] `cncms:grant-landlord` → `/landlord/tenants` works → approve the test
+      workspace.
 - [ ] Trigger a manuscript run → the Worker picks it up → it reaches
       `pending_review` → publish it.
-- [ ] Generate bills → download the bulk PDF (works even on ephemeral
-      storage within the same container lifetime; redeploy and it's gone
-      unless `FILESYSTEM_DISK` is remote).
+- [ ] Generate bills → download the bulk PDF (works within a container
+      lifetime; redeploy loses it unless `FILESYSTEM_DISK` is remote).
