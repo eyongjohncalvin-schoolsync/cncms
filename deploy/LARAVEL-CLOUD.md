@@ -7,33 +7,93 @@ file is only the CNCMS-specific configuration.
 
 ---
 
+## 0. This deployment uses external Supabase + Upstash
+
+Not Laravel Cloud's managed Postgres/Redis — an external Supabase Postgres
+and an external Upstash Redis. That means **you set `DB_*` / `REDIS_*` by
+hand** (nothing is injected) and there are two mode/limit traps that break
+CNCMS:
+
+### Supabase — use the **Session** pooler, never the Transaction pooler
+
+CNCMS is schema-per-tenant (Stancl) and runs `SET search_path` per request.
+The Transaction pooler (port `6543`) does not keep session state between
+statements, so tenancy silently breaks — the wrong schema, or `public`,
+answers a tenant request. Use the **Session pooler** string (Dashboard →
+Project Settings → Database → Connection string → *Session pooler*, port
+`5432`, host `…pooler.supabase.com`). The direct connection also works but
+is IPv6-only on newer projects.
+
+```
+DB_CONNECTION=pgsql
+DB_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres
+DB_SSLMODE=require
+```
+
+- `config/database.php` already reads `DB_URL` — one var beats five.
+- DB name is `postgres`, not `cncms`.
+- The `postgres` role has `CREATE` on the DB, so `tenants:migrate` (schema
+  per tenant) and self-service registration work. A locked-down role needs
+  `GRANT CREATE ON DATABASE postgres TO <role>;`.
+
+### Upstash — DB 0 only, and watch the free-tier command quota
+
+```
+REDIS_URL=rediss://default:<pw>@<endpoint>.upstash.io:6379
+REDIS_CACHE_DB=0
+```
+
+- `rediss://` turns on TLS; phpredis on Cloud handles it (no `predis`).
+- **`REDIS_CACHE_DB=0`** — Laravel's cache connection defaults to DB 1 and
+  Upstash only has DB 0, so without this every cache op fails.
+- **Free tier = 10k commands/day.** A `queue:work` Redis worker polls every
+  few seconds → ~25k commands/day idling → limit hit within hours. On the
+  free tier keep the **queue on Postgres** and use Redis for cache only.
+
+### Recommended split (Supabase + free Upstash)
+
+```
+SESSION_DRIVER=database      # low volume; also avoids `cache:clear` logging everyone out
+CACHE_STORE=redis            # where Redis actually helps
+QUEUE_CONNECTION=database    # avoids the Upstash daily limit; job_batches lives in Postgres anyway
+```
+
+On paid Upstash, flip `SESSION_DRIVER` + `QUEUE_CONNECTION` to `redis`.
+
+---
+
 ## 1. Environment variables (dashboard → Environment)
 
-Start from `../.env.production.example`. Laravel Cloud injects `APP_KEY` and
-the database connection vars for its managed Postgres automatically — don't
-set `DB_*` by hand unless you attached your own database.
+Start from `../.env.production.example`. On **Laravel Cloud managed**
+resources, `APP_KEY` and the DB vars are injected — but this deployment
+uses external services (§0), so set `DB_*` / `REDIS_*` yourself.
 
 Set these:
 
 | Key | Value |
 |---|---|
 | `APP_ENV` | `production` |
-| `APP_DEBUG` | `false` |
-| `APP_URL` | your Cloud URL, or the custom domain once attached (`https://…`) |
-| `SESSION_DRIVER` | `database` (or `redis` if you add a Redis resource) |
-| `SESSION_DOMAIN` | `.yourdomain` once on a custom domain; leave unset on the `*.laravel.cloud` URL |
+| `APP_DEBUG` | `false` — **must**; a stack trace on a tenant page leaks data shape |
+| `APP_KEY` | your generated `base64:…` key |
+| `APP_URL` | `https://cncms.laravel.cloud` (or the custom domain once attached) |
+| `DB_CONNECTION` / `DB_URL` / `DB_SSLMODE` | §0 — Supabase session pooler |
+| `REDIS_URL` / `REDIS_CACHE_DB` | §0 — Upstash |
+| `SESSION_DRIVER` | `database` (see §0) |
 | `SESSION_SECURE_COOKIE` | `true` |
-| `SANCTUM_STATEFUL_DOMAINS` | the host of `APP_URL` |
-| `CACHE_STORE` | `database` (or `redis`) |
-| `QUEUE_CONNECTION` | `database` (or `redis`) |
-| `FILESYSTEM_DISK` | **see §4 — do not leave `local`** |
-| `MAIL_*` | your SMTP provider |
-| `GOOGLE_CLIENT_ID/SECRET` | from Google Console |
-| `GOOGLE_REDIRECT_URI` | `https://<APP_URL host>/auth/google/callback` |
+| `SESSION_DOMAIN` | **do not set** on a `*.laravel.cloud` host — it's a public-suffix domain and browsers reject the cookie. Add `.yourdomain.com` only with a custom domain. |
+| `SANCTUM_STATEFUL_DOMAINS` | `cncms.laravel.cloud` (the host of `APP_URL`) |
+| `CACHE_STORE` | `redis` (see §0) |
+| `QUEUE_CONNECTION` | `database` (see §0) |
+| `FILESYSTEM_DISK` | `local` is fine for a test (ephemeral — regenerate bills / re-upload the logo after redeploys); §4 for real use |
+| `MAIL_MAILER` | `log` for the test, or `smtp` + `MAIL_HOST/PORT/USERNAME/PASSWORD` |
+| `MAIL_FROM_ADDRESS` | `no-reply@cncms.laravel.cloud` |
+| `GOOGLE_CLIENT_ID/SECRET` | from Google Console, or leave blank to hide the button |
+| `GOOGLE_REDIRECT_URI` | `https://cncms.laravel.cloud/auth/google/callback` |
 | `INERTIA_ENCRYPT_HISTORY` | `true` |
 
-`CENTRAL_DOMAIN` is derived from `APP_URL` (see `config/tenancy.php`) — set
-it only if the served host differs from `APP_URL`.
+**Do NOT set** `DB_HOST` / `DB_PORT` (use `DB_URL`), `SESSION_DOMAIN` (above),
+`CENTRAL_DOMAIN` (derived from `APP_URL`), or any `AWS_*` (unused while
+`FILESYSTEM_DISK=local`).
 
 Tenancy resolves the tenant from the logged-in user, not the URL, so one
 Cloud environment / one domain serves the admin app, the landlord area, and
