@@ -72,117 +72,115 @@ const NAV_ACCENTS: Record<string, NavAccent> = {
 // proof for the language-support infra (see language-support.md section 8,
 // rollout step 1). Resolved via t() in the component body below, not here,
 // since useTranslation() is a hook and this array is module-level.
-// Complaint Desk is deliberately un-gated here (no *_ROLES filter list like
-// every other item added below) — references/complaint-desk.md section 6:
-// "visible to every role, same tier as Dashboard/Customers/Payments (not
-// role-gated like Settings/Resources/Audit)." The feature's entire premise
-// is universal visibility; hiding it from any role would contradict that,
-// so it's a permanent member of the base navItems array rather than
-// conditionally appended like the *_ROLES-gated items further down.
+//
+// RBAC v2 Wave 4: every item now carries an optional `permission` string
+// checked against `auth.user.permissions` (the resolved per-role matrix
+// from HandleInertiaRequests::share(), `['*']` for super) — no more
+// hardcoded `*_ROLES` arrays keyed off `auth.user.role`. `permission`
+// omitted (dashboard) = always shown to any authenticated user. Every
+// seeded system role holds `customers.view` / `zones.view` / `payments.view`
+// / `agents.view` / `complaints.view`, so gating those base items changes
+// nothing for existing users — but a future custom role without, say,
+// `payments.view` correctly won't see Payments. (`manuscripts.view` is NOT
+// seeded to `worker`, matching ManuscriptPolicy::viewAny, so a worker
+// stops seeing a Manuscripts link that only ever 403'd for them anyway.)
+// Complaint Desk keeps its "visible to every role" premise
+// (references/complaint-desk.md section 6) via `complaints.view`, which
+// every seeded role holds.
 const navItems = [
     { href: '/dashboard', labelKey: 'common.dashboard', icon: IconLayoutDashboard, accent: 'blue' as const },
-    { href: '/customers', labelKey: 'common.customers', icon: IconUsers, accent: 'indigo' as const },
-    { href: '/zones', labelKey: 'common.zones', icon: IconMapPin, accent: 'teal' as const },
-    { href: '/payments', labelKey: 'common.payments', icon: IconCash, accent: 'green' as const },
-    { href: '/manuscripts', labelKey: 'common.manuscripts', icon: IconFileDescription, accent: 'amber' as const },
-    { href: '/agents', labelKey: 'common.agents', icon: IconUserCog, accent: 'purple' as const },
-    { href: '/complaints', labelKey: 'common.complaints', icon: IconMessageReport, accent: 'fuchsia' as const },
+    { href: '/customers', labelKey: 'common.customers', icon: IconUsers, accent: 'indigo' as const, permission: 'customers.view' },
+    { href: '/zones', labelKey: 'common.zones', icon: IconMapPin, accent: 'teal' as const, permission: 'zones.view' },
+    { href: '/payments', labelKey: 'common.payments', icon: IconCash, accent: 'green' as const, permission: 'payments.view' },
+    { href: '/manuscripts', labelKey: 'common.manuscripts', icon: IconFileDescription, accent: 'amber' as const, permission: 'manuscripts.view' },
+    { href: '/agents', labelKey: 'common.agents', icon: IconUserCog, accent: 'purple' as const, permission: 'agents.view' },
+    { href: '/complaints', labelKey: 'common.complaints', icon: IconMessageReport, accent: 'fuchsia' as const, permission: 'complaints.view' },
 ];
 
-// Settings is admin-only per web-admin-spec.md's nav spec ("SETTINGS
-// [admin only]") — filtered into navItems below rather than always shown,
-// same client-side role-gating idea as Agents/Index.tsx's canManage check.
-// The server-side Policies (CompanyPolicy, TenantUserPolicy, CommandRunPolicy)
-// are the actual source of truth; this only hides the link from other roles.
+// RBAC v2 Wave 4: the conditionally-appended items below are each gated by
+// a permission string (or a small `canAny` of them) resolved against
+// `auth.user.permissions`, replacing the old hardcoded `*_ROLES` arrays.
+// The permission named on each is the one its destination's server-side
+// Policy / controller actually checks after Wave 2's enforcement swap
+// (docs/plans/rbac-v2-configurable-roles.md's "Wave 1: final catalog"), so
+// the nav link and the real gate never disagree.
+
+// Settings — there is no single "settings" permission; the real gates on
+// the Settings surface are CompanyPolicy::update (`company.update`) and
+// CommandRunPolicy::viewAny (`command_runs.view`). Shown if the user holds
+// either.
 const settingsNavItem = { href: '/settings/company', labelKey: 'common.settings', icon: IconSettings, accent: 'slate' as const };
-const SETTINGS_ROLES = ['super', 'admin'];
 
-// Branches (Manage Branches) is office-only per BranchPolicy::create()
-// (super/admin — deliberately narrower than ZonePolicy's super/admin/
-// manager, see branches-and-locations.md section 8) — same client-side
-// hide-the-link idea as Settings above; BranchPolicy is the real
-// server-side gate.
+// Manage Branches — BranchPolicy::create/update/delete → `branches.manage`.
 const branchesNavItem = { href: '/branches', labelKey: 'common.branches', icon: IconBuildingCommunity, accent: 'slate' as const };
-const BRANCHES_ROLES = ['super', 'admin'];
 
-// Resources (P&L dashboard) is gated to the same roles as
-// ExpenditurePolicy::viewDashboard() (super/admin/manager) — agents can
-// still record expenditures via /resources/expenditures/create, but the
-// dashboard landing page at /resources itself is office-only, so the nav
-// link is hidden for agents/workers the same way Settings is hidden for
-// non-admins above.
+// Resources (P&L dashboard) — ExpenditurePolicy::viewDashboard →
+// `expenditures.dashboard`. Agents can still record expenditures via
+// /resources/expenditures/create (that's `expenditures.create`), but the
+// dashboard landing page itself is `expenditures.dashboard`.
 const resourcesNavItem = { href: '/resources', labelKey: 'common.resources', icon: IconReportMoney, accent: 'pink' as const };
-const RESOURCES_ROLES = ['super', 'admin', 'manager'];
 
-// Audit Log viewing is gated to the same roles as AuditLogPolicy::viewAny()
-// (super/admin/manager) — enforced server-side by the policy; this only
-// hides the link client-side for agents/workers, same idea as
-// Settings/Resources above. A non-privileged user who navigates there
-// directly still just gets a 403 page.
+// Audit Log — AuditLogPolicy::viewAny → `audit.view`.
 const auditNavItem = { href: '/audit/logs', labelKey: 'common.audit_log', icon: IconHistory, accent: 'cyan' as const };
-const AUDIT_ROLES = ['super', 'admin', 'manager'];
 
-// Disconnections (bulk customer status workboard) is gated to the same
-// roles as CustomerPolicy::viewStatusBoard() (super/admin/manager) — same
-// idea as Resources/Audit/Settings above. Agents/workers keep their
-// existing single-customer view access via /customers/{customer}, they just
-// don't get this dedicated bulk-action page in the nav.
+// Disconnections (bulk customer status workboard) — CustomerPolicy::
+// viewStatusBoard → `customers.status_board`.
 const disconnectionsNavItem = { href: '/disconnections', labelKey: 'common.disconnections', icon: IconUserOff, accent: 'red' as const };
-const DISCONNECTIONS_ROLES = ['super', 'admin', 'manager'];
 
-// `agent` can't reach the status board (still viewStatusBoard-gated,
-// super/admin/manager only) but CAN see the arrears-based "flagged for
-// non-payment" tab for their own zone (CustomerPolicy::viewEligibilityBoard()
-// — see DisconnectionsController::eligibilityIndex()), so they get a
-// dedicated nav entry straight into that view instead of the default board.
+// `agent` can't reach the status board (`customers.status_board`) but CAN
+// see the arrears-based "flagged for non-payment" tab for their own zone
+// (CustomerPolicy::viewEligibilityBoard → `customers.eligibility_board`, see
+// DisconnectionsController::eligibilityIndex()). This is the agent's variant
+// entry into the same board, so it's shown only when the user has
+// `customers.eligibility_board` but NOT `customers.status_board` — anyone
+// with the full board gets `disconnectionsNavItem` instead.
 const eligibilityNavItem = { href: '/disconnections?eligible=1', labelKey: 'common.flagged_customers', icon: IconUserOff, accent: 'red' as const };
-const ELIGIBILITY_NAV_ROLES = ['agent'];
 
-// Reports (Daily/Weekly/Monthly — App\Policies\ReportPolicy::view()) is a
-// new TOP-LEVEL nav item, deliberately NOT nested under Resources: Resources
-// is gated to RESOURCES_ROLES (super/admin/manager), which excludes agent,
-// but agents need their own zone-fenced daily figures in the field — see
-// App\Http\Controllers\ReportController::defaultTierForRole(). `worker` is
-// still excluded, matching ReportPolicy::view()'s role set exactly.
+// Reports (Daily/Weekly/Monthly) — ReportPolicy::view → `reports.view`.
+// Deliberately a TOP-LEVEL item, not nested under Resources: agents hold
+// `reports.view` (for their zone-fenced field figures — see
+// ReportController::defaultTierForRole()) but not `expenditures.dashboard`.
 const reportsNavItem = { href: '/reports', labelKey: 'common.reports', icon: IconChartBar, accent: 'orange' as const };
-const REPORTS_ROLES = ['super', 'admin', 'manager', 'agent'];
 
 // "Get the Agent App" (/agent-app) — the mobile field app's install page.
-// Gated to the app's actual audience (agent primary, manager supervisory,
-// admin/super oversight); `worker` excluded. AgentAppController enforces
-// the same set server-side — this only hides the link.
+// AgentAppController checks the same S A M G set as ManuscriptPolicy::
+// viewAny, and there is no dedicated `mobile.sync`/`agent_app` permission
+// (deliberately deferred — see the plan's Wave 2 notes), so `manuscripts.view`
+// is the agreed proxy: it resolves to exactly that role set and
+// AgentAppController was migrated to it in Wave 2.
 const agentAppNavItem = { href: '/agent-app', labelKey: 'common.agent_app', icon: IconDeviceMobile, accent: 'lime' as const };
-const AGENT_APP_ROLES = ['super', 'admin', 'manager', 'agent'];
 
-// "Users Control Center" (/users) — RBAC v2 Wave 3. This is the FIRST nav
-// item gated by a permission string rather than a hardcoded `_ROLES` array:
-// it's shown when the resolved permission list (auth.user.permissions,
-// already in the Inertia share since Wave 1 — `['*']` for super) contains
-// `users.view`. Wave 4 migrates the other items' role arrays to the same
-// permission model; until then this item is the only one on the new path.
-// TenantUserPolicy::viewAny is the real server-side gate on /users.
+// "Users Control Center" (/users) — RBAC v2 Wave 3. Shown when the resolved
+// permission list contains `users.view`. TenantUserPolicy::viewAny is the
+// real server-side gate on /users.
 const usersControlCenterNavItem = { href: '/users', labelKey: 'common.users_control_center', icon: IconShieldLock, accent: 'sky' as const };
 
 /**
- * The role-gated nav list, in display order. Identical for the desktop
+ * The permission-gated nav list, in display order. Identical for the desktop
  * `<aside>` and the mobile drawer — both call this so the item set, order,
- * and gating never fork. `role` is `auth.user?.role ?? null`; a null role
- * (no authenticated user) gets just the ungated base items.
+ * and gating never fork. `permissions` is `auth.user?.permissions ?? []`
+ * (the resolved per-role matrix from HandleInertiaRequests::share(), `['*']`
+ * for super); an empty list (no authenticated user) gets only the ungated
+ * dashboard. RBAC v2 Wave 4: `role` is no longer needed here — every gate is
+ * now a permission check.
  */
-export function buildVisibleNavItems(role: string | null, permissions: string[] = []) {
+export function buildVisibleNavItems(permissions: string[] = []) {
     const can = (permission: string) => permissions.includes('*') || permissions.includes(permission);
+    const canAny = (...perms: string[]) => perms.some(can);
 
     return [
-        ...navItems,
-        ...(role !== null && DISCONNECTIONS_ROLES.includes(role) ? [disconnectionsNavItem] : []),
-        ...(role !== null && ELIGIBILITY_NAV_ROLES.includes(role) ? [eligibilityNavItem] : []),
-        ...(role !== null && REPORTS_ROLES.includes(role) ? [reportsNavItem] : []),
-        ...(role !== null && AGENT_APP_ROLES.includes(role) ? [agentAppNavItem] : []),
-        ...(role !== null && RESOURCES_ROLES.includes(role) ? [resourcesNavItem] : []),
-        ...(role !== null && AUDIT_ROLES.includes(role) ? [auditNavItem] : []),
-        ...(role !== null && BRANCHES_ROLES.includes(role) ? [branchesNavItem] : []),
+        ...navItems.filter((item) => !item.permission || can(item.permission)),
+        ...(can('customers.status_board') ? [disconnectionsNavItem] : []),
+        // The agent variant — only when the user has the eligibility board
+        // but NOT the full status board (which supersedes it).
+        ...(can('customers.eligibility_board') && !can('customers.status_board') ? [eligibilityNavItem] : []),
+        ...(can('reports.view') ? [reportsNavItem] : []),
+        ...(can('manuscripts.view') ? [agentAppNavItem] : []),
+        ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
+        ...(can('audit.view') ? [auditNavItem] : []),
+        ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),
-        ...(role !== null && SETTINGS_ROLES.includes(role) ? [settingsNavItem] : []),
+        ...(canAny('company.update', 'command_runs.view') ? [settingsNavItem] : []),
     ];
 }
 
@@ -199,13 +197,11 @@ export function buildVisibleNavItems(role: string | null, permissions: string[] 
  * alongside AppLayout's router 'navigate' listener).
  */
 export function AppNav({
-    role,
     permissions = [],
     currentPath,
     companyName,
     onNavigate,
 }: {
-    role: string | null;
     /** auth.user.permissions from the Inertia share (`['*']` for super). */
     permissions?: string[];
     currentPath: string;
@@ -213,7 +209,7 @@ export function AppNav({
     onNavigate?: () => void;
 }) {
     const { t } = useTranslation();
-    const visibleNavItems = buildVisibleNavItems(role, permissions);
+    const visibleNavItems = buildVisibleNavItems(permissions);
 
     return (
         <>

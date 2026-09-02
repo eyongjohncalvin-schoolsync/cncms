@@ -12,6 +12,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
 import { ChangeZoneModal } from '@/components/agents/ChangeZoneModal';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import type { Agent, PageProps, PaginatedResponse, Zone } from '@/types';
 
 interface AgentFilters {
@@ -25,16 +26,14 @@ interface AgentsIndexProps {
     zones: Zone[];
 }
 
-const MANAGE_ROLES = ['super', 'admin', 'manager'];
-
 function lastSyncLabel(lastSyncAt: string | null): string {
     return lastSyncAt ?? 'Never';
 }
 
 export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canManage = role !== null && MANAGE_ROLES.includes(role);
+    // RBAC v2 Wave 4: AgentPolicy::create/update/delete → `agents.manage`.
+    const canManage = hasPermission(auth.user?.permissions, 'agents.manage');
 
     const [isFiltering, setIsFiltering] = useState(false);
     const [zoneChangeAgent, setZoneChangeAgent] = useState<Agent | null>(null);

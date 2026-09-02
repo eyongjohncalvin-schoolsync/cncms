@@ -11,7 +11,7 @@ import { EmptyState } from '../src/components/ui/EmptyState';
 import { colors } from '../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../src/theme/tokens';
 import { formatFcfa } from '../src/utils/format';
-import type { ManuscriptListItemApi, ManuscriptSummaryApi, TenantRole } from '../src/types/api';
+import type { ManuscriptListItemApi, ManuscriptSummaryApi } from '../src/types/api';
 
 /**
  * Manuscript — a modest, read-only view of this agent's own zone's current
@@ -85,8 +85,6 @@ import type { ManuscriptListItemApi, ManuscriptSummaryApi, TenantRole } from '..
  * this route is simply `/manuscript`.
  */
 
-const VIEW_ALLOWED_ROLES = new Set<TenantRole>(['super', 'admin', 'manager', 'agent']);
-
 // The first period v2's monthly cycle actually produced (see
 // project-manuscript-monthly-cycle: the imported "2026-08" baseline is v1's
 // 2026-07-22 run). There is nothing to show before this, so the month
@@ -128,7 +126,7 @@ function latestPeriod(): string {
 }
 
 export default function ManuscriptScreen() {
-    const { role, status: authStatus } = useAuth();
+    const { can, status: authStatus } = useAuth();
 
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -146,7 +144,9 @@ export default function ManuscriptScreen() {
     // being in its dependency list.
     const periodRef = useRef<string>(currentPeriod());
 
-    const authorized = role !== null && VIEW_ALLOWED_ROLES.has(role);
+    // RBAC v2 Wave 4: ManuscriptPolicy::viewAny → `manuscripts.view`
+    // (seeded to S A M G, matching the old role set exactly).
+    const authorized = can('manuscripts.view');
 
     const load = useCallback(
         (options?: { silent?: boolean }) => {

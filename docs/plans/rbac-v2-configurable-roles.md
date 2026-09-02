@@ -266,7 +266,7 @@ Tests: `UsersControlCenterTest`, `RoleManagementTest`.
   (Users assertions moved out; legacy-redirect test added), `RoleLoginTest`
   (`/settings/users` → `/users`), `InvestorTest` (grant/revoke paths moved).
 
-### Wave 4 — frontend enforcement + mobile + cleanup
+### Wave 4 — frontend enforcement + mobile + cleanup  ✅ BUILT (awaiting coordinator commit)
 Owns: `resources/tsx/components/shared/AppNav.tsx` (swap role arrays →
 permissions — coordinate with wave 3 if concurrent), remaining `resources/tsx`
 role literals, `mobile/src` role checks, `mobile/src/api` types,
@@ -274,6 +274,62 @@ role literals, `mobile/src` role checks, `mobile/src/api` types,
 Full mobile test run (`cd mobile && npm test`) + the web suites touched.
 Update `rbac-permissions.md` with a "v2 superseded the role-check approach"
 section and this doc's final state.
+
+**Delivered:**
+- `resources/tsx/components/shared/AppNav.tsx` — every `*_ROLES` array
+  removed. `buildVisibleNavItems(permissions)` (no more `role` arg) filters
+  a `permission?` on each base nav item (`customers.view` / `zones.view` /
+  `payments.view` / `manuscripts.view` / `agents.view` / `complaints.view`;
+  dashboard ungated) and gates the conditional items on:
+  Disconnections→`customers.status_board`, Flagged Customers→
+  `customers.eligibility_board && !customers.status_board` (agent variant
+  intent preserved), Reports→`reports.view`, Agent App→`manuscripts.view`
+  (the agreed `mobile.sync` proxy), Resources→`expenditures.dashboard`,
+  Audit→`audit.view`, Branches→`branches.manage`, Users Control Center→
+  `users.view`, Settings→`canAny('company.update','command_runs.view')`.
+  `AppNav`/`MobileNavDrawer`/`AppLayout` call sites drop the `role` prop.
+- `resources/tsx/lib/permissions.ts` (new) — `hasPermission()` /
+  `hasAnyPermission()` / `useCan()`, honouring `'*'`.
+- `resources/tsx/types/index.ts` — `AuthUser.role` widened to
+  `string | null`; `Role` union kept exported for "a system role" sites.
+- Per-page affordance checks migrated off hardcoded role names to
+  `hasPermission(auth.user?.permissions, …)`: `Payments/Index`
+  (`payments.verify`/`payments.delete`), `Customers/Index` +
+  `Customers/Show` (`customers.update`/`customers.archive`),
+  `Disconnections/Index` (`customers.change_status`), `Manuscripts/Index`
+  (`manuscripts.export`/`.calculate`/`.send_bill`), `Agents/Index`
+  (`agents.manage`), `Resources/Dashboard` + `Resources/Categories`
+  (`expense_categories.manage`), `Resources/Expenditures/Index`
+  (`expenditures.delete`). Each new permission is seeded to exactly the old
+  role set, so no system-role user's UI changes. `Reports/Index`'s
+  `AGENT_LAYOUT_ROLES` (layout selection, not a gate — like mobile
+  `zones.tsx`) and `Users.tsx`'s `role === 'agent'/'worker'` (system-role
+  display branches) left as-is per plan.
+- `mobile/src/types/api.ts` — `MeResponse.permissions` docstring updated
+  (field itself added in Wave 1).
+- `mobile/src/auth/AuthContext.tsx` — `permissions: string[]` carried in
+  state, cached in the SecureStore session profile (`AuthProfile`, optional
+  for back-compat → defaults `[]`), refreshed on every `/auth/me` (login +
+  cold start), reset on logout/401. Exposes `permissions` + `can(permission)`
+  (honours `'*'`) on the context value. (The mobile session profile is a
+  SecureStore JSON blob, not versioned SQLite — no migration; `role` was
+  stored the same way.)
+- Mobile guards swapped to `can()`: `disconnect/[uuid].tsx` →
+  `can('customers.change_status') || role === 'agent'` (matches
+  CustomerPolicy::disconnect's agent OR-branch), `reconnect/[uuid].tsx` →
+  `can('customers.change_status')` (no agent branch), `manuscript.tsx` →
+  `can('manuscripts.view')`, `reports.tsx` → `can('reports.view')`.
+  `zones.tsx`'s `role === 'agent'` (a "show MY zone" UX branch) and
+  `(tabs)/index.tsx` / `settings.tsx` (role display-only) left as-is.
+- `app/Console/Commands/TenantRole.php` — validates `role` against the
+  tenant's `roles` table after `tenancy()->initialize()` (system + custom),
+  error lists the available names. No longer `Rule::in` the 5 built-ins.
+- `app/Http/Controllers/Api/AuthController.php` — no change needed
+  (`/auth/me` already returned `permissions` from Wave 1).
+- Docs: `rbac-permissions.md` "v2 (2026-09)" section appended; this doc +
+  `docs/plans/README.md` marked DONE.
+
+**RBAC v2 is COMPLETE** — all 4 waves built.
 
 ## Non-goals (do not build)
 Per-user permission overrides. Permission scoping/qualifiers. A "ceiling"

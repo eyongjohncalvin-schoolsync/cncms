@@ -38,6 +38,7 @@ import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustment
 import { PreRunReviewPanel } from '@/components/manuscripts/PreRunReviewPanel';
 import { usePreRunReview } from '@/hooks/usePreRunReview';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
 import type { BillBatch, Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
 
@@ -80,20 +81,14 @@ function upcomingPeriod(): string {
     return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
 }
 
-const EXPORT_ROLES = ['super', 'admin', 'manager'];
-const CALCULATE_ROLES = ['super', 'admin'];
-// Matches App\Policies\ManuscriptPolicy::sendBill() — same roles as
-// viewAny()/view(), so in practice anyone who can reach this page already
-// qualifies; kept explicit for the same reason EXPORT_ROLES/CALCULATE_ROLES
-// are, rather than assuming that alignment holds forever.
-const SEND_BILL_ROLES = ['super', 'admin', 'manager', 'agent'];
-
 export default function ManuscriptsIndex({ period, filters, manuscripts, summary, zones, billBatches }: ManuscriptsIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canExport = role !== null && EXPORT_ROLES.includes(role);
-    const canCalculate = role !== null && CALCULATE_ROLES.includes(role);
-    const canSendBill = role !== null && SEND_BILL_ROLES.includes(role);
+    // RBAC v2 Wave 4: display affordances from the shared permission matrix
+    // (auth.user.permissions), each mirroring the matching ManuscriptPolicy
+    // method after Wave 2's enforcement swap.
+    const canExport = hasPermission(auth.user?.permissions, 'manuscripts.export');
+    const canCalculate = hasPermission(auth.user?.permissions, 'manuscripts.calculate');
+    const canSendBill = hasPermission(auth.user?.permissions, 'manuscripts.send_bill');
 
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);

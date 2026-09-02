@@ -12,15 +12,16 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import type { PageProps, ResourcesDashboard } from '@/types';
 
 const CATEGORY_COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#64748b'];
-const MANAGE_CATEGORY_ROLES = ['super', 'admin'];
 
 export default function ResourcesDashboardPage({ period, income, expenses, pnl, budgets }: ResourcesDashboard) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canManageCategories = role !== null && MANAGE_CATEGORY_ROLES.includes(role);
+    // RBAC v2 Wave 4: ExpenseCategoryPolicy::create/update/delete →
+    // `expense_categories.manage`.
+    const canManageCategories = hasPermission(auth.user?.permissions, 'expense_categories.manage');
 
     const [isLoading, setIsLoading] = useState(false);
 

@@ -16,6 +16,7 @@ import { CustomerStatusActions } from '@/components/customers/CustomerStatusActi
 import { BulkStatusModal } from '@/components/customers/BulkStatusModal';
 import type { StatusAction } from '@/components/customers/CustomerStatusActions';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { Customer, CustomerStatus, PageProps, PaginatedResponse, Zone } from '@/types';
 
@@ -65,8 +66,11 @@ const ELIGIBILITY_DEFAULT_NOTE = 'Automatic — arrears reached 3x monthly bill,
  */
 export default function DisconnectionsIndex({ customers, zones, filters, isAgentScoped }: DisconnectionsIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canManageStatus = role === 'super' || role === 'admin' || role === 'manager';
+    // RBAC v2 Wave 4: CustomerPolicy::disconnect/suspend/reconnect (+ bulk)
+    // → `customers.change_status`. The agent's zone-scoped disconnect is a
+    // server-side OR-branch with no matrix permission, matching the old role
+    // array's exclusion of agent from this bulk-action board.
+    const canManageStatus = hasPermission(auth.user?.permissions, 'customers.change_status');
 
     const [search, setSearch] = useState(filters.search ?? '');
     const [loading, setLoading] = useState(false);

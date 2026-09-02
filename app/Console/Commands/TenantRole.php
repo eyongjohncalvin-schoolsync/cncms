@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
 use Illuminate\Console\Command;
-use Illuminate\Validation\Rule;
 
 /**
  * Sets a central user's role inside a tenant — creating the `tenant_users`
@@ -22,7 +22,12 @@ use Illuminate\Validation\Rule;
  *      someone the `super` of a landlord-created workspace.
  *   2. Fixing / changing a user's role in a workspace when there's no UI
  *      path (e.g. bootstrapping, or a self-service owner who needs a
- *      second admin before the Settings > Users screen is reachable).
+ *      second admin before the Users Control Center screen is reachable).
+ *
+ * RBAC v2 Wave 4: the role name is validated against the tenant's own
+ * `roles` table (system + custom), not a hardcoded list of the 5 built-ins
+ * — so this can assign a tenant-defined custom role too. The check happens
+ * after `tenancy()->initialize()` so the `roles` table is the tenant's.
  *
  * Run from the Laravel Cloud command runner.
  */
@@ -31,7 +36,7 @@ class TenantRole extends Command
     protected $signature = 'cncms:tenant-role
         {tenant : The tenant id / slug (e.g. swecom)}
         {email : The central user\'s email}
-        {role : super|admin|manager|agent|worker}';
+        {role : A role name from the tenant\'s roles table (e.g. super, admin, or a custom role)}';
 
     protected $description = "Set a user's role in a tenant (creates the membership if missing)";
 
@@ -39,18 +44,7 @@ class TenantRole extends Command
     {
         $tenantId = (string) $this->argument('tenant');
         $email = mb_strtolower(trim((string) $this->argument('email')));
-        $role = (string) $this->argument('role');
-
-        $validator = validator(
-            ['role' => $role],
-            ['role' => ['required', Rule::in(['super', 'admin', 'manager', 'agent', 'worker'])]],
-        );
-
-        if ($validator->fails()) {
-            $this->error('Role must be one of: super, admin, manager, agent, worker.');
-
-            return self::FAILURE;
-        }
+        $role = mb_strtolower(trim((string) $this->argument('role')));
 
         $tenant = Tenant::find($tenantId);
 
@@ -71,6 +65,17 @@ class TenantRole extends Command
         tenancy()->initialize($tenant);
 
         try {
+            $availableRoles = Role::query()->orderBy('name')->pluck('name')->all();
+
+            if (! in_array($role, $availableRoles, true)) {
+                $this->error(
+                    "No role [{$role}] in tenant [{$tenantId}]. Available roles: "
+                    .(count($availableRoles) > 0 ? implode(', ', $availableRoles) : '(none — run cncms:seed-default-roles)').'.'
+                );
+
+                return self::FAILURE;
+            }
+
             $membership = TenantUser::query()->updateOrCreate(
                 ['user_id' => $user->id, 'tenant_id' => $tenant->id],
                 ['role' => $role],

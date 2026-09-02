@@ -31,6 +31,7 @@ import { CustomerStatusActions } from '@/components/customers/CustomerStatusActi
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
 import type { CustomerDetail, PageProps } from '@/types';
 
@@ -45,8 +46,8 @@ function initials(name: string): string {
 
 export default function CustomersShow({ customer }: { customer: CustomerDetail }) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canArchive = role === 'super' || role === 'admin' || role === 'manager';
+    // RBAC v2 Wave 4: CustomerPolicy::archive/restore/delete → `customers.archive`.
+    const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
     const isArchived = Boolean(customer.archived_at);
     const [archiveOpen, setArchiveOpen] = useState(false);
 

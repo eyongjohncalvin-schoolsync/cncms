@@ -11,7 +11,14 @@ export interface AuthUser {
     name: string;
     username: string;
     email: string;
-    role: Role | null;
+    /**
+     * The user's role NAME — a built-in (`Role`) or, since RBAC v2 Wave 3,
+     * a tenant-defined custom role, so this is a plain `string`, not the
+     * `Role` union. Display only (RoleBadge, Users Control Center); every
+     * real access decision goes through `permissions` below, resolved from
+     * the per-tenant role→permission matrix.
+     */
+    role: string | null;
     /** Platform-wide flag, independent of role/tenant — see EnsureLandlord. */
     is_landlord: boolean;
     /**
@@ -24,8 +31,9 @@ export interface AuthUser {
     /**
      * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the permission
      * strings this user's role grants, or `['*']` for a super role. Shared
-     * by HandleInertiaRequests::share(). Wave 1 only populates it — no
-     * consumer yet; AppNav still keys off role arrays until Wave 4.
+     * by HandleInertiaRequests::share(). Since Wave 4 this is what drives
+     * AppNav visibility and every client-side `can*` affordance — see
+     * `buildVisibleNavItems` and the per-page permission checks.
      */
     permissions: string[];
 }

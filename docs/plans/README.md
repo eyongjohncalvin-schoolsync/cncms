@@ -8,7 +8,7 @@ agents touch the same files in the same wave.
 
 | # | Plan | Waves | Status |
 |---|---|---|---|
-| 1 | [RBAC v2 — configurable roles & permissions](./rbac-v2-configurable-roles.md) | 4 | Waves 1-2 committed (`d7607731`, `2a47d639`); Wave 3 built (awaiting coordinator commit); Wave 4 not started |
+| 1 | [RBAC v2 — configurable roles & permissions](./rbac-v2-configurable-roles.md) | 4 | ✅ **DONE** — waves 1-3 committed (`d7607731`, `2a47d639`, `5dd128e6`); wave 4 built (awaiting coordinator commit) |
 | 2 | [Payment receipts + WhatsApp send](./payment-receipts-and-whatsapp.md) | 3 | not started |
 | 3 | [Customer record export](./customer-record-export.md) | 1 | not started |
 

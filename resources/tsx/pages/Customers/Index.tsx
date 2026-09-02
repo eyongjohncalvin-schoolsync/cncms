@@ -19,6 +19,7 @@ import type { BulkBillTarget } from '@/components/customers/BulkUpdateBillModal'
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { Customer, CustomerLevel, CustomerStatus, PageProps, PaginatedResponse, Zone } from '@/types';
 
@@ -42,15 +43,15 @@ const levelOptions: CustomerLevel[] = ['normal', 'Vip', 'Operator'];
 
 export default function CustomersIndex({ customers, zones, filters, archived_view: archivedView }: CustomersIndexProps) {
     const { auth, flash } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    // Same super/admin/manager gate as the single-customer edit form
-    // (App\Policies\CustomerPolicy::update()) — a bulk price adjustment is
-    // the same "can edit customer billing" ability applied to many rows,
-    // not a distinct one. See BulkUpdateCustomerBillRequest::authorize().
-    const canBulkUpdateBill = role === 'super' || role === 'admin' || role === 'manager';
-    // Archive / restore / delete — CustomerPolicy::archive()/restore()/delete(),
-    // all super/admin/manager.
-    const canArchive = role === 'super' || role === 'admin' || role === 'manager';
+    // RBAC v2 Wave 4: display affordances from the shared permission matrix
+    // (auth.user.permissions), not hardcoded role names. A bulk price
+    // adjustment is the same "can edit customer billing" ability as the
+    // single-customer edit form → `customers.update`
+    // (CustomerPolicy::update / BulkUpdateCustomerBillRequest::authorize()).
+    const canBulkUpdateBill = hasPermission(auth.user?.permissions, 'customers.update');
+    // Archive / restore / delete — CustomerPolicy::archive()/restore()/delete()
+    // → `customers.archive`.
+    const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
 
     const [search, setSearch] = useState(filters.search ?? '');
     const [loading, setLoading] = useState(false);

@@ -45,10 +45,10 @@ export interface MeResponse {
     role: TenantRole;
     /**
      * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the permission
-     * strings this role grants, or `['*']` for a super role. Wave 1 only
-     * adds the field — mobile guards still key off `role` until Wave 4
-     * swaps them to permission checks (cache with the session, refresh on
-     * each successful sync, same cadence as `role`).
+     * strings this role grants, or `['*']` for a super role. Since Wave 4
+     * this is what the mobile guards check (via AuthContext's `can()`), not
+     * `role` — cached alongside `role` in the offline session profile and
+     * refreshed on every `/auth/me` (login + cold start).
      */
     permissions: string[];
 }

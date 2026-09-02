@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { PageProps, PaginatedResponse, Payment, PaymentFrequency, VerificationStatus } from '@/types';
 
@@ -86,14 +87,14 @@ const frequencyLabels: Record<PaymentFrequency, string> = {
 
 export default function PaymentsIndex({ payments, filters, statusCounts }: PaymentsIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const canVerify = auth.user?.role === 'super' || auth.user?.role === 'admin' || auth.user?.role === 'manager';
-    // Mirrors PaymentPolicy::delete()'s stricter super/admin-only role
-    // check (unlike canVerify above, which mirrors update()'s
-    // super/admin/manager) — same client-computed-from-role idiom this page
-    // already used for canVerify, rather than a per-row backend flag, since
-    // PaymentPolicy::delete() is a pure class-level check with no per-row
-    // variation.
-    const canDelete = auth.user?.role === 'super' || auth.user?.role === 'admin';
+    // RBAC v2 Wave 4: display affordances resolved from the shared
+    // permission matrix (auth.user.permissions), not hardcoded role names.
+    // `payments.verify` mirrors PaymentPolicy::verify (the agent's
+    // zone-scoped verify is a server-side OR-branch with no matrix
+    // permission, matching the old role array's exclusion of agent here);
+    // `payments.delete` mirrors PaymentPolicy::delete's stricter gate.
+    const canVerify = hasPermission(auth.user?.permissions, 'payments.verify');
+    const canDelete = hasPermission(auth.user?.permissions, 'payments.delete');
 
     const [reviewing, setReviewing] = useState<Payment | null>(null);
     const [deleting, setDeleting] = useState<Payment | null>(null);

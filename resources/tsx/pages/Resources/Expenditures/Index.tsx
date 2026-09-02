@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import type { Expenditure, ExpenseCategory, PageProps, PaginatedResponse } from '@/types';
 
 interface ExpendituresIndexProps {
@@ -23,12 +24,10 @@ interface ExpendituresIndexProps {
     categories: ExpenseCategory[];
 }
 
-const DELETE_ROLES = ['super', 'admin'];
-
 export default function ExpendituresIndex({ expenditures, filters, categories }: ExpendituresIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canDelete = role !== null && DELETE_ROLES.includes(role);
+    // RBAC v2 Wave 4: ExpenditurePolicy::delete → `expenditures.delete`.
+    const canDelete = hasPermission(auth.user?.permissions, 'expenditures.delete');
 
     const [isLoading, setIsLoading] = useState(false);
 

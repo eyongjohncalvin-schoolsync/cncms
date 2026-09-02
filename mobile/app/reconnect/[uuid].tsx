@@ -17,8 +17,6 @@ import type { CustomerDetailApi } from '../../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting' | 'success';
 
-const CAN_RECONNECT_ROLES = new Set(['super', 'admin', 'manager']);
-
 /**
  * Reconnect & Pay — a distinct flow from Record Payment, not a variant of
  * it (mobile-app-react-native.md §4). Maps directly onto the server's
@@ -70,7 +68,7 @@ const CAN_RECONNECT_ROLES = new Set(['super', 'admin', 'manager']);
 export default function ReconnectScreen() {
     const { uuid } = useLocalSearchParams<{ uuid: string }>();
     const router = useRouter();
-    const { role } = useAuth();
+    const { can } = useAuth();
 
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -228,7 +226,11 @@ export default function ReconnectScreen() {
     const arrears = Number(customer.manuscript?.total_arrears ?? 0);
     const fine = Number(customer.reconnection_fine ?? 0);
     const total = arrears + (includeFine ? fine : 0);
-    const authorized = role !== null && CAN_RECONNECT_ROLES.has(role);
+    // RBAC v2 Wave 4: CustomerPolicy::reconnect() is `customers.change_status`
+    // only — NO agent OR-branch (unlike disconnect), so no `role === 'agent'`
+    // fallback here. A field agent still gets the read-only figures + the
+    // "manager/admin approval required" explanation below.
+    const authorized = can('customers.change_status');
     const submitting = phase === 'submitting';
 
     return (

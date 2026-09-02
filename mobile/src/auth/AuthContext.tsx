@@ -16,6 +16,16 @@ export interface AuthUser {
 interface AuthProfile {
     user: AuthUser;
     role: TenantRole;
+    /**
+     * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the resolved
+     * permission list for this session's role, `['*']` for a super role.
+     * Cached on disk alongside `role` so it survives an offline cold start
+     * exactly like `role` does; refreshed on every `/auth/me`. Optional on
+     * the wire only for backward-compat with a profile written by a
+     * pre-Wave-4 build — `readCachedProfile()` defaults a missing value to
+     * `[]` (nothing granted until the next online `/auth/me` repopulates it).
+     */
+    permissions?: string[];
 }
 
 const PROFILE_KEY = 'cncms_auth_profile';
@@ -43,6 +53,19 @@ interface AuthContextValue {
     status: AuthStatus;
     user: AuthUser | null;
     role: TenantRole | null;
+    /**
+     * RBAC v2 Wave 4: the resolved permission list for `role` (`['*']` for
+     * super), from `/auth/me` and cached offline alongside `role`. Prefer
+     * the `can()` helper below over reading this directly.
+     */
+    permissions: string[];
+    /**
+     * True if the session holds `permission` (or is super, i.e. `['*']`).
+     * The mobile counterpart of the web `hasPermission()` /
+     * `TenantContext::can()` — a DISPLAY affordance; the server-side Policy
+     * is the real gate on every write.
+     */
+    can: (permission: string) => boolean;
     /** True once /auth/me has confirmed the token online at least this session. */
     roleConfirmed: boolean;
     login: (identifier: string, password: string) => Promise<void>;
@@ -78,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [status, setStatus] = useState<AuthStatus>('loading');
     const [user, setUser] = useState<AuthUser | null>(null);
     const [role, setRole] = useState<TenantRole | null>(null);
+    const [permissions, setPermissions] = useState<string[]>([]);
     const [roleConfirmed, setRoleConfirmed] = useState(false);
 
     const handleUnauthorized = useCallback(() => {
@@ -86,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void clearCachedProfile();
         setUser(null);
         setRole(null);
+        setPermissions([]);
         setRoleConfirmed(false);
         setStatus('unauthenticated');
     }, []);
@@ -112,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (cached) {
                 setUser(cached.user);
                 setRole(cached.role);
+                setPermissions(cached.permissions ?? []);
                 setStatus('authenticated');
             }
 
@@ -119,9 +145,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 const me = await fetchMe();
                 setUser(me.user);
                 setRole(me.role);
+                setPermissions(me.permissions);
                 setRoleConfirmed(true);
                 setStatus('authenticated');
-                await writeCachedProfile({ user: me.user, role: me.role });
+                await writeCachedProfile({ user: me.user, role: me.role, permissions: me.permissions });
             } catch {
                 // A genuine 401 is already fully handled by
                 // handleUnauthorized(), invoked synchronously by the
@@ -156,8 +183,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setUser(me.user);
         setRole(me.role);
+        setPermissions(me.permissions);
         setRoleConfirmed(true);
-        await writeCachedProfile({ user: me.user, role: me.role });
+        await writeCachedProfile({ user: me.user, role: me.role, permissions: me.permissions });
         setStatus('authenticated');
     }, []);
 
@@ -177,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await clearCachedProfile();
         setUser(null);
         setRole(null);
+        setPermissions([]);
         setRoleConfirmed(false);
         setStatus('unauthenticated');
     }, []);
@@ -190,14 +219,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const next = { ...user, ...patch };
 
             setUser(next);
-            await writeCachedProfile({ user: next, role });
+            await writeCachedProfile({ user: next, role, permissions });
         },
-        [user, role],
+        [user, role, permissions],
+    );
+
+    const can = useCallback(
+        (permission: string) => permissions.includes('*') || permissions.includes(permission),
+        [permissions],
     );
 
     const value = useMemo<AuthContextValue>(
-        () => ({ status, user, role, roleConfirmed, login, logout, updateCachedUser }),
-        [status, user, role, roleConfirmed, login, logout, updateCachedUser],
+        () => ({ status, user, role, permissions, can, roleConfirmed, login, logout, updateCachedUser }),
+        [status, user, role, permissions, can, roleConfirmed, login, logout, updateCachedUser],
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
