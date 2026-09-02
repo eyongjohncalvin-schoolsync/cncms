@@ -110,6 +110,7 @@ class DefaultRolesSeeder extends Seeder
             Permission::PaymentsCreate->value,
             Permission::PaymentsUpdate->value,
             Permission::PaymentsVerify->value,
+            Permission::PaymentsIssueReceipt->value,
 
             Permission::ManuscriptsView->value,
             Permission::ManuscriptsExport->value,

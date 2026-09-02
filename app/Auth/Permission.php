@@ -55,6 +55,15 @@ enum Permission: string
     case PaymentsDelete = 'payments.delete';
     /** verify + bulkVerify class gate (agent zone fence stays an OR-branch + per-item recheck). */
     case PaymentsVerify = 'payments.verify';
+    /**
+     * The manual "Issue / re-issue receipt" action on the payment detail
+     * page (Wave 2 of docs/plans/payment-receipts-and-whatsapp.md). Auto-
+     * issue on verify() needs no permission — it is a side effect of an
+     * already-authorised approval — but issuing/re-issuing a receipt by hand
+     * (for a payment recorded before receipts shipped, or a correction) is
+     * gated. Seeded to the same roles that hold payments.verify.
+     */
+    case PaymentsIssueReceipt = 'payments.issue_receipt';
 
     // ---- Manuscripts -------------------------------------------------
     case ManuscriptsView = 'manuscripts.view';

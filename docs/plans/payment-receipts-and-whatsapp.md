@@ -56,7 +56,35 @@ payment is later rejected, mark the receipt `void` (don't delete — audit).
 
 ## Waves
 
-### Wave 1 — model, generation, PDF
+### Wave 1 — model, generation, PDF  — ✅ BUILT (awaiting coordinator commit)
+
+Delivered:
+- `database/migrations/tenant/2026_09_04_000000_create_payment_receipts_table.php`
+  — `payment_receipts` + `receipt_counters` (per-year, `FOR UPDATE`-locked
+  allocator). Run on all tenant schemas.
+- `database/migrations/tenant/2026_09_04_000100_grant_issue_receipt_permission.php`
+  — idempotent top-up of `payments.issue_receipt` onto admin + manager.
+- `app/Models/PaymentReceipt.php`, `app/Services/PaymentReceiptService.php`
+  (`issueFor` / `void` / `voidForPayment` / `pdf`), `resources/views/pdf/receipt.blade.php`.
+- `App\Auth\Permission::PaymentsIssueReceipt` (`payments.issue_receipt`) +
+  `DefaultRolesSeeder` (manager set; admin gets it via `Permission::values()`).
+- Auto-issue / void hook wired in `PaymentVerificationService::verify()`
+  (approve branch issues, reject branch voids — both inside the status-write
+  transaction).
+- `app/Console/Commands/BackfillPaymentReceipts.php`
+  (`cncms:backfill-payment-receipts {tenant?} --no-dry-run`; dry-run default).
+- Tests: `tests/Feature/PaymentReceiptTest.php` (11),
+  `tests/Feature/PaymentReceiptBackfillTest.php` (2). Regression:
+  Web/Api `PaymentTest`, `Api/PaymentVerificationTest` all green.
+
+Notes for Wave 2: `PaymentReceiptService::pdf()` returns a disk-relative
+path on `config('filesystems.default')`; build the signed URL / download
+route on top of it. The receipt is reachable as `$payment->receipt` once
+that relation is added (Wave 2). Logo is fetched live at render, everything
+else is frozen in `snapshot`. `sent_log` (jsonb `[]`) is ready for Wave 3
+to append `{channel, at, by, to}`.
+
+Original scope:
 Owns: `database/migrations/tenant/*_create_payment_receipts_table.php`,
 `app/Models/PaymentReceipt.php`, `app/Services/PaymentReceiptService.php`
 (issue / reissue / void, receipt-number allocation, snapshot build),

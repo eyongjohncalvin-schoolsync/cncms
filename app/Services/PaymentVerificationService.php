@@ -30,6 +30,7 @@ class PaymentVerificationService
         private readonly PaymentVerificationRepositoryInterface $verifications,
         private readonly PaymentRepositoryInterface $payments,
         private readonly TenantContext $context,
+        private readonly PaymentReceiptService $receipts,
     ) {}
 
     public function verify(Payment $payment, VerifyPaymentData $data, User $actor): Payment
@@ -48,6 +49,14 @@ class PaymentVerificationService
                 ]);
 
                 $this->payments->update($payment, ['verification_status' => 'verified']);
+
+                // Auto-issue the customer's payment receipt (explicit
+                // call-site wiring, not an observer — see
+                // App\Services\NotificationService's class doc). Idempotent:
+                // a re-approval reuses the existing row. In the same
+                // transaction as the status write, so a verified payment
+                // always has a receipt.
+                $this->receipts->issueFor($payment, $actor);
             } else {
                 $this->verifications->update($verification, [
                     'status' => 'rejected',
@@ -57,6 +66,11 @@ class PaymentVerificationService
                 ]);
 
                 $this->payments->update($payment, ['verification_status' => 'rejected']);
+
+                // A payment that was verified (and so had a receipt issued)
+                // and is now being rejected: void the receipt, keep the row
+                // for audit. No-op when there is no receipt.
+                $this->receipts->voidForPayment($payment);
             }
         });
 
