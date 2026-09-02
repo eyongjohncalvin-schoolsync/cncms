@@ -68,6 +68,13 @@ class HandleInertiaRequests extends Middleware
                     // Reports/Index.tsx; ReportPolicy is the real server-side
                     // gate on the /reports route itself.
                     'is_investor' => (bool) $context?->tenantUser->is_investor,
+                    // RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the
+                    // resolved permission list for this user's role, or
+                    // ['*'] for a super role. Wave 1 only SHARES it — no
+                    // frontend consumer yet (AppNav still keys off role
+                    // arrays); Wave 4 swaps those to permissions.includes().
+                    // Mirrored by Api\AuthController::me().
+                    'permissions' => $context ? $context->permissions() : [],
                 ] : null,
             ],
             // The resolved tenant's company name, for the app chrome

@@ -6,6 +6,8 @@ namespace App\Support;
 
 use App\Models\Agent;
 use App\Models\TenantUser;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Resolved tenant-membership context for the currently authenticated API
@@ -41,6 +43,18 @@ use App\Models\TenantUser;
  */
 final class TenantContext
 {
+    /**
+     * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the resolved
+     * {is_super, permissions} for `$this->role`, looked up once and memoised
+     * for the life of this instance. Null until first accessed. The
+     * instance is bound per-request as a container singleton by both
+     * resolving middleware, so this memo is effectively request-scoped —
+     * no separate registry needed.
+     *
+     * @var array{is_super: bool, permissions: list<string>}|null
+     */
+    private ?array $roleState = null;
+
     public function __construct(
         public readonly TenantUser $tenantUser,
         public readonly string $role,
@@ -56,6 +70,111 @@ final class TenantContext
     public function isAnyOf(string ...$roles): bool
     {
         return in_array($this->role, $roles, true);
+    }
+
+    /**
+     * The `super` bypass (Gate::before). Authoritative source is the
+     * `roles.is_super` flag, not the string `$this->role === 'super'` — a
+     * tenant could in principle rename which role holds it, and the flag is
+     * the single guaranteed-unique marker (uq_roles_single_super).
+     */
+    public function isSuper(): bool
+    {
+        return $this->resolveRoleState()['is_super'];
+    }
+
+    /**
+     * True if `$this->role` grants $permission (a value from
+     * App\Auth\Permission). Always true for a super role — its stored rows
+     * are irrelevant. Wave 2 rewrites the Policy classes to call this;
+     * Wave 1 only wires it into the Gate and the frontend share.
+     */
+    public function can(string $permission): bool
+    {
+        if ($this->isSuper()) {
+            return true;
+        }
+
+        return in_array($permission, $this->resolveRoleState()['permissions'], true);
+    }
+
+    public function canAny(string ...$permissions): bool
+    {
+        if ($this->isSuper()) {
+            return true;
+        }
+
+        $granted = $this->resolveRoleState()['permissions'];
+
+        foreach ($permissions as $permission) {
+            if (in_array($permission, $granted, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The resolved permission list for this role — `['*']` for a super role
+     * (matching what HandleInertiaRequests::share() / Api\AuthController::me()
+     * expose to the frontend), otherwise the exact set of granted strings.
+     *
+     * @return list<string>
+     */
+    public function permissions(): array
+    {
+        if ($this->resolveRoleState()['is_super']) {
+            return ['*'];
+        }
+
+        return $this->resolveRoleState()['permissions'];
+    }
+
+    /**
+     * One query, joining `roles` -> `role_permissions` by the role name
+     * `tenant_users.role` holds. Kept as a lean query builder call rather
+     * than hydrating App\Models\Role — this runs on every authenticated
+     * request (both middleware call resolve(), and the Gate/share read it),
+     * so it stays as cheap as the branch/zone lookups already here.
+     *
+     * A role name with no matching `roles` row (a schema mid-migration
+     * before the seed ran, or a hand-set `tenant_users.role` string that
+     * doesn't exist) fails closed: not super, zero permissions.
+     *
+     * @return array{is_super: bool, permissions: list<string>}
+     */
+    private function resolveRoleState(): array
+    {
+        if ($this->roleState !== null) {
+            return $this->roleState;
+        }
+
+        // `roles` not yet created in this schema — the window between this
+        // migration landing in the codebase and `tenants:migrate` running.
+        // Checked with Schema::hasTable (a clean information_schema SELECT),
+        // NOT a try/catch around the real query: a failed statement inside
+        // a transaction poisons it on Postgres ("current transaction is
+        // aborted"), which the transaction-wrapped feature-test suite runs
+        // into on every authenticated request. Fail closed — Wave 1 changes
+        // no Policy, so this degrades to exactly today's behaviour.
+        if (! Schema::hasTable('roles')) {
+            return $this->roleState = ['is_super' => false, 'permissions' => []];
+        }
+
+        $rows = DB::table('roles')
+            ->leftJoin('role_permissions', 'roles.id', '=', 'role_permissions.role_id')
+            ->where('roles.name', $this->role)
+            ->get(['roles.is_super', 'role_permissions.permission']);
+
+        if ($rows->isEmpty()) {
+            return $this->roleState = ['is_super' => false, 'permissions' => []];
+        }
+
+        return $this->roleState = [
+            'is_super' => (bool) $rows->first()->is_super,
+            'permissions' => $rows->pluck('permission')->filter()->values()->all(),
+        ];
     }
 
     public function isCrossBranch(): bool

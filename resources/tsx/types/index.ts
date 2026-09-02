@@ -15,6 +15,13 @@ export interface AuthUser {
      * AppLayout; the server-side gate is ReportPolicy, not this flag.
      */
     is_investor: boolean;
+    /**
+     * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the permission
+     * strings this user's role grants, or `['*']` for a super role. Shared
+     * by HandleInertiaRequests::share(). Wave 1 only populates it — no
+     * consumer yet; AppNav still keys off role arrays until Wave 4.
+     */
+    permissions: string[];
 }
 
 export interface ImportFailedRow {

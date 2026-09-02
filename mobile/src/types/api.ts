@@ -43,6 +43,14 @@ export interface MeResponse {
     };
     /** The authoritative role — resolved by ResolveTenant + TenantContext. */
     role: TenantRole;
+    /**
+     * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the permission
+     * strings this role grants, or `['*']` for a super role. Wave 1 only
+     * adds the field — mobile guards still key off `role` until Wave 4
+     * swaps them to permission checks (cache with the session, refresh on
+     * each successful sync, same cadence as `role`).
+     */
+    permissions: string[];
 }
 
 /** PATCH /auth/profile — App\Http\Requests\UpdateProfileRequest. Every field

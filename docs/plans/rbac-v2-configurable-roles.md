@@ -167,7 +167,19 @@ or remove the old nav entry (coordinator decides at wave 3).
 
 ## Waves
 
-### Wave 1 — foundation (no behaviour change)
+### Wave 1 — foundation (no behaviour change)  ✅ BUILT (awaiting coordinator commit)
+Delivered: `app/Auth/Permission.php` (49-case enum + `byArea()`),
+`app/Models/Role.php` + `app/Models/RolePermission.php`,
+`database/migrations/tenant/2026_09_02_000000_create_roles_and_role_permissions_tables.php`
++ `2026_09_02_000100_seed_default_roles.php`, `database/seeders/DefaultRolesSeeder.php`
+(wired into `TenantDatabaseSeeder`), `app/Console/Commands/SeedDefaultRoles.php`
+(`cncms:seed-default-roles`), `TenantContext::can()/canAny()/isSuper()/permissions()`,
+`app/Providers/PermissionServiceProvider.php` (Gate::before + 49 defines),
+`permissions` in the Inertia share + `/auth/me` + both TS type files,
+`tests/Feature/Web/RolePermissionResolutionTest.php`. Catalog table below.
+**Coordinator must run `php artisan tenants:migrate` (or `cncms:seed-default-roles`)
+before Wave 2** — see the Wave 1 notes.
+
 Owns: `database/migrations/tenant/*_create_roles_tables.php`,
 `database/seeders/` role seed, `app/Auth/Permission.php`,
 `app/Models/Role.php`, `app/Support/TenantContext.php` (+ `resolve()`),
@@ -211,3 +223,169 @@ section and this doc's final state.
 Per-user permission overrides. Permission scoping/qualifiers. A "ceiling"
 concept. Time-boxed grants. Approval workflow for role changes. Any of the
 shelved v1 matrix's extra tables.
+
+---
+
+## Wave 1: final catalog
+
+Audited every method in the 14 `app/Policies/*` classes, every
+`$this->context->isAnyOf(...)` / `is('...')` call site in `app/`, every
+`$user->can(...)` FormRequest `authorize()`, and every `abort_unless` role
+gate. There are **no** route-level `->middleware()` role gates — all role
+enforcement is Policy methods plus a handful of controller/service checks.
+
+**Catalog = 49 permissions** (`App\Auth\Permission`). Two were added beyond
+the plan's first sketch because their role set genuinely differs from the
+nearest neighbour (the collapsing rule says keep separate):
+`customers.eligibility_board` (adds `agent` vs `customers.status_board`) and
+`expense_categories.manage` (`super,admin` — distinct from every
+`expenditures.*`). `notification_settings` collapsed **into** `company.view`
+/ `company.update` (identical `super,admin` gate, same Settings surface).
+
+Role-set shorthand: **S**=super **A**=admin **M**=manager **G**=agent
+**W**=worker. "all" = unconditionally `true` for any authenticated tenant
+user (S/A/M/G/W).
+
+### Customers
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `customers.view` | `CustomerPolicy::viewAny/view` | all | A M G W |
+| `customers.create` | `CustomerPolicy::create`; `ImportCustomersRequest`; `CustomerController::store/import` | S A M | A M |
+| `customers.update` | `CustomerPolicy::update`; `BulkUpdateCustomerBillRequest` | S A M | A M |
+| `customers.delete` | `CustomerPolicy::delete`; `CustomerController::destroy` | S A M | A M |
+| `customers.archive` | `CustomerPolicy::archive/restore`; `ArchiveCustomerRequest` | S A M | A M |
+| `customers.print_bill` | `CustomerPolicy::printBill`; `BillController`; `Api\BillController` | S A M G | A M G |
+| `customers.change_status` | `CustomerPolicy::disconnect/suspend/reconnect` + `bulkDisconnect/bulkSuspend/bulkReconnect`; the `*CustomerRequest` authorize()s | S A M (agent gets zone-scoped **disconnect only**, stays an OR-branch) | A M |
+| `customers.status_board` | `CustomerPolicy::viewStatusBoard` (the /disconnections board) | S A M | A M |
+| `customers.eligibility_board` | `CustomerPolicy::viewEligibilityBoard`; `DisconnectionsController::eligibilityIndex`; `Api\CustomerController` | S A M G | A M G |
+
+### Payments
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `payments.view` | `PaymentPolicy::viewAny/view` | all | A M G W |
+| `payments.create` | `PaymentPolicy::create` + `bulkCreate` + `attachReceipt`; `PaymentController::create/store` | S A M G (**+ worker w/ `can_record_payments`**, stays an OR-branch) | A M G |
+| `payments.update` | `PaymentPolicy::update`; `PaymentController` `can_manage` | S A M | A M |
+| `payments.delete` | `PaymentPolicy::delete`; `PaymentController` `can_delete` | S A | A |
+| `payments.verify` | `PaymentPolicy::verify` + `bulkVerify`; `PaymentService::create` auto-verify; `VerifyPaymentRequest`/`BulkVerifyPaymentRequest` | S A M (agent gets zone-scoped verify, stays an OR-branch; `bulkVerify` keeps agent in the class gate + per-item zone recheck in `PaymentVerificationService::verifyMany`) | A M |
+
+### Manuscripts
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `manuscripts.view` | `ManuscriptPolicy::viewAny/view`; `Api\ManuscriptController`; `Api\SyncController::authorizeSync` (same S A M G set); `AgentAppController` (same set) | S A M G | A M G |
+| `manuscripts.export` | `ManuscriptPolicy::export`; `BillBatchController` (all 4 actions) | S A M | A M |
+| `manuscripts.calculate` | `ManuscriptPolicy::calculate`; `ManuscriptController` (run/rerun/publish paths) | S A | A |
+| `manuscripts.send_bill` | `ManuscriptPolicy::sendBill` | S A M G | A M G |
+
+### Zones / field agents / branches
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `zones.view` | `ZonePolicy::viewAny/view` | all | A M G W |
+| `zones.manage` | `ZonePolicy::create/update/delete`; `ImportZonesRequest` | S A M | A M |
+| `agents.view` | `AgentPolicy::viewAny/view` | all | A M G W |
+| `agents.manage` | `AgentPolicy::create/update/delete` | S A M | A M |
+| `branches.view` | `BranchPolicy::viewAny/view` | all | A M G W |
+| `branches.manage` | `BranchPolicy::create/update/delete` | S A | A |
+
+### Expenditures
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `expenditures.view` | `ExpenditurePolicy::viewAny/view`; `ExpenseCategoryPolicy::viewAny/view` | all | A M G W |
+| `expenditures.create` | `ExpenditurePolicy::create` | S A M G | A M G |
+| `expenditures.update` | `ExpenditurePolicy::update` | S A | A |
+| `expenditures.delete` | `ExpenditurePolicy::delete`; `Api\ExpenditureController` | S A | A |
+| `expenditures.dashboard` | `ExpenditurePolicy::viewDashboard`; `ResourceController::dashboard`; `Api\ResourcesDashboardController` | S A M | A M |
+| `expense_categories.manage` | `ExpenseCategoryPolicy::create/update/delete` | S A | A |
+
+### Reports / audit
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `reports.view` | `ReportPolicy::view` | S A M G (**+ `is_investor`**, stays an OR-branch) | A M G |
+| `reports.export` | `ReportPolicy::export`; `ReportController::export` `can_export` | S A M | A M |
+| `audit.view` | `AuditLogPolicy::viewAny`; `AuditLogController`; `Api\AuditLogController` | S A M | A M |
+
+> `ReportService::applyRoleVisibility()` also strips the `pnl` sub-payload
+> for anyone below `super,admin`. That is a **payload-shaping** filter inside
+> an already-authorised response, not an access gate — left as-is for Wave 2
+> to decide whether it wants a `reports.pnl` permission. Not seeded.
+
+### Complaints
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `complaints.view` | `ComplaintPolicy::viewAny/view`; `ComplaintController` dashboard-vs-submission view is cosmetic, not a gate | all | A M G W |
+| `complaints.create` | `ComplaintPolicy::create` | all | A M G W |
+| `complaints.resolve` | `ComplaintPolicy::resolve` + `reopen` + `linkDuplicate` (all S A M); `ReopenComplaintRequest`/`LinkDuplicateComplaintRequest`; `ComplaintController` `can_manage`/`can_link_duplicate` | S A M (**+ actor ≠ submitter**, stays in the policy) | A M |
+| `complaints.assign` | `ComplaintPolicy::assign`; `AssignComplaintRequest` | S A M | A M |
+| `complaints.notify_investors` | `ComplaintPolicy::notifyInvestors`; `NotifyInvestorsComplaintRequest`; `ComplaintController` `can_notify_investors` | S A | A |
+
+### Arrears adjustments
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `arrears.view` | `ArrearsAdjustmentPolicy::viewAny/view` | all | A M G W |
+| `arrears.request` | `ArrearsAdjustmentPolicy::create` | all | A M G W |
+| `arrears.approve` | `ArrearsAdjustmentPolicy::approve` + `reject`; `ApproveArrearsAdjustmentRequest`/`RejectArrearsAdjustmentRequest`; `AuditLogController` `can_approve`/`can_reject` | stage 1 (`pending`): S A M; stage 2 (`pending_second_approval`): S A — plus the maker≠checker identity rules and the `super` self-approval carve-out | A M (stage-2 "admin/super only" narrowing + all identity rules **stay hardcoded** in the policy — Wave 2) |
+
+### Company & settings / task scheduler / users
+
+| Permission | Policy methods / call sites | Current role set | Seeded to |
+|---|---|---|---|
+| `company.view` | `CompanyPolicy::view`; `NotificationSettingPolicy::view`; `SettingsBillPrintingController` (uses `view Company`) | all | A M G W |
+| `company.update` | `CompanyPolicy::update`; `NotificationSettingPolicy::update` | S A | A |
+| `command_runs.view` | `CommandRunPolicy::viewAny`; `SettingsCommandRunController::index` | S A | A |
+| `command_runs.publish` | `CommandRunPolicy::publish` (publish + cancel + rollback + unpublish); `SettingsCommandRunController` (all 4 mutating actions + their `can*` props); `ManuscriptController` `canPublish` | S A | A |
+| `command_runs.schedule` | `CommandRunPolicy::manageSchedule`; `SettingsCommandRunController` `canManageSchedule` | S A | A |
+| `users.view` | `TenantUserPolicy::viewAny/view`; `SettingsUserController::index` | S A | A |
+| `users.manage` | `TenantUserPolicy::create/update/deactivate`; `SettingsUserController::store/update/deactivate`; `UpdateTenantUserRequest`/`StoreTenantUserRequest` | S A | A |
+| `roles.manage` | *(no policy yet — Wave 3 matrix UI)* | S A (by design) | A |
+
+### Seed summary
+
+| Role | `is_super` | Permission count | Rule |
+|---|---|---|---|
+| `super` | **true** | — (bypass, no rows) | Gate::before |
+| `admin` | false | 49 (all) | every catalog entry |
+| `manager` | false | 35 | the `super,admin,manager` set |
+| `agent` | false | 18 | the `super,admin,manager,agent` set (minus `customers.change_status` & `payments.verify` — agent only gets those zone-scoped, as OR-branches) |
+| `worker` | false | 11 | every unconditionally-`true` policy method + `complaints.create` + `arrears.request` |
+
+Nesting holds: `worker ⊂ agent ⊂ manager ⊂ admin`.
+
+### Notes for Wave 2
+
+- **`Gate::before` super bypass is global** (per the spec's literal
+  pseudocode). Two policies deliberately return `false` for a `super` today
+  and Wave 2 must decide whether to preserve that against the bypass:
+  `ComplaintPolicy::resolve/reopen` (submitter exclusion — a `super` who
+  filed the complaint) and `ArrearsAdjustmentPolicy::approve` terminal
+  states (`default => false` for an already approved/rejected row). No
+  existing test exercises either super case, so Wave 1 ships the global
+  bypass; flag raised for the coordinator.
+- **`customers.change_status`, `payments.verify`**: agent is NOT seeded
+  these. Wave 2's rewritten `CustomerPolicy::disconnect` /
+  `PaymentPolicy::verify` / `bulkVerify` must keep the existing
+  `role === 'agent' && zoneId matches` OR-branch next to the `can()` call,
+  and `PaymentVerificationService::verifyMany()` keeps its per-item zone
+  recheck.
+- **`payments.create` worker branch**: `can_record_payments` stays an
+  additive OR — worker role is not seeded `payments.create`.
+- **`reports.view` investor branch**: `is_investor` stays an additive OR.
+- **`arrears.approve`**: seeding grants the stage-1 gate (S A M). The
+  stage-2 `admin/super only` narrowing and the maker≠checker/second-approver
+  identity checks and the `super` carve-out are all orthogonal to "does this
+  role hold the permission" — they stay in the policy body.
+- **`tenant_users.role` has a CHECK constraint** (`tenant_users_role_check`)
+  pinning it to the 5 system names. Wave 3 must drop/replace it before a
+  custom role name can be stored on a membership row. (Wave 1's resolution
+  path doesn't care — it joins by name string — but assignment does.)
+- Non-policy class gates not given a dedicated permission:
+  `AgentAppController` (agent-app download page) and
+  `Api\SyncController::authorizeSync` both check the exact `S A M G` set —
+  Wave 4 (mobile) can either reuse `manuscripts.view` or add a
+  `mobile.sync` permission; not seeded now.
