@@ -949,3 +949,228 @@ Profile/Settings/Notifications/Sync Status) — a real UX improvement on its own
 Sync Status previously had no consistent home beyond ad-hoc `Card` links scattered on Home. Home's
 existing "Quick actions"/"Get around" sections and its own inline "Sign out" button were left
 untouched — More is additive, not a replacement for any existing entry point.
+
+## 14. Arrears Adjustment REQUEST screen — 2026-08-28 (mobile counterpart to a web-only feature)
+
+Closed a real gap confirmed by the product owner: the web app has a complete "Adjust Arrears"
+maker-checker write-off request+review flow (`references/arrears-adjustment.md`), but mobile had no
+way to request one at all — that doc's §7 previously listed "mobile" outright as deliberately out of
+scope. This build narrowed that to just the *review* half staying out of scope; the *request* half now
+exists on mobile, matching the "mobile creates, web reviews" split already established here for
+payments/expenditures/complaints/disconnections (§4/§11's own "no dedicated verify/reject approval UI
+on mobile" pattern, reused rather than reinvented).
+
+**Backend gap confirmed before building anything**: `ArrearsAdjustmentController::store()` returns an
+Inertia `RedirectResponse`, not JSON — purely web-session-only, unreachable from mobile's Sanctum
+client. Added `POST /api/v1/arrears-adjustments` (`Api\ArrearsAdjustmentController::store()`), reusing
+the exact same `StoreArrearsAdjustmentRequest`/`ArrearsAdjustmentPolicy`/`ArrearsAdjustmentService::create()`
+the web path already used — no validation or business logic duplicated. Deliberately `store()` only;
+no `approve()`/`reject()` JSON routes exist. Full detail, including the new
+`App\Http\Resources\ArrearsAdjustmentResource` shape and the new
+`tests/Feature/Api/ArrearsAdjustmentTest.php` (20/20 passing across both the web and API test classes),
+is in `arrears-adjustment.md` §10 — not duplicated here.
+
+**New screen**: `app/adjust-arrears/[uuid].tsx` — a per-customer, online-only modal route (the same
+family as `reconnect/[uuid].tsx`/`disconnect/[uuid].tsx`: `Stack.Screen` with `presentation: 'modal'`,
+registered in `app/_layout.tsx` alongside those two). `customerUuid` travels as the route's dynamic
+`[uuid]` segment, matching those two existing screens' own param shape rather than a query string.
+
+- **Entry point**: Customer Detail's (`app/(tabs)/customers/[uuid].tsx`) "Other actions" cluster gained
+  a new, always-visible "Adjust Arrears" button (secondary variant, violet-bordered) — unlike
+  Disconnect (status-gated) or Send Bill (phone-on-file-gated), this one has no visibility condition at
+  all, since `ArrearsAdjustmentPolicy::create()` is ungated for every role and every customer status.
+- **Fields mirror the web modal** (`ArrearsAdjustmentModal.tsx`) closely: reason-category chips (6
+  options, chip-row layout ported from `log-complaint.tsx`'s category-chip pattern rather than
+  introducing a new picker primitive — this app has no `SelectInput`/dropdown component, so the
+  existing "labeled chip row" convention was the natural fit), direction chips (decrease/increase), a
+  `YYYY-MM` target-period text field, an amount field, a required notes field, the identical "This does
+  not record a payment…" explanatory note (rendered as an accent-bordered `Card`, mirroring how
+  `log-complaint.tsx`'s urgent-toggle card and `reconnect/[uuid].tsx`'s fine-toggle card already use
+  `accentColor` for a callout), and the same current-balance/balance-after guidance block, computed
+  client-side and explicitly labeled "guidance only" exactly like the web version's identical caveat.
+- **Fetches the customer's current arrears fresh, online-only** — same `fetchCustomerDetail()` call
+  `reconnect`/`disconnect` already use, same reasoning (§4/§7: this needs the real server-side figure,
+  not a stale local cache value), same offline/retry-on-reconnect phase machine as those two screens.
+- **New pure validator**: `validateArrearsAdjustmentForm` in `src/utils/validation.ts` (target-period
+  format + not-future, positive amount, required note — mirrors
+  `StoreArrearsAdjustmentRequest::rules()`), covered by 5 new `node --test` cases in
+  `src/utils/__tests__/validation.test.ts`, same "pure, screen-free, unit-tested" convention as every
+  other form validator in this file.
+- **Success state is deliberately NOT the green "confirmed" treatment** Reconnect/Disconnect use.
+  Those two are immediate, already-applied server changes; submitting an arrears adjustment request is
+  not — it only starts the maker-checker review. The success view uses `Badge tone="pending"` ("Submitted
+  — pending approval") with body copy stating plainly that the customer's balance hasn't changed yet and
+  still needs office approval. This is the one place this build was most deliberate about not
+  overstating what just happened — see arrears-adjustment.md §10 for the full reasoning.
+
+**New accent color, added after checking existing tokens first (this file's own §6/§10 convention)**:
+`colors.accent.arrears` (`#5B21B6`, violet-800, ~8.98:1 white-on-fill, verified with the same
+relative-luminance script §10's rebrand pass used — not eyeballed). The web modal's purple-600 is a
+page-local choice ("the one genuinely unclaimed color" on `Customers/Show.tsx` specifically, per that
+component's own doc comment), not the web nav's `NAV_ACCENTS.purple` (which means `Agents`). On mobile,
+plain purple is already claimed by `accent.expense` (Record Expense/Resources) — reusing it here would
+blur two unrelated feature areas under one hue, against §10's "color with restraint, meaning something
+specific" principle, so a new, genuinely-distinct hue was the correct call rather than a reuse.
+`StatCard.tsx`'s `toneColors` map required one mechanical follow-up entry (`arrears: colors.accent.arrears`)
+purely to keep `npx tsc --noEmit` clean, since `StatCardTone` derives from `AccentKey` — no `StatCard`
+on the new screen actually uses that tone.
+
+**Deliberately NOT wired into `app/manuscript.tsx`.** The task brief explicitly invited this if it fit
+cleanly; it doesn't. That screen's own class doc states outright: "Rows are deliberately non-interactive
+plain Cards — no drill-down into Customer Detail, no bill-send action; this is a glance, not a
+workflow." Adding a third per-row action there would reverse a design decision that screen already made
+for itself, not merely find room for one. Customer Detail is the complete, single v1 entry point — a
+fine, deliberate scope boundary, not a gap.
+
+**Verification**: `cd mobile && npx tsc --noEmit` — clean except the two pre-existing
+`src/api/devices.ts` errors (unrelated, unchanged, called out as expected in every prior pass's own
+verification section too). `npm test` — 100/100 passing (95 pre-existing + 5 new).
+
+## 15. Stale-arrears bug report — 2026-08-28 (a real, generalizable delta-sync gap, force-full-refresh added)
+
+Product owner report, verbatim: "The mobile app still has stale data, I thought it was supposed to
+sync with the actual data now from the backend, same like the web." Filed within an hour of raw SQL
+run directly against Postgres deleting the entire August 2026 manuscript period (446 rows) plus 35
+stale `command_runs` rows, and applying a missing `manuscripts.command_run_id` migration — none of
+it through any app write path (no artisan command, no HTTP request, no queued job).
+
+**Root cause, confirmed by reading the real code, not assumed.** Customer Detail
+(`app/(tabs)/customers/[uuid].tsx`) reads its headline arrears figure entirely from the local SQLite
+`customers` cache (`getCustomerByUuid()`, no live API call — deliberate offline-first design, see
+that screen's own doc comment), and that cache's `total_arrears`/`credit` columns are populated
+solely by `SyncManager.pull()` → `upsertCustomers()` from the server's `SyncService::
+upsertedCustomers()`. That query is a **delta** pull filtered by
+`Customer::query()->where('updated_at', '>=', $sinceAt)` (`app/Services/SyncService.php`) — it
+returns `total_arrears`/`credit` sourced from `$customer->latestManuscript`, but the WHERE clause
+gates on the `customers` row's own `updated_at`, not the manuscript's. **No `$touches` relationship
+exists from `Manuscript` back to `Customer`** (confirmed: grepped every model), and neither
+`ManuscriptCalculate`/`CustomerManuscriptRecalculationService` (the normal, legitimate monthly
+billing-cycle write path) nor `PaymentService::create()` ever calls `$customer->touch()` or
+`->save()` on the customer row itself when a manuscript is written. The practical result: **a
+customer's cached arrears/credit figures can only ever refresh on mobile if that customer's own row
+was independently touched for some unrelated reason** (e.g. a direct edit) — a manuscript being
+created, recalculated, corrected, or (this incident) deleted is invisible to every future delta
+pull, indefinitely, regardless of how many times "Sync now" is tapped.
+
+**This is a generalizable bug, not merely "raw SQL bypasses everything, expected."** It would
+already misfire on a completely normal `manuscript:calculate` run for any customer whose own row
+isn't otherwise touched that cycle — today's direct-SQL incident is the trigger that surfaced it,
+not a special case of it. The direct-SQL angle does compound it further in one respect worth noting
+for the record: a raw `DELETE` also can't fire any Eloquent `saved`/`deleted` event, so even a
+`$touches` relationship (which relies on Eloquent's save lifecycle) would NOT have caught this
+specific incident either — only an explicit reconciliation step (a tombstone, or a full re-pull)
+can. That reinforces the fix chosen below (see "what was fixed").
+
+**Investigated and ruled out as the sustained cause (real, but self-healing, mechanisms):**
+- `ManuscriptService::list()`/`summary()` (used by `app/manuscript.tsx`, which is otherwise
+  correctly live/uncached on-device per §13) ARE server-side `Cache::remember`'d, 10-minute TTL,
+  keyed by period/branch/filter hash — and `forgetSummaryCache()` is only ever called by
+  `ManuscriptCalculate`, never by anything resembling today's raw SQL path, so a request served
+  from cache in the ~10 minutes straddling the delete could have returned pre-delete totals. Given
+  the report landed roughly an hour after the delete, this TTL has self-healed several times over by
+  now and is not the sustained cause — but it is a real, latent version of the exact "server-side
+  cache invisible to a direct-SQL change" risk this investigation was asked to check for, and would
+  bite again, briefly, on any future direct DB intervention within a fresh 10-minute window.
+- `CustomerService::findOrFail()` (`customers:show:{uuid}:{branch}`, 60s TTL, eager-loads
+  `latestManuscript`) — same shape, shorter TTL, same conclusion: self-healed by now, not the
+  sustained cause, but a real instance of the same class of risk for the ~60s after a future direct
+  DB write.
+- Confirmed `SyncService::pull()`'s `customers.deleted` is always `[]` (no tombstone mechanism
+  exists — `Customer` has no `deleted_at`, documented inline in the code itself) — not relevant here
+  since no customer rows were deleted, only manuscript rows, but confirms the codebase's delta-sync
+  design has no deletion-reconciliation story at all beyond what this section's fix adds for the
+  arrears-figure case specifically.
+
+**What was fixed (mobile-only, contained, low-risk):** No backend code was changed — the deeper fix
+(making manuscript writes touch the owning customer's `updated_at`, or a real tombstone/reconciliation
+mechanism) is real future work but touches the shared recalculation path multiple write flows depend
+on, which is a bigger, riskier change than this report's scope, and per this session's constraints a
+backend test suite is currently in concurrent use by another process. Added a **"Force full
+refresh"** action instead, addressing the actual reachable gap: mobile had no way at all to escape a
+watermark-blind customer, not even by logging out (deliberately preserves local data/last_sync_at —
+see §7) or force-closing the app (SQLite `sync_meta` persists across restarts).
+
+- `mobile/src/db/syncMeta.ts` — new `clearLastSyncAt()`, a plain `DELETE FROM sync_meta WHERE
+  key = 'last_sync_at'`.
+- `mobile/src/sync/SyncManager.ts` — new `forceFullResync()`: clears the watermark, then calls the
+  existing `syncNow()` unchanged. With no watermark, `SyncService::pull()`'s `$sinceAt` is null, so
+  `upsertedCustomers()`'s `->when($sinceAt, ...)` clause is skipped entirely and every zone-scoped
+  customer is returned regardless of `updated_at` — the same shape as a first-login sync. Safe to
+  call anytime: `upsertCustomers()` (`src/db/customers.ts`) is a plain `ON CONFLICT DO UPDATE`
+  upsert, never delete-then-insert, and a zone is only low hundreds of customers (§2's stated
+  scale), so this is a cheap request, not a heavy resync. Queued outbox items (payments/
+  expenditures/complaints) and everything else in the same `syncNow()` cycle are untouched — only
+  the customers-pull watermark is reset.
+- `mobile/app/sync-status.tsx` — a second, visually distinct (`variant="secondary"`) button below
+  the existing "Sync now," labeled "Force full refresh," with an explanatory hint line ("Re-downloads
+  every customer's bill and arrears figures from the server, even ones 'Sync now' would skip. Use
+  this if a customer's balance looks out of date."). Deliberately NOT merged into the existing "Sync
+  now" button or made to run automatically — a full customer re-pull on every ordinary sync tick
+  would be needless network/battery cost at this app's normal cadence (§2's four triggers already
+  fire frequently); this is an explicit, occasional escape hatch for exactly this failure mode, not
+  the new default. Needed its own local `forceRefreshing` state rather than reusing
+  `liveState.phase === 'syncing'`, since `syncingProgress` (which drives that phase) is only ever set
+  inside `push()` for queued outbox items — a customers-only pull is invisible to it.
+
+**The immediate action for the product owner, right now:** Open the app → tap the sync-status strip
+(persistent on every screen, §5) → **Sync Status** sheet → **"Force full refresh."** This is now a
+real, implemented action, not a hypothetical one — confirmed by writing and type-checking the code
+above, not just designed. Logging out/in and force-closing/reopening the app were both checked and
+do NOT help (see above); a plain "Sync now" tap also does NOT help for this specific failure mode
+(it reads the same unchanged watermark) — the new button is the only correct answer today, which is
+exactly why it was added rather than only documented.
+
+**Verification:** `cd mobile && npx tsc --noEmit` — clean except the two pre-existing
+`src/api/devices.ts` errors (unrelated, unchanged, called out as expected in every prior pass's own
+verification section too). `npm test` — 100/100 passing, unchanged (no `src/utils/*` pure-function
+logic was added by this fix — `syncMeta.ts`/`SyncManager.ts`/`sync-status.tsx` changes are DB
+helper/orchestration/UI only, same shape as several prior additions in this file that also added no
+new test coverage).
+
+**Deliberately NOT done:** No backend PHP was changed (see above — the real root-cause fix is
+future work, flagged here, not silently left undiscovered). No change to
+`ManuscriptService`/`CustomerService`'s `Cache::remember` TTLs or keys — both were investigated and
+ruled out as the sustained cause (see above); shortening either TTL further would be a blind
+defensive change with a real perf cost (both exist specifically to absorb read load) for a risk this
+report found to be minor and self-healing, not the reported bug. No automatic/periodic full resync
+was added — only an explicit, agent-initiated one, per the reasoning above.
+
+**Procedural note, separate from the code fix:** the underlying trigger — raw SQL run directly
+against production-shaped data outside every app write path — remains something no client-side sync
+logic can fully defend against in general (a raw `DELETE` fires no Eloquent event, so even a
+`$touches` fix wouldn't have caught this specific incident, only reduced how often manual
+intervention is needed for the *normal* recalculation case). Direct DB intervention should be
+followed by a deliberate resync signal to affected clients (this new "Force full refresh" button is
+now that signal for mobile) rather than assumed to be invisible-and-fine — this is a process
+recommendation, not something further code can fully substitute for.
+
+## 16. Credit target on Adjust Arrears + Manuscript month stepper — 2026-08-30/31 (commits 122f4f0b, a7ce0b97)
+
+Two mobile changes tracking web features shipped the same days.
+
+**`app/adjust-arrears/[uuid].tsx` → "Adjust Arrears / Credit"** — mirrors the web
+`ArrearsAdjustmentModal`'s 2026-08-30 `target` toggle (see `arrears-adjustment.md`). A correction
+now lands on EITHER `total_arrears` OR the loose `credit` figure. Switching target resets the
+direction default (write-off for arrears, claw-back for credit), the reason category, and the
+amount; credit gets its own reason menu (`credit_correction` / `duplicate_credit` /
+`migration_credit_error`) and direction labels ("Grant (increase credit)" / "Claw back (reduce
+credit)"). "Clear all arrears" becomes "Clear credit" on the credit side. `src/types/api.ts`
+gained `ArrearsAdjustmentTarget`, the credit reason categories, `target?` on
+`RequestArrearsAdjustmentPayload`, and `credit_snapshot` on `ArrearsAdjustmentApi` — all already
+accepted by `StoreArrearsAdjustmentRequest`. The `_layout.tsx` title and the Customer Detail
+button label both became "Adjust Arrears / Credit". Still REQUEST-only; still online-only.
+
+**`app/manuscript.tsx` — month stepper.** The screen was locked to `currentPeriod()`. Added
+prev/next arrows around the period label (`shiftPeriod()` — plain calendar arithmetic, never
+"latest of any period", per §13's incident). Bounds: `[EARLIEST_PERIOD '2026-08' .. latestPeriod()]`
+where `latestPeriod()` is **one month past the current calendar month** — the cycle generates
+next month's manuscript in advance, so during August the September register must be reachable
+(the first cap I shipped, `currentPeriod()`, left both arrows disabled since today == earliest).
+Stepping does a silent re-fetch that keeps the current list visible under a small spinner
+(`switching` state) instead of the full-screen loader; a stale response is dropped if the viewer
+steps again mid-flight. On screen focus the stepper snaps back to the real current month.
+`fetchManuscripts(period)` already took the param; the server (`ManuscriptService::scopedFilters`)
+validates format only, no future guard, so a past/next period just works.
+
+Verification: `npx tsc --noEmit` clean bar the two pre-existing `src/api/devices.ts` errors;
+`validation.test.ts` 24/24.

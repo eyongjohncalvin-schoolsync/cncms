@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import type { Expenditure, ExpenseCategory, PageProps, PaginatedResponse } from '@/types';
 
 interface ExpendituresIndexProps {
@@ -23,12 +24,10 @@ interface ExpendituresIndexProps {
     categories: ExpenseCategory[];
 }
 
-const DELETE_ROLES = ['super', 'admin'];
-
 export default function ExpendituresIndex({ expenditures, filters, categories }: ExpendituresIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canDelete = role !== null && DELETE_ROLES.includes(role);
+    // RBAC v2 Wave 4: ExpenditurePolicy::delete → `expenditures.delete`.
+    const canDelete = hasPermission(auth.user?.permissions, 'expenditures.delete');
 
     const [isLoading, setIsLoading] = useState(false);
 
@@ -85,13 +84,13 @@ export default function ExpendituresIndex({ expenditures, filters, categories }:
             </div>
 
             <div className="mb-4 animate-fade-up rounded-lg border border-slate-200 bg-slate-50 p-4" style={{ animationDelay: '80ms' }}>
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                     <SelectInput
                         id="category_uuid"
                         label="Category"
                         value={filters.category_uuid ?? ''}
                         onChange={(e) => applyFilter({ category_uuid: e.target.value || undefined })}
-                        className="rounded-lg bg-white"
+                        className="w-full rounded-lg bg-white sm:w-auto"
                     >
                         <option value="">All categories</option>
                         {categories.map((category) => (
@@ -106,7 +105,7 @@ export default function ExpendituresIndex({ expenditures, filters, categories }:
                         type="date"
                         value={filters.from ?? ''}
                         onChange={(e) => applyFilter({ from: e.target.value || undefined })}
-                        className="rounded-lg bg-white"
+                        className="w-full rounded-lg bg-white sm:w-auto"
                     />
                     <TextInput
                         id="to"
@@ -114,7 +113,7 @@ export default function ExpendituresIndex({ expenditures, filters, categories }:
                         type="date"
                         value={filters.to ?? ''}
                         onChange={(e) => applyFilter({ to: e.target.value || undefined })}
-                        className="rounded-lg bg-white"
+                        className="w-full rounded-lg bg-white sm:w-auto"
                     />
                     {isLoading && <LoadingSpinner className="mb-2 text-slate-400" />}
                 </div>

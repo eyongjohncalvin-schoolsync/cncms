@@ -19,26 +19,26 @@ class ZonePolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('zones.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('zones.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('zones.manage');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('zones.manage');
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('zones.manage');
     }
 }

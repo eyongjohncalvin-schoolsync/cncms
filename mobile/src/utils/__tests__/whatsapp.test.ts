@@ -22,6 +22,10 @@ test('normalizeCameroonPhoneForWhatsapp: a leading + is stripped like any other 
     assert.equal(normalizeCameroonPhoneForWhatsapp('+237677440670'), '237677440670');
 });
 
+test('normalizeCameroonPhoneForWhatsapp: a 00237 international-access prefix is normalized', () => {
+    assert.equal(normalizeCameroonPhoneForWhatsapp('00237677440670'), '237677440670');
+});
+
 test('normalizeCameroonPhoneForWhatsapp: null/undefined/empty/whitespace-only return null, not a guess', () => {
     assert.equal(normalizeCameroonPhoneForWhatsapp(null), null);
     assert.equal(normalizeCameroonPhoneForWhatsapp(undefined), null);

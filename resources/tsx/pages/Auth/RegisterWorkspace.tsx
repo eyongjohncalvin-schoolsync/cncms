@@ -54,9 +54,9 @@ export default function RegisterWorkspace() {
     return (
         <AuthLayout>
             <Head title="Set up your workspace" />
-            <div className="animate-fade-up mb-6 text-center">
-                <h2 className="font-display text-2xl text-slate-900">Set up your workspace</h2>
-                <p className="mt-1 text-sm text-slate-500">Almost done — tell us about your business</p>
+            <div className="animate-fade-up mb-6">
+                <h2 className="font-display text-3xl text-slate-900">Set up your workspace</h2>
+                <p className="mt-1.5 text-sm text-slate-500">Almost done — tell us about your business.</p>
             </div>
 
             <form onSubmit={submit} className="animate-fade-up flex flex-col gap-4" style={{ animationDelay: '100ms' }}>

@@ -153,7 +153,7 @@ function ResolveForm({ complaint }: { complaint: Complaint }) {
                 value={data.resolution_notes}
                 onChange={(e) => setData('resolution_notes', e.target.value)}
                 placeholder="What was done to resolve this?"
-                className={`rounded-lg border-0 bg-white px-3.5 py-2 text-sm text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 ${
+                className={`rounded-lg border-0 bg-white px-3.5 py-2 text-base text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm ${
                     errors.resolution_notes ? 'ring-red-400' : ''
                 }`}
             />

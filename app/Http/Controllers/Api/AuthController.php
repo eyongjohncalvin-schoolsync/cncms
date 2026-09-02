@@ -118,6 +118,12 @@ class AuthController extends Controller
                 'email' => $user->email,
             ],
             'role' => $context->role,
+            // RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the
+            // resolved permission list for this role, or ['*'] for a super
+            // role. Mirrors HandleInertiaRequests::share()'s
+            // auth.user.permissions. Wave 1 only exposes it — the mobile
+            // guards still key off `role` until Wave 4.
+            'permissions' => $context->permissions(),
         ]);
     }
 

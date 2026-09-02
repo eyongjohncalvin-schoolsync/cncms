@@ -21,7 +21,7 @@ class CommandRunPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('command_runs.view');
     }
 
     /**
@@ -33,7 +33,7 @@ class CommandRunPolicy
      */
     public function publish(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('command_runs.publish');
     }
 
     /**
@@ -43,6 +43,6 @@ class CommandRunPolicy
      */
     public function manageSchedule(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('command_runs.schedule');
     }
 }

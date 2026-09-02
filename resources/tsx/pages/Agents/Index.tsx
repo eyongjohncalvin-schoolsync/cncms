@@ -12,6 +12,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
 import { ChangeZoneModal } from '@/components/agents/ChangeZoneModal';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import type { Agent, PageProps, PaginatedResponse, Zone } from '@/types';
 
 interface AgentFilters {
@@ -25,16 +26,14 @@ interface AgentsIndexProps {
     zones: Zone[];
 }
 
-const MANAGE_ROLES = ['super', 'admin', 'manager'];
-
 function lastSyncLabel(lastSyncAt: string | null): string {
     return lastSyncAt ?? 'Never';
 }
 
 export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canManage = role !== null && MANAGE_ROLES.includes(role);
+    // RBAC v2 Wave 4: AgentPolicy::create/update/delete → `agents.manage`.
+    const canManage = hasPermission(auth.user?.permissions, 'agents.manage');
 
     const [isFiltering, setIsFiltering] = useState(false);
     const [zoneChangeAgent, setZoneChangeAgent] = useState<Agent | null>(null);
@@ -93,13 +92,13 @@ export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps
                 className="mb-4 animate-fade-up rounded-lg border border-slate-200 bg-slate-50 p-4"
                 style={{ animationDelay: '0.08s' }}
             >
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                     <SelectInput
                         id="zone"
                         label="Zone"
                         value={filters.zone_uuid ?? ''}
                         onChange={(e) => applyFilter({ zone_uuid: e.target.value || undefined })}
-                        className="rounded-lg bg-white"
+                        className="w-full rounded-lg bg-white sm:w-auto"
                     >
                         <option value="">All zones</option>
                         {zones.map((zone) => (
@@ -113,7 +112,7 @@ export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps
                         label="Status"
                         value={filters.status ?? ''}
                         onChange={(e) => applyFilter({ status: e.target.value || undefined })}
-                        className="rounded-lg bg-white"
+                        className="w-full rounded-lg bg-white sm:w-auto"
                     >
                         <option value="">All statuses</option>
                         <option value="active">Active</option>

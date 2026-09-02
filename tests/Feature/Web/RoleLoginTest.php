@@ -13,10 +13,11 @@ use Tests\TestCase;
 
 /**
  * Confirms real session-cookie login (POST /login) actually works for each
- * of the app's 5 permission tiers, and that the role the client-side nav
- * gating in resources/tsx/layouts/AppLayout.tsx keys off of
- * (`visibleNavItems`, driven by `auth.user.role`) is exactly what the
- * server hands back in the post-login Inertia payload.
+ * of the app's 5 permission tiers, and that the role/permissions the
+ * client-side nav gating keys off of (RBAC v2 Wave 4: `buildVisibleNavItems`
+ * in resources/tsx/components/shared/AppNav.tsx now filters on
+ * `auth.user.permissions`, not role arrays) are exactly what the server
+ * hands back in the post-login Inertia payload.
  *
  * This was written alongside adding the purely-descriptive `job_title`
  * field to tenant_users (see the
@@ -25,10 +26,10 @@ use Tests\TestCase;
  * meaning, so this test deliberately only exercises the 5 existing `role`
  * values and never touches job_title.
  *
- * AppLayout.tsx hides the Settings / Resources / Audit Log / Disconnections
- * nav links from any role not in that item's *_ROLES list, but the nav
+ * AppNav.tsx hides the Settings / Resources / Audit Log / Disconnections
+ * nav links from anyone missing that item's permission, but the nav
  * hiding is only ever a UX convenience — the actual gate is always the
- * server-side Policy the comments above each *_ROLES constant cite
+ * server-side Policy each item's comment cites
  * (TenantUserPolicy::viewAny, ExpenditurePolicy::viewDashboard,
  * AuditLogPolicy::viewAny, CustomerPolicy::viewStatusBoard). This test
  * hits those same endpoints directly to prove the gating is real, not just
@@ -59,7 +60,7 @@ class RoleLoginTest extends TestCase
      * @var array<string, string>
      */
     private const NAV_GATED_ENDPOINTS = [
-        'Settings > Users (TenantUserPolicy::viewAny)' => '/settings/users',
+        'Users Control Center (TenantUserPolicy::viewAny)' => '/users',
         'Resources dashboard (ExpenditurePolicy::viewDashboard)' => '/resources',
         'Audit Log (AuditLogPolicy::viewAny)' => '/audit/logs',
         'Disconnections status board (CustomerPolicy::viewStatusBoard)' => '/disconnections',

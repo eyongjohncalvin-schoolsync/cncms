@@ -13,7 +13,6 @@ use App\Repositories\Contracts\ZoneRepositoryInterface;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 
@@ -119,7 +118,11 @@ class PaymentService
     {
         $customer = $this->resolveCustomer($data->customerUuid);
 
-        $canAutoVerify = $this->context->isAnyOf('super', 'admin', 'manager')
+        // RBAC v2: mirrors PaymentPolicy::verify() exactly — the office gate
+        // is now the `payments.verify` catalog permission; the agent
+        // zone-scoped branch stays an additive OR (agent is NOT seeded
+        // `payments.verify`).
+        $canAutoVerify = $this->context->can('payments.verify')
             || ($this->context->role === 'agent'
                 && $this->context->zoneId !== null
                 && $customer->zone_id === $this->context->zoneId);
@@ -127,6 +130,13 @@ class PaymentService
         $attributes = $data->toAttributes();
         $attributes['verification_status'] = $canAutoVerify ? 'verified' : 'pending';
         $attributes['expiration_date'] = $this->computeExpirationDate($data->frequency, $data->months);
+
+        // Draw-down credit (references/prepayment-drawdown.md): a months/yearly
+        // payment locks the customer's current bill as its prepaid_rate, so a
+        // later rate change never shortens the coverage it bought (PD-3).
+        if (in_array($data->frequency, ['months', 'yearly'], true)) {
+            $attributes['prepaid_rate'] = (string) $customer->bill;
+        }
 
         $payment = $this->payments->create($customer->id, $attributes);
 
@@ -226,13 +236,21 @@ class PaymentService
         Cache::forget("payments:show:{$uuid}:all");
     }
 
+    /**
+     * Draw-down cutover (references/prepayment-drawdown.md §10 step 2): new
+     * `months`/`yearly` payments no longer carry an `expiration_date` — their
+     * value flows through the draw-down branch as prepaid months against the
+     * ledger, not a calendar freeze. Pre-cutover rows keep their stored date
+     * and ride the legacy freeze branch until it lapses. The method is kept
+     * (still called from update()) but now always returns null; the derived
+     * "covered through" date is computed for display from
+     * `manuscripts.prepaid_months_remaining` instead.
+     */
     private function computeExpirationDate(?string $frequency, ?int $months): ?string
     {
-        return match ($frequency) {
-            'yearly' => Carbon::now()->addMonths(12)->toDateString(),
-            'months' => $months ? Carbon::now()->addMonths($months)->toDateString() : null,
-            default => null,
-        };
+        unset($frequency, $months);
+
+        return null;
     }
 
     private function resolveCustomerId(?string $customerUuid): int

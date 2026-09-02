@@ -59,6 +59,9 @@ class StorePaymentRequest extends FormRequest
             'credit' => ['nullable', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'],
             'frequency' => ['required', 'string', 'in:monthly,yearly,months'],
             'months' => ['required_if:frequency,months', 'nullable', 'integer', 'min:1'],
+            // Draw-down Q1 — the agent's "pay down arrears first" toggle,
+            // only meaningful for a months/yearly prepayment.
+            'clear_arrears_first' => ['nullable', 'boolean'],
             'recorded_offline' => ['nullable', 'boolean'],
             'recorded_by_device' => ['nullable', 'string', 'max:255'],
         ];

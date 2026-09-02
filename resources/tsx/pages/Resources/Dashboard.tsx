@@ -12,15 +12,16 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { hasPermission } from '@/lib/permissions';
 import type { PageProps, ResourcesDashboard } from '@/types';
 
 const CATEGORY_COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#64748b'];
-const MANAGE_CATEGORY_ROLES = ['super', 'admin'];
 
 export default function ResourcesDashboardPage({ period, income, expenses, pnl, budgets }: ResourcesDashboard) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canManageCategories = role !== null && MANAGE_CATEGORY_ROLES.includes(role);
+    // RBAC v2 Wave 4: ExpenseCategoryPolicy::create/update/delete →
+    // `expense_categories.manage`.
+    const canManageCategories = hasPermission(auth.user?.permissions, 'expense_categories.manage');
 
     const [isLoading, setIsLoading] = useState(false);
 
@@ -58,25 +59,27 @@ export default function ResourcesDashboardPage({ period, income, expenses, pnl, 
                     <h1 className="font-display text-2xl text-slate-900">Profit &amp; Loss — {period}</h1>
                     <p className="text-sm text-slate-500">Income vs. expenditure summary for the selected period.</p>
                 </div>
-                <div className="flex items-end gap-2">
-                    <TextInput
-                        id="period"
-                        label="Period"
-                        type="month"
-                        value={period}
-                        onChange={(e) => applyPeriod(e.target.value)}
-                    />
+                <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
+                    <div className="w-40">
+                        <TextInput
+                            id="period"
+                            label="Period"
+                            type="month"
+                            value={period}
+                            onChange={(e) => applyPeriod(e.target.value)}
+                        />
+                    </div>
                     {isLoading && <LoadingSpinner className="mb-2 text-blue-600" label="Loading period" />}
                     {canManageCategories && (
-                        <Link href="/resources/categories">
-                            <Button variant="secondary">Manage Categories</Button>
+                        <Link href="/resources/categories" className="flex-1 sm:flex-none">
+                            <Button variant="secondary" className="w-full sm:w-auto">Manage Categories</Button>
                         </Link>
                     )}
-                    <Link href="/resources/expenditures">
-                        <Button variant="secondary">View Expenditures</Button>
+                    <Link href="/resources/expenditures" className="flex-1 sm:flex-none">
+                        <Button variant="secondary" className="w-full sm:w-auto">View Expenditures</Button>
                     </Link>
-                    <Link href="/resources/expenditures/create">
-                        <Button>Record Expense</Button>
+                    <Link href="/resources/expenditures/create" className="flex-1 sm:flex-none">
+                        <Button className="w-full sm:w-auto">Record Expense</Button>
                     </Link>
                 </div>
             </div>
@@ -97,7 +100,7 @@ export default function ResourcesDashboardPage({ period, income, expenses, pnl, 
                             Net {isNetPositive ? 'Profit' : 'Loss'} — {period}
                         </p>
                         <p
-                            className={`font-display mt-1 text-4xl font-semibold tracking-tight sm:text-5xl ${
+                            className={`font-display mt-1 text-3xl font-semibold tracking-tight break-words sm:text-5xl ${
                                 isNetPositive ? 'text-green-700' : 'text-red-700'
                             }`}
                         >

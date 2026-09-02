@@ -270,6 +270,52 @@ class LandlordTest extends TestCase
         }
     }
 
+    public function test_deactivating_a_tenant_blocks_its_users_even_with_valid_credentials(): void
+    {
+        $this->setOwnerIsLandlord(true);
+
+        ['tenant' => $tenant, 'registrant' => $registrant] = $this->createPendingWorkspace();
+        $tenant->update(['registration_status' => 'approved']);
+
+        try {
+            // Approved + active: the registrant reaches their dashboard.
+            $this->actingAs($registrant)
+                ->get('/dashboard')
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page->component('Dashboard'));
+
+            // Landlord deactivates the workspace.
+            $this->actingAs($this->owner())
+                ->patch("/landlord/tenants/{$tenant->id}", ['is_active' => '0'])
+                ->assertRedirect('/landlord/tenants');
+
+            $this->assertFalse(Tenant::find($tenant->id)->is_active);
+
+            // Same session, no re-login — ResolveTenantWeb re-checks per
+            // request, so the registrant is now bounced to the holding page.
+            $this->actingAs($registrant)
+                ->get('/dashboard')
+                ->assertRedirect('/workspace/pending');
+
+            $this->actingAs($registrant)
+                ->get('/workspace/pending')
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->component('Workspace/Pending')
+                    ->where('status', 'suspended'));
+
+            // Reactivating restores access, again with no re-login.
+            $this->actingAs($this->owner())
+                ->patch("/landlord/tenants/{$tenant->id}", ['is_active' => '1']);
+
+            $this->actingAs($registrant)
+                ->get('/dashboard')
+                ->assertOk();
+        } finally {
+            $this->cleanupPendingWorkspace($tenant, $registrant);
+        }
+    }
+
     public function test_non_landlord_is_forbidden_from_approving_or_rejecting_tenants(): void
     {
         ['tenant' => $tenant, 'registrant' => $registrant] = $this->createPendingWorkspace();

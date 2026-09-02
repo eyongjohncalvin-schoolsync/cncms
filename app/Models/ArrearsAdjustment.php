@@ -32,14 +32,25 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * folded into the net = previousNet + (billDue - income) ± adjustmentTotal
  * formula.
  *
+ * `target` (2026-08-30 — see the design doc's credit-correction addendum)
+ * picks WHICH side of `net = arrears - credit` the correction lands on:
+ * 'arrears' (default, the original behavior) or 'credit'. A 'credit' target
+ * with direction 'increase' claws credit back (`credit -= amount`, clamped at
+ * 0); with 'decrease' it grants credit (`credit += amount`). It touches ONLY
+ * the loose `manuscripts.credit` figure — never `prepaid_months_remaining` /
+ * `prepaid_rate` (the draw-down model's own prepaid coverage), which is
+ * explicitly out of scope. `credit_snapshot` is the credit-side counterpart
+ * of `arrears_snapshot` — captured at request time so approve()'s staleness
+ * re-check covers credit drift when `target = 'credit'`.
+ *
  * `processed_at`/`processed_period` are the SAME idempotency mechanism as
  * `payments.processed_at`/`processed_period` — an adjustment is eligible for
  * manuscript calculation period P when `status = 'approved' AND
  * target_period = P AND (processed_period IS NULL OR processed_period = P)`.
  */
 #[Fillable([
-    'customer_id', 'target_period', 'direction', 'amount', 'reason_category', 'reason_note',
-    'arrears_snapshot', 'status', 'approved_by', 'approved_at', 'second_approved_by', 'second_approved_at',
+    'customer_id', 'target_period', 'direction', 'target', 'amount', 'reason_category', 'reason_note',
+    'arrears_snapshot', 'credit_snapshot', 'status', 'approved_by', 'approved_at', 'second_approved_by', 'second_approved_at',
     'rejection_reason', 'complaint_id', 'processed_at', 'processed_period',
 ])]
 #[RouteKey('uuid')]
@@ -56,15 +67,36 @@ class ArrearsAdjustment extends Model
      */
     public const string DEFAULT_SECOND_APPROVAL_THRESHOLD = '20000.00';
 
+    /**
+     * Reason categories only ever paired with `target = 'credit'` — the
+     * credit-correction fallback (2026-08-30 design-doc addendum). The
+     * original arrears categories stay valid for `target = 'arrears'`; the
+     * full allowed set lives in StoreArrearsAdjustmentRequest (no DB CHECK
+     * constraint — see that migration).
+     *
+     * @var list<string>
+     */
+    public const array CREDIT_REASON_CATEGORIES = ['credit_correction', 'duplicate_credit', 'migration_credit_error'];
+
     protected function casts(): array
     {
         return [
             'amount' => 'decimal:2',
             'arrears_snapshot' => 'decimal:2',
+            'credit_snapshot' => 'decimal:2',
             'approved_at' => 'datetime',
             'second_approved_at' => 'datetime',
             'processed_at' => 'datetime',
         ];
+    }
+
+    /**
+     * True when this correction targets the loose `manuscripts.credit`
+     * figure rather than `total_arrears` (the default).
+     */
+    public function targetsCredit(): bool
+    {
+        return $this->target === 'credit';
     }
 
     public function customer(): BelongsTo

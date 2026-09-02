@@ -1,7 +1,7 @@
 {{--
     Bulk N-up bill grid — takes $bills (an array of per-bill data arrays,
     each shaped exactly like App\Services\ManuscriptService::billData()'s
-    return value, e.g. from billDataForCustomers()), a $density (1/2/4),
+    return value, e.g. from billDataForCustomers()), a $density (1/2/3/4),
     and a $template name, and tiles them onto sheets.
 
     Mechanism, per this cycle's design review:
@@ -13,6 +13,8 @@
       - density 1 -> 1x1 (one full-page bill per sheet).
         density 2 -> 1 column x 2 rows (bill cards are portrait-ish, so
           stacking beats side-by-side for 2-up).
+        density 3 -> 1 column x 3 rows (same single-column stack as 2-up,
+          one card per third of the sheet).
         density 4 -> 2 columns x 2 rows.
       - The final, possibly-ragged chunk is padded with empty <td>s so every
         row is rectangular — ragged rows destabilize dompdf's table layout.
@@ -37,6 +39,14 @@
     <meta charset="utf-8">
     <title>Bills</title>
     <style>
+        /* dompdf ships a UA default of `@page { margin: 1.2cm }`, so without
+           this the usable sheet is only 273mm x 186mm and every N-up row
+           height computed against 297mm overflows. Zero it out — the grid
+           is full-bleed by design (the cut lines are the dashed cell
+           borders) and `body { margin: 0 }` already assumes this. */
+        @page {
+            margin: 0;
+        }
         body {
             font-family: 'DejaVu Sans', sans-serif;
             margin: 0;
@@ -45,25 +55,46 @@
         table.sheet-grid {
             table-layout: fixed;
             width: 100%;
+            margin: 0;
             border-collapse: collapse;
         }
         table.sheet-grid td {
             vertical-align: top;
+            /* dompdf 3.x has NO `box-sizing` support (it throws on the
+               property), so `height` below is the CONTENT box — the 6px
+               padding (top+bottom) and the collapsed 0.5px border add
+               ~3.4mm of chrome per row ON TOP of it. The per-density
+               heights computed below already subtract that chrome so
+               N rows still sum to <= 297mm. */
             padding: 6px;
-            border: 1px dashed #999;
+            border: 0.5px dashed #999;
             overflow: hidden;
         }
     </style>
 </head>
 <body>
 @php
-    $perPage = in_array((int) $density, [1, 2, 4], true) ? (int) $density : 1;
+    $perPage = in_array((int) $density, [1, 2, 3, 4], true) ? (int) $density : 1;
     $effectiveTemplate = $perPage > 1 ? 'compact' : $template;
 
+    // Cell height. `height` on a <td> is dompdf's CONTENT box (no
+    // `box-sizing`); each cell adds ~3.4mm of chrome (6px+6px padding +
+    // the 0.5px dashed border).
+    //
+    // 1-up fills the page. The multi-up cells always render the 'compact'
+    // template — ~78mm of content — so they are sized to HUG that content
+    // (82mm) rather than divide the sheet into equal 1/2 or 1/3 slices:
+    // an equal slice leaves each bill stranded at the top of a much taller
+    // cell with a wide band of white space beneath it (owner: "the spacing
+    // between the bills is too wide"). Bills now sit close together; the
+    // unused bottom of the sheet is just trimmed off after cutting along
+    // the dashed rules. N x (82 + 3.4) stays well under 297mm, so the page
+    // count is still exactly ceil(N / perPage).
     $geometry = match ($perPage) {
-        2 => ['rows' => 2, 'cols' => 1, 'height' => '148mm'],
-        4 => ['rows' => 2, 'cols' => 2, 'height' => '148mm'],
-        default => ['rows' => 1, 'cols' => 1, 'height' => '297mm'],
+        2 => ['rows' => 2, 'cols' => 1, 'height' => '82mm'],
+        3 => ['rows' => 3, 'cols' => 1, 'height' => '82mm'],
+        4 => ['rows' => 2, 'cols' => 2, 'height' => '82mm'],
+        default => ['rows' => 1, 'cols' => 1, 'height' => '293mm'],
     };
 
     $chunks = collect($bills)->chunk($perPage)->values();

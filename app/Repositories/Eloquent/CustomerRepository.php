@@ -18,7 +18,14 @@ class CustomerRepository implements CustomerRepositoryInterface
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->when(
+                ! empty($filters['archived']),
+                fn ($query) => $query->onlyTrashed()->with('archivedBy'),
+            )
             ->with('zone')
+            // Drives the "Archive customer" vs "Delete row" choice on the
+            // list without an N+1 — one EXISTS subquery per relation per row.
+            ->withExists(['payments', 'manuscripts', 'messages'])
             ->when($filters['zone_id'] ?? null, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when($filters['level'] ?? null, fn ($query, $level) => $query->where('level', $level))
@@ -38,9 +45,10 @@ class CustomerRepository implements CustomerRepositoryInterface
             ->paginate($perPage);
     }
 
-    public function findByUuid(string $uuid, array $with = []): ?Customer
+    public function findByUuid(string $uuid, array $with = [], bool $withTrashed = false): ?Customer
     {
         return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->when($withTrashed, fn ($query) => $query->withTrashed())
             ->with($with)
             ->where('uuid', $uuid)
             ->first();
@@ -66,7 +74,26 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function delete(Customer $customer): bool
     {
-        return (bool) $customer->delete();
+        // forceDelete, not delete: Customer uses SoftDeletes now, and this
+        // path is only reached for a zero-history junk row that should
+        // actually leave the table rather than become an archived tombstone.
+        return (bool) $customer->forceDelete();
+    }
+
+    public function archive(Customer $customer, int $actorId, string $reason): void
+    {
+        $customer->archived_by = $actorId;
+        $customer->archived_reason = $reason;
+        $customer->save();
+
+        $customer->delete();
+    }
+
+    public function restore(Customer $customer): void
+    {
+        $customer->archived_by = null;
+        $customer->archived_reason = null;
+        $customer->restore();
     }
 
     public function updateStatus(Customer $customer, array $attributes): Customer

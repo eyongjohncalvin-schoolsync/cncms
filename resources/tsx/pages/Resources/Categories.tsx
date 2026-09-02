@@ -20,13 +20,12 @@ import { TextInput } from '@/components/ui/TextInput';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { hasPermission } from '@/lib/permissions';
 import type { ExpenseCategory, PageProps } from '@/types';
 
 interface CategoriesProps {
     categories: ExpenseCategory[];
 }
-
-const MANAGE_ROLES = ['super', 'admin'];
 
 // Maps the "ti-*" icon names stored per-category (seeded in
 // TenantDatabaseSeeder) to their @tabler/icons-react equivalents. Any icon
@@ -55,8 +54,9 @@ const CHIP_TONES = ['bg-blue-100 text-blue-700', 'bg-green-100 text-green-700', 
 
 export default function Categories({ categories }: CategoriesProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canManage = role !== null && MANAGE_ROLES.includes(role);
+    // RBAC v2 Wave 4: ExpenseCategoryPolicy::create/update/delete →
+    // `expense_categories.manage`.
+    const canManage = hasPermission(auth.user?.permissions, 'expense_categories.manage');
 
     const [showForm, setShowForm] = useState(false);
     const [isLoading, setIsLoading] = useState(false);

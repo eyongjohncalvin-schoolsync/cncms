@@ -1,5 +1,5 @@
-import { Head, Link } from '@inertiajs/react';
-import { useMemo, type ComponentType } from 'react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
+import { useMemo, useState, type ComponentType } from 'react';
 import {
     IconCash,
     IconFileDescription,
@@ -11,13 +11,20 @@ import {
     IconGauge,
     IconFileText,
     IconAlertTriangle,
+    IconArchive,
     IconEdit,
+    IconRestore,
     IconUserCircle,
     IconCalendarTime,
     IconClipboardList,
     IconScale,
+    IconFileExport,
+    IconFileTypePdf,
+    IconFileSpreadsheet,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
+import { Button } from '@/components/ui/Button';
+import { Dropdown, DropdownItem } from '@/components/ui/Dropdown';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
@@ -26,8 +33,11 @@ import { Badge } from '@/components/ui/Badge';
 import { StatusBadge, VerificationBadge, ArrearsAdjustmentStatusBadge } from '@/components/shared/StatusBadge';
 import { CustomerStatusActions } from '@/components/customers/CustomerStatusActions';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
+import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { CustomerDetail } from '@/types';
+import { hasPermission } from '@/lib/permissions';
+import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
+import type { CustomerDetail, PageProps } from '@/types';
 
 function initials(name: string): string {
     const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -39,6 +49,51 @@ function initials(name: string): string {
 }
 
 export default function CustomersShow({ customer }: { customer: CustomerDetail }) {
+    const { auth } = usePage<PageProps>().props;
+    // RBAC v2 Wave 4: CustomerPolicy::archive/restore/delete → `customers.archive`.
+    const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
+    // "Export full record" — a full unredacted data dump gated
+    // `customers.export_record` (super/admin only). Prefer the shared
+    // permissions list; the `can_export_record` prop resolves the same
+    // thing server-side and is the fallback.
+    const canExportRecord =
+        hasPermission(auth.user?.permissions, 'customers.export_record') || customer.can_export_record;
+    const isArchived = Boolean(customer.archived_at);
+    const [archiveOpen, setArchiveOpen] = useState(false);
+
+    // A real browser navigation (not an Inertia visit) so the server's
+    // Content-Disposition: attachment actually downloads the file.
+    const exportRecordMenu = canExportRecord ? (
+        <Dropdown
+            align="end"
+            label="Export full customer record"
+            trigger={
+                <span className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                    <IconFileExport size={16} stroke={1.75} />
+                    Export Record
+                </span>
+            }
+        >
+            <DropdownItem
+                icon={<IconFileTypePdf size={16} stroke={1.75} />}
+                onClick={() => window.location.assign(`/customers/${customer.uuid}/record-export/pdf`)}
+            >
+                As PDF
+            </DropdownItem>
+            <DropdownItem
+                icon={<IconFileSpreadsheet size={16} stroke={1.75} />}
+                onClick={() => window.location.assign(`/customers/${customer.uuid}/record-export/xlsx`)}
+            >
+                As spreadsheet
+            </DropdownItem>
+        </Dropdown>
+    ) : null;
+
+    const pendingAdjustments = useMemo(
+        () => customer.arrears_adjustments.filter((a) => a.status === 'pending' || a.status === 'pending_second_approval').length,
+        [customer.arrears_adjustments],
+    );
+
     // Derived, formatted values are recomputed only when the underlying
     // customer/manuscript/payments data changes, not on unrelated re-renders.
     const formattedBill = useMemo(() => formatCurrency(customer.bill), [customer.bill]);
@@ -54,7 +109,7 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
             arrears: formatCurrency(customer.manuscript.total_arrears),
             credit: formatCurrency(customer.manuscript.credit),
             totalBill: formatCurrency(customer.manuscript.total_bill),
-            expires: customer.manuscript.payment_expiration ?? '—',
+            expires: prepaidCoverageLabel(customer.manuscript),
         };
     }, [customer.manuscript]);
 
@@ -139,28 +194,87 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                         </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                        <CustomerStatusActions customer={customer} />
-                        <ArrearsAdjustmentModal customer={customer} />
-                        <a
-                            href={`/customers/${customer.uuid}/bill/print`}
-                            target="_blank"
-                            rel="noreferrer"
-                            title="Print bill"
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-                        >
-                            <IconPrinter size={16} stroke={2} />
-                            Print Bill
-                        </a>
-                        <Link
-                            href={`/customers/${customer.uuid}/edit`}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
-                        >
-                            <IconEdit size={16} stroke={1.75} />
-                            Edit
-                        </Link>
-                    </div>
+                    {!isArchived && (
+                        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                            {exportRecordMenu}
+                            <CustomerStatusActions customer={customer} />
+                            <ArrearsAdjustmentModal customer={customer} />
+                            {/* Bills only ever print for an active customer — a
+                                disconnected/suspended/passive customer is frozen
+                                with a 0 total_bill (owner decision, 2026-08). The
+                                server (CustomerController::printBill) is the real
+                                guard; this just hides a button that would only
+                                bounce back with an error. */}
+                            {customer.status === 'active' && (
+                                <a
+                                    href={`/customers/${customer.uuid}/bill/print`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title="Print bill"
+                                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                                >
+                                    <IconPrinter size={16} stroke={2} />
+                                    Print Bill
+                                </a>
+                            )}
+                            <Link
+                                href={`/customers/${customer.uuid}/edit`}
+                                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
+                            >
+                                <IconEdit size={16} stroke={1.75} />
+                                Edit
+                            </Link>
+                            {canArchive && (
+                                <Button
+                                    type="button"
+                                    variant="warning"
+                                    onClick={() => setArchiveOpen(true)}
+                                    className="px-4 py-2.5 text-sm font-semibold"
+                                >
+                                    <IconArchive size={16} stroke={1.75} />
+                                    Archive
+                                </Button>
+                            )}
+                        </div>
+                    )}
                 </div>
+
+                {isArchived && (
+                    <div className="mt-5 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex gap-3 text-sm text-amber-900">
+                            <IconArchive size={18} stroke={1.75} className="mt-0.5 shrink-0 text-amber-600" />
+                            <div>
+                                <p className="font-semibold">
+                                    This customer was archived
+                                    {customer.archived_at ? ` on ${new Date(customer.archived_at).toLocaleDateString()}` : ''}
+                                    {customer.archived_by_name ? ` by ${customer.archived_by_name}` : ''}.
+                                </p>
+                                {customer.archived_reason && <p className="mt-0.5">Reason: {customer.archived_reason}</p>}
+                                <p className="mt-1 text-xs text-amber-700">
+                                    Their billing history below is read-only and kept for auditing.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                            {exportRecordMenu}
+                            {canArchive && (
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    className="px-4 py-2.5 text-sm font-semibold"
+                                    onClick={() => {
+                                        if (confirm(`Restore ${customer.name}? They will reappear in the register and the next manuscript run.`)) {
+                                            router.patch(`/customers/${customer.uuid}/restore`, {}, { preserveScroll: true });
+                                        }
+                                    }}
+                                >
+                                    <IconRestore size={16} stroke={1.75} />
+                                    Restore customer
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Stat Callouts */}
@@ -305,6 +419,7 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                         <Table>
                             <TableHead>
                                 <Th>Period</Th>
+                                <Th>Target</Th>
                                 <Th>Direction</Th>
                                 <Th>Amount</Th>
                                 <Th>Reason</Th>
@@ -315,6 +430,7 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                                 {customer.arrears_adjustments.map((adjustment) => (
                                     <tr key={adjustment.uuid} className="transition-colors hover:bg-slate-50/75">
                                         <Td>{adjustment.target_period}</Td>
+                                        <Td className="capitalize">{adjustment.target ?? 'arrears'}</Td>
                                         <Td className="capitalize">{adjustment.direction}</Td>
                                         <Td>{formatCurrency(adjustment.amount)}</Td>
                                         <Td className="capitalize">{adjustment.reason_category.replace(/_/g, ' ')}</Td>
@@ -329,6 +445,20 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                     )}
                 </Card>
             </div>
+
+            {canArchive && !isArchived && (
+                <ArchiveCustomerModal
+                    open={archiveOpen}
+                    onClose={() => setArchiveOpen(false)}
+                    customer={{
+                        uuid: customer.uuid,
+                        name: customer.name,
+                        arrears: customer.manuscript?.total_arrears ?? null,
+                        credit: customer.manuscript?.credit ?? null,
+                        pendingAdjustments,
+                    }}
+                />
+            )}
         </AppLayout>
     );
 }

@@ -170,13 +170,13 @@ export default function PaymentsEdit({ payment }: PaymentsEditProps) {
                             error={errors.credit}
                         />
 
-                        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-                            <Link href={`/payments/${payment.uuid}`}>
-                                <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                        <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+                            <Link href={`/payments/${payment.uuid}`} className="w-full sm:w-auto">
+                                <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                     Cancel
                                 </Button>
                             </Link>
-                            <Button type="submit" disabled={processing} className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                            <Button type="submit" disabled={processing} className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                 {processing && <LoadingSpinner className="h-4 w-4" />}
                                 {processing ? 'Saving…' : 'Save Changes'}
                             </Button>

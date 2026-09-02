@@ -13,7 +13,9 @@ use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
 use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\PaymentReceipt;
 use App\Models\PaymentVerification;
+use App\Support\PaymentReceiptLink;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
@@ -78,7 +80,7 @@ class PaymentController extends Controller
         }
 
         $payments = $this->payments->list($filters, $perPage);
-        $payments->getCollection()->load(['customer.zone', 'verification.verifier']);
+        $payments->getCollection()->load(['customer.zone', 'verification.verifier', 'receipt']);
 
         $raw = $payments->toArray();
 
@@ -153,7 +155,7 @@ class PaymentController extends Controller
         // scoped via PaymentService::resolveCustomerId() ->
         // CustomerRepository::findByUuid().
         $customers = $this->customers->allMatching([]);
-        $customers->load('zone');
+        $customers->load(['zone', 'latestManuscript']);
 
         $customers = $customers
             ->map(fn (Customer $customer): array => [
@@ -167,6 +169,9 @@ class PaymentController extends Controller
                 'level' => $customer->level,
                 'status' => $customer->status,
                 'location' => $customer->location,
+                // Current arrears — drives the "clear arrears first" toggle on a
+                // months/yearly prepayment (references/prepayment-drawdown.md Q1).
+                'total_arrears' => (string) ($customer->latestManuscript?->total_arrears ?? '0'),
             ])
             ->values();
 
@@ -241,20 +246,28 @@ class PaymentController extends Controller
         // not a repository contract change) purely so Payments/Show.tsx can
         // offer an "Adjust Arrears" entry point without a page navigation —
         // see this feature's design doc, 2026-08-27 addendum.
-        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier']);
+        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier', 'receipt']);
 
         return Inertia::render('Payments/Show', [
             'payment' => $this->formatPayment($payment),
+            // The business-issued receipt (Wave 2 of
+            // payment-receipts-and-whatsapp.md) — null until a receipt is
+            // issued (auto on verify, or the manual action below).
+            'receipt' => $payment->receipt ? $this->formatReceipt($payment->receipt) : null,
+            // Mirrors PaymentReceiptPolicy::issue() — the class-level
+            // `payments.issue_receipt` gate, computed controller-side the
+            // same way can_manage/can_delete are.
+            'can_issue_receipt' => $this->context->can('payments.issue_receipt'),
             // Mirrors PaymentPolicy::update()'s own role check exactly (that
             // policy method takes no target Payment — it's a pure
             // class-level role gate) — same "compute the flag the page
             // needs, controller-side" idiom ComplaintController::show() uses
             // for its own can_manage prop.
-            'can_manage' => $this->context->isAnyOf('super', 'admin', 'manager'),
+            'can_manage' => $this->context->can('payments.update'),
             // Same idiom as can_manage above, but mirroring PaymentPolicy::
             // delete()'s stricter super/admin-only role check instead of
             // update()'s super/admin/manager.
-            'can_delete' => $this->context->isAnyOf('super', 'admin'),
+            'can_delete' => $this->context->can('payments.delete'),
         ]);
     }
 
@@ -344,6 +357,7 @@ class PaymentController extends Controller
             'uuid' => $payment->uuid,
             'customer_uuid' => $payment->customer->uuid,
             'customer_name' => $payment->customer->name,
+            'customer_phone' => $payment->customer->phone,
             'customer_bill' => (string) $payment->customer->bill,
             'zone_name' => $payment->customer->zone?->name,
             // Only populated on Payments/Show.tsx (where `customer.
@@ -367,6 +381,42 @@ class PaymentController extends Controller
             'collected_at' => $payment->collected_at?->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),
             'verification' => $payment->verification ? $this->formatVerification($payment->verification) : null,
+            // Lightweight receipt indicator for Payments/Index.tsx's column
+            // (and harmless on Show, which reads the richer top-level
+            // `receipt` prop instead). Null when no receipt has been issued.
+            'receipt' => $payment->relationLoaded('receipt') && $payment->receipt
+                ? [
+                    'uuid' => $payment->receipt->uuid,
+                    'receipt_number' => $payment->receipt->receipt_number,
+                    'status' => $payment->receipt->status,
+                ]
+                : null,
+        ];
+    }
+
+    /**
+     * The full receipt payload for Payments/Show.tsx's Receipt card.
+     *
+     * @return array<string, mixed>
+     */
+    private function formatReceipt(PaymentReceipt $receipt): array
+    {
+        return [
+            'uuid' => $receipt->uuid,
+            'receipt_number' => $receipt->receipt_number,
+            'status' => $receipt->status,
+            'issued_at' => $receipt->issued_at?->toIso8601String(),
+            'amount' => (string) $receipt->amount,
+            'download_url' => route('payment-receipts.pdf', $receipt),
+            // Signed ~7-day public link — Wave 3's WhatsApp Send button reuses
+            // this verbatim; harmless to mint on each page load.
+            'shared_url' => PaymentReceiptLink::shared($receipt),
+            // Wave 3 — "Last sent" line on the Receipt card, read from the
+            // sent_log jsonb array the WhatsApp send appends to.
+            'sent_count' => count($receipt->sent_log ?? []),
+            'last_sent_at' => ! empty($receipt->sent_log)
+                ? ($receipt->sent_log[array_key_last($receipt->sent_log)]['at'] ?? null)
+                : null,
         ];
     }
 

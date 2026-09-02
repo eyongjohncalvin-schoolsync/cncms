@@ -35,6 +35,12 @@ export function normalizeCameroonPhoneForWhatsapp(phone: string | null | undefin
         return null;
     }
 
+    // '00237…' international-access prefix — drop the leading '00'. Mirrors
+    // App\Support\CameroonPhone::forWhatsapp() on the server.
+    if (digits.startsWith('00')) {
+        digits = digits.slice(2);
+    }
+
     if (digits.startsWith('237') && digits.length === 12) {
         return digits;
     }

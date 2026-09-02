@@ -22,22 +22,22 @@ class ExpenseCategoryPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('expenditures.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('expenditures.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('expense_categories.manage');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('expense_categories.manage');
     }
 
     /**
@@ -45,6 +45,6 @@ class ExpenseCategoryPolicy
      */
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('expense_categories.manage');
     }
 }

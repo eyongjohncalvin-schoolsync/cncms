@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Exports\ManuscriptRegisterExport;
+use App\Models\BillBatch;
+use App\Models\BillBatchFile;
 use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
@@ -22,6 +25,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
+use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -45,7 +49,7 @@ class ManuscriptController extends Controller
     {
         $this->authorize('viewAny', Manuscript::class);
 
-        $filters = $request->only(['period', 'zone_uuid', 'status']);
+        $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
         $period = (string) ($filters['period'] ?? now()->format('Y-m'));
 
         $paginated = $this->manuscripts->list($filters, 25);
@@ -61,7 +65,9 @@ class ManuscriptController extends Controller
             'total_arrears' => $manuscript->total_arrears,
             'credit' => $manuscript->credit,
             'total_bill' => $manuscript->total_bill,
-            'payment_expiration' => $manuscript->payment_expiration,
+            'payment_expiration' => $manuscript->payment_expiration?->toDateString(),
+            'prepaid_months_remaining' => (int) $manuscript->prepaid_months_remaining,
+            'prepaid_rate' => $manuscript->prepaid_rate,
             'period' => $manuscript->period,
             'status' => $manuscript->customer->status,
             // Built from THIS row's own manuscript (not necessarily the
@@ -77,23 +83,105 @@ class ManuscriptController extends Controller
             'manuscripts' => $this->paginatorProps($paginated),
             'summary' => $this->manuscripts->summary($filters),
             'zones' => $this->zones->all(),
+            // Asynchronous bill-generation runs for this period (owner's
+            // 2026-08-30 ask — App\Services\BillBatchService). Polled from
+            // the page with router.reload({ only: ['billBatches'] }) while
+            // any run is still queued/processing.
+            'billBatches' => $this->billBatchesForPeriod($period),
         ]);
     }
 
     /**
-     * Mirrors Api\ManuscriptController::export() — same PDF, streamed
-     * directly instead of behind a JSON envelope.
+     * The period's bill-generation runs, newest first, with per-file
+     * download links — feeds the "Bills" surface on Manuscripts/Index.tsx.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function billBatchesForPeriod(string $period): array
+    {
+        return BillBatch::query()
+            ->with('files')
+            ->where('period', $period)
+            ->latest('id')
+            ->limit(10)
+            ->get()
+            ->map(fn (BillBatch $batch): array => [
+                'uuid' => $batch->uuid,
+                'status' => $batch->status,
+                'period' => $batch->period,
+                'density' => $batch->density,
+                'template' => $batch->template,
+                'total_bills' => $batch->total_bills,
+                'total_zones' => $batch->total_zones,
+                'error_message' => $batch->error_message,
+                'created_at' => $batch->created_at,
+                'completed_at' => $batch->completed_at,
+                'files' => $batch->files
+                    ->sortBy(fn (BillBatchFile $file): string => match ($file->kind) {
+                        'bulk' => '0',
+                        'zip' => '1',
+                        default => '2'.mb_strtolower($file->zone_name ?? ''),
+                    })
+                    ->map(fn (BillBatchFile $file): array => [
+                        'uuid' => $file->uuid,
+                        'kind' => $file->kind,
+                        'zone_name' => $file->zone_name,
+                        'bill_count' => $file->bill_count,
+                        'page_count' => $file->page_count,
+                        'size_bytes' => $file->size_bytes,
+                        'download_url' => route('manuscripts.bills.download', [$batch->uuid, $file->uuid]),
+                    ])
+                    ->values()
+                    ->all(),
+            ])
+            ->all();
+    }
+
+    /**
+     * The monthly billing register, downloadable as either a PDF or an Excel
+     * workbook (?format=xlsx) — one branch, one policy gate, one
+     * throttle:exports ceiling. Both formats are fed the IDENTICAL
+     * ManuscriptService::exportData() result (same rows, same period/zone/
+     * status/search filtering), so the PDF and the spreadsheet can never
+     * disagree.
+     *
+     * The PDF branch raises PHP's memory_limit and execution time for the
+     * duration of this one request: dompdf's layout of the full register
+     * (one row per customer — hundreds of rows for a real tenant) blows
+     * past the default 128M / 30s. The API sibling
+     * (Api\ManuscriptController::export()) already did this; this web
+     * variant historically omitted it, which is exactly why the "Export"
+     * link 500'd — the reported break.
      */
     public function export(Request $request): Response
     {
         $this->authorize('export', Manuscript::class);
 
-        $filters = $request->only(['period', 'zone_uuid', 'status']);
+        $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
 
         $data = $this->manuscripts->exportData($filters);
 
-        return Pdf::loadView('pdf.manuscript', $data)
-            ->setPaper('a4', 'landscape')
+        if ($request->query('format') === 'xlsx') {
+            return Excel::download(
+                new ManuscriptRegisterExport($data),
+                'manuscript-'.$data['period'].'.xlsx',
+            );
+        }
+
+        ini_set('memory_limit', '1024M');
+        set_time_limit(120);
+
+        // Register orientation is an admin choice, defaulting to portrait —
+        // portrait fits more customer rows per page, which is what the owner
+        // wants for the monthly register; landscape stays available for the
+        // wider view. Fed to both dompdf's paper setup and the blade (which
+        // switches its fixed column widths on it). A hand-crafted value other
+        // than the two allowed is a hard 422 rather than a silent coercion.
+        $orientation = (string) $request->query('orientation', 'portrait');
+        abort_unless(in_array($orientation, ['portrait', 'landscape'], true), 422, 'orientation must be portrait or landscape.');
+
+        return Pdf::loadView('pdf.manuscript', [...$data, 'orientation' => $orientation])
+            ->setPaper('a4', $orientation)
             ->stream('manuscript-'.$data['period'].'.pdf');
     }
 
@@ -140,7 +228,10 @@ class ManuscriptController extends Controller
     {
         $this->authorize('calculate', Manuscript::class);
 
-        $period = (string) $request->input('period', now()->format('Y-m'));
+        // 2026-08-28 correction (business-rules.md section 2): triggered
+        // near month-end, this run governs the UPCOMING month, not the one
+        // it's clicked in — see ManuscriptCalculate's identical comment.
+        $period = (string) $request->input('period', now()->addMonthNoOverflow()->format('Y-m'));
 
         // A bad/mistyped period reaching this endpoint previously ran and
         // auto-published billing for the ENTIRE tenant against that literal
@@ -149,9 +240,11 @@ class ManuscriptController extends Controller
         // manuscript rows for every customer, corrupting BillNotificationService's
         // "latest manuscript" for all of them at once. Mirrors
         // StoreArrearsAdjustmentRequest's target_period validation (format +
-        // not-in-the-future) since the same invariant applies here.
-        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
-            return redirect()->back()->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.");
+        // not-in-the-future) since the same invariant applies here — except
+        // "future" now means "beyond the upcoming month", since generating
+        // next month's bill in advance is the NORMAL case, not a mistake.
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->addMonthNoOverflow()->format('Y-m')) {
+            return redirect()->back()->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be beyond next month.");
         }
 
         $validated = $request->validate([
@@ -210,8 +303,65 @@ class ManuscriptController extends Controller
                 'batch_progress' => $batchProgressById[$run->batch_id] ?? null,
                 'published_at' => $run->published_at,
             ],
+            // The full per-customer preview of what Publish would commit —
+            // the computed figures sit on the run's computed_result already,
+            // just never surfaced before. Only present once a run is
+            // computed (pending_review / published); null while still queued.
+            'computed_rows' => $this->computedRows($run),
             'canPublish' => Auth::user()?->can('publish', CommandRun::class) ?? false,
         ]);
+    }
+
+    /**
+     * Joins `command_runs.computed_result['customers']` (keyed by
+     * customer_id) with customer name/zone/phone so RunReview.tsx can render
+     * a scannable, filterable table of exactly what Publish will write —
+     * the missing "preview before you commit" step. Returns null when the
+     * run hasn't produced a computed_result yet.
+     *
+     * @return array<int, array<string, mixed>>|null
+     */
+    private function computedRows(CommandRun $run): ?array
+    {
+        $customers = $run->computed_result['customers'] ?? null;
+
+        if (! is_array($customers) || $customers === []) {
+            return null;
+        }
+
+        $byId = Customer::query()
+            ->with('zone')
+            ->whereIn('id', array_map('intval', array_keys($customers)))
+            ->get()
+            ->keyBy('id');
+
+        return collect($customers)
+            ->map(function (array $entry, int|string $customerId) use ($byId): array {
+                $customer = $byId->get((int) $customerId);
+                $a = $entry['attributes'] ?? [];
+
+                return [
+                    'customer_uuid' => $customer?->uuid,
+                    'customer_name' => $customer?->name ?? "#{$customerId}",
+                    'customer_code' => $customer ? substr($customer->uuid, 0, 8) : null,
+                    'phone' => $customer?->phone,
+                    'zone_name' => $customer?->zone?->name,
+                    'level' => $customer?->level,
+                    'status' => $customer?->status,
+                    'is_frozen' => (bool) ($entry['is_frozen'] ?? false),
+                    'bill' => $a['bill'] ?? null,
+                    'total_arrears' => $a['total_arrears'] ?? null,
+                    'credit' => $a['credit'] ?? null,
+                    'total_bill' => $a['total_bill'] ?? null,
+                    'payment_expiration' => $a['payment_expiration'] ?? null,
+                    'prepaid_months_remaining' => (int) ($a['prepaid_months_remaining'] ?? 0),
+                    'payments_applied' => count($entry['processed_payment_ids'] ?? []),
+                    'adjustments_applied' => count($entry['processed_adjustment_ids'] ?? []),
+                ];
+            })
+            ->sortBy('customer_name', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values()
+            ->all();
     }
 
     /**
@@ -244,11 +394,14 @@ class ManuscriptController extends Controller
     {
         $this->authorize('calculate', Manuscript::class);
 
-        $period = (string) $request->input('period', now()->format('Y-m'));
+        // Matches calculate()'s own default/guard — this previews who WOULD
+        // be flagged by the run that's about to happen, which governs the
+        // upcoming month (2026-08-28 correction, business-rules.md section 2).
+        $period = (string) $request->input('period', now()->addMonthNoOverflow()->format('Y-m'));
 
-        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->addMonthNoOverflow()->format('Y-m')) {
             return response()->json([
-                'message' => "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.",
+                'message' => "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be beyond next month.",
             ], 422);
         }
 
@@ -285,10 +438,12 @@ class ManuscriptController extends Controller
     {
         $this->authorize('calculate', Manuscript::class);
 
-        $period = (string) $request->input('period', now()->format('Y-m'));
+        // Matches calculate()'s own default/guard — see preRunReview()'s
+        // identical comment (2026-08-28 correction).
+        $period = (string) $request->input('period', now()->addMonthNoOverflow()->format('Y-m'));
 
-        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->format('Y-m')) {
-            return redirect()->route('manuscripts.index')->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be in the future.");
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) || $period > now()->addMonthNoOverflow()->format('Y-m')) {
+            return redirect()->route('manuscripts.index')->with('error', "Invalid period \"{$period}\" — expected format YYYY-MM, and it cannot be beyond next month.");
         }
 
         $zoneUuid = $request->string('zone_uuid')->toString() ?: null;
@@ -335,6 +490,17 @@ class ManuscriptController extends Controller
     public function sendBill(Customer $customer): RedirectResponse
     {
         $this->authorize('sendBill', Manuscript::class);
+
+        // A bill reminder is only ever sent to an ACTIVE customer (owner
+        // decision, 2026-08) — a disconnected/suspended/passive customer is
+        // frozen with a 0 total_bill. Refuse here the same way
+        // CustomerController::printBill() refuses the printed slip, and do
+        // NOT log a `messages` row claiming we reminded them. BillNotificationService
+        // ::composeMessage() also guards this, but we want a status-specific
+        // flash rather than the generic "no manuscript" one below.
+        if ($customer->status !== 'active') {
+            return redirect()->back()->with('error', "Bills are only sent for active customers. {$customer->name} is {$customer->status}.");
+        }
 
         $content = $this->billNotifications->composeMessage($customer);
 

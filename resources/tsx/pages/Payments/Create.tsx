@@ -152,6 +152,7 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
         credit: '',
         frequency: 'monthly' as PaymentFrequency,
         months: '',
+        clear_arrears_first: false,
     });
 
     const filteredCustomers = useMemo(() => {
@@ -258,6 +259,48 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
         return bill * months;
     }, [selectedCustomer, data.frequency, data.months]);
 
+    // Draw-down Q1 (references/prepayment-drawdown.md): the "clear arrears
+    // first" toggle is only relevant on a months/yearly prepayment for a
+    // customer who currently owes.
+    const isPrepayment = data.frequency === 'months' || data.frequency === 'yearly';
+    const selectedArrears = selectedCustomer ? Number(selectedCustomer.total_arrears ?? 0) : 0;
+    const showClearArrearsToggle = isPrepayment && selectedArrears > 0;
+
+    // A read-only preview of how the payment splits, mirroring the mobile
+    // Record Payment screen's guide. Never auto-fills anything.
+    const prepaymentSplit = useMemo(() => {
+        if (!showClearArrearsToggle || !selectedCustomer) {
+            return null;
+        }
+
+        const rate = Number(selectedCustomer.bill);
+        const amount = Number(data.amount);
+
+        if (!Number.isFinite(rate) || rate <= 0 || !Number.isFinite(amount) || amount <= 0) {
+            return null;
+        }
+
+        if (data.clear_arrears_first) {
+            const cleared = Math.min(amount, selectedArrears);
+            const months = Math.floor((amount - cleared) / rate);
+
+            return `Clears ${formatCurrency(cleared)} of arrears, then covers ~${months} prepaid month(s).`;
+        }
+
+        const intended = data.frequency === 'yearly' ? 12 : Number(data.months) || 0;
+        const months = Math.min(intended, Math.floor(amount / rate));
+
+        return `Covers ${months} prepaid month(s); ${formatCurrency(selectedArrears)} arrears stays due.`;
+    }, [showClearArrearsToggle, selectedCustomer, data.amount, data.months, data.frequency, data.clear_arrears_first, selectedArrears]);
+
+    // Keep the flag from lingering once it stops being relevant.
+    useEffect(() => {
+        if (!showClearArrearsToggle && data.clear_arrears_first) {
+            setData('clear_arrears_first', false);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showClearArrearsToggle]);
+
     function selectCustomer(uuid: string) {
         setData((current) => {
             const customer = customers.find((c) => c.uuid === uuid);
@@ -355,6 +398,23 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
                             />
                         )}
 
+                        {showClearArrearsToggle && (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
+                                    <input
+                                        type="checkbox"
+                                        checked={data.clear_arrears_first}
+                                        onChange={(e) => setData('clear_arrears_first', e.target.checked)}
+                                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                                    />
+                                    <span>
+                                        Clear the {formatCurrency(selectedArrears)} arrears first, then buy prepaid months with the rest
+                                    </span>
+                                </label>
+                                {prepaymentSplit && <p className="mt-2 pl-6 text-xs text-slate-500">{prepaymentSplit}</p>}
+                            </div>
+                        )}
+
                         <TextInput
                             id="credit"
                             label="Credit (optional)"
@@ -366,13 +426,13 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
                             error={errors.credit}
                         />
 
-                        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-                            <Link href="/payments">
-                                <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                        <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+                            <Link href="/payments" className="w-full sm:w-auto">
+                                <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                     Cancel
                                 </Button>
                             </Link>
-                            <Button type="submit" disabled={processing} className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                            <Button type="submit" disabled={processing} className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                 {processing && <LoadingSpinner className="h-4 w-4" />}
                                 {processing ? 'Saving…' : 'Record Payment'}
                             </Button>
@@ -647,20 +707,20 @@ function BulkPaymentForm({ customers }: { customers: Customer[] }) {
                         />
                     )}
 
-                    <div className="flex items-center justify-between border-t border-slate-200 pt-4">
+                    <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-sm text-slate-600">
                             {selected.size} payment{selected.size === 1 ? '' : 's'} · total {formatCurrency(String(totalAmount))}
                         </p>
-                        <div className="flex gap-2">
-                            <Link href="/payments">
-                                <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                            <Link href="/payments" className="w-full sm:w-auto">
+                                <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                     Cancel
                                 </Button>
                             </Link>
                             <Button
                                 type="submit"
                                 disabled={processing || selected.size === 0}
-                                className="rounded-lg px-5 py-2.5 text-sm font-semibold"
+                                className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
                             >
                                 {processing && <LoadingSpinner className="h-4 w-4" />}
                                 {processing ? 'Saving…' : `Record ${selected.size || ''} Payments`}

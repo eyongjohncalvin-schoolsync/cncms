@@ -85,7 +85,7 @@ class CommandRunCancelUnblocksDispatchTest extends TestCase
 
         Manuscript::query()->whereIn('customer_id', $customerIds)->delete();
         Payment::query()->whereIn('customer_id', $customerIds)->delete();
-        Customer::query()->whereIn('id', $customerIds)->delete();
+        Customer::query()->whereIn('id', $customerIds)->forceDelete();
         Zone::query()->whereKey($zone->id)->delete();
 
         if ($commandRunIds !== []) {

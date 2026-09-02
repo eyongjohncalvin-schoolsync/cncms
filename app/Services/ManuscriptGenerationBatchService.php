@@ -161,6 +161,11 @@ class ManuscriptGenerationBatchService
         // chunk jobs themselves.
         $batch = Bus::batch($jobs)
             ->name("manuscript_generation:{$tenantId}:{$period}:{$commandRunId}")
+            // Heavy, non-time-critical work on its own queue so it never
+            // sits in front of a tenant-creation / notification job on the
+            // default queue — the worker is run as
+            // `--queue=default,manuscripts,bills` (see DEPLOYMENT.md).
+            ->onQueue('manuscripts')
             ->allowFailures()
             ->then(function (Batch $batch) use ($commandRunId, $autoPublish, $actingUserId): void {
                 app(self::class)->handleBatchSucceeded($commandRunId, $autoPublish, $actingUserId);
@@ -341,9 +346,17 @@ class ManuscriptGenerationBatchService
                     continue;
                 }
 
+                // command_run_id (task-scheduler.md's 2026-08-28 manuscript-run-
+                // management addendum): links this row back to exactly the
+                // command_runs row that wrote it, so Delete/Rollback can scope its
+                // DELETE precisely — never by period alone (see
+                // SettingsCommandRunController::rollback()). Set on every publish,
+                // including a republish of an already-existing row, so the link
+                // always reflects whichever run most recently committed this row's
+                // numbers.
                 Manuscript::query()
                     ->firstOrNew(['customer_id' => (int) $customerId, 'period' => $commandRun->period])
-                    ->fill($entry['attributes'] ?? [])
+                    ->fill([...($entry['attributes'] ?? []), 'command_run_id' => $commandRun->id])
                     ->save();
 
                 $paymentIds = $entry['processed_payment_ids'] ?? [];

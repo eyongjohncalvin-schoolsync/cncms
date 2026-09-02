@@ -22,27 +22,63 @@ class CustomerPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('customers.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('customers.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.create');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.update');
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.delete');
+    }
+
+    /**
+     * Archive (soft-delete) / restore a customer — the customer-deletion
+     * deliberation's reversible, non-financial lifecycle action. Same
+     * super/admin/manager gate as delete() and the reversible status
+     * actions (disconnect/suspend/reconnect): archiving moves no ledger
+     * figure, so it deliberately does NOT go through the arrears-adjustment
+     * maker-checker (that is the money-movement control, not the
+     * destructive-action control). The type-the-name confirm + required
+     * reason on the modal, plus the full audit row, are the safety here.
+     */
+    public function archive(User $user): bool
+    {
+        return $this->context->can('customers.archive');
+    }
+
+    public function restore(User $user): bool
+    {
+        return $this->context->can('customers.archive');
+    }
+
+    /**
+     * "Export full record" (docs/plans/customer-record-export.md) — a
+     * single downloadable PDF / multi-sheet XLSX bundling EVERYTHING CNCMS
+     * holds about this customer (profile, every payment + verification +
+     * receipt, every manuscript, arrears adjustments, messages, complaints,
+     * the full audit trail). It is a complete, UNREDACTED data dump for an
+     * auditor or a dispute, so `customers.export_record` is seeded
+     * super/admin only — deliberately narrower than the plain `view` gate.
+     * The route binds the customer ->withTrashed(), so this must also allow
+     * exporting an archived customer.
+     */
+    public function exportRecord(User $user, Customer $customer): bool
+    {
+        return $this->context->can('customers.export_record');
     }
 
     /**
@@ -52,7 +88,7 @@ class CustomerPolicy
      */
     public function printBill(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('customers.print_bill');
     }
 
     /**
@@ -79,7 +115,11 @@ class CustomerPolicy
      */
     public function disconnect(User $user, Customer $customer): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager')
+        // RBAC v2: the office gate is now the `customers.change_status`
+        // catalog permission; the agent zone-scoped branch stays an additive
+        // OR (agent is NOT seeded `customers.change_status` — see Wave 2
+        // rules and TenantContext::zoneId).
+        return $this->context->can('customers.change_status')
             || ($this->context->role === 'agent'
                 && $this->context->zoneId !== null
                 && $customer->zone_id === $this->context->zoneId);
@@ -87,12 +127,12 @@ class CustomerPolicy
 
     public function suspend(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     public function reconnect(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     /**
@@ -103,7 +143,7 @@ class CustomerPolicy
      */
     public function viewStatusBoard(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.status_board');
     }
 
     /**
@@ -120,7 +160,7 @@ class CustomerPolicy
      */
     public function viewEligibilityBoard(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('customers.eligibility_board');
     }
 
     /**
@@ -131,16 +171,16 @@ class CustomerPolicy
      */
     public function bulkDisconnect(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     public function bulkSuspend(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     public function bulkReconnect(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 }

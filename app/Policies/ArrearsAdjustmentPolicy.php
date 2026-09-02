@@ -30,6 +30,20 @@ use App\Support\TenantContext;
  *   - any other status (already 'approved'/'rejected'): false — there is
  *     nothing left to approve or reject.
  *
+ * SUPER SELF-APPROVAL CARVE-OUT (2026-08-29): the `super` role — the single
+ * business owner in this ~6-person, owner-operated company — is exempt from
+ * the maker≠checker rule at BOTH stages: a super may approve/reject an
+ * adjustment they themselves raised (and, at the second stage, one they also
+ * gave the first approval to). Rationale: the owner is the ultimate
+ * authority and must not be permanently deadlocked on their own small ledger
+ * corrections when no other senior reviewer is available. `admin` and
+ * `manager` stay fully bound by maker≠checker and the two-senior-approver
+ * identity rules exactly as before — the carve-out is `super`-only and
+ * deliberately hardcoded (no config flag; configurable permissions are a
+ * separate, later effort). The web review UI surfaces a confirmation step
+ * for a super acting on their own request so the bypass is explicit and, as
+ * always, it lands in the audit log.
+ *
  * This is intentionally the single source of truth for "who may act on
  * this adjustment right now" — App\Services\ArrearsAdjustmentService trusts
  * that this check already ran (same "authorization is the Policy's job,
@@ -46,27 +60,41 @@ class ArrearsAdjustmentPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('arrears.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('arrears.view');
     }
 
     public function create(User $user): bool
     {
-        return true;
+        return $this->context->can('arrears.request');
     }
 
+    /**
+     * RBAC v2: only the STAGE-1 flat role gate becomes a catalog permission
+     * (`arrears.approve`, seeded to admin + manager, super via bypass). The
+     * rest stays hardcoded and orthogonal to "does this role hold the
+     * permission", exactly as the plan's Wave 2 rules require:
+     *   - the STAGE-2 (`pending_second_approval`) admin/super-only narrowing
+     *     — `manager` DOES hold `arrears.approve` but is still excluded here;
+     *   - the maker≠checker / second-approver≠first-approver identity checks;
+     *   - the `super` self-approval carve-out (unchanged from `is('super')`);
+     *   - the terminal-state `default => false`.
+     * Wave 1's Gate::before is catalog-scoped and never touches this
+     * `approve`/`reject` ability, so this method body is authoritative.
+     */
     public function approve(User $user, ArrearsAdjustment $adjustment): bool
     {
         return match ($adjustment->status) {
-            'pending' => $this->context->isAnyOf('super', 'admin', 'manager')
-                && $user->id !== $adjustment->requested_by,
+            'pending' => $this->context->can('arrears.approve')
+                && ($user->id !== $adjustment->requested_by || $this->context->isSuper()),
             'pending_second_approval' => $this->context->isAnyOf('super', 'admin')
-                && $user->id !== $adjustment->requested_by
-                && $user->id !== $adjustment->approved_by,
+                && ($this->context->isSuper()
+                    || ($user->id !== $adjustment->requested_by
+                        && $user->id !== $adjustment->approved_by)),
             default => false,
         };
     }

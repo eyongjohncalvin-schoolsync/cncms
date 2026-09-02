@@ -1,6 +1,16 @@
 # Prepaid-Time Preservation Across Suspend/Disconnect — Design Spec
 
-Status: **Design, not yet implemented — build after the in-flight suspended-freeze fix lands**
+Status: **SUPERSEDED (2026-08-29) by `references/prepayment-drawdown.md` — do not build.**
+Under draw-down credit, a frozen customer's `prepaid_months_remaining` / `prepaid_rate` /
+`credit` are simply carried forward untouched and not decremented while frozen (that doc's
+PD-8), so the customer resumes with exactly what they had — no `status_changed_at`
+arithmetic, no `prepaid_paused` flag, no reconnect-time date extension. This entire spec
+exists only to patch the calendar-date freeze model that draw-down replaces. Kept for
+historical context; the sections below describe a problem draw-down does not have.
+
+---
+
+Original status: **Design, not yet implemented — build after the in-flight suspended-freeze fix lands**
 (that fix adds `suspended` to `ManuscriptCalculator`'s freeze branch; this feature is a distinct,
 more precise mechanism layered on top of it, not a variation of it — see §1 for why they're
 different problems). Owner ask, verbatim reasoning: a customer who prepaid 6 months and used only

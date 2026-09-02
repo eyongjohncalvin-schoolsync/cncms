@@ -11,6 +11,7 @@ use App\Models\Notification;
 use App\Models\User;
 use App\Repositories\Contracts\NotificationRepositoryInterface;
 use App\Support\TenantContext;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Public API for the in-app notification system (in-app-notifications.md).
@@ -35,6 +36,19 @@ use App\Support\TenantContext;
  */
 class NotificationService
 {
+    /**
+     * Win 3 (perf): per-tenant cache version fronting feedForUser(). It's
+     * appended to that method's cache key and bumped by every write path in
+     * this class (create / markRead / markAllRead / acknowledge). Bumping a
+     * single counter rather than enumerating recipients keeps invalidation
+     * O(1): fan-out is lazy and role-based (in-app-notifications.md §3), so
+     * one broadcast can change every user's feed, and "the whole tenant's
+     * feeds may have moved" is both true and cheap to say this way. Plain
+     * string key — App\Tenancy\CacheTenancyBootstrapper already scopes it
+     * per tenant.
+     */
+    private const string FEED_VERSION_KEY = 'notifications:feed_version';
+
     public function __construct(
         private readonly NotificationRepositoryInterface $notifications,
     ) {}
@@ -56,6 +70,10 @@ class NotificationService
         $notification = $this->notifications->create($data->toAttributes());
 
         SendPushNotificationJob::dispatch($notification->uuid);
+
+        // A new notification can land in any matching user's lazily-computed
+        // feed — invalidate every cached feedForUser() result for the tenant.
+        $this->bumpFeedVersion();
 
         return $notification;
     }
@@ -162,28 +180,68 @@ class NotificationService
     {
         $isInvestor = (bool) $context->tenantUser->is_investor;
 
-        $recent = $this->notifications->recentForUser($user->id, $context->role, $isInvestor, $limit);
-        $emergencies = $this->notifications->unacknowledgedEmergenciesForUser($user->id, $context->role, $isInvestor);
+        // Win 3 (perf): these 3 uncached repo queries otherwise run on EVERY
+        // Inertia response, EVERY 60s poll tick from EVERY open tab, and
+        // every mobile GET /sync/pull. Cache the assembled feed per
+        // (version, user, role, investor, limit). The version key — bumped
+        // by every write path in this class — is the real invalidation; the
+        // 30s TTL is only a backstop so a missed bump can't stick long,
+        // keeping the bell near-real-time.
+        $key = sprintf(
+            'notifications:feed:v%d:u%d:%s:%d:%d',
+            $this->feedVersion(),
+            $user->id,
+            $context->role,
+            (int) $isInvestor,
+            $limit,
+        );
 
-        return [
-            'items' => NotificationResource::collection($recent)->resolve(),
-            'unread_count' => $this->notifications->unreadCountForUser($user->id, $context->role, $isInvestor),
-            'emergency' => NotificationResource::collection($emergencies)->resolve(),
-        ];
+        return Cache::remember($key, now()->addSeconds(30), function () use ($user, $context, $isInvestor, $limit): array {
+            $recent = $this->notifications->recentForUser($user->id, $context->role, $isInvestor, $limit);
+            $emergencies = $this->notifications->unacknowledgedEmergenciesForUser($user->id, $context->role, $isInvestor);
+
+            return [
+                'items' => NotificationResource::collection($recent)->resolve(),
+                'unread_count' => $this->notifications->unreadCountForUser($user->id, $context->role, $isInvestor),
+                'emergency' => NotificationResource::collection($emergencies)->resolve(),
+            ];
+        });
     }
 
     public function markRead(Notification $notification, User $user): void
     {
         $this->notifications->markRead($notification, $user->id);
+        $this->bumpFeedVersion();
     }
 
     public function markAllRead(User $user, TenantContext $context): void
     {
         $this->notifications->markAllReadForUser($user->id, $context->role, (bool) $context->tenantUser->is_investor);
+        $this->bumpFeedVersion();
     }
 
     public function acknowledge(Notification $notification, User $user): void
     {
         $this->notifications->acknowledge($notification, $user->id);
+        $this->bumpFeedVersion();
+    }
+
+    /**
+     * Current per-tenant feed cache version (0 when never bumped).
+     */
+    private function feedVersion(): int
+    {
+        return (int) Cache::get(self::FEED_VERSION_KEY, 0);
+    }
+
+    /**
+     * Invalidates every cached feedForUser() result for the active tenant.
+     * Cache::add seeds the key first so the very first increment on a cold
+     * cache store doesn't no-op.
+     */
+    private function bumpFeedVersion(): void
+    {
+        Cache::add(self::FEED_VERSION_KEY, 0);
+        Cache::increment(self::FEED_VERSION_KEY);
     }
 }

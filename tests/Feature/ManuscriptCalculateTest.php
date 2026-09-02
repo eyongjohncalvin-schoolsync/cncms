@@ -15,43 +15,77 @@ use App\Services\ManuscriptService;
 use Database\Factories\CustomerFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
+use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
 
 /**
- * Exercises App\Services\ManuscriptCalculator (and, in one case, the full
- * manuscript:calculate command) against the real `tenantswecom` schema.
+ * Exercises App\Services\ManuscriptCalculator (and, in six tests, the full
+ * manuscript:calculate command end-to-end) against a real, throwaway tenant
+ * schema.
  *
- * Stancl tenancy dynamically creates a `tenant` database connection only once
- * tenancy()->initialize() runs, so it can't be named in $connectionsToTransact
- * up front like a normal DatabaseTransactions connection. Instead, setUp()
- * initializes tenancy to swecom and then manually opens a transaction on that
- * connection; tearDown() rolls it back before ending tenancy. This gives the
- * same "the shared dev Postgres database is left untouched" guarantee as
- * DatabaseTransactions, without ever running a migration/refresh against it.
+ * 2026-08-28 incident this closes: this file used to initialize tenancy
+ * against the REAL `swecom` tenant and open a manual
+ * DB::connection('tenant') transaction in setUp(), rolled back in
+ * tearDown() — the same style of bug already fixed once before in
+ * ManuscriptGenerationBatchServiceTest and ManuscriptPublishStaleRaceTest
+ * (2026-08-27, commit 81bee0e8) for the same underlying reason: Stancl's
+ * DatabaseManager::connectToTenant() unconditionally purges/recreates the
+ * `tenant` PDO connection on every tenancy()->initialize() call, silently
+ * rolling back an open outer transaction's uncommitted fixtures. Six tests
+ * in this file (test_the_command_upserts_manuscripts_processes_payments_and_logs_a_command_run
+ * and the five below it) invoke the REAL manuscript:calculate artisan
+ * command, which does exactly that internally — so, like the two files
+ * fixed on 2026-08-27, they could never rely on the normal rollback safety
+ * net and instead committed real fixtures straight into `swecom`, manually
+ * deleting them in a `finally` block afterward. A killed/interrupted test
+ * process skips a `finally` block entirely, which is what produced this
+ * file's own incident: 2,230 orphaned manuscript rows across periods
+ * 2033-04/2035-01/2035-02/2035-04 committed against real swecom customers.
+ *
+ * WORSE than "only a killed test leaks data": manuscript:calculate has no
+ * way to scope itself to a customer subset — Customer::query()->chunkById()
+ * processes EVERY customer belonging to whatever tenant --tenant points at.
+ * Every one of the six artisan-invoking tests ran the command against the
+ * REAL swecom tenant, so EVERY successful (non-crashed) run of this file
+ * already wrote a manuscript row for every real swecom customer at that
+ * test's period — and every one of those tests' `finally` blocks deleted
+ * only that test's own single fixture customer's manuscript row, never the
+ * hundreds of real customers' rows the command also touched. The 2,230-row
+ * incident is consistent with exactly this: roughly one row per real
+ * customer, per leaked period, left behind by ordinary green test runs, not
+ * merely by interrupted ones.
+ *
+ * The fix: provision a brand-new, disposable tenant schema per test instead
+ * (Tests\Feature\Concerns\UsesDisposableTenant — see its class doc for the
+ * full reasoning; the same pattern already proven in the two files fixed on
+ * 2026-08-27, not a new mechanism). The disposable schema starts with zero
+ * customers (only the seeded 29 zones / 9 expense categories / company row
+ * from Database\Seeders\TenantDatabaseSeeder), so manuscript:calculate run
+ * against it only ever touches fixtures this file itself created, and
+ * tearDown()'s unconditional `DROP SCHEMA ... CASCADE` cleans up everything
+ * regardless of how the test exits — no per-test `finally` cleanup needed
+ * anymore, and no risk of leaking real customer data even on a perfectly
+ * ordinary, successful run.
  *
  * All fixtures (zones, customers, payments) are created fresh per test via
- * factories — none of the real seeded 29 zones / 9 expense categories /
- * company row are read or modified.
+ * factories — the seeded 29 zones / 9 expense categories / company row exist
+ * in the disposable schema but are never read or modified by any test here.
  */
 class ManuscriptCalculateTest extends TestCase
 {
-    use DatabaseTransactions;
+    use UsesDisposableTenant;
 
     private ManuscriptCalculator $calculator;
+
+    private Tenant $tenant;
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $tenant = Tenant::find('swecom');
-        $this->assertNotNull($tenant, 'The swecom tenant must already be provisioned to run this test.');
-
-        tenancy()->initialize($tenant);
-
-        DB::connection('tenant')->beginTransaction();
+        $this->tenant = $this->provisionDisposableTenant('zmct');
+        tenancy()->initialize($this->tenant);
 
         $this->calculator = new ManuscriptCalculator;
     }
@@ -59,12 +93,15 @@ class ManuscriptCalculateTest extends TestCase
     protected function tearDown(): void
     {
         if (tenancy()->initialized) {
-            if (DB::connection('tenant')->transactionLevel() > 0) {
-                DB::connection('tenant')->rollBack();
-            }
-
             tenancy()->end();
         }
+
+        // Drops the entire disposable schema this test's fixtures lived in
+        // — total, unconditional cleanup regardless of what the test
+        // created or how far it got. Never touches `swecom` or any other
+        // real tenant. See Tests\Feature\Concerns\UsesDisposableTenant's
+        // class doc.
+        $this->tenant->delete();
 
         parent::tearDown();
     }
@@ -264,6 +301,171 @@ class ManuscriptCalculateTest extends TestCase
         $this->assertEqualsWithDelta(0.0, (float) $result2->totalBill, 0.001);
         $this->assertNotNull($result2->paymentExpiration);
         $this->assertTrue($result2->paymentExpiration->isSameDay(Carbon::parse($payment->expiration_date)));
+    }
+
+    /**
+     * Creates a post-cutover draw-down prepayment: a months/yearly payment
+     * with NO expiration_date and a locked prepaid_rate
+     * (references/prepayment-drawdown.md).
+     */
+    private function drawdownPayment(Customer $customer, int $months, float $rate, bool $clearArrearsFirst = false, ?float $amount = null): Payment
+    {
+        return PaymentFactory::new()->create([
+            'customer_id' => $customer->id,
+            'amount' => $amount ?? $rate * $months,
+            'frequency' => $months === 12 ? 'yearly' : 'months',
+            'months' => $months,
+            'expiration_date' => null,
+            'prepaid_rate' => $rate,
+            'clear_arrears_first' => $clearArrearsFirst,
+            'verification_status' => 'verified',
+        ]);
+    }
+
+    public function test_a_drawdown_prepayment_covers_exactly_n_months(): void
+    {
+        // The N-1 trap: routed through the normal ledger a 6-month payment
+        // covered only 5 months. The dedicated draw-down branch covers
+        // exactly 6, tracked by prepaid_months_remaining.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500);
+
+        $expected = [
+            '2026-01' => 5, '2026-02' => 4, '2026-03' => 3,
+            '2026-04' => 2, '2026-05' => 1, '2026-06' => 0,
+        ];
+        foreach ($expected as $period => $remaining) {
+            $r = $this->runAndPersist($customer, $period);
+            $this->assertEqualsWithDelta(0.0, (float) $r->totalBill, 0.001, "{$period} is a covered month — total_bill 0");
+            $this->assertSame($remaining, $r->prepaidMonthsRemaining, "{$period} remaining months");
+        }
+
+        // Window exhausted — first billed month resumes normal billing.
+        $r7 = $this->runAndPersist($customer, '2026-07');
+        $this->assertFalse($r7->isFrozen);
+        $this->assertSame(0, $r7->prepaidMonthsRemaining);
+        $this->assertEqualsWithDelta(5000.0, (float) $r7->totalBill, 0.001);
+    }
+
+    public function test_a_drawdown_prepaid_customer_is_unaffected_by_a_bill_rate_change(): void
+    {
+        // PD-3 / owner ruling: a rate change never touches a customer inside
+        // a prepaid window — a covered month is not charged at all.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500);
+
+        $this->runAndPersist($customer, '2026-01');
+        $this->runAndPersist($customer, '2026-02');
+
+        $customer->update(['bill' => 3000]); // rate hike mid-window
+
+        foreach (['2026-03', '2026-04', '2026-05', '2026-06'] as $period) {
+            $r = $this->runAndPersist($customer, $period);
+            $this->assertEqualsWithDelta(0.0, (float) $r->totalBill, 0.001, "{$period} still covered at the paid rate");
+        }
+
+        // Only now does the new rate apply.
+        $r7 = $this->runAndPersist($customer, '2026-07');
+        $this->assertEqualsWithDelta(6000.0, (float) $r7->totalBill, 0.001); // 3000 bill + 3000 arrears
+    }
+
+    public function test_stacking_a_second_drawdown_prepayment_adds_months_at_the_new_rate(): void
+    {
+        // PD-5 / Q2: the second payment's months add to the counter and
+        // re-lock prepaid_rate to the newer rate.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 3, 2500);
+
+        $this->runAndPersist($customer, '2026-01'); // remaining 2
+        $this->runAndPersist($customer, '2026-02'); // remaining 1
+
+        $customer->update(['bill' => 3000]);
+        $this->drawdownPayment($customer, 6, 3000); // 18,000
+
+        $r3 = $this->runAndPersist($customer, '2026-03');
+        $this->assertSame(6, $r3->prepaidMonthsRemaining, '1 carried + 6 new, minus this period');
+        $this->assertSame('3000.00', $r3->prepaidRate);
+        $this->assertEqualsWithDelta(0.0, (float) $r3->totalBill, 0.001);
+
+        foreach (['2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09'] as $period) {
+            $this->assertEqualsWithDelta(0.0, (float) $this->runAndPersist($customer, $period)->totalBill, 0.001);
+        }
+        $this->assertEqualsWithDelta(6000.0, (float) $this->runAndPersist($customer, '2026-10')->totalBill, 0.001);
+    }
+
+    public function test_drawdown_overpayment_becomes_credit_drawn_at_the_current_rate(): void
+    {
+        // Q3: amount beyond N*rate is ordinary credit, spent at the current
+        // rate once the prepaid months are gone.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500, amount: 20000); // 5,000 over
+
+        for ($m = 1; $m <= 6; $m++) {
+            $r = $this->runAndPersist($customer, sprintf('2026-%02d', $m));
+            $this->assertEqualsWithDelta(0.0, (float) $r->totalBill, 0.001);
+            $this->assertEqualsWithDelta(5000.0, (float) $r->credit, 0.001, 'overpay held as loose credit through the window');
+        }
+
+        $r7 = $this->runAndPersist($customer, '2026-07');
+        $this->assertEqualsWithDelta(0.0, (float) $r7->totalBill, 0.001, 'credit covers month 7');
+        $this->assertEqualsWithDelta(2500.0, (float) $r7->credit, 0.001);
+    }
+
+    public function test_drawdown_clear_arrears_first_toggle(): void
+    {
+        // Q1: ON pays down arrears then buys fewer months; OFF leaves the
+        // debt standing and buys the full N.
+        $on = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+        $off = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+
+        foreach ([$on, $off] as $c) {
+            $this->runAndPersist($c, '2026-01');
+            $this->runAndPersist($c, '2026-02'); // arrears 5,000 each
+        }
+
+        $this->drawdownPayment($on, 6, 2500, clearArrearsFirst: true);   // 15,000: 5k clears debt, 10k = 4 months
+        $this->drawdownPayment($off, 6, 2500, clearArrearsFirst: false); // 15,000: 6 months, 5k debt stays
+
+        $rOn = $this->runAndPersist($on, '2026-03');
+        $this->assertEqualsWithDelta(0.0, (float) $rOn->totalArrears, 0.001, 'debt cleared');
+        $this->assertSame(3, $rOn->prepaidMonthsRemaining, '4 bought minus this period');
+        $this->assertEqualsWithDelta(0.0, (float) $rOn->totalBill, 0.001);
+
+        $rOff = $this->runAndPersist($off, '2026-03');
+        $this->assertEqualsWithDelta(5000.0, (float) $rOff->totalArrears, 0.001, 'debt still standing');
+        $this->assertSame(5, $rOff->prepaidMonthsRemaining, 'full 6 bought minus this period');
+        $this->assertEqualsWithDelta(5000.0, (float) $rOff->totalBill, 0.001, 'old debt shows; no new monthly charge');
+    }
+
+    public function test_a_drawdown_prepaid_customer_keeps_their_months_across_disconnection(): void
+    {
+        // PD-8: a frozen customer does not consume prepaid months.
+        $customer = CustomerFactory::new()->create([
+            'zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active',
+        ]);
+        $this->drawdownPayment($customer, 6, 2500);
+
+        $this->runAndPersist($customer, '2026-01'); // remaining 5
+        $this->runAndPersist($customer, '2026-02'); // remaining 4
+
+        $customer->update(['status' => 'disconnected']);
+        $d3 = $this->runAndPersist($customer, '2026-03');
+        $d4 = $this->runAndPersist($customer, '2026-04');
+        $this->assertSame(4, $d3->prepaidMonthsRemaining, 'disconnected — no month consumed');
+        $this->assertSame(4, $d4->prepaidMonthsRemaining);
+        $this->assertEqualsWithDelta(0.0, (float) $d4->totalBill, 0.001);
+
+        $customer->update(['status' => 'active']);
+        $r5 = $this->runAndPersist($customer, '2026-05');
+        $this->assertSame(3, $r5->prepaidMonthsRemaining, 'reconnected — window resumes with all 4 still there');
     }
 
     public function test_a_prepaid_customers_freeze_lifts_exactly_on_the_expiration_day(): void
@@ -675,17 +877,13 @@ class ManuscriptCalculateTest extends TestCase
     public function test_the_command_upserts_manuscripts_processes_payments_and_logs_a_command_run(): void
     {
         // The manuscript:calculate command owns its own tenancy()->initialize()/
-        // end() lifecycle end-to-end, exactly as it does in production. Stancl's
-        // tenancy()->end() purges (disconnects) the tenant database connection,
-        // which would silently roll back this test's own fixtures if they were
-        // sitting in the still-open outer transaction from setUp(). So — unlike
-        // every other test in this file — this one releases that empty outer
-        // transaction up front and cleans up its own rows explicitly afterwards
-        // instead of relying on DatabaseTransactions-style rollback.
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
-
-        tenancy()->initialize(Tenant::find('swecom'));
+        // end() lifecycle end-to-end, exactly as it does in production.
+        // setUp() already initialized tenancy to this test's disposable
+        // tenant, so fixtures below are committed directly to that schema —
+        // no manual transaction is involved at all (unlike this file before
+        // the 2026-08-28 UsesDisposableTenant fix). tenancy()->end() here
+        // just simulates the command starting cold, exactly as a real CLI
+        // invocation would.
         $zone = $this->zone();
         $customer = CustomerFactory::new()->create([
             'zone_id' => $zone->id,
@@ -702,89 +900,75 @@ class ManuscriptCalculateTest extends TestCase
 
         $period = '2026-05';
 
-        try {
-            $this->artisan('manuscript:calculate', [
-                'period' => $period,
-                '--tenant' => 'swecom',
-            ])->assertExitCode(0);
+        $this->artisan('manuscript:calculate', [
+            'period' => $period,
+            '--tenant' => $this->tenant->getTenantKey(),
+        ])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $manuscript = Manuscript::query()
-                ->where('customer_id', $customer->id)
-                ->where('period', $period)
-                ->first();
+        $manuscript = Manuscript::query()
+            ->where('customer_id', $customer->id)
+            ->where('period', $period)
+            ->first();
 
-            $this->assertNotNull($manuscript);
-            $this->assertNotNull($payment->fresh()->processed_at);
-            $this->assertSame($period, $payment->fresh()->processed_period);
+        $this->assertNotNull($manuscript);
+        $this->assertNotNull($payment->fresh()->processed_at);
+        $this->assertSame($period, $payment->fresh()->processed_period);
 
-            $arrearsAfterFirstRun = $manuscript->total_arrears;
-            $creditAfterFirstRun = $manuscript->credit;
-            $totalBillAfterFirstRun = $manuscript->total_bill;
+        $arrearsAfterFirstRun = $manuscript->total_arrears;
+        $creditAfterFirstRun = $manuscript->credit;
+        $totalBillAfterFirstRun = $manuscript->total_bill;
 
-            $commandRun = CommandRun::query()
-                ->where('command', 'manuscript:calculate')
-                ->where('period', $period)
-                ->latest('id')
-                ->first();
+        $commandRun = CommandRun::query()
+            ->where('command', 'manuscript:calculate')
+            ->where('period', $period)
+            ->latest('id')
+            ->first();
 
-            $this->assertNotNull($commandRun);
-            $this->assertSame('swecom', $commandRun->metadata['tenant']);
-            $this->assertArrayHasKey('customers_processed', $commandRun->metadata);
-            $this->assertArrayHasKey('total_arrears_sum', $commandRun->metadata);
-            $this->assertArrayHasKey('errors', $commandRun->metadata);
-            $this->assertArrayHasKey('duration_ms', $commandRun->metadata);
-            $this->assertGreaterThanOrEqual(1, $commandRun->metadata['customers_processed']);
+        $this->assertNotNull($commandRun);
+        $this->assertSame($this->tenant->getTenantKey(), $commandRun->metadata['tenant']);
+        $this->assertArrayHasKey('customers_processed', $commandRun->metadata);
+        $this->assertArrayHasKey('total_arrears_sum', $commandRun->metadata);
+        $this->assertArrayHasKey('errors', $commandRun->metadata);
+        $this->assertArrayHasKey('duration_ms', $commandRun->metadata);
+        $this->assertGreaterThanOrEqual(1, $commandRun->metadata['customers_processed']);
 
-            tenancy()->end();
+        tenancy()->end();
 
-            // Re-running the same period must upsert, not duplicate — and,
-            // per the idempotency fix, the VALUES must be byte-identical too,
-            // not just "still exactly one row" (what this test originally,
-            // insufficiently, checked — see
-            // test_rerunning_the_same_period_with_no_new_payments_produces_byte_identical_results
-            // above for the direct reproduction of the bug this would have
-            // missed). --force is required here (2026-08-27): the first run
-            // above already published this period, and
-            // App\Services\ManuscriptRerunGuard now refuses a bare rerun of
-            // an already-published period — see
-            // test_a_rerun_of_an_already_published_period_is_refused_without_force
-            // below for that refusal tested directly.
-            $this->artisan('manuscript:calculate', [
-                'period' => $period,
-                '--tenant' => 'swecom',
-                '--force' => true,
-            ])->assertExitCode(0);
+        // Re-running the same period must upsert, not duplicate — and,
+        // per the idempotency fix, the VALUES must be byte-identical too,
+        // not just "still exactly one row" (what this test originally,
+        // insufficiently, checked — see
+        // test_rerunning_the_same_period_with_no_new_payments_produces_byte_identical_results
+        // above for the direct reproduction of the bug this would have
+        // missed). --force is required here (2026-08-27): the first run
+        // above already published this period, and
+        // App\Services\ManuscriptRerunGuard now refuses a bare rerun of
+        // an already-published period — see
+        // test_a_rerun_of_an_already_published_period_is_refused_without_force
+        // below for that refusal tested directly.
+        $this->artisan('manuscript:calculate', [
+            'period' => $period,
+            '--tenant' => $this->tenant->getTenantKey(),
+            '--force' => true,
+        ])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $this->assertSame(
-                1,
-                Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->count()
-            );
+        $this->assertSame(
+            1,
+            Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->count()
+        );
 
-            $manuscriptAfterRerun = Manuscript::query()
-                ->where('customer_id', $customer->id)
-                ->where('period', $period)
-                ->first();
+        $manuscriptAfterRerun = Manuscript::query()
+            ->where('customer_id', $customer->id)
+            ->where('period', $period)
+            ->first();
 
-            $this->assertSame($arrearsAfterFirstRun, $manuscriptAfterRerun->total_arrears, 'total_arrears must be byte-identical after a harmless rerun.');
-            $this->assertSame($creditAfterFirstRun, $manuscriptAfterRerun->credit, 'credit must be byte-identical after a harmless rerun.');
-            $this->assertSame($totalBillAfterFirstRun, $manuscriptAfterRerun->total_bill, 'total_bill must be byte-identical after a harmless rerun.');
-        } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
-            }
-
-            Manuscript::query()->where('customer_id', $customer->id)->delete();
-            Payment::query()->where('customer_id', $customer->id)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-
-            tenancy()->end();
-        }
+        $this->assertSame($arrearsAfterFirstRun, $manuscriptAfterRerun->total_arrears, 'total_arrears must be byte-identical after a harmless rerun.');
+        $this->assertSame($creditAfterFirstRun, $manuscriptAfterRerun->credit, 'credit must be byte-identical after a harmless rerun.');
+        $this->assertSame($totalBillAfterFirstRun, $manuscriptAfterRerun->total_bill, 'total_bill must be byte-identical after a harmless rerun.');
     }
 
     /**
@@ -802,126 +986,107 @@ class ManuscriptCalculateTest extends TestCase
      * and a THIRD, no-op rerun of that period must be byte-identical to the
      * second.
      *
-     * Runs against the real, full customer table (like
-     * test_the_command_upserts_manuscripts_processes_payments_and_logs_a_command_run
-     * above — manuscript:calculate has no way to scope to a customer
-     * subset), so far-future, never-otherwise-used periods are chosen and
-     * EVERY manuscript row for those periods is deleted in the finally block
-     * (not just this test's own 3 customers), fully undoing the side effect
-     * of running the real command against the whole tenant.
+     * Runs against this test's disposable tenant schema (2026-08-28: no
+     * longer against the real, full swecom customer table —
+     * manuscript:calculate has no way to scope itself to a customer subset,
+     * so before the UsesDisposableTenant fix this test ran against ALL real
+     * swecom customers and had to hand-pick far-future periods and delete
+     * every manuscript row for them afterward to avoid corrupting real data
+     * — see this file's class doc for the incident that produced). The
+     * disposable schema starts with zero customers (only the seeded 29
+     * zones / 9 expense categories / company row), so the command now only
+     * ever processes this test's own three fixtures, and tearDown()'s
+     * schema drop is all the cleanup needed.
      */
     public function test_an_unrelated_customers_manuscript_is_unaffected_by_another_customers_payment_change_on_rerun(): void
     {
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
-
-        tenancy()->initialize(Tenant::find('swecom'));
         $zone = $this->zone();
 
         $customerA = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
         $customerB = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 3000, 'others' => 500, 'status' => 'active']);
         $customerC = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 4000, 'others' => 0, 'status' => 'active']);
-        $customerIds = [$customerA->id, $customerB->id, $customerC->id];
         tenancy()->end();
 
         $period1 = '2031-08';
         $period2 = '2031-09';
 
-        try {
-            // P1: establishes a baseline for all three, nobody has any
-            // payment history yet.
-            $this->artisan('manuscript:calculate', ['period' => $period1, '--tenant' => 'swecom'])->assertExitCode(0);
+        // P1: establishes a baseline for all three, nobody has any
+        // payment history yet.
+        $this->artisan('manuscript:calculate', ['period' => $period1, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $bP1 = Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period1)->firstOrFail();
-            $cP1 = Manuscript::query()->where('customer_id', $customerC->id)->where('period', $period1)->firstOrFail();
-            // B: previousArrears seeded from others(500) + bill(3000).
-            $this->assertEqualsWithDelta(3500.0, (float) $bP1->total_arrears, 0.001);
-            // C: previousArrears seeded from others(0) + bill(4000).
-            $this->assertEqualsWithDelta(4000.0, (float) $cP1->total_arrears, 0.001);
+        $bP1 = Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period1)->firstOrFail();
+        $cP1 = Manuscript::query()->where('customer_id', $customerC->id)->where('period', $period1)->firstOrFail();
+        // B: previousArrears seeded from others(500) + bill(3000).
+        $this->assertEqualsWithDelta(3500.0, (float) $bP1->total_arrears, 0.001);
+        // C: previousArrears seeded from others(0) + bill(4000).
+        $this->assertEqualsWithDelta(4000.0, (float) $cP1->total_arrears, 0.001);
 
-            // Only customer A's payment situation changes before P2: a new,
-            // large verified payment that overpays A's arrears+bill.
-            $paymentA = PaymentFactory::new()->create([
-                'customer_id' => $customerA->id,
-                'amount' => 10000,
-                'verification_status' => 'verified',
-            ]);
-            tenancy()->end();
+        // Only customer A's payment situation changes before P2: a new,
+        // large verified payment that overpays A's arrears+bill.
+        $paymentA = PaymentFactory::new()->create([
+            'customer_id' => $customerA->id,
+            'amount' => 10000,
+            'verification_status' => 'verified',
+        ]);
+        tenancy()->end();
 
-            $this->artisan('manuscript:calculate', ['period' => $period2, '--tenant' => 'swecom'])->assertExitCode(0);
+        $this->artisan('manuscript:calculate', ['period' => $period2, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $bP2Run1 = Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->firstOrFail();
-            $cP2Run1 = Manuscript::query()->where('customer_id', $customerC->id)->where('period', $period2)->firstOrFail();
+        $bP2Run1 = Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->firstOrFail();
+        $cP2Run1 = Manuscript::query()->where('customer_id', $customerC->id)->where('period', $period2)->firstOrFail();
 
-            // Sanity: A's own payment really was applied — otherwise this
-            // test would prove nothing about isolation.
-            $aP2Run1 = Manuscript::query()->where('customer_id', $customerA->id)->where('period', $period2)->firstOrFail();
-            $this->assertEqualsWithDelta(0.0, (float) $aP2Run1->total_arrears, 0.001);
-            $this->assertEqualsWithDelta(5000.0, (float) $aP2Run1->credit, 0.001);
-            $this->assertSame($period2, $paymentA->fresh()->processed_period);
+        // Sanity: A's own payment really was applied — otherwise this
+        // test would prove nothing about isolation.
+        $aP2Run1 = Manuscript::query()->where('customer_id', $customerA->id)->where('period', $period2)->firstOrFail();
+        $this->assertEqualsWithDelta(0.0, (float) $aP2Run1->total_arrears, 0.001);
+        $this->assertEqualsWithDelta(5000.0, (float) $aP2Run1->credit, 0.001);
+        $this->assertSame($period2, $paymentA->fresh()->processed_period);
 
-            // B and C must land EXACTLY where zero payment activity of their
-            // own would put them: previousNet + this period's bill, nothing
-            // else — completely unaffected by A's new payment landing in the
-            // same chunk-resolution batch.
-            $this->assertEqualsWithDelta(6500.0, (float) $bP2Run1->total_arrears, 0.001, "B's arrears must be unaffected by A's new payment.");
-            $this->assertEqualsWithDelta(0.0, (float) $bP2Run1->credit, 0.001);
-            $this->assertEqualsWithDelta(9500.0, (float) $bP2Run1->total_bill, 0.001);
-            $this->assertNull($bP2Run1->payment_expiration);
+        // B and C must land EXACTLY where zero payment activity of their
+        // own would put them: previousNet + this period's bill, nothing
+        // else — completely unaffected by A's new payment landing in the
+        // same chunk-resolution batch.
+        $this->assertEqualsWithDelta(6500.0, (float) $bP2Run1->total_arrears, 0.001, "B's arrears must be unaffected by A's new payment.");
+        $this->assertEqualsWithDelta(0.0, (float) $bP2Run1->credit, 0.001);
+        $this->assertEqualsWithDelta(9500.0, (float) $bP2Run1->total_bill, 0.001);
+        $this->assertNull($bP2Run1->payment_expiration);
 
-            $this->assertEqualsWithDelta(8000.0, (float) $cP2Run1->total_arrears, 0.001, "C's arrears must be unaffected by A's new payment.");
-            $this->assertEqualsWithDelta(0.0, (float) $cP2Run1->credit, 0.001);
-            $this->assertEqualsWithDelta(12000.0, (float) $cP2Run1->total_bill, 0.001);
-            $this->assertNull($cP2Run1->payment_expiration);
+        $this->assertEqualsWithDelta(8000.0, (float) $cP2Run1->total_arrears, 0.001, "C's arrears must be unaffected by A's new payment.");
+        $this->assertEqualsWithDelta(0.0, (float) $cP2Run1->credit, 0.001);
+        $this->assertEqualsWithDelta(12000.0, (float) $cP2Run1->total_bill, 0.001);
+        $this->assertNull($cP2Run1->payment_expiration);
 
-            tenancy()->end();
+        tenancy()->end();
 
-            // A third run of P2, with no further changes for anyone — B and
-            // C must be byte-identical to run 2 as well (idempotency
-            // compounded with cross-customer isolation). --force is required
-            // (2026-08-27): the run just above already published P2.
-            $this->artisan('manuscript:calculate', ['period' => $period2, '--tenant' => 'swecom', '--force' => true])->assertExitCode(0);
+        // A third run of P2, with no further changes for anyone — B and
+        // C must be byte-identical to run 2 as well (idempotency
+        // compounded with cross-customer isolation). --force is required
+        // (2026-08-27): the run just above already published P2.
+        $this->artisan('manuscript:calculate', ['period' => $period2, '--tenant' => $this->tenant->getTenantKey(), '--force' => true])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $bP2Run2 = Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->firstOrFail();
-            $cP2Run2 = Manuscript::query()->where('customer_id', $customerC->id)->where('period', $period2)->firstOrFail();
+        $bP2Run2 = Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->firstOrFail();
+        $cP2Run2 = Manuscript::query()->where('customer_id', $customerC->id)->where('period', $period2)->firstOrFail();
 
-            $this->assertSame($bP2Run1->total_arrears, $bP2Run2->total_arrears, 'B total_arrears must be byte-identical across rerun 2 -> 3.');
-            $this->assertSame($bP2Run1->credit, $bP2Run2->credit, 'B credit must be byte-identical across rerun 2 -> 3.');
-            $this->assertSame($bP2Run1->total_bill, $bP2Run2->total_bill, 'B total_bill must be byte-identical across rerun 2 -> 3.');
-            $this->assertSame($bP2Run1->payment_expiration, $bP2Run2->payment_expiration);
+        $this->assertSame($bP2Run1->total_arrears, $bP2Run2->total_arrears, 'B total_arrears must be byte-identical across rerun 2 -> 3.');
+        $this->assertSame($bP2Run1->credit, $bP2Run2->credit, 'B credit must be byte-identical across rerun 2 -> 3.');
+        $this->assertSame($bP2Run1->total_bill, $bP2Run2->total_bill, 'B total_bill must be byte-identical across rerun 2 -> 3.');
+        $this->assertSame($bP2Run1->payment_expiration, $bP2Run2->payment_expiration);
 
-            $this->assertSame($cP2Run1->total_arrears, $cP2Run2->total_arrears, 'C total_arrears must be byte-identical across rerun 2 -> 3.');
-            $this->assertSame($cP2Run1->credit, $cP2Run2->credit, 'C credit must be byte-identical across rerun 2 -> 3.');
-            $this->assertSame($cP2Run1->total_bill, $cP2Run2->total_bill, 'C total_bill must be byte-identical across rerun 2 -> 3.');
-            $this->assertSame($cP2Run1->payment_expiration, $cP2Run2->payment_expiration);
+        $this->assertSame($cP2Run1->total_arrears, $cP2Run2->total_arrears, 'C total_arrears must be byte-identical across rerun 2 -> 3.');
+        $this->assertSame($cP2Run1->credit, $cP2Run2->credit, 'C credit must be byte-identical across rerun 2 -> 3.');
+        $this->assertSame($cP2Run1->total_bill, $cP2Run2->total_bill, 'C total_bill must be byte-identical across rerun 2 -> 3.');
+        $this->assertSame($cP2Run1->payment_expiration, $cP2Run2->payment_expiration);
 
-            $this->assertSame(
-                1,
-                Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->count()
-            );
-        } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
-            }
-
-            // The full-tenant command wrote a manuscript row for EVERY real
-            // customer at these far-future, never-otherwise-used periods —
-            // not just A/B/C — so clean up ALL of them, not merely this
-            // test's own fixtures.
-            Manuscript::query()->whereIn('period', [$period1, $period2])->delete();
-            Payment::query()->whereIn('customer_id', $customerIds)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->whereIn('period', [$period1, $period2])->delete();
-            Customer::query()->whereIn('id', $customerIds)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-
-            tenancy()->end();
-        }
+        $this->assertSame(
+            1,
+            Manuscript::query()->where('customer_id', $customerB->id)->where('period', $period2)->count()
+        );
     }
 
     /**
@@ -937,10 +1102,6 @@ class ManuscriptCalculateTest extends TestCase
      */
     public function test_a_rerun_of_an_already_published_period_is_refused_without_force(): void
     {
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
-
-        tenancy()->initialize(Tenant::find('swecom'));
         $zone = $this->zone();
         $customer = CustomerFactory::new()->create([
             'zone_id' => $zone->id,
@@ -952,52 +1113,38 @@ class ManuscriptCalculateTest extends TestCase
 
         $period = '2035-01';
 
-        try {
-            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(0);
+        $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
-            $publishedCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
-            $this->assertSame('published', $publishedCommandRun->status);
-            $arrearsAfterFirstRun = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->value('total_arrears');
-            tenancy()->end();
+        tenancy()->initialize($this->tenant);
+        $publishedCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+        $this->assertSame('published', $publishedCommandRun->status);
+        $arrearsAfterFirstRun = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->value('total_arrears');
+        tenancy()->end();
 
-            // A brand new verified payment arrives, and someone (or a cron
-            // misfire) re-triggers the CLI for the SAME period with no
-            // --force — this must be refused, and must NOT touch the
-            // already-published manuscript or create a second command_runs row.
-            tenancy()->initialize(Tenant::find('swecom'));
-            PaymentFactory::new()->create([
-                'customer_id' => $customer->id,
-                'amount' => 2500,
-                'verification_status' => 'verified',
-            ]);
-            tenancy()->end();
+        // A brand new verified payment arrives, and someone (or a cron
+        // misfire) re-triggers the CLI for the SAME period with no
+        // --force — this must be refused, and must NOT touch the
+        // already-published manuscript or create a second command_runs row.
+        tenancy()->initialize($this->tenant);
+        PaymentFactory::new()->create([
+            'customer_id' => $customer->id,
+            'amount' => 2500,
+            'verification_status' => 'verified',
+        ]);
+        tenancy()->end();
 
-            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(1);
+        $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(1);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $this->assertSame(
-                1,
-                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
-                'a refused rerun must not create a second command_runs row.'
-            );
+        $this->assertSame(
+            1,
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+            'a refused rerun must not create a second command_runs row.'
+        );
 
-            $manuscriptAfterRefusedRerun = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->firstOrFail();
-            $this->assertSame($arrearsAfterFirstRun, $manuscriptAfterRefusedRerun->total_arrears, 'a refused rerun must not have recomputed anything.');
-        } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
-            }
-
-            Manuscript::query()->where('customer_id', $customer->id)->delete();
-            Payment::query()->where('customer_id', $customer->id)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-
-            tenancy()->end();
-        }
+        $manuscriptAfterRefusedRerun = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->firstOrFail();
+        $this->assertSame($arrearsAfterFirstRun, $manuscriptAfterRefusedRerun->total_arrears, 'a refused rerun must not have recomputed anything.');
     }
 
     /**
@@ -1008,10 +1155,6 @@ class ManuscriptCalculateTest extends TestCase
      */
     public function test_a_rerun_of_an_already_published_period_succeeds_with_force(): void
     {
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
-
-        tenancy()->initialize(Tenant::find('swecom'));
         $zone = $this->zone();
         $customer = CustomerFactory::new()->create([
             'zone_id' => $zone->id,
@@ -1023,50 +1166,36 @@ class ManuscriptCalculateTest extends TestCase
 
         $period = '2035-02';
 
-        try {
-            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(0);
+        $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
-            $firstCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+        tenancy()->initialize($this->tenant);
+        $firstCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
 
-            PaymentFactory::new()->create([
-                'customer_id' => $customer->id,
-                'amount' => 2500,
-                'verification_status' => 'verified',
-            ]);
-            tenancy()->end();
+        PaymentFactory::new()->create([
+            'customer_id' => $customer->id,
+            'amount' => 2500,
+            'verification_status' => 'verified',
+        ]);
+        tenancy()->end();
 
-            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom', '--force' => true])->assertExitCode(0);
+        $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->getTenantKey(), '--force' => true])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $this->assertSame(
-                2,
-                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
-                'a forced rerun must create a genuinely new command_runs row alongside the original.'
-            );
+        $this->assertSame(
+            2,
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+            'a forced rerun must create a genuinely new command_runs row alongside the original.'
+        );
 
-            $secondCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->latest('id')->firstOrFail();
-            $this->assertNotSame($firstCommandRun->id, $secondCommandRun->id);
-            $this->assertSame('published', $secondCommandRun->status);
+        $secondCommandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->latest('id')->firstOrFail();
+        $this->assertNotSame($firstCommandRun->id, $secondCommandRun->id);
+        $this->assertSame('published', $secondCommandRun->status);
 
-            // The new payment must actually have been consumed — proving
-            // this was a real recomputation, not a no-op.
-            $manuscript = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->firstOrFail();
-            $this->assertEqualsWithDelta(0.0, (float) $manuscript->total_arrears, 0.001);
-        } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
-            }
-
-            Manuscript::query()->where('customer_id', $customer->id)->delete();
-            Payment::query()->where('customer_id', $customer->id)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-
-            tenancy()->end();
-        }
+        // The new payment must actually have been consumed — proving
+        // this was a real recomputation, not a no-op.
+        $manuscript = Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->firstOrFail();
+        $this->assertEqualsWithDelta(0.0, (float) $manuscript->total_arrears, 0.001);
     }
 
     /**
@@ -1083,10 +1212,6 @@ class ManuscriptCalculateTest extends TestCase
      */
     public function test_a_concurrent_cli_invocation_for_the_same_period_is_rejected_by_the_inflight_lock(): void
     {
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
-
-        tenancy()->initialize(Tenant::find('swecom'));
         $zone = $this->zone();
         $customer = CustomerFactory::new()->create([
             'zone_id' => $zone->id,
@@ -1104,38 +1229,24 @@ class ManuscriptCalculateTest extends TestCase
             'command' => 'manuscript:calculate',
             'period' => $period,
             'ran_at' => now(),
-            'metadata' => ['tenant' => 'swecom', 'trigger' => 'cli'],
+            'metadata' => ['tenant' => $this->tenant->getTenantKey(), 'trigger' => 'cli'],
             'status' => 'queued',
         ]);
         tenancy()->end();
 
-        try {
-            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(1);
+        $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(1);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        tenancy()->initialize($this->tenant);
 
-            $this->assertSame(
-                1,
-                CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
-                'the second, concurrent-shaped invocation must not have created a competing command_runs row.'
-            );
-            $this->assertSame('queued', $inFlightRun->fresh()->status, 'the original in-flight row must be untouched.');
+        $this->assertSame(
+            1,
+            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
+            'the second, concurrent-shaped invocation must not have created a competing command_runs row.'
+        );
+        $this->assertSame('queued', $inFlightRun->fresh()->status, 'the original in-flight row must be untouched.');
 
-            // Nothing computed by the rejected second invocation.
-            $this->assertFalse(Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->exists());
-        } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
-            }
-
-            Manuscript::query()->where('customer_id', $customer->id)->delete();
-            Payment::query()->where('customer_id', $customer->id)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-
-            tenancy()->end();
-        }
+        // Nothing computed by the rejected second invocation.
+        $this->assertFalse(Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->exists());
     }
 
     /**
@@ -1150,10 +1261,6 @@ class ManuscriptCalculateTest extends TestCase
      */
     public function test_a_fatal_failure_after_computation_marks_the_command_run_failed_not_stuck_queued(): void
     {
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
-
-        tenancy()->initialize(Tenant::find('swecom'));
         $zone = $this->zone();
         $customer = CustomerFactory::new()->create([
             'zone_id' => $zone->id,
@@ -1175,30 +1282,35 @@ class ManuscriptCalculateTest extends TestCase
             }
         });
 
-        try {
-            $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => 'swecom'])->assertExitCode(1);
+        // 2026-08-28: forgetInstance() the console Kernel here — a side
+        // effect specific to the disposable-tenant fix, not present in the
+        // original swecom-based version of this test. provisionDisposableTenant()
+        // in setUp() calls Tenant::create(), whose Stancl provisioning
+        // pipeline runs Artisan::call('tenants:migrate'/'tenants:seed')
+        // (Stancl\Tenancy\Jobs\MigrateDatabase / SeedDatabase) — the FIRST
+        // Artisan::call in the whole test, which bootstraps and caches the
+        // console Kernel's Artisan Application and resolves (and caches)
+        // every discovered command, including this one, using whatever
+        // ManuscriptService binding was current AT THAT MOMENT (the real
+        // one). The bind() above — which runs in the test body, after
+        // setUp() — is too late to affect that already-resolved,
+        // already-cached command instance. Forgetting the Kernel singleton
+        // forces the next $this->artisan() call to rebuild the console
+        // Application from scratch and re-resolve every command against the
+        // container's CURRENT bindings, honoring the override above.
+        $this->app->forgetInstance(\Illuminate\Contracts\Console\Kernel::class);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+        $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(1);
 
-            $commandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
-            $this->assertSame('failed', $commandRun->status);
-            $this->assertArrayHasKey('exception', $commandRun->metadata);
+        tenancy()->initialize($this->tenant);
 
-            // The manuscript upsert itself (which happens before the
-            // simulated failure point) is real and unaffected — only the
-            // command_runs row's final status reflects the failure.
-            $this->assertTrue(Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->exists());
-        } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
-            }
+        $commandRun = CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->firstOrFail();
+        $this->assertSame('failed', $commandRun->status);
+        $this->assertArrayHasKey('exception', $commandRun->metadata);
 
-            Manuscript::query()->where('customer_id', $customer->id)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
-
-            tenancy()->end();
-        }
+        // The manuscript upsert itself (which happens before the
+        // simulated failure point) is real and unaffected — only the
+        // command_runs row's final status reflects the failure.
+        $this->assertTrue(Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->exists());
     }
 }

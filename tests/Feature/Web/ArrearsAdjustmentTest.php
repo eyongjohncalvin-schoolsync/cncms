@@ -6,12 +6,15 @@ namespace Tests\Feature\Web;
 
 use App\Models\ArrearsAdjustment;
 use App\Models\Manuscript;
+use App\Models\TenantUser;
 use App\Models\User;
+use App\Services\ArrearsAdjustmentService;
 use Database\Factories\ArrearsAdjustmentFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -41,7 +44,7 @@ class ArrearsAdjustmentTest extends TestCase
     private function actingAsRole(string $role): User
     {
         $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
-        \App\Models\TenantUser::query()->where('user_id', $user->id)->update(['role' => $role]);
+        TenantUser::query()->where('user_id', $user->id)->update(['role' => $role]);
 
         $this->actingAs($user);
 
@@ -245,6 +248,172 @@ class ArrearsAdjustmentTest extends TestCase
         $this->post("/arrears-adjustments/{$adjustment->uuid}/reject", ['rejection_reason' => 'x'])->assertStatus(403);
     }
 
+    /**
+     * The super self-approval carve-out (ArrearsAdjustmentPolicy's class doc,
+     * 2026-08-29): the owner may approve an adjustment they raised themselves,
+     * and it reaches the ledger via the same real recalculation path as any
+     * other approval — mirrors
+     * test_a_small_adjustment_is_approved_in_one_step_...().
+     */
+    public function test_a_super_can_approve_an_adjustment_they_requested_themselves_and_it_reaches_the_ledger(): void
+    {
+        $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
+        $previousPeriod = now()->subMonth()->format('Y-m');
+        $currentPeriod = now()->format('Y-m');
+
+        ManuscriptFactory::new()->forPeriod($previousPeriod)->create([
+            'customer_id' => $customer->id,
+            'bill' => 2500,
+            'total_arrears' => 10000,
+            'credit' => 0,
+            'total_bill' => 12500,
+        ]);
+
+        $owner = $this->actingAsRole('super');
+
+        $adjustment = ArrearsAdjustmentFactory::new()
+            ->requestedBy($owner->id)
+            ->forPeriod($currentPeriod)
+            ->withAmount('5000.00')
+            ->withArrearsSnapshot('10000.00')
+            ->create(['customer_id' => $customer->id]);
+
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertRedirect();
+
+        $adjustment->refresh();
+        $this->assertSame('approved', $adjustment->status);
+        $this->assertSame($owner->id, $adjustment->approved_by);
+        $this->assertSame($currentPeriod, $adjustment->processed_period);
+        $this->assertNotNull($adjustment->processed_at);
+
+        $manuscript = Manuscript::query()
+            ->where('customer_id', $customer->id)
+            ->where('period', $currentPeriod)
+            ->firstOrFail();
+
+        // 10000 + (2500 - 0) - 5000 = 7500.
+        $this->assertSame('7500.00', (string) $manuscript->total_arrears);
+    }
+
+    public function test_an_admin_still_cannot_approve_or_reject_their_own_request(): void
+    {
+        $customer = CustomerFactory::new()->active()->create();
+        $admin = $this->actingAsRole('admin');
+
+        $adjustment = ArrearsAdjustmentFactory::new()
+            ->requestedBy($admin->id)
+            ->create(['customer_id' => $customer->id]);
+
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertStatus(403);
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/reject", ['rejection_reason' => 'x'])->assertStatus(403);
+    }
+
+    public function test_a_manager_still_cannot_approve_their_own_request(): void
+    {
+        $customer = CustomerFactory::new()->active()->create();
+        $manager = $this->actingAsRole('manager');
+
+        $adjustment = ArrearsAdjustmentFactory::new()
+            ->requestedBy($manager->id)
+            ->create(['customer_id' => $customer->id]);
+
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertStatus(403);
+    }
+
+    /**
+     * The super carve-out is the ONLY change — the ordinary maker-checker
+     * path is untouched: an unrelated admin still approves someone else's
+     * request exactly as before.
+     */
+    public function test_an_unrelated_admin_can_still_approve_a_request_raised_by_a_super(): void
+    {
+        $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
+        $currentPeriod = now()->format('Y-m');
+
+        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+            'customer_id' => $customer->id,
+            'bill' => 2500,
+            'total_arrears' => 10000,
+            'credit' => 0,
+            'total_bill' => 12500,
+        ]);
+
+        $requesterId = $this->seededUserId('divine@shalomtech.dev');
+        TenantUser::query()->where('user_id', $requesterId)->update(['role' => 'super']);
+
+        $adjustment = ArrearsAdjustmentFactory::new()
+            ->requestedBy($requesterId)
+            ->forPeriod($currentPeriod)
+            ->withAmount('5000.00')
+            ->withArrearsSnapshot('10000.00')
+            ->create(['customer_id' => $customer->id]);
+
+        $this->actingAsSeededUser('patience@shalomtech.dev'); // admin — neither requester nor a super
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertRedirect();
+
+        $adjustment->refresh();
+        $this->assertSame('approved', $adjustment->status);
+        $this->assertSame($this->seededUserId('patience@shalomtech.dev'), $adjustment->approved_by);
+    }
+
+    /**
+     * At the SECOND stage the carve-out still holds for super only: a super
+     * who both raised the request and gave the first approval can still give
+     * the second one. An admin first approver cannot (the identity rule is
+     * unchanged for them).
+     */
+    public function test_at_the_second_stage_a_super_who_raised_and_first_approved_can_still_give_the_second_approval(): void
+    {
+        $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
+        $currentPeriod = now()->format('Y-m');
+
+        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+            'customer_id' => $customer->id,
+            'bill' => 2500,
+            'total_arrears' => 30000,
+            'credit' => 0,
+            'total_bill' => 32500,
+        ]);
+
+        $owner = $this->actingAsRole('super');
+
+        $adjustment = ArrearsAdjustmentFactory::new()
+            ->requestedBy($owner->id)
+            ->forPeriod($currentPeriod)
+            ->withAmount('25000.00')
+            ->withArrearsSnapshot('30000.00')
+            ->pendingSecondApproval($owner->id)
+            ->create(['customer_id' => $customer->id]);
+
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertRedirect();
+
+        $adjustment->refresh();
+        $this->assertSame('approved', $adjustment->status);
+        $this->assertSame($owner->id, $adjustment->second_approved_by);
+
+        $manuscript = Manuscript::query()
+            ->where('customer_id', $customer->id)
+            ->where('period', $currentPeriod)
+            ->firstOrFail();
+
+        // 30000 + (2500 - 0) - 25000 = 7500.
+        $this->assertSame('7500.00', (string) $manuscript->total_arrears);
+    }
+
+    public function test_at_the_second_stage_an_admin_who_gave_the_first_approval_still_cannot_give_the_second(): void
+    {
+        $customer = CustomerFactory::new()->active()->create();
+        $firstApproverId = $this->seededUserId('patience@shalomtech.dev'); // admin
+
+        $adjustment = ArrearsAdjustmentFactory::new()
+            ->requestedBy($this->seededUserId('divine@shalomtech.dev'))
+            ->pendingSecondApproval($firstApproverId)
+            ->create(['customer_id' => $customer->id]);
+
+        $this->actingAsSeededUser('patience@shalomtech.dev');
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertStatus(403);
+    }
+
     public function test_agents_and_workers_cannot_approve_or_reject(): void
     {
         $customer = CustomerFactory::new()->active()->create();
@@ -283,7 +452,7 @@ class ArrearsAdjustmentTest extends TestCase
         // would otherwise apply to a *different* admin, terence is not one
         // anyway; this specifically proves the self-block, so we simulate
         // terence briefly holding admin rights to isolate that one rule.
-        \App\Models\TenantUser::query()->where('user_id', $adjustment->approved_by)->update(['role' => 'admin']);
+        TenantUser::query()->where('user_id', $adjustment->approved_by)->update(['role' => 'admin']);
         $this->actingAsSeededUser('terence@shalomtech.dev');
 
         $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertStatus(403);
@@ -420,15 +589,20 @@ class ArrearsAdjustmentTest extends TestCase
         $firstRead = ArrearsAdjustment::query()->findOrFail($stored->id);
         $secondRead = ArrearsAdjustment::query()->findOrFail($stored->id);
 
-        $service = app(\App\Services\ArrearsAdjustmentService::class);
+        $service = app(ArrearsAdjustmentService::class);
         $service->approve($firstRead, $actor);
 
-        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->expectException(ValidationException::class);
         $service->approve($secondRead, $actor);
     }
 
     public function test_the_audit_log_arrears_adjustments_tab_lists_pending_and_decided_requests_with_stats(): void
     {
+        // Runs against the real seeded tenant (InteractsWithTenantRoles), which
+        // may already hold adjustments from prior owner activity — assert the
+        // delta from this test's own two rows, not an absolute count.
+        $before = min(ArrearsAdjustment::query()->count(), 25);
+
         $customer = CustomerFactory::new()->active()->create();
         ArrearsAdjustmentFactory::new()
             ->requestedBy($this->seededUserId('divine@shalomtech.dev'))
@@ -446,11 +620,61 @@ class ArrearsAdjustmentTest extends TestCase
                 ->component('Audit/Index')
                 ->where('view', 'arrears_adjustments')
                 ->has('arrears_adjustments.stats')
-                ->has('arrears_adjustments.adjustments.data', 2));
+                ->has('arrears_adjustments.adjustments.data', min($before + 2, 25)));
+    }
+
+    public function test_the_audit_tab_row_payload_carries_the_context_and_per_row_decision_flags_the_review_ui_needs(): void
+    {
+        $customer = CustomerFactory::new()->active()->create();
+        ArrearsAdjustmentFactory::new()
+            ->requestedBy($this->seededUserId('divine@shalomtech.dev'))
+            ->create(['customer_id' => $customer->id, 'reason_note' => 'Double-charged in the March migration.']);
+
+        $this->actingAsSeededUser('patience@shalomtech.dev'); // admin — eligible first approver, not the requester
+
+        $this->get('/audit/logs?view=arrears_adjustments')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('arrears_adjustments.adjustments.data.0', fn (Assert $row) => $row
+                    ->where('reason_note', 'Double-charged in the March migration.')
+                    ->where('customer_uuid', $customer->uuid)
+                    ->where('can_approve', true)
+                    ->where('can_reject', true)
+                    ->etc()));
+    }
+
+    public function test_a_pending_second_approval_row_surfaces_as_approvable_to_an_eligible_second_approver_in_the_review_payload(): void
+    {
+        $customer = CustomerFactory::new()->active()->create();
+        ArrearsAdjustmentFactory::new()
+            ->requestedBy($this->seededUserId('divine@shalomtech.dev'))
+            ->pendingSecondApproval($this->seededUserId('terence@shalomtech.dev'))
+            ->create(['customer_id' => $customer->id]);
+
+        // patience (admin) is neither the requester nor the first approver, so
+        // the review list must offer the (relabelled "Second approve") action
+        // — driven purely by the server-resolved can_approve flag on a row
+        // still at the pending_second_approval stage. The end-to-end second
+        // approval itself is already covered by
+        // test_a_large_adjustment_requires_a_second_approval_...().
+        $this->actingAsSeededUser('patience@shalomtech.dev');
+        $this->get('/audit/logs?view=arrears_adjustments')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('arrears_adjustments.adjustments.data.0', fn (Assert $row) => $row
+                    ->where('status', 'pending_second_approval')
+                    ->where('can_approve', true)
+                    ->where('can_reject', true)
+                    ->etc()));
     }
 
     public function test_service_dashboard_counts_reflect_pending_and_applied_totals(): void
     {
+        // Delta assertions — the real seeded tenant may already hold owner
+        // adjustments (see the audit-tab test above).
+        $service = app(ArrearsAdjustmentService::class);
+        $before = $service->dashboard();
+
         $customer = CustomerFactory::new()->active()->create();
 
         ArrearsAdjustmentFactory::new()
@@ -463,10 +687,24 @@ class ArrearsAdjustmentTest extends TestCase
             ->withAmount('3000.00')
             ->create(['customer_id' => $customer->id, 'approved_at' => now()]);
 
-        $dashboard = app(\App\Services\ArrearsAdjustmentService::class)->dashboard();
+        // dashboard() is cached behind a per-tenant version key bumped by
+        // create()/approve()/reject() (Win 4). The factory writes straight
+        // to the table, bypassing those — so clear the cache by hand before
+        // re-reading, exactly as a real create()/approve() would have.
+        Cache::flush();
 
-        $this->assertSame(1, $dashboard['pending_approval']);
-        $this->assertSame(1, $dashboard['applied_this_month']);
-        $this->assertSame('3000.00', $dashboard['total_written_off']);
+        $after = $service->dashboard();
+
+        $this->assertSame($before['pending_approval'] + 1, $after['pending_approval']);
+        $this->assertSame($before['applied_this_month'] + 1, $after['applied_this_month']);
+        $this->assertSame(bcadd((string) $before['total_written_off'], '3000.00', 2), (string) $after['total_written_off']);
     }
+
+    // Credit-target corrections + the imported-baseline delta-vs-recalc branch
+    // (2026-08-30 addendum) are covered in
+    // tests/Feature/Web/ArrearsAdjustmentCreditTargetTest.php — that file uses
+    // UsesDisposableTenant because it needs the freshly-added
+    // `arrears_adjustments.target` / `credit_snapshot` columns, exactly like
+    // CommandRunRollbackTest needed `manuscripts.command_run_id` (the real
+    // swecom schema is deliberately not altered while building this feature).
 }

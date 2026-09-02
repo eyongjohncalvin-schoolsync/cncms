@@ -109,9 +109,13 @@ class PaymentTest extends TestCase
         $response->assertCreated()->assertJsonPath('data.verification_status', 'pending');
     }
 
-    public function test_a_months_frequency_payment_computes_expiration_date(): void
+    public function test_a_months_frequency_payment_locks_the_prepaid_rate_and_sets_no_expiration_date(): void
     {
-        $customer = $this->customer();
+        // Draw-down cutover (references/prepayment-drawdown.md): a new
+        // months/yearly payment no longer carries an expiration_date — its
+        // value flows through the draw-down branch as prepaid months, and
+        // prepaid_rate captures the customer's bill at payment time.
+        $customer = $this->customer(); // factory bill
         $token = $this->tokenForRole('super');
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")
@@ -123,7 +127,8 @@ class PaymentTest extends TestCase
             ]);
 
         $response->assertCreated();
-        $this->assertNotNull($response->json('data.expiration_date'));
+        $this->assertNull($response->json('data.expiration_date'));
+        $this->assertSame((string) $customer->bill, $response->json('data.prepaid_rate'));
     }
 
     public function test_super_can_update_a_payment(): void

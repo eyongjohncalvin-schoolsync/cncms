@@ -24,17 +24,17 @@ class ManuscriptPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('manuscripts.view');
     }
 
     public function view(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('manuscripts.view');
     }
 
     public function export(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('manuscripts.export');
     }
 
     /**
@@ -44,7 +44,7 @@ class ManuscriptPolicy
      */
     public function calculate(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('manuscripts.calculate');
     }
 
     /**
@@ -55,6 +55,6 @@ class ManuscriptPolicy
      */
     public function sendBill(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('manuscripts.send_bill');
     }
 }

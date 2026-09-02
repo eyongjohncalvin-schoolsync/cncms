@@ -25,6 +25,12 @@ class TenantDatabaseSeeder extends Seeder
         $this->seedZones();
         $this->seedExpenseCategories();
         $this->seedCompany();
+
+        // RBAC v2 system roles (super/admin/manager/agent/worker) with their
+        // day-1 permission sets. Idempotent — see DefaultRolesSeeder. Also
+        // seeded by the 2026_09_02_000100 migration for already-provisioned
+        // tenants; running both is harmless.
+        $this->call(DefaultRolesSeeder::class);
     }
 
     private function seedZones(): void

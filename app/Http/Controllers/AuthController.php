@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\TenantUserIndex;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -78,6 +79,18 @@ class AuthController extends Controller
 
         if (is_string($intendedPath) && str_starts_with($intendedPath, '/landlord') && ! $request->user()->is_landlord) {
             $request->session()->forget('url.intended');
+        }
+
+        // A landlord with no workspace of their own (e.g. the bootstrap
+        // `cncms:grant-landlord --create` user) would otherwise land on
+        // /dashboard and hit ResolveTenantWeb's "no tenant yet" 403. Send
+        // them to the platform area instead — that's where they belong.
+        $user = $request->user();
+
+        if ($user->is_landlord
+            && ! $request->session()->has('url.intended')
+            && ! TenantUserIndex::query()->where('user_id', $user->id)->exists()) {
+            return redirect()->route('landlord.tenants.index');
         }
 
         return redirect()->intended(route('dashboard'));

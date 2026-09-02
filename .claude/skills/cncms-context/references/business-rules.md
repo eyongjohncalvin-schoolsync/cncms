@@ -45,6 +45,51 @@ The billing cycle is driven by the `manuscript:calculate` Artisan command.
 Run manually or via scheduler at month-end (historically last week of each month).
 Recorded in `command_runs` with `period = 'YYYY-MM'`.
 
+### 2026-08-28 correction: what `period` actually means
+
+**A run's `period` is the month it GOVERNS, not the month it EXECUTES in.**
+Because the trigger fires near month-end and no new run happens again until
+the following month-end, a run executed on (say) 2026-07-22 produces the
+bill customers actually owe throughout **August**, not July — and stays the
+operative "current" bill for the entire month until the next run (executed
+near end-August) takes over and governs September.
+
+This was previously a real, confirmed source of confusion (not just
+appearance): `manuscript:calculate`/the scheduled task/the web trigger all
+used to default an omitted period to `now()->format('Y-m')` — the month the
+run executes in — mislabeling every run one month behind what it actually
+governs. Fixed (owner-confirmed 2026-08-28: the underlying arrears/credit/
+total_bill MATH was always correct — this was purely a labeling/timing bug,
+not a calculation bug) by defaulting to `now()->addMonthNoOverflow()->
+format('Y-m')` instead, everywhere a period is auto-computed for a NEW run
+(`ManuscriptCalculate` command, `ManuscriptGenerationTaskType::run()`,
+`ManuscriptController::calculate()`/`preRunReview()`/`preRunReviewFull()`,
+and the Manuscripts/Index.tsx "Run Calculation" trigger's own default). Each
+of those three controller actions' "period cannot be in the future" guard
+was widened to match — `period > now()->addMonthNoOverflow()->format('Y-m')`
+— since generating next month's bill in advance is now the NORMAL case, not
+a mistake to reject.
+
+**Everywhere ELSE `now()->format('Y-m')` appears — viewing/filtering
+defaults (Manuscripts index, dashboards), `ManuscriptRunLockService`'s
+"current period" lock rule, the arrears-adjustment forward-recalculation
+sweep boundary, `StoreArrearsAdjustmentRequest`'s target-period validation —
+was deliberately left UNCHANGED.** Once periods are labeled by the month
+they govern, "the period governing right now" correctly equals today's
+calendar month again — the fix at the generation source is what restores
+that simple equivalence everywhere else, rather than needing a scattered
++1-month offset patched into every consumer.
+
+**Real data as of this fix**: the real `swecom` tenant's most recent
+manuscript run (`command_runs.id=14`) is labeled `period='2026-07'` (executed
+2026-07-22) under the OLD, pre-fix labeling — meaning it is, in fact, the
+bill currently governing August 2026, mislabeled as July. Whether to relabel
+that existing row (and its 446 `manuscripts` rows, and any `payments.
+processed_period` stamps referencing it) to `2026-08` to match the corrected
+convention, versus leaving historical data as-is and only applying the fix
+going forward, is a decision for the product owner — not made unilaterally
+as part of this code fix.
+
 ### Calculation per customer
 
 ```
@@ -280,6 +325,36 @@ On each monthly `manuscript:calculate` run until expiration_date:
 After expiration_date:
 - Customer resumes normal monthly billing
 - Previous arrears (if any) reactivate
+
+### 2026-08-28 addendum — v2 baseline + planned move to draw-down credit
+
+**Baseline repair (done).** The v1 register never persisted `payment_expiration`
+on manuscripts, so `ManuscriptImportAugust` seeded every 2026-08 row NULL.
+`manuscript:reconcile-prepaid-baseline` (one-off, safe to delete) backfilled
+`payment_expiration` onto the 22 `tenantswecom` customers whose prepaid window
+still covers 2026-09+, from each customer's latest verified future
+`expiration_date`. Money columns unchanged; a synthetic `published`
+`command_runs` row for 2026-08 (id 1438) now blocks an accidental
+`manuscript:calculate 2026-08` from rebuilding the baseline off `customers.others`.
+5 already-lapsed multi-month payments were left alone (their window is over —
+the customer is billed normally from 2026-09) but still need `processed_period`
+stamped by the payment reconciliation or 2026-09 re-reads their amount as income.
+
+**Direction (owner-approved, NOT yet implemented).** New `months`/`yearly`
+payments should stop setting `expiration_date` and route their full `amount`
+through the normal income path, so the existing ledger draws them down as
+`credit` one month at a time — no freeze branch, no date special-casing. A rate
+change must not shorten already-purchased coverage.
+
+**Blocker.** The cutover is held on a pre-existing ledger defect:
+`total_bill = bill + total_arrears - credit` bills the full amount in the period
+that exhausts a credit exactly (`net == 0`) — so an N-month payment yields only
+N-1 free months. Documented in
+`ManuscriptCalculateTest::test_credit_is_consumed_before_arrears` and
+`::test_a_months_payment_with_no_expiration_date_draws_down_as_credit`. The
+freeze model does not have this bug. Fixing it is a core `ManuscriptCalculator`
+change that needs owner sign-off and a parallel-run verification before the
+draw-down cutover ships. Until then, `months`/`yearly` keep the freeze branch.
 
 ---
 

@@ -142,7 +142,7 @@ export function CustomerStatusActions({
 
     return (
         <>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
                 {canDisconnectOrSuspend && (
                     <>
                         <Button
@@ -421,20 +421,20 @@ function CustomerStatusModal({ customer, action, onClose }: { customer: Customer
                             rows={3}
                             value={data.note}
                             onChange={(e) => setData('note', e.target.value)}
-                            className={`rounded-lg border-0 px-3 py-2 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 ${
+                            className={`rounded-lg border-0 px-3 py-2 text-base text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm ${
                                 errors.note ? 'ring-red-400 focus:ring-red-500' : ''
                             }`}
                         />
                         {errors.note && <p className="text-xs text-red-600">{errors.note}</p>}
                     </div>
 
-                    <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                    <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
                         <Button
                             type="button"
                             variant="secondary"
                             onClick={close}
                             disabled={processing}
-                            className="rounded-lg px-4 py-2.5 text-sm font-semibold"
+                            className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold sm:w-auto"
                         >
                             Cancel
                         </Button>
@@ -442,7 +442,7 @@ function CustomerStatusModal({ customer, action, onClose }: { customer: Customer
                             type="submit"
                             variant={action === 'disconnect' ? 'danger' : 'primary'}
                             disabled={processing}
-                            className="rounded-lg px-4 py-2.5 text-sm font-semibold"
+                            className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold sm:w-auto"
                         >
                             {processing && <LoadingSpinner className="h-4 w-4" />}
                             {title}

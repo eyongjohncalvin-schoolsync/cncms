@@ -33,6 +33,7 @@ const toneColors: Record<StatCardTone, string> = {
     history: colors.accent.history,
     expense: colors.accent.expense,
     complaint: colors.accent.complaint,
+    arrears: colors.accent.arrears,
     green: colors.status.syncedDot,
     red: colors.status.errorDot,
     amber: colors.status.offlineDot,

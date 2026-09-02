@@ -58,7 +58,13 @@ class CommandRunCancelTest extends TestCase
     public function test_an_admin_can_cancel_a_stuck_queued_run(): void
     {
         $this->actingAsRole('admin');
-        $run = $this->queuedRun('2032-01');
+        // Must be the REAL current period — ManuscriptRunLockService (2026-08-28
+        // manuscript-run-management addendum) now gates cancel() to the current,
+        // unlocked period, same as rollback(). A hardcoded far-future literal
+        // (this file's old convention, chosen only to avoid colliding with real
+        // seeded manuscript history — never load-bearing to "not the current
+        // month") would now be treated as a locked/past period and rejected.
+        $run = $this->queuedRun(now()->format('Y-m'));
 
         $response = $this->post("/settings/command-runs/{$run->uuid}/cancel");
         $response->assertRedirect();
@@ -67,6 +73,25 @@ class CommandRunCancelTest extends TestCase
         $this->assertSame('failed', $run->status);
         $this->assertNotNull($run->metadata['cancelled_by'] ?? null);
         $this->assertNotNull($run->metadata['cancelled_at'] ?? null);
+    }
+
+    /**
+     * 2026-08-28 manuscript-run-management addendum: a queued run whose
+     * period has already passed (an old, orphaned "stuck" row from a prior
+     * month, never resolved) must stay fully locked — cancel() must refuse
+     * it exactly like every other action on a past-period run, not become
+     * cancellable purely because it never got published.
+     */
+    public function test_cancel_is_refused_for_a_queued_run_against_a_past_period(): void
+    {
+        $this->actingAsRole('admin');
+        $run = $this->queuedRun('2020-01');
+
+        $response = $this->post("/settings/command-runs/{$run->uuid}/cancel");
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+
+        $this->assertSame('queued', $run->fresh()->status, 'a locked (past-period) run must be left completely untouched by cancel().');
     }
 
     public function test_a_manager_cannot_cancel_a_run(): void

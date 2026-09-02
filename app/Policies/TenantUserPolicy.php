@@ -23,26 +23,26 @@ class TenantUserPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('users.view');
     }
 
     public function view(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('users.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('users.manage');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('users.manage');
     }
 
     public function deactivate(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('users.manage');
     }
 }

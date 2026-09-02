@@ -48,7 +48,10 @@ class BillTemplatesTest extends TestCase
     private function customerWithManuscript(): Customer
     {
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        // ->active(): CustomerFactory's default status is random (~20%
+        // 'disconnected'), and ManuscriptService::billData() now refuses a
+        // non-active customer — a bill only prints for an active one.
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
 
         ManuscriptFactory::new()
             ->forPeriod(now()->format('Y-m'))

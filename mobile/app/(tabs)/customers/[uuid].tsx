@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Card } from '../../../src/components/ui/Card';
 import { Button } from '../../../src/components/ui/Button';
@@ -202,16 +202,35 @@ export default function CustomerDetailScreen() {
             <Card>
                 <Text style={styles.sectionTitle}>Last payment</Text>
                 {lastPayment ? (
-                    <View style={styles.lastPaymentRow}>
-                        <View>
-                            <Text style={styles.lastPaymentAmount}>{formatFcfa(lastPayment.amount)}</Text>
-                            <Text style={styles.lastPaymentDate}>{formatDate(lastPayment.created_at)}</Text>
+                    <>
+                        <View style={styles.lastPaymentRow}>
+                            <View>
+                                <Text style={styles.lastPaymentAmount}>{formatFcfa(lastPayment.amount)}</Text>
+                                <Text style={styles.lastPaymentDate}>{formatDate(lastPayment.created_at)}</Text>
+                            </View>
+                            <Badge
+                                label={PAYMENT_SYNC_BADGE[lastPayment.sync_status].label}
+                                tone={PAYMENT_SYNC_BADGE[lastPayment.sync_status].tone}
+                            />
                         </View>
-                        <Badge
-                            label={PAYMENT_SYNC_BADGE[lastPayment.sync_status].label}
-                            tone={PAYMENT_SYNC_BADGE[lastPayment.sync_status].tone}
-                        />
-                    </View>
+                        {/*
+                          A receipt only exists once a payment has synced (so a
+                          real server_uuid exists to address it) AND been
+                          verified by the office — the same choke point that
+                          auto-issues it (payment-receipts-and-whatsapp.md). The
+                          receipt screen itself re-checks and shows a friendly
+                          "not issued yet" state if it 404s.
+                        */}
+                        {lastPayment.server_uuid && lastPayment.verification_status === 'verified' ? (
+                            <Pressable
+                                accessibilityRole="button"
+                                onPress={() => router.push(`/receipt/${lastPayment.server_uuid}`)}
+                                style={styles.receiptLink}
+                            >
+                                <Text style={styles.receiptLinkText}>View receipt</Text>
+                            </Pressable>
+                        ) : null}
+                    </>
                 ) : (
                     <Text style={styles.noPayment}>No payment recorded from this device yet.</Text>
                 )}
@@ -241,30 +260,46 @@ export default function CustomerDetailScreen() {
               happens, only how strongly this entry point competes for
               attention against Record Payment. See Button's 'dangerOutline'
               variant for the lower-emphasis treatment.
+
+              2026-08-28: "Adjust Arrears" added to this same cluster — the
+              mobile REQUEST side of the maker-checker write-off workflow
+              (arrears-adjustment.md). Unlike Disconnect/WhatsApp above, it
+              is never conditionally hidden: ArrearsAdjustmentPolicy::create()
+              is ungated for every role and every customer status (a
+              disconnected customer's frozen, wrong arrears figure is
+              exactly this feature's central use case — see that doc's
+              section 4), so there's no "canAdjustArrears" gate to mirror
+              here, matching how the web modal renders unconditionally on
+              Customers/Show.tsx too.
             */}
-            {canDisconnect || customer.phone ? (
-                <View style={styles.secondaryActions}>
-                    <Text style={styles.secondaryActionsLabel}>Other actions</Text>
+            <View style={styles.secondaryActions}>
+                <Text style={styles.secondaryActionsLabel}>Other actions</Text>
 
-                    {customer.phone ? (
-                        <Button
-                            title={sendingWhatsapp ? 'Preparing…' : 'Send Bill via WhatsApp'}
-                            loading={sendingWhatsapp}
-                            disabled={sendingWhatsapp}
-                            onPress={handleSendBillWhatsapp}
-                            style={styles.whatsappButton}
-                        />
-                    ) : null}
+                {customer.phone ? (
+                    <Button
+                        title={sendingWhatsapp ? 'Preparing…' : 'Send Bill via WhatsApp'}
+                        loading={sendingWhatsapp}
+                        disabled={sendingWhatsapp}
+                        onPress={handleSendBillWhatsapp}
+                        style={styles.whatsappButton}
+                    />
+                ) : null}
 
-                    {canDisconnect ? (
-                        <Button
-                            title="Disconnect this customer"
-                            variant="dangerOutline"
-                            onPress={() => router.push(`/disconnect/${uuid}`)}
-                        />
-                    ) : null}
-                </View>
-            ) : null}
+                <Button
+                    title="Adjust Arrears / Credit"
+                    variant="secondary"
+                    onPress={() => router.push(`/adjust-arrears/${uuid}`)}
+                    style={styles.arrearsButton}
+                />
+
+                {canDisconnect ? (
+                    <Button
+                        title="Disconnect this customer"
+                        variant="dangerOutline"
+                        onPress={() => router.push(`/disconnect/${uuid}`)}
+                    />
+                ) : null}
+            </View>
         </ScrollView>
     );
 }
@@ -288,6 +323,8 @@ const styles = StyleSheet.create({
     lastPaymentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     lastPaymentAmount: { fontSize: fontSize.lg, fontWeight: '800', color: colors.textPrimary },
     lastPaymentDate: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
+    receiptLink: { marginTop: spacing.md, alignSelf: 'flex-start' },
+    receiptLinkText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.accent.payment },
     noPayment: { fontSize: fontSize.sm, color: colors.textSecondary },
     // Groups WhatsApp + Disconnect under one labeled, visually-separated
     // cluster (marginTop, not just the screen's default content gap) so it
@@ -305,4 +342,9 @@ const styles = StyleSheet.create({
     // see colors.whatsapp's doc comment for why it's the darker AAA-safe
     // teal rather than WhatsApp's brighter brand green.
     whatsappButton: { backgroundColor: colors.whatsapp },
+    // 'secondary' variant (light fill, dark text) with a violet border laid
+    // on top — ties this action to the new colors.accent.arrears identity
+    // without needing a whole new Button variant just for one screen's
+    // entry point.
+    arrearsButton: { borderColor: colors.accent.arrears },
 });

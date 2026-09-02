@@ -35,7 +35,12 @@ class ManuscriptService
     ) {}
 
     /**
-     * @param  array<string, mixed>  $filters  Supported keys: 'period', 'zone_uuid', 'status'.
+     * @param  array<string, mixed>  $filters  Supported keys: 'period', 'zone_uuid', 'status', 'search'.
+     *                                         'search' matches the customer's name (ILIKE, partial)
+     *                                         or phone (LIKE, partial) — same shape as the Customers
+     *                                         list. It is folded into listCacheKey()/summaryCacheKey()
+     *                                         via scopedFilters() (json_encode'd whole), so a searched
+     *                                         view never serves a cached unsearched page.
      */
     public function list(array $filters, int $perPage): LengthAwarePaginator
     {
@@ -101,6 +106,42 @@ class ManuscriptService
     }
 
     /**
+     * The active customers who should receive a printed bill for
+     * $filters['period'] (same period/zone/status/search keys as list()),
+     * ordered by zone name then customer name — feeds
+     * ManuscriptController::downloadBills() and the bulk N-up grid
+     * (resources/views/pdf/bills/_grid.blade.php).
+     *
+     * ACTIVE ONLY: a disconnected / suspended / passive customer is frozen
+     * with a 0 total_bill, so a printed slip for them is wrong — the same
+     * rule billData() enforces on the single-print path. billDataForCustomers()
+     * trusts its caller to have filtered (see its doc comment), so the filter
+     * lives here.
+     *
+     * ORDER (owner's ask, 2026-08-30): grouped by zone, zones alphabetical,
+     * customers alphabetical within each zone, so an agent walking a zone
+     * gets that zone's bills as one contiguous run. Case-insensitive; a
+     * customer with no zone sorts to the front under an empty key.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{period: string, customers: Collection<int, Customer>}
+     */
+    public function billRecipients(array $filters): array
+    {
+        $scoped = $this->scopedFilters($filters);
+
+        $customers = $this->manuscripts->all($scoped)
+            ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active')
+            ->sortBy(fn (Manuscript $manuscript): string => mb_strtolower(
+                ($manuscript->customer?->zone?->name ?? '')."\0".($manuscript->customer?->name ?? '')
+            ))
+            ->map(fn (Manuscript $manuscript): Customer => $manuscript->customer)
+            ->values();
+
+        return ['period' => $scoped['period'], 'customers' => $customers];
+    }
+
+    /**
      * Everything needed to render a single customer's bill slip
      * (resources/views/pdf/bills/{classic,compact,modern}.blade.php via
      * pdf/bills/show.blade.php). See business-rules.md section 3.
@@ -108,10 +149,26 @@ class ManuscriptService
      * Resolves the manuscript for the given period, or the customer's most
      * recently calculated manuscript when no period is given.
      *
+     * A bill slip is only ever printed for an ACTIVE customer (owner
+     * decision, 2026-08): a disconnected / suspended / passive customer is
+     * frozen — their manuscript carries a 0 total_bill — so handing them a
+     * printable slip is wrong. This is the single guard behind both print
+     * paths (CustomerController::printBill and Api\BillController::print);
+     * it throws a friendly ValidationException that the web controller
+     * catches into a flash 'error' and the API surfaces as a 422. The bulk
+     * N-up grid (billDataForCustomers()) filters upstream instead, and
+     * sampleBillData()/the monthly register never come through here.
+     *
      * @return array{company: ?Company, customer: Customer, manuscript: Manuscript, period: string, period_label: string, deadline: string, account_code: string, bill_number: string, logo_data_uri: ?string}
      */
     public function billData(Customer $customer, ?string $period): array
     {
+        if ($customer->status !== 'active') {
+            throw ValidationException::withMessages([
+                'customer' => ["Bills are only printed for active customers. {$customer->name} is {$customer->status}."],
+            ]);
+        }
+
         $manuscript = $this->resolveManuscript($customer, $period);
         $company = Company::cached();
 
@@ -252,7 +309,15 @@ class ManuscriptService
         $customer->loadMissing('zone');
 
         $billPeriod = $period ?? $manuscript->period;
-        $periodLabel = Carbon::createFromFormat('Y-m', $billPeriod)->format('F Y');
+        // `!Y-m` resets day/time to the epoch base (day 01, 00:00) BEFORE the
+        // year/month are applied — without the `!`, createFromFormat keeps
+        // TODAY's day-of-month, so on the 29th–31st a short target month
+        // silently rolls forward (e.g. generating a 2026-09 bill on Aug 31
+        // produced "October 2026"). Every 'Y-m' period parse in this app has
+        // the same hazard — see the identical fix in BillNotificationService,
+        // ReportService, ResourcesDashboardService, ManuscriptRepository and
+        // Manuscript::expiryLabel().
+        $periodLabel = Carbon::createFromFormat('!Y-m', $billPeriod)->format('F Y');
 
         return [
             'company' => $company,

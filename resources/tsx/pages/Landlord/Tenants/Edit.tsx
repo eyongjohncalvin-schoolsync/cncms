@@ -49,12 +49,12 @@ export default function LandlordTenantsEdit({ tenant }: { tenant: LandlordTenant
                                         : 'Activating this tenant restores sign-in access for their staff.'}
                                 </p>
 
-                                <div className="flex items-center gap-3 border-t border-slate-100 pt-4">
+                                <div className="flex flex-col-reverse items-center gap-3 border-t border-slate-100 pt-4 sm:flex-row">
                                     <Button
                                         type="submit"
                                         variant={tenant.is_active ? 'danger' : 'primary'}
                                         disabled={processing}
-                                        className="rounded-lg px-5 py-2.5 text-sm font-semibold"
+                                        className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
                                     >
                                         {processing && <LoadingSpinner className="mr-1.5 text-white" />}
                                         {processing
@@ -106,7 +106,7 @@ export default function LandlordTenantsEdit({ tenant }: { tenant: LandlordTenant
                                         type="submit"
                                         variant={tenant.bulk_whatsapp_enabled ? 'danger' : 'primary'}
                                         disabled={processing}
-                                        className="rounded-lg px-5 py-2.5 text-sm font-semibold"
+                                        className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
                                     >
                                         {processing && <LoadingSpinner className="mr-1.5 text-white" />}
                                         {processing

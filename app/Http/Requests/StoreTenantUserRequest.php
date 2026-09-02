@@ -25,7 +25,12 @@ class StoreTenantUserRequest extends FormRequest
             'username' => ['required', 'string', 'max:50', 'unique:pgsql.users,username'],
             'email' => ['required', 'email', 'max:255', 'unique:pgsql.users,email'],
             'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', 'string', Rule::in(['super', 'admin', 'manager', 'agent', 'worker'])],
+            // RBAC v2 Wave 3: roles are configurable — validate the name
+            // against this tenant's own `roles` table (system + custom)
+            // rather than a hardcoded 5-value list. The DB CHECK constraint
+            // that used to pin this column was dropped in
+            // 2026_09_03_000000_relax_tenant_users_role_check.
+            'role' => ['required', 'string', Rule::exists('roles', 'name')],
             // Purely descriptive — see the tenant_users migration's doc block.
             // Deliberately free text (not Rule::in(...)): real operators will
             // have job titles this app hasn't anticipated.
@@ -36,7 +41,8 @@ class StoreTenantUserRequest extends FormRequest
             // SettingsUserController (mirrors CustomerService::
             // resolveZoneId()'s existing "resolve uuid to id, or a
             // ValidationException" pattern) rather than a Rule::exists()
-            // here, matching the rest of this codebase's convention.
+            // here, matching the rest of this codebase's convention. (uuid
+            // resolution now lives in UsersControlCenter\UserController.)
             'branch_uuid' => ['nullable', 'string'],
         ];
     }

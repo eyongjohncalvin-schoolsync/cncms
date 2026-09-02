@@ -94,10 +94,13 @@ class ResourcesDashboardService
      */
     private function periodBounds(string $period): array
     {
-        $start = Carbon::createFromFormat('Y-m', $period, BusinessTimezone::WAT)
+        // `!Y-m` — reset the day to 01 in the parse itself; a bare 'Y-m' keeps
+        // today's day-of-month and overflows a short month on the 29th–31st
+        // before startOfMonth()/endOfMonth() ever run.
+        $start = Carbon::createFromFormat('!Y-m', $period, BusinessTimezone::WAT)
             ->startOfMonth()
             ->setTimezone('UTC');
-        $end = Carbon::createFromFormat('Y-m', $period, BusinessTimezone::WAT)
+        $end = Carbon::createFromFormat('!Y-m', $period, BusinessTimezone::WAT)
             ->endOfMonth()
             ->setTimezone('UTC');
 
@@ -165,8 +168,9 @@ class ResourcesDashboardService
         // component), so its calendar-month bounds are just the period's
         // first/last day as written — no UTC conversion belongs here (see
         // periodBounds()'s docblock).
-        $start = Carbon::createFromFormat('Y-m', $period)->startOfMonth()->toDateString();
-        $end = Carbon::createFromFormat('Y-m', $period)->endOfMonth()->toDateString();
+        // `!Y-m` pins the parse to day 01 (see periodBounds()).
+        $start = Carbon::createFromFormat('!Y-m', $period)->startOfMonth()->toDateString();
+        $end = Carbon::createFromFormat('!Y-m', $period)->endOfMonth()->toDateString();
 
         $rows = Expenditure::query()
             ->join('expense_categories', 'expense_categories.id', '=', 'expenditures.category_id')

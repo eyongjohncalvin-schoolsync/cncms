@@ -12,7 +12,8 @@ use Inertia\Response;
 
 /**
  * Holding page for a user whose workspace (Tenant) has
- * registration_status = 'pending'/'rejected' — see
+ * registration_status = 'pending'/'rejected', or has been deactivated by a
+ * landlord (is_active = false) — see
  * .ai/skills/cncms/cncms-context/references/self-service-onboarding.md.
  * Deliberately NOT behind ['auth', 'tenant.web'] (ResolveTenantWeb is what
  * redirects here in the first place; routing this page through the same
@@ -25,8 +26,20 @@ class WorkspaceController extends Controller
         $entry = TenantUserIndex::query()->where('user_id', $request->user()->id)->first();
         $tenant = $entry ? Tenant::find($entry->tenant_id) : null;
 
+        // No index entry yet = App\Jobs\FinalizeWorkspaceProvisioning hasn't
+        // run — the tenant schema is still being built on the queue. The
+        // page polls this endpoint and advances once it flips.
+        // A deactivated tenant reports 'suspended' — a terminal state the
+        // page shows without polling.
+        $status = match (true) {
+            $tenant === null => 'pending',
+            ! $tenant->is_active => 'suspended',
+            default => $tenant->registration_status ?? 'pending',
+        };
+
         return Inertia::render('Workspace/Pending', [
-            'status' => $tenant?->registration_status ?? 'pending',
+            'provisioning' => $entry === null,
+            'status' => $status,
             'workspace_name' => $tenant?->name,
         ]);
     }

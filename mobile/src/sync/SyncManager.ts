@@ -27,10 +27,10 @@ import {
     markComplaintFailed,
     markComplaintSynced,
 } from '../db/complaints';
-import { upsertCustomers } from '../db/customers';
+import { deleteCustomers, upsertCustomers } from '../db/customers';
 import { getPendingAcknowledgements, markAckConfirmed, markAckPending, upsertNotifications } from '../db/notifications';
 import { refreshNotificationsState } from '../notifications/notificationStore';
-import { getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
+import { clearLastSyncAt, getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
 import { patchSyncState } from './syncStore';
 import type { SyncPushComplaintItem, SyncPushExpenditureItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
 
@@ -239,6 +239,40 @@ class SyncManagerImpl {
         }
     }
 
+    /**
+     * Forces a full re-pull of every eligible customer, instead of the
+     * normal delta pull scoped to `updated_at >= last_sync_at`. Exists
+     * because that delta filter (SyncService::upsertedCustomers()) is blind
+     * to any customer whose cached `total_arrears`/`credit` went stale
+     * without the customer row's own `updated_at` changing — which is
+     * exactly what happens when a manuscript is recalculated, corrected, or
+     * (as in the 2026-08-28 incident) deleted directly against the
+     * database: no `$touches` relationship exists from Manuscript back to
+     * Customer, so none of that ever bumps `customers.updated_at`. A normal
+     * "Sync Now" (syncNow('manual')) does NOT fix this — it still reads the
+     * persisted `last_sync_at` watermark unchanged, so a customer whose own
+     * row wasn't independently touched stays permanently excluded from
+     * every future delta pull until something else touches it.
+     *
+     * This is the one thing that actually fixes it client-side: clear the
+     * watermark so the next pull's `$sinceAt` is null, which makes
+     * `upsertedCustomers()` return every zone-scoped customer unconditionally
+     * (`->when($sinceAt, ...)` is simply skipped), re-populating this
+     * device's cache with current server truth regardless of what did or
+     * didn't touch `updated_at`. Safe to call anytime: `upsertCustomers()`
+     * is a plain `ON CONFLICT DO UPDATE` upsert (src/db/customers.ts), never
+     * a delete-then-insert, and a zone is only low hundreds of customers
+     * (mobile-app-react-native.md §2), so this is a cheap, low-risk network
+     * call, not a heavy resync. Queued/failed payments and expenditures are
+     * untouched — only the customers-pull watermark is reset, push() and
+     * everything else in this same syncNow() cycle behaves exactly as
+     * normal.
+     */
+    async forceFullResync(): Promise<void> {
+        await clearLastSyncAt();
+        await this.syncNow('manual-full-refresh');
+    }
+
     private scheduleRetry(): void {
         if (this.retryTimer || this.retryAttempt >= RETRY_SCHEDULE_MS.length) {
             return;
@@ -278,6 +312,8 @@ class SyncManagerImpl {
             credit: payment.credit,
             frequency: payment.frequency,
             months: payment.months,
+            // SQLite stores this as 0/1; coerce for the JSON payload.
+            clear_arrears_first: !!payment.clear_arrears_first,
             created_at: payment.created_at,
         }));
 
@@ -339,6 +375,7 @@ class SyncManagerImpl {
         const response = await pullChanges(since);
 
         await upsertCustomers(response.changes.customers.upserted);
+        await deleteCustomers(response.changes.customers.deleted);
         await applyVerificationUpdates(response.changes.payments.verified, 'verified');
         await applyVerificationUpdates(response.changes.payments.rejected, 'rejected');
 

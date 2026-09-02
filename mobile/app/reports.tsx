@@ -10,7 +10,6 @@ import { StatCard } from '../src/components/ui/StatCard';
 import { colors } from '../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../src/theme/tokens';
 import { formatFcfa } from '../src/utils/format';
-import type { TenantRole } from '../src/types/api';
 
 /**
  * Reports — plain-numeral summary of an agent's own collection performance
@@ -78,8 +77,6 @@ import type { TenantRole } from '../src/types/api';
  * colors.ts's accent.history comment) for exactly this treatment (filled
  * card / active filter chip), so no new contrast math was needed.
  */
-
-const VIEW_ALLOWED_ROLES = new Set<TenantRole>(['super', 'admin', 'manager', 'agent']);
 
 type Period = 'today' | 'week' | 'month';
 
@@ -166,12 +163,17 @@ async function getPeriodSummary(period: Period): Promise<PeriodSummary> {
 }
 
 export default function ReportsScreen() {
-    const { role, status } = useAuth();
+    const { can, status } = useAuth();
     const [period, setPeriod] = useState<Period>('today');
     const [summary, setSummary] = useState<PeriodSummary | null>(null);
     const [zoneSnapshot, setZoneSnapshot] = useState<ZoneSnapshot | null>(null);
 
-    const authorized = role !== null && VIEW_ALLOWED_ROLES.has(role);
+    // RBAC v2 Wave 4: ReportPolicy::view → `reports.view` (seeded S A M G,
+    // matching the old role set). The policy's `is_investor` OR-branch is
+    // still not replicated here — `is_investor` is never sent to this app
+    // and the Investor tier is a web-only InvestorLayout experience (see the
+    // file header comment).
+    const authorized = can('reports.view');
 
     const refresh = useCallback(() => {
         if (!authorized) {

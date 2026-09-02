@@ -90,8 +90,15 @@ class ManuscriptController extends Controller
         // the single-record bill print.
         ini_set('memory_limit', '1024M');
 
-        return Pdf::loadView('pdf.manuscript', $data)
-            ->setPaper('a4', 'landscape')
+        // Orientation matches the web export (ManuscriptController::export):
+        // defaults to portrait, `?orientation=landscape` opts into the wide
+        // layout, anything else is a 422. Passed to both dompdf and the
+        // blade's fixed column widths.
+        $orientation = (string) $request->query('orientation', 'portrait');
+        abort_unless(in_array($orientation, ['portrait', 'landscape'], true), 422, 'orientation must be portrait or landscape.');
+
+        return Pdf::loadView('pdf.manuscript', [...$data, 'orientation' => $orientation])
+            ->setPaper('a4', $orientation)
             ->stream('manuscript-'.$data['period'].'.pdf');
     }
 }

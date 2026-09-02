@@ -695,8 +695,8 @@ class SyncTest extends TestCase
 
     public function test_pull_with_null_since_returns_all_customers(): void
     {
-        $this->customer();
-        $this->customer();
+        $a = $this->customer();
+        $b = $this->customer();
 
         $token = $this->tokenForRole('agent');
 
@@ -705,8 +705,19 @@ class SyncTest extends TestCase
 
         $response->assertOk();
 
-        $this->assertGreaterThanOrEqual(2, count($response->json('changes.customers.upserted')));
-        $this->assertSame([], $response->json('changes.customers.deleted'));
+        $upsertedUuids = collect($response->json('changes.customers.upserted'))->pluck('uuid');
+        $this->assertGreaterThanOrEqual(2, $upsertedUuids->count());
+        $this->assertContains($a->uuid, $upsertedUuids);
+        $this->assertContains($b->uuid, $upsertedUuids);
+
+        // The two freshly-created customers are active, so neither is a
+        // tombstone. We can't assert `deleted === []` — this runs against the
+        // real `tenantswecom` schema, which already holds genuinely archived
+        // customers, and with a null `since` deletedCustomers() has no
+        // window to filter them out.
+        $deletedUuids = $response->json('changes.customers.deleted');
+        $this->assertNotContains($a->uuid, $deletedUuids);
+        $this->assertNotContains($b->uuid, $deletedUuids);
     }
 
     /**

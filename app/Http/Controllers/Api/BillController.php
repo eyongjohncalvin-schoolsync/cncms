@@ -12,6 +12,7 @@ use App\Services\ManuscriptService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class BillController extends Controller
@@ -75,10 +76,22 @@ class BillController extends Controller
      *    The mobile UI must not show a broken/dead button for this case.
      *  - 'no_manuscript': the customer has no manuscript yet, so there is
      *    no real bill figure to send.
+     *
+     * A non-active customer is refused outright with a 422 ValidationException
+     * (same shape as the printed-slip refusal in ManuscriptService::billData())
+     * rather than a structured `reason` — a bill is only ever sent to an
+     * active customer (owner decision, 2026-08), so this isn't a "maybe
+     * later" missing-ingredient case the mobile UI should soft-handle.
      */
     public function whatsappMessage(Customer $customer): JsonResponse
     {
         $this->authorize('printBill', $customer);
+
+        if ($customer->status !== 'active') {
+            throw ValidationException::withMessages([
+                'customer' => ["Bills are only sent for active customers. {$customer->name} is {$customer->status}."],
+            ]);
+        }
 
         $phone = $this->billNotifications->normalizedPhone($customer);
         $message = $this->billNotifications->composeMessage($customer);

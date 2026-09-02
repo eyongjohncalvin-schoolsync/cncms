@@ -708,3 +708,311 @@ a single `customer_id`) — audit-log-only residue (zero associated manuscripts,
 446), left over from **before** this fix, not created by it. Not deleted as part of this task —
 touching real `swecom` rows autonomously is exactly the category of action this fix exists to
 prevent; flagged here for the product owner to review and remove if confirmed safe.
+
+---
+
+## Addendum (2026-08-28): manuscript-run management — cancel/delete/rollback, gated by one flat "is this period locked" rule
+
+Product owner ask, verbatim intent: an index for managing manuscript RUNS (`command_runs` rows,
+`command = 'manuscript:calculate'`) — cancel a running process, delete it if not published,
+roll it back — with a single hard constraint: **the current period is mutable; any period that has
+already passed is fully locked, read-only, no exceptions.** This mirrors how payments already work
+in this app (past payments are immutable) — manuscripts get the identical guarantee, for the
+identical reason.
+
+### What "current period" means here (read from business-rules.md + the actual code, not assumed)
+
+business-rules.md never describes period advancement as "last published period + 1" — nothing in
+this codebase computes it that way. Every real entry point that means "the billing period right
+now" — `ManuscriptController::index()/calculate()/preRunReview()/preRunReviewFull()`,
+`ManuscriptCalculate`'s CLI default, `ManuscriptService`, `ArrearsAdjustmentService`,
+`RecalculateCustomerManuscriptsForwardJob` — uses the identical bare expression
+`Carbon::now()->format('Y-m')`, a plain calendar-month string compared lexicographically. "Current
+period" for this feature is defined identically, in exactly one place:
+`App\Services\ManuscriptRunLockService::currentPeriod()`. A period is locked
+(`isPeriodLocked(string $period): bool`) when it is anything other than that string. In practice
+this only ever means "in the past," since every entry point that accepts a `period` already rejects
+a future one outright before any `command_runs` row for it can exist — so plain inequality is both
+correct and the simplest possible implementation of "the current period is mutable, everything
+else is locked."
+
+Locking is decided **purely by period, never by the individual `command_run`'s own status** — a
+stale/abandoned `queued` or `failed` row against a period that has since passed (an old, orphaned
+row from a prior month, never resolved) is just as locked as a `published` one. This was the
+one thing explicitly called out as a trap to avoid: "not yet published" and "period has passed" are
+two different conditions, and only the second one locks.
+
+### What already existed vs. what was built new
+
+Already existed and reused as-is: `SettingsCommandRunController::cancel()` (the 2026-08-27 "unstick
+a stuck queued row" action, flips `queued` -> `failed`), `CommandRunPolicy::publish()` (the
+super/admin ability gating both `publish()` and `cancel()`), the `Settings/CommandRuns.tsx` page
+itself (already the de facto "index for managing manuscript runs" — no new page was created; this
+is the only place a `command_runs` row's lifecycle is ever acted on, so extending it rather than
+building a second, competing surface was the deliberate choice, matching this app's established "no
+new nav item, extend the existing settings page" precedent from section 4's own admin-UI note), and
+the `Dropdown`/`DropdownItem`/`DropdownDivider` kebab-menu components (already built for
+Customers/Index.tsx and Disconnections/Index.tsx — reused verbatim, not reinvented, replacing that
+page's previous bare inline buttons).
+
+Built new:
+
+1. **`App\Services\ManuscriptRunLockService`** — the single source of truth described above.
+   `currentPeriod()` + `isPeriodLocked(string $period): bool`. Every action below calls this one
+   method; the comparison is never reimplemented inline anywhere else.
+2. **`manuscripts.command_run_id`** (migration
+   `2026_08_28_010000_add_command_run_id_to_manuscripts_table.php`, nullable FK,
+   `nullOnDelete()`) — required because `manuscripts` had no linkage back to whichever
+   `command_runs` row wrote it. Without it, a delete/rollback scoped by `period` alone would also
+   delete a sibling run's rows against the identical period string (a real, named scenario: a
+   run re-computed and re-published after a data fix creates a NEW `command_runs` row for the same
+   period, per `ManuscriptGenerationBatchService::publish()`'s own existing "multiple historical
+   rows per period are expected" comment). Set on every write path that actually commits to
+   `manuscripts`: `ManuscriptGenerationBatchService::publish()` and
+   `ManuscriptCalculate`'s CLI `runForEveryCustomer()` (the CLI bypasses the review gate and writes
+   directly — see the 2026-08-27 addendum above — so it needed the same linkage independently, not
+   inherited from `publish()`). Pre-migration historical rows are left NULL (no reliable way to
+   attribute them retroactively) — they are simply never a rollback candidate, the safe default.
+
+   One real interaction this required handling: `CustomerManuscriptRecalculationService::
+   recalculateOne()` (the arrears-adjustment single-customer recalculation path) can overwrite a
+   manuscript row a bulk `manuscript:calculate` run previously wrote, via the same
+   `firstOrNew()->fill()->save()` shape. Left alone, that write would silently preserve the OLD
+   `command_run_id` (since `fill()` only touches keys actually passed), so rolling back the
+   original bulk run later would delete a row that had since been legitimately corrected by an
+   unrelated, more authoritative mechanism. Fixed by having `recalculateOne()` explicitly set
+   `command_run_id => null` on every write — it deliberately does NOT attribute the row to its own
+   `manuscript:recalculate-one` audit-trace row either, since that command has no batch/review
+   lifecycle and was never meant to be a rollback target (see next point).
+3. **`SettingsCommandRunController::rollback()`** — `POST /settings/command-runs/{run}/rollback`
+   (`settings.command-runs.rollback`). Gated to `CommandRunPolicy::publish()` (same reuse rationale
+   as `cancel()` — one existing ability, not a new one), restricted to
+   `command === 'manuscript:calculate'` (404 otherwise, mirroring `ManuscriptController::
+   runReview()`'s identical guard — a `manuscript:recalculate-one` row is a single-customer
+   audit-trace side effect, not a "manuscript process" in the sense of this feature). Order of
+   checks: authorize -> command guard -> `ManuscriptRunLockService::isPeriodLocked()` (refused with
+   a clear message if locked) -> `CommandRun::isRollbackable()` (true for `pending_review`,
+   `published`, or `failed` — false for `queued`, which is `cancel()`'s job, and `rolled_back`,
+   terminal). Inside a `DB::transaction()`: `Manuscript::query()->where('command_run_id',
+   $run->id)->delete()` (a real, precisely-scoped `DELETE`, never by `period` alone), then
+   `$run->update(['status' => 'rolled_back', 'metadata' => [...'rolled_back_by', 'rolled_back_at']])`.
+   Also calls `ManuscriptService::forgetSummaryCache($run->period)` afterward, matching every other
+   manuscript-mutating path's existing cache-invalidation discipline.
+
+   A `pending_review` run genuinely has zero `manuscripts` rows at the point of rollback (only
+   `publish()` ever writes them — compute only populates `command_runs.computed_result`), so
+   rolling one back deletes nothing; the action is still meaningful there — it discards the
+   computed result and frees the period/marks the attempt abandoned rather than leaving it sitting
+   forever as an un-actioned `pending_review` row. A `failed` run CAN have real partial rows: the
+   CLI path (`ManuscriptCalculate`) commits each customer inside its own per-customer transaction
+   as it goes, so a fatal exception partway through `runForEveryCustomer()`'s loop can leave some
+   customers' rows already committed under that run's `command_run_id` before the row is marked
+   `failed` — rollback cleans those up too.
+
+   `command_runs.status` has no DB check constraint (confirmed — it's a plain `string(20)` column,
+   `idx_command_runs_period_inflight`'s partial index is the only thing that cares about specific
+   status values), so `'rolled_back'` needed no schema migration to introduce — added a
+   `CommandRun::isRollbackable()`/`isRolledBack()` model helper alongside the existing
+   `isQueued()`/`isPendingReview()`/`isPublished()`.
+4. **`cancel()` gained the same lock check**, run first (before the existing `isQueued()` check) —
+   an old orphaned `queued` row against a period that has since passed must stay locked, not become
+   cancellable purely because it never resolved. This is the literal "stale/abandoned row from
+   months ago" case flagged as a trap in the original ask.
+5. **Frontend**: `Settings/CommandRuns.tsx`'s Actions column now sends `is_locked` (computed
+   server-side via the lock service, never re-derived in React — a display hint only, the backend
+   enforces the same check independently on every POST regardless of what renders) and a new
+   `canRollback` prop (same underlying ability as `canPublish`/`canCancel`, exposed under its own
+   name for the same "don't infer the gate from an unrelated prop" reason those two already were).
+   A locked row renders a plain read-only "Locked" badge and **no action menu at all** — never a
+   disabled/hidden menu. An unlocked row's previously-separate inline Publish/Cancel buttons are
+   now bundled into one `Dropdown`/`DropdownItem`/`DropdownDivider` kebab menu (mirroring
+   Customers/Index.tsx and Disconnections/Index.tsx's established per-row actions-menu pattern),
+   showing whichever of Publish/Cancel/Delete-Rollback actually apply to that row's status; a
+   Preview link (read-only) stays outside the menu and available even on a locked row, since the
+   lock is about mutation, not visibility.
+
+### Test fallout
+
+`CommandRunCancelTest.php`'s one success-path test (`test_an_admin_can_cancel_a_stuck_queued_run`)
+used a hardcoded future literal (`'2032-01'`) purely to avoid colliding with real seeded manuscript
+history under the old, real-`swecom`-in-a-transaction pattern — never load-bearing to "not the
+current month." Updated to `now()->format('Y-m')` since `cancel()` now requires the current,
+unlocked period to succeed at all. A new
+`test_cancel_is_refused_for_a_queued_run_against_a_past_period` test covers the locked case
+directly. The existing `nonQueuedStatuses` data-provider test needed no change — it only asserts an
+error was returned and the status is unchanged, which holds regardless of whether the lock check or
+the status check is what actually fired first.
+
+New file `tests/Feature/Web/CommandRunRollbackTest.php` — deliberately uses
+`Tests\Feature\Concerns\UsesDisposableTenant` rather than `CommandRunCancelTest.php`'s
+`InteractsWithTenantRoles` (real `swecom`, wrapped in a rolled-back transaction): this feature's
+tests need the new `manuscripts.command_run_id` column, and the real `swecom` schema is
+deliberately never altered as part of building/testing this feature (the migration was written but
+never run against it) — a freshly-provisioned disposable tenant is the only schema in the test run
+guaranteed to have that column, which also happens to double as live proof the migration itself
+applies cleanly. Covers: rollback of a published current-period run deletes only that run's own
+rows, never a sibling run's rows against the identical period (the two-runs-same-period fixture is
+the direct proof of the `command_run_id`-scoped delete); rollback of a `pending_review` run
+succeeds and marks `rolled_back` despite deleting zero rows; rollback refused for a past period
+regardless of the run's own status (`pending_review`/`published`/`failed`, via a data provider —
+the literal "locked by period, not by publish-status" case); rollback refused for a still-`queued`
+run (must use Cancel instead); authorization refused for `manager`/`agent` roles.
+
+### Deliberately left out
+
+- **No UI/backend distinction between "Delete" and "Rollback" as two separate actions** — the ask
+  used both words somewhat interchangeably for what turned out to be exactly one operation once the
+  actual write paths were traced (delete the linked `manuscripts` rows, mark the run
+  `rolled_back`). Introducing two separately-worded actions with identical backend behavior would
+  add UI surface without adding a real distinction.
+- **No reversal of `payments.processed_period`/`arrears_adjustments.processed_period` stamps** on
+  rollback. Confirmed unnecessary by reading `Payment::scopeEligibleForPeriod()`: a payment stamped
+  `processed_period = $period` remains eligible for a fresh `manuscript:calculate` run against that
+  *same* period (the existing "re-stampable-on-republish guard" `publish()` already relies on) — so
+  a subsequent re-run of the now-rolled-back current period naturally re-includes everything without
+  any additional cleanup. This is exactly the "cheap to recompute" property the original ask leaned
+  on.
+- **No time threshold / cooldown on rollback**, for the identical reasoning `cancel()`'s own
+  2026-08-27 doc comment already gives for itself: at this app's real scale, a human choosing to
+  roll back a run they can see is already the safety mechanism, matching every other admin-only
+  destructive action here.
+- **No per-role exceptions or override cascade on the lock rule itself** — `isPeriodLocked()` has
+  exactly one implementation, called identically by `cancel()` and `rollback()`, with no
+  role-conditional bypass. This was an explicit standing constraint for this feature, not an
+  oversight.
+- **`manuscript:recalculate-one` rows were left out of this feature entirely** — no lock check, no
+  rollback route reachable for them (404 via the command guard). They're a single-customer audit
+  trace of an arrears-adjustment side effect with no batch/review lifecycle, not a "manuscript
+  process" in the sense the product owner described; folding them in would have blurred what this
+  feature actually manages.
+
+---
+
+## Addendum (2026-08-28): closing `ManuscriptCalculateTest`'s real-swecom-fixture-corruption gap — the SECOND occurrence of the 2026-08-27 incident class
+
+**The incident.** A second occurrence of the same incident class documented in the 2026-08-27
+addendum above: 2,230 orphaned manuscript rows found committed against real `swecom` customers,
+across periods `2033-04`/`2035-01`/`2035-02`/`2035-04` (plus the real `2026-08` period, deleted
+separately by the product owner). Traced precisely to `tests/Feature/ManuscriptCalculateTest.php`,
+which — unlike the two files fixed on 2026-08-27 — was never touched by that fix: its class doc
+explicitly documented committing real fixtures into `swecom` via a manual
+`DB::connection('tenant')->beginTransaction()` / `beforeApplicationDestroyed(fn () =>
+DB::connection('tenant')->rollBack())`-shaped pattern, not `UsesDisposableTenant`. Six of its
+tests invoke the real `manuscript:calculate` artisan command directly, which — exactly like the
+2026-08-27 incident's `Bus::batch()` chunk jobs — calls `tenancy()->initialize()`/`tenancy()->end()`
+internally, purging the outer manual transaction and forcing these six tests onto the same
+real-swecom-plus-`finally`-cleanup pattern that produced the first incident.
+
+**Worse than "only a killed test leaks data."** `manuscript:calculate` has no way to scope itself
+to a customer subset — `Customer::query()->chunkById()` processes *every* customer belonging to
+whatever tenant `--tenant` points at. All six artisan-invoking tests ran the command against the
+real `swecom` tenant, so *every successful, non-crashed* run of this file already wrote a
+manuscript row for every real `swecom` customer at that test's period — and five of those six
+tests' `finally` blocks deleted only that test's own single fixture customer's manuscript row,
+never the hundreds of real customers' rows the command also touched (the sixth,
+`test_an_unrelated_customers_manuscript_is_unaffected_by_another_customers_payment_change_on_rerun`,
+was the one test that got this right, deleting every manuscript row for its periods rather than
+just its own fixtures — proving the gap was an inconsistency across tests, not a fundamental
+limitation). The 2,230-row incident is consistent with exactly this mechanism: roughly one row per
+real customer, per leaked period, left behind by ordinary green test runs — not merely by
+interrupted ones, unlike the 2026-08-27 incident.
+
+**The fix.** Exactly the pattern already proven on 2026-08-27, applied to this file too: converted
+to `Tests\Feature\Concerns\UsesDisposableTenant` (prefix `zmct`), provisioning a throwaway tenant
+schema per test in `setUp()`/dropping it in `tearDown()`, no new mechanism invented. The class
+doc's claim that "all fixtures are created fresh per test via factories — none of the real seeded
+29 zones / 9 expense categories / company row are read or modified" was verified true for every
+one of the file's 19 tests (checked for hardcoded UUIDs/zone names/customer counts — none found;
+the only real-tenant-specific literal anywhere was the string `'swecom'` itself, now replaced with
+`$this->tenant->getTenantKey()`).
+
+**The six artisan-invoking tests specifically.** All six now run `manuscript:calculate --tenant=
+<disposable tenant id>` instead of `--tenant=swecom`. Since the disposable schema starts with zero
+customers (only the seeded 29 zones / 9 expense categories / company row from
+`Database\Seeders\TenantDatabaseSeeder`), the command now only ever touches each test's own
+fixtures — the "delete every manuscript row for the period, not just this test's own customer"
+workaround one test needed under real `swecom` became unnecessary entirely; `tearDown()`'s schema
+drop is the only cleanup needed for all six. One test-specific wrinkle not present in the
+2026-08-27 fix: the test that stubs `ManuscriptService::forgetSummaryCache()` via
+`$this->app->bind()` to force a fatal-failure path needed an extra
+`$this->app->forgetInstance(\Illuminate\Contracts\Console\Kernel::class)` call before invoking
+`$this->artisan()` — `provisionDisposableTenant()`'s `Tenant::create()` call in `setUp()` runs
+Stancl's `MigrateDatabase`/`SeedDatabase` jobs, which call `Artisan::call('tenants:migrate'/
+'tenants:seed')` internally. That is the *first* `Artisan::call` of the test, which bootstraps and
+caches the console `Kernel`'s Artisan `Application` and resolves (and caches) every discovered
+command — including `manuscript:calculate` — against whatever `ManuscriptService` binding was
+current *at that moment* (the real one, since this happens in `setUp()`, before the test body's
+own `bind()` override). Forgetting the `Kernel` singleton forces the next `$this->artisan()` call
+to rebuild the console application from scratch, honoring the override. This is a side effect
+specific to disposable-tenant provisioning triggering `Artisan::call` before a test's own
+container overrides run; it did not affect the 2026-08-27 fix because neither file fixed that day
+uses `$this->app->bind()` immediately before an `artisan()` call.
+
+**An unrelated, pre-existing production bug found (and fixed) while empirically verifying this
+file.** `app/Console/Commands/ManuscriptCalculate.php`'s `runForEveryCustomer()` — modified
+earlier the same day as part of this file's `command_run_id` linkage work — passes `$commandRun`
+into the outer `Customer::query()->chunkById()` closure's nested `DB::transaction()` closure via
+`use ($commandRun, ...)`, but never added `$commandRun` to the *outer* closure's own `use (...)`
+list. PHP closures never inherit an enclosing scope's variables implicitly, only what their own
+`use()` imports, so `$commandRun` was genuinely undefined inside the outer closure — every
+customer processed threw "Undefined variable $commandRun" (converted to a thrown `ErrorException`
+by Laravel's error handler), counted as a per-customer error, and none of the six artisan-invoking
+tests could pass. One-line fix: added `$commandRun,` to the outer closure's `use (...)` list. Flagged
+here explicitly because it is outside this task's scope (a production bug, not a test-tenancy
+pattern) — it was fixed only because it blocked empirically proving the tenancy fix works at all,
+and whoever owns the `command_run_id` linkage work should be aware it was silently broken until now.
+
+**Empirical proof (not just code review).** Same method as 2026-08-27: a scratch, temporary
+`exit(1)` was inserted mid-test in `test_the_command_upserts_manuscripts_processes_payments_and_logs_a_command_run`,
+immediately after the first real `manuscript:calculate` run committed a customer, a payment, a
+manuscript row, and a published `command_runs` row to the disposable schema — before `tearDown()`
+could run. PHPUnit reported `Fatal error: Premature end of PHP process`, confirming `tearDown()`
+never executed. Direct `psql` verification afterward against the real database:
+- **Disposable schema** (`tenantzmct202608280125203191`) held the orphaned fixture in full: the
+  customer row, its `2026-05` manuscript (`total_bill = 2500.00`), a `published` `command_runs`
+  row, and the payment stamped `processed_period = '2026-05'`.
+- **Real `tenantswecom` schema**: zero customers matching the fixture's UUID, zero `command_runs`
+  rows for period `2026-05` from this test, and `total_customers` unchanged at exactly 446
+  (`manuscripts` already had 446 real rows for period `2026-05` from genuine May-2026 production
+  billing — pre-existing, untouched, unrelated to this test).
+
+The orphaned disposable schema and its `tenants` row were then cleaned up manually (the schema
+drop itself was delayed by unrelated lock contention from a concurrent process on the same shared
+dev database — see below — but eventually completed; the accepted "needs occasional manual
+pruning" tradeoff from the 2026-08-27 addendum applied here exactly as documented).
+
+**Test results.** All 19 tests in `ManuscriptCalculateTest.php` pass (169 assertions), confirmed
+directly (`php artisan test tests/Feature/ManuscriptCalculateTest.php`) after both the tenancy fix
+and the one-line `ManuscriptCalculate.php` fix above. A regression sweep of
+`ManuscriptGenerationBatchServiceTest`, `ManuscriptPublishStaleRaceTest`, `Api/ManuscriptTest`,
+`Web/ManuscriptTest`, `Web/ManuscriptPreRunReviewTest`, and `Web/ManuscriptRunReviewTest` was
+attempted but could not be completed in this session: the shared dev Postgres instance was under
+heavy, sustained lock contention from a concurrent process (an apparently-hung `php artisan test`
+run covering `CommandRunCancelTest`/`CommandRunRollbackTest`, holding an `idle in transaction`
+session for 15+ minutes) for the remainder of the session. That contention was left alone
+deliberately rather than resolved by terminating another session's database backend or process —
+the regression sweep should be re-run once the database is confirmed idle.
+
+**Residual risk: this is NOT the last file with this pattern.** A grep across all of `tests/` for
+`DB::connection('tenant')->beginTransaction()` combined with `Tenant::find('swecom')` found six
+files using this manual-transaction-against-real-`swecom` shape. Four
+(`tests/Feature/Api/AuthTest.php`, `tests/Feature/Api/Concerns/InteractsWithTenantRoles.php`,
+`tests/Feature/PrepaidPausePreservationTest.php`, `tests/Feature/Web/SettingsTest.php`) only
+initialize tenancy once, in `setUp()`, and never re-initialize it mid-test — they lack the specific
+mechanism (a queued job or artisan command purging the outer transaction) that turns this pattern
+into a real corruption risk, so they were not investigated further here. The other two are
+**genuinely vulnerable to the exact same incident mechanism and are still unfixed**:
+
+- **`tests/Feature/Web/ManuscriptTest.php`** — `test_admin_can_run_the_manuscript_calculation`
+  drives `manuscript:calculate` indirectly through the real HTTP endpoints
+  (`POST /manuscripts/calculate` → `POST /settings/command-runs/{run}/publish`), against the real
+  `swecom` tenant, with the identical manual-transaction-release-plus-`finally`-cleanup shape —
+  its own comment explicitly says this is "the same workaround against the raw command" as this
+  file's now-fixed test. Its own doc comment notes the command "processes every real customer in
+  the tenant schema (~550 rows)."
+- **`tests/Feature/Api/AuditLogTest.php`** — calls `$this->artisan('manuscript:calculate', [...])`
+  directly against real `swecom`, same manual-transaction-plus-`finally` shape.
+
+Both are out of scope for this task (scoped explicitly to `ManuscriptCalculateTest.php`) and were
+not modified. They should receive the identical `UsesDisposableTenant` treatment in a follow-up
+task before they produce a third occurrence of this incident class.

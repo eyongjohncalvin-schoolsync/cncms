@@ -14,17 +14,43 @@ interface CustomerRepositoryInterface
     /**
      * @param  array<string, mixed>  $filters  Supported keys: 'zone_id',
      *                                         'status', 'level', 'search',
-     *                                         'has_phone'.
+     *                                         'has_phone', 'archived' (bool —
+     *                                         true returns ONLY archived
+     *                                         customers; omitted/false
+     *                                         returns only active ones, the
+     *                                         SoftDeletes default).
      */
     public function paginate(array $filters, int $perPage): LengthAwarePaginator;
 
-    public function findByUuid(string $uuid, array $with = []): ?Customer;
+    /**
+     * @param  bool  $withTrashed  Include an archived (soft-deleted)
+     *                             customer in the lookup — needed by the
+     *                             show page and the restore action, which
+     *                             must resolve a customer that ordinary
+     *                             queries now hide.
+     */
+    public function findByUuid(string $uuid, array $with = [], bool $withTrashed = false): ?Customer;
 
     public function create(int $zoneId, CustomerData $data): Customer;
 
     public function update(Customer $customer, CustomerData $data, ?int $zoneId = null): Customer;
 
+    /**
+     * Hard delete (forceDelete) — only ever called for a customer with zero
+     * billing history. A customer with history is archived, not deleted.
+     */
     public function delete(Customer $customer): bool;
+
+    /**
+     * Archive (soft delete) a customer, stamping who did it and why.
+     * `archived_by`/`archived_reason` are written with an explicit save()
+     * before the soft delete so the Auditable trail carries one "Archived
+     * customer" row — see App\Services\CustomerService::archive().
+     */
+    public function archive(Customer $customer, int $actorId, string $reason): void;
+
+    /** Restore an archived customer, clearing the archive stamp. */
+    public function restore(Customer $customer): void;
 
     /**
      * Raw-attribute update used by the dedicated status actions

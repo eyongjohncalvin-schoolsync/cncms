@@ -11,7 +11,8 @@ use Illuminate\Support\Collection;
 interface ManuscriptRepositoryInterface
 {
     /**
-     * @param  array<string, mixed>  $filters  Supported keys: 'period' (required), 'zone_id', 'status'.
+     * @param  array<string, mixed>  $filters  Supported keys: 'period' (required), 'zone_id', 'status',
+     *                                         'search' (customer name ILIKE / phone LIKE, partial).
      */
     public function paginate(array $filters, int $perPage): LengthAwarePaginator;
 

@@ -32,6 +32,8 @@ export interface LocalPayment {
     credit: number;
     frequency: 'monthly' | 'yearly' | 'months';
     months: number | null;
+    /** Draw-down Q1 — stored 0/1 in SQLite. Only meaningful for months/yearly. */
+    clear_arrears_first: boolean;
     verification_status: VerificationStatus;
     rejection_reason: string | null;
     /** Local file URI captured via the camera at submit time; uploaded

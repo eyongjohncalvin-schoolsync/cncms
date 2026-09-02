@@ -43,6 +43,14 @@ export interface MeResponse {
     };
     /** The authoritative role — resolved by ResolveTenant + TenantContext. */
     role: TenantRole;
+    /**
+     * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the permission
+     * strings this role grants, or `['*']` for a super role. Since Wave 4
+     * this is what the mobile guards check (via AuthContext's `can()`), not
+     * `role` — cached alongside `role` in the offline session profile and
+     * refreshed on every `/auth/me` (login + cold start).
+     */
+    permissions: string[];
 }
 
 /** PATCH /auth/profile — App\Http\Requests\UpdateProfileRequest. Every field
@@ -83,6 +91,9 @@ export interface SyncPushPaymentItem {
     credit?: number | null;
     frequency: PaymentFrequency;
     months?: number | null;
+    /** Draw-down Q1 — agent's "pay down arrears first" toggle for a
+     * months/yearly prepayment (references/prepayment-drawdown.md). */
+    clear_arrears_first?: boolean | null;
     created_at?: string | null;
 }
 
@@ -277,6 +288,11 @@ export interface CustomerManuscriptSummary {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    /** Draw-down (references/prepayment-drawdown.md): whole billing periods
+     * still covered by a months/yearly prepayment, and the rate it was
+     * bought at. 0 / null for a customer not in a prepaid window. */
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
 }
 
@@ -427,6 +443,9 @@ export interface ManuscriptListItemApi {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    /** Draw-down prepaid window state — see CustomerManuscriptSummary. */
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
     status: string;
 }
@@ -511,6 +530,124 @@ export interface ExpenseCategoryApi {
 
 export interface ExpenseCategoryListResponse {
     data: ExpenseCategoryApi[];
+}
+
+// ---------------------------------------------------------------------------
+// Arrears Adjustment — POST /api/v1/arrears-adjustments,
+// App\Http\Controllers\Api\ArrearsAdjustmentController::store(),
+// App\Http\Requests\StoreArrearsAdjustmentRequest,
+// App\Http\Resources\ArrearsAdjustmentResource. Hand-copied 2026-08-28 for
+// the mobile "Request an arrears adjustment" screen — see
+// .claude/skills/cncms-context/references/arrears-adjustment.md. This is
+// the REQUEST side only: mobile never calls approve()/reject() (no JSON
+// route exists for either — see the controller's own class doc), so no
+// approval-related fields are represented here.
+// ---------------------------------------------------------------------------
+
+export type ArrearsAdjustmentDirection = 'decrease' | 'increase';
+
+/** Which side of `net = arrears - credit` a correction lands on. Added
+ * 2026-08-30 alongside the web ArrearsAdjustmentModal's target toggle — a
+ * `credit` correction touches ONLY the loose credit figure, never prepaid
+ * coverage (prepaid_months_remaining / prepaid_rate). Optional/defaulted
+ * server-side (StoreArrearsAdjustmentRequest: `nullable|in:arrears,credit`),
+ * so an older client that never sends it still gets the `arrears` default. */
+export type ArrearsAdjustmentTarget = 'arrears' | 'credit';
+
+export type ArrearsAdjustmentReasonCategory =
+    | 'legacy_migration_error'
+    | 'billing_error'
+    | 'goodwill_service_outage'
+    | 'bad_debt_writeoff'
+    | 'credit_clawback'
+    | 'other'
+    // Credit-specific categories — offered only when target = 'credit'
+    // (StoreArrearsAdjustmentRequest::rules() accepts all nine values).
+    | 'credit_correction'
+    | 'duplicate_credit'
+    | 'migration_credit_error';
+
+export type ArrearsAdjustmentStatus = 'pending' | 'pending_second_approval' | 'approved' | 'rejected';
+
+/** Request body — mirrors StoreArrearsAdjustmentRequest::rules() exactly.
+ * `amount` is a decimal STRING (matches the server's `decimal:0,2` rule),
+ * same convention as ReconnectCustomerRequestBody::arrears_payment. */
+export interface RequestArrearsAdjustmentPayload {
+    customer_uuid: string;
+    target_period: string;
+    /** Omit (or send 'arrears') for an arrears correction — the server
+     * defaults it. Send 'credit' to correct the loose credit figure. */
+    target?: ArrearsAdjustmentTarget;
+    direction: ArrearsAdjustmentDirection;
+    amount: string;
+    reason_category: ArrearsAdjustmentReasonCategory;
+    reason_note: string;
+    complaint_uuid?: string;
+}
+
+export interface ArrearsAdjustmentApi {
+    uuid: string;
+    customer_uuid: string;
+    customer_name: string;
+    target_period: string;
+    direction: ArrearsAdjustmentDirection;
+    target: ArrearsAdjustmentTarget;
+    amount: string;
+    reason_category: ArrearsAdjustmentReasonCategory;
+    reason_note: string;
+    arrears_snapshot: string;
+    /** Null on older rows / arrears-target requests. */
+    credit_snapshot: string | null;
+    status: ArrearsAdjustmentStatus;
+    requested_by: { uuid: string; name: string } | null;
+    created_at: string;
+}
+
+export interface RequestArrearsAdjustmentResponse {
+    data: ArrearsAdjustmentApi;
+}
+
+// ---------------------------------------------------------------------------
+// Payment receipts (Wave 2 of payment-receipts-and-whatsapp.md) — read-only
+// view + PDF share. GET /api/v1/payments/{uuid}/receipt
+// ---------------------------------------------------------------------------
+
+export type PaymentReceiptStatus = 'issued' | 'void';
+
+export interface PaymentReceiptApi {
+    uuid: string;
+    receipt_number: string;
+    status: PaymentReceiptStatus;
+    issued_at: string | null;
+    amount: string;
+    payment_uuid?: string;
+    /** Sanctum-token API download endpoint. */
+    pdf_url: string;
+    /** Signed ~7-day public link — opened in the device browser / WhatsApp. */
+    shared_pdf_url: string;
+}
+
+export interface PaymentReceiptResponse {
+    data: PaymentReceiptApi;
+}
+
+/**
+ * GET /api/v1/payments/{uuid}/receipt/whatsapp-message (Wave 3) — the two
+ * raw ingredients for the manual "Send via WhatsApp" action, same shape as
+ * BillWhatsappMessageApi. The client builds the wa.me link itself
+ * (src/utils/whatsapp.ts). A voided receipt is a 422, not a `reason` here.
+ */
+export interface ReceiptWhatsappMessageApi {
+    has_phone: boolean;
+    available: boolean;
+    reason: 'no_phone' | null;
+    /** Digits-only, '237'-prefixed international form, or null. */
+    phone: string | null;
+    message: string | null;
+}
+
+export interface ReceiptWhatsappMessageResponse {
+    data: ReceiptWhatsappMessageApi;
 }
 
 // ---------------------------------------------------------------------------

@@ -5,17 +5,15 @@ declare(strict_types=1);
 namespace Tests\Feature\Api;
 
 use App\Models\AuditLog;
-use App\Models\CommandRun;
-use App\Models\Customer;
 use App\Models\Manuscript;
-use App\Models\Tenant;
-use App\Models\Zone;
 use Database\Factories\CustomerFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
+use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
 
 /**
@@ -27,12 +25,27 @@ class AuditLogTest extends TestCase
 {
     use DatabaseTransactions;
     use InteractsWithTenantRoles;
+    use UsesDisposableTenant;
+
+    /**
+     * test_manuscript_calculate_does_not_crash_and_logs_system_actions_with_a_null_user
+     * invokes the real manuscript:calculate command and provisions its own
+     * disposable tenant instead of touching real swecom at all — see
+     * tests/Feature/Web/ManuscriptTest.php's identical DISPOSABLE_TENANT_TESTS
+     * for the full reasoning (2026-08-28, closing this file's own instance
+     * of the same incident class documented in task-scheduler.md).
+     */
+    private const array DISPOSABLE_TENANT_TESTS = [
+        'test_manuscript_calculate_does_not_crash_and_logs_system_actions_with_a_null_user',
+    ];
 
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->initializeTenant();
+        if (! in_array($this->name(), self::DISPOSABLE_TENANT_TESTS, true)) {
+            $this->initializeTenant();
+        }
     }
 
     public function test_updating_a_customer_writes_a_diffed_audit_log_row(): void
@@ -125,7 +138,12 @@ class AuditLogTest extends TestCase
         ]);
         $uuid = $customer->uuid;
         $name = $customer->name;
-        $customer->delete();
+        // Customer uses SoftDeletes now (customer-deletion deliberation) —
+        // a plain ->delete() archives rather than removes, and
+        // AuditableObserver deliberately does not write a 'delete' audit
+        // row for a soft delete. A genuine hard removal is forceDelete(),
+        // which still logs 'delete' exactly as before.
+        $customer->forceDelete();
 
         $token = $this->tokenForRole('manager');
 
@@ -198,17 +216,21 @@ class AuditLogTest extends TestCase
 
     public function test_manuscript_calculate_does_not_crash_and_logs_system_actions_with_a_null_user(): void
     {
-        // manuscript:calculate owns its own tenancy()->initialize()/end()
-        // lifecycle end-to-end, exactly as ManuscriptCalculateTest's
-        // command-level test documents: tenancy()->end() purges the tenant
-        // connection, which would silently roll back setUp()'s still-open
-        // outer transaction if left in place. So this test releases that
-        // empty outer transaction up front and cleans up its own rows
-        // explicitly afterwards instead of relying on rollback.
-        DB::connection('tenant')->rollBack();
-        tenancy()->end();
+        // DatabaseTransactions wraps this test's default (central `pgsql`)
+        // connection in an outer, uncommitted transaction — but
+        // provisionDisposableTenant()'s CREATE SCHEMA runs on that same
+        // connection, and the migration step right after runs on the
+        // separate `tenant` session, which cannot see an uncommitted DDL
+        // change from a different Postgres session. Committing for real
+        // first makes the new schema actually visible cross-session. See
+        // tests/Feature/Web/ManuscriptTest.php's identical comment.
+        if (DB::connection()->transactionLevel() > 0) {
+            DB::connection()->commit();
+        }
 
-        tenancy()->initialize(Tenant::find('swecom'));
+        $tenant = $this->provisionDisposableTenant('adlt');
+
+        tenancy()->initialize($tenant);
         $zone = ZoneFactory::new()->create();
         $customer = CustomerFactory::new()->create([
             'zone_id' => $zone->id,
@@ -218,8 +240,7 @@ class AuditLogTest extends TestCase
         ]);
         tenancy()->end();
 
-        // A period unlikely to collide with any other test's fixtures/CommandRun rows.
-        $period = '2031-11';
+        $period = Carbon::now()->format('Y-m');
 
         try {
             // The command must run to completion (no exception, no observer
@@ -227,10 +248,10 @@ class AuditLogTest extends TestCase
             // — auth()->id() is null in this context.
             $this->artisan('manuscript:calculate', [
                 'period' => $period,
-                '--tenant' => 'swecom',
+                '--tenant' => $tenant->id,
             ])->assertExitCode(0);
 
-            tenancy()->initialize(Tenant::find('swecom'));
+            tenancy()->initialize($tenant);
 
             $manuscript = Manuscript::query()
                 ->where('customer_id', $customer->id)
@@ -248,34 +269,17 @@ class AuditLogTest extends TestCase
             $this->assertNotNull($log, 'manuscript:calculate should still write an audit_logs row for the manuscript it created');
             $this->assertSame('create', $log->action);
             $this->assertNull($log->user_id, 'system/scheduled actions have no authenticated user');
+            tenancy()->end();
         } finally {
-            if (! tenancy()->initialized) {
-                tenancy()->initialize(Tenant::find('swecom'));
+            if (tenancy()->initialized) {
+                tenancy()->end();
             }
 
-            // manuscript:calculate chunks over EVERY customer in the tenant,
-            // not just the one this test created — so the period it stamps
-            // ends up on every existing customer's manuscript row, not only
-            // ours. Clean up by period (all of them), not by customer_id,
-            // or every other real customer in the schema is left with a
-            // permanent bogus '2031-11' manuscript row after this test runs.
-            Manuscript::query()->where('period', $period)->delete();
-            CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
-            Customer::query()->whereKey($customer->id)->delete();
-            Zone::query()->whereKey($zone->id)->delete();
+            $tenant->delete();
 
-            tenancy()->end();
-
-            // InteractsWithTenantRoles::initializeTenant() (run in setUp())
-            // registered a beforeApplicationDestroyed callback that
-            // unconditionally touches the `tenant` connection when this
-            // test's Application is torn down. tenancy()->end() above
-            // purges that connection entirely, so without re-establishing
-            // it here that callback blows up with "Database connection
-            // [tenant] not configured." instead of the harmless no-op
-            // rollback it expects.
-            tenancy()->initialize(Tenant::find('swecom'));
-            DB::connection('tenant')->beginTransaction();
+            if (DB::connection()->transactionLevel() === 0) {
+                DB::connection()->beginTransaction();
+            }
         }
     }
 }

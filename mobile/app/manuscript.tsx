@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { useAuth } from '../src/auth/AuthContext';
 import { currentPeriod, fetchManuscripts } from '../src/api/manuscripts';
@@ -9,9 +9,9 @@ import { Card } from '../src/components/ui/Card';
 import { StatCard } from '../src/components/ui/StatCard';
 import { EmptyState } from '../src/components/ui/EmptyState';
 import { colors } from '../src/theme/colors';
-import { fontSize, spacing } from '../src/theme/tokens';
+import { fontSize, radius, spacing, touchTarget } from '../src/theme/tokens';
 import { formatFcfa } from '../src/utils/format';
-import type { ManuscriptListItemApi, ManuscriptSummaryApi, TenantRole } from '../src/types/api';
+import type { ManuscriptListItemApi, ManuscriptSummaryApi } from '../src/types/api';
 
 /**
  * Manuscript — a modest, read-only view of this agent's own zone's current
@@ -32,10 +32,16 @@ import type { ManuscriptListItemApi, ManuscriptSummaryApi, TenantRole } from '..
  * comment for the full incident writeup. In short: this screen NEVER
  * trusts "latest manuscript of any period" (the relationship a real 2026-08
  * incident found could silently pick up bogus future-dated rows as
- * "current" for every customer). It always requests an explicit, real
- * calendar period computed client-side (`currentPeriod()`), which the
- * server independently re-validates and re-defaults the same way
- * (App\Services\ManuscriptService::scopedFilters()).
+ * "current" for every customer). Every request carries an explicit, real
+ * calendar period as 'YYYY-MM', which the server independently re-validates
+ * (App\Services\ManuscriptService::scopedFilters()). The month stepper
+ * (2026-08-30 addendum) lets the viewer page between months, but only ever
+ * within a hard [EARLIEST_PERIOD .. latestPeriod()] window computed from
+ * real calendar arithmetic (shiftPeriod()) — latestPeriod() is one month
+ * ahead of today, since the cycle generates next month's manuscript in
+ * advance (the September register exists and is reviewed during August),
+ * but never further, and never before v2's first real run. It is still
+ * "an explicit calendar period", never "whatever sorts highest".
  *
  * ZONE SAFETY — this screen sends no zone_uuid at all. The server
  * force-scopes an `agent` caller to their own zone regardless of what's
@@ -79,7 +85,12 @@ import type { ManuscriptListItemApi, ManuscriptSummaryApi, TenantRole } from '..
  * this route is simply `/manuscript`.
  */
 
-const VIEW_ALLOWED_ROLES = new Set<TenantRole>(['super', 'admin', 'manager', 'agent']);
+// The first period v2's monthly cycle actually produced (see
+// project-manuscript-monthly-cycle: the imported "2026-08" baseline is v1's
+// 2026-07-22 run). There is nothing to show before this, so the month
+// stepper stops here rather than letting an agent page back through empty
+// months forever.
+const EARLIEST_PERIOD = '2026-08';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready';
 
@@ -94,8 +105,28 @@ function periodLabel(period: string): string {
     return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
+/** Shift a 'YYYY-MM' period by whole months (delta may be negative). */
+function shiftPeriod(period: string, delta: number): string {
+    const [year, month] = period.split('-').map(Number);
+    const date = new Date(year, (month || 1) - 1 + delta, 1);
+
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * The furthest-ahead period the stepper allows — one month past the current
+ * calendar month. The billing cycle runs a month early: the run executed
+ * near the end of month M produces month M+1's manuscript (the bills that
+ * go out before M+1 begins — see project-manuscript-monthly-cycle), so
+ * during August the September manuscript already exists and must be
+ * reachable. Nothing is ever generated further ahead than that.
+ */
+function latestPeriod(): string {
+    return shiftPeriod(currentPeriod(), 1);
+}
+
 export default function ManuscriptScreen() {
-    const { role, status: authStatus } = useAuth();
+    const { can, status: authStatus } = useAuth();
 
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -103,59 +134,110 @@ export default function ManuscriptScreen() {
     const [summary, setSummary] = useState<ManuscriptSummaryApi | null>(null);
     const [rows, setRows] = useState<ManuscriptListItemApi[]>([]);
     const [totalCount, setTotalCount] = useState(0);
+    // True only while re-fetching a different month with data already on
+    // screen — keeps the current list visible under a spinner in the month
+    // stepper instead of blanking the whole screen to the 'loading' state.
+    const [switching, setSwitching] = useState(false);
     const phaseRef = useRef<Phase>('loading');
+    // The period the next load() should request. A ref (not just state) so
+    // the focus-effect's own load() always sees the latest value without
+    // being in its dependency list.
+    const periodRef = useRef<string>(currentPeriod());
 
-    const authorized = role !== null && VIEW_ALLOWED_ROLES.has(role);
+    // RBAC v2 Wave 4: ManuscriptPolicy::viewAny → `manuscripts.view`
+    // (seeded to S A M G, matching the old role set exactly).
+    const authorized = can('manuscripts.view');
 
-    const load = useCallback(() => {
-        if (!authorized) {
-            return;
-        }
+    const load = useCallback(
+        (options?: { silent?: boolean }) => {
+            if (!authorized) {
+                return;
+            }
 
-        if (!getSyncState().isOnline) {
-            phaseRef.current = 'offline';
-            setPhase('offline');
-            return;
-        }
+            if (!getSyncState().isOnline) {
+                phaseRef.current = 'offline';
+                setPhase('offline');
+                setSwitching(false);
+                return;
+            }
 
-        phaseRef.current = 'loading';
-        setPhase('loading');
-        setErrorMessage(null);
+            if (options?.silent) {
+                setSwitching(true);
+            } else {
+                phaseRef.current = 'loading';
+                setPhase('loading');
+            }
+            setErrorMessage(null);
 
-        // Always recomputed at load time, never cached across calls — an
-        // agent who leaves the app open across a real month boundary should
-        // see next month's period on their next visit, not a stale one.
-        const requestedPeriod = currentPeriod();
-        setPeriod(requestedPeriod);
+            const requestedPeriod = periodRef.current;
 
-        fetchManuscripts(requestedPeriod)
-            .then((response) => {
-                const sorted = [...response.data].sort(
-                    (a, b) => Number(b.total_arrears) - Number(a.total_arrears),
-                );
+            fetchManuscripts(requestedPeriod)
+                .then((response) => {
+                    // Ignore a response that arrived after the agent stepped
+                    // to yet another month.
+                    if (periodRef.current !== requestedPeriod) {
+                        return;
+                    }
 
-                setRows(sorted);
-                setSummary(response.summary);
-                setTotalCount(response.meta?.total ?? response.data.length);
-                phaseRef.current = 'ready';
-                setPhase('ready');
-            })
-            .catch((error) => {
-                if (isNetworkError(error)) {
-                    phaseRef.current = 'offline';
-                    setPhase('offline');
-                } else {
-                    setErrorMessage(extractErrorMessage(error, "Couldn't load this period's manuscript figures."));
-                    phaseRef.current = 'error';
-                    setPhase('error');
-                }
-            });
-    }, [authorized]);
+                    const sorted = [...response.data].sort(
+                        (a, b) => Number(b.total_arrears) - Number(a.total_arrears),
+                    );
+
+                    setRows(sorted);
+                    setSummary(response.summary);
+                    setTotalCount(response.meta?.total ?? response.data.length);
+                    setPeriod(requestedPeriod);
+                    phaseRef.current = 'ready';
+                    setPhase('ready');
+                    setSwitching(false);
+                })
+                .catch((error) => {
+                    if (periodRef.current !== requestedPeriod) {
+                        return;
+                    }
+
+                    setSwitching(false);
+
+                    if (isNetworkError(error)) {
+                        phaseRef.current = 'offline';
+                        setPhase('offline');
+                    } else {
+                        setErrorMessage(extractErrorMessage(error, "Couldn't load this period's manuscript figures."));
+                        phaseRef.current = 'error';
+                        setPhase('error');
+                    }
+                });
+        },
+        [authorized],
+    );
+
+    // Step the stepper. Capped at EARLIEST_PERIOD .. latestPeriod() (one
+    // month ahead — the cycle generates next month's manuscript in advance).
+    const changeMonth = useCallback(
+        (delta: number) => {
+            const next = shiftPeriod(periodRef.current, delta);
+
+            if (next < EARLIEST_PERIOD || next > latestPeriod()) {
+                return;
+            }
+
+            periodRef.current = next;
+            setPeriod(next);
+            load({ silent: true });
+        },
+        [load],
+    );
 
     // Same "retry automatically once connectivity returns" behavior as
-    // Disconnections / Reconnect & Pay / Disconnect.
+    // Disconnections / Reconnect & Pay / Disconnect. On (re)focus the
+    // stepper always snaps back to the real current calendar month — an
+    // agent who left the app open across a month boundary should land on
+    // this month, not a stale one, and shouldn't inherit a month they'd
+    // paged to on a previous visit.
     useFocusEffect(
         useCallback(() => {
+            periodRef.current = currentPeriod();
+            setPeriod(currentPeriod());
             load();
 
             return subscribeSyncState(() => {
@@ -165,6 +247,9 @@ export default function ManuscriptScreen() {
             });
         }, [load]),
     );
+
+    const canGoPrev = shiftPeriod(period, -1) >= EARLIEST_PERIOD;
+    const canGoNext = shiftPeriod(period, 1) <= latestPeriod();
 
     function renderItem({ item }: { item: ManuscriptListItemApi }) {
         const arrears = Number(item.total_arrears);
@@ -191,13 +276,48 @@ export default function ManuscriptScreen() {
         );
     }
 
+    function renderMonthStepper() {
+        return (
+            <View style={styles.stepperRow}>
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Previous month"
+                    accessibilityState={{ disabled: !canGoPrev }}
+                    disabled={!canGoPrev || switching}
+                    onPress={() => changeMonth(-1)}
+                    style={[styles.stepperButton, (!canGoPrev || switching) && styles.stepperButtonDisabled]}
+                >
+                    <Text style={styles.stepperArrow}>‹</Text>
+                </Pressable>
+
+                <View style={styles.stepperLabelWrap}>
+                    <Text style={styles.stepperLabel}>{periodLabel(period)}</Text>
+                    {switching ? <ActivityIndicator size="small" color={colors.accent.history} /> : null}
+                </View>
+
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Next month"
+                    accessibilityState={{ disabled: !canGoNext }}
+                    disabled={!canGoNext || switching}
+                    onPress={() => changeMonth(1)}
+                    style={[styles.stepperButton, (!canGoNext || switching) && styles.stepperButtonDisabled]}
+                >
+                    <Text style={styles.stepperArrow}>›</Text>
+                </Pressable>
+            </View>
+        );
+    }
+
     function renderHeader() {
         if (summary === null) {
-            return null;
+            return <View style={styles.headerBlock}>{renderMonthStepper()}</View>;
         }
 
         return (
             <View style={styles.headerBlock}>
+                {renderMonthStepper()}
+
                 {/* The one hero card on this screen — see file header
                     comment for why accent.history needed no new contrast
                     verification. */}
@@ -291,7 +411,7 @@ export default function ManuscriptScreen() {
                     title="Requires an internet connection"
                     subtitle="Manuscript figures are computed live from the server and aren't cached offline. Connect and this screen will pick up automatically."
                     actionLabel="Try again"
-                    onAction={load}
+                    onAction={() => load()}
                 />
             </View>
         );
@@ -305,7 +425,7 @@ export default function ManuscriptScreen() {
                     title="Couldn't load manuscript figures"
                     subtitle={errorMessage ?? undefined}
                     actionLabel="Try again"
-                    onAction={load}
+                    onAction={() => load()}
                 />
             </View>
         );
@@ -321,8 +441,8 @@ export default function ManuscriptScreen() {
                 ListHeaderComponent={renderHeader}
                 ListEmptyComponent={
                     <EmptyState
-                        title="No manuscripts yet for this period"
-                        subtitle="Your zone's billing figures will appear here once this period's manuscript calculation runs."
+                        title="No manuscripts for this month"
+                        subtitle="Nothing was calculated for this period. Use the arrows above to check another month."
                     />
                 }
                 contentContainerStyle={styles.listContent}
@@ -337,6 +457,21 @@ const styles = StyleSheet.create({
     content: { padding: spacing.lg },
     listContent: { padding: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm, flexGrow: 1 },
     headerBlock: { gap: spacing.md, marginBottom: spacing.md },
+    stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    stepperButton: {
+        width: touchTarget.floor,
+        height: touchTarget.floor,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.surface,
+    },
+    stepperButtonDisabled: { opacity: 0.35 },
+    stepperArrow: { fontSize: fontSize.xxl, fontWeight: '800', color: colors.textPrimary, lineHeight: fontSize.xxl },
+    stepperLabelWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+    stepperLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     heroLabel: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textInverse, letterSpacing: 0.6 },
     heroValue: { fontSize: fontSize.display, fontWeight: '800', color: colors.textInverse, marginTop: spacing.sm },
     heroHint: { fontSize: fontSize.xs, color: colors.textInverse, marginTop: spacing.xs },

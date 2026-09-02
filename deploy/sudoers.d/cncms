@@ -1,0 +1,7 @@
+# /etc/sudoers.d/cncms  —  mode 440, owner root
+# Lets the deploy script (run as `cncms`) reload PHP-FPM and bounce the
+# worker without a password. Nothing else.
+#   sudo install -m 440 -o root -g root deploy/sudoers.d/cncms /etc/sudoers.d/cncms
+#   sudo visudo -cf /etc/sudoers.d/cncms
+
+cncms ALL=(root) NOPASSWD: /usr/bin/systemctl reload php8.4-fpm, /usr/bin/systemctl restart cncms-worker, /usr/bin/systemctl status cncms-worker

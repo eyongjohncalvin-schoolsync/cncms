@@ -14,6 +14,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -45,7 +46,10 @@ class BillPrintTest extends TestCase
     private function customerWithManuscript(?string $period = null): Customer
     {
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        // ->active(): CustomerFactory's default status is random (~20%
+        // 'disconnected'), and ManuscriptService::billData() now refuses a
+        // non-active customer — a bill only prints for an active one.
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
 
         ManuscriptFactory::new()
             ->forPeriod($period ?? Carbon::now()->format('Y-m'))
@@ -129,12 +133,43 @@ class BillPrintTest extends TestCase
     public function test_print_returns_not_found_when_no_manuscript_exists_for_the_period(): void
     {
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id]);
         $token = $this->tokenForRole('manager');
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")
             ->get("/api/v1/bills/{$customer->uuid}/print");
 
         $response->assertStatus(404);
+    }
+
+    /**
+     * A bill slip only ever prints for an ACTIVE customer — a disconnected/
+     * suspended/passive customer is frozen with a 0 total_bill (owner
+     * decision, 2026-08). ManuscriptService::billData() refuses them; the
+     * API surfaces that as a 422 with a friendly message.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function nonActiveStatusProvider(): array
+    {
+        return [
+            'disconnected' => ['disconnected'],
+            'suspended' => ['suspended'],
+            'passive' => ['passive'],
+        ];
+    }
+
+    #[DataProvider('nonActiveStatusProvider')]
+    public function test_printing_a_bill_is_refused_for_a_non_active_customer(string $status): void
+    {
+        $customer = $this->customerWithManuscript();
+        $customer->update(['status' => $status]);
+        $token = $this->tokenForRole('manager');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson("/api/v1/bills/{$customer->uuid}/print");
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['customer']);
+        $this->assertStringContainsString('only printed for active customers', $response->json('message'));
     }
 }

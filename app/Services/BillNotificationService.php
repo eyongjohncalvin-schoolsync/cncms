@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Manuscript;
+use App\Support\CameroonPhone;
 use Illuminate\Support\Carbon;
 
 /**
@@ -28,8 +29,16 @@ final class BillNotificationService
      * Plain-text bill reminder for $customer, built from a Manuscript
      * (defaults to $customer->latestManuscript — see that relation's doc
      * comment on App\Models\Customer for why it's ordered by `period`, not
-     * `created_at`) and the tenant's Company record. Returns null when the
-     * customer has no manuscript yet — nothing real to remind them about.
+     * `created_at`) and the tenant's Company record. Returns null when:
+     *  - the customer is not ACTIVE (owner decision, 2026-08): a
+     *    disconnected/suspended/passive customer is frozen with a 0
+     *    total_bill, so sending them a bill reminder is wrong. This is the
+     *    single guard both the web (ManuscriptController::index's wa_link
+     *    column / ::sendBill()) and API (Api\BillController::whatsappMessage())
+     *    paths inherit — mirrors ManuscriptService::billData()'s refusal for
+     *    the printed slip.
+     *  - the customer has no manuscript yet — nothing real to remind them
+     *    about.
      *
      * $manuscript can be passed explicitly by a caller that already has one
      * loaded (e.g. Manuscripts/Index's per-row listing, which is scoped to
@@ -38,6 +47,10 @@ final class BillNotificationService
      */
     public function composeMessage(Customer $customer, ?Manuscript $manuscript = null): ?string
     {
+        if ($customer->status !== 'active') {
+            return null;
+        }
+
         $manuscript ??= $customer->latestManuscript;
 
         if (! $manuscript instanceof Manuscript) {
@@ -45,7 +58,10 @@ final class BillNotificationService
         }
 
         $company = Company::cached();
-        $periodLabel = Carbon::createFromFormat('Y-m', $manuscript->period)->format('F Y');
+        // `!Y-m` — reset day/time to base first so a short target month never
+        // rolls forward when this runs on the 29th–31st (see the fuller note
+        // in ManuscriptService::buildBillData()).
+        $periodLabel = Carbon::createFromFormat('!Y-m', $manuscript->period)->format('F Y');
         $deadline = '05 '.$periodLabel;
 
         // total_bill (bill + total_arrears - credit, clamped to 0 — see
@@ -78,7 +94,8 @@ final class BillNotificationService
      *    silently produce a broken link), or
      *  - their phone number doesn't normalize to a plausible Cameroon
      *    mobile number (see normalizePhoneForWhatsapp()), or
-     *  - they have no manuscript yet (composeMessage() returned null).
+     *  - composeMessage() returned null — they have no manuscript yet, or
+     *    they are not an active customer (see that method).
      *
      * See composeMessage() for the optional $manuscript parameter.
      */
@@ -113,34 +130,14 @@ final class BillNotificationService
     }
 
     /**
-     * Normalizes a raw customers.phone value (formats vary wildly in real
-     * data — '677440670', '(67) 321-7927', etc., per
-     * cncms-context/references/database-schema.md's known-issues list)
-     * into the digits-only, country-code-prefixed form wa.me requires.
-     * Cameroon mobile numbers are 9 local digits; returns null rather than
-     * guessing when the digit count doesn't match that shape — a wrong
-     * number is worse than no link.
+     * Normalizes a raw customers.phone value into the digits-only,
+     * country-code-prefixed form wa.me requires. Delegates to the canonical
+     * App\Support\CameroonPhone::forWhatsapp() — the same normaliser
+     * App\Services\ReceiptWhatsAppService uses — so the rule lives in one
+     * place. See that class for the full behaviour / edge cases.
      */
     private function normalizePhoneForWhatsapp(?string $phone): ?string
     {
-        if ($phone === null || trim($phone) === '') {
-            return null;
-        }
-
-        $digits = preg_replace('/\D+/', '', $phone) ?? '';
-
-        if ($digits === '') {
-            return null;
-        }
-
-        if (str_starts_with($digits, '237') && strlen($digits) === 12) {
-            return $digits;
-        }
-
-        if (str_starts_with($digits, '0')) {
-            $digits = substr($digits, 1);
-        }
-
-        return strlen($digits) === 9 ? '237'.$digits : null;
+        return CameroonPhone::forWhatsapp($phone);
     }
 }

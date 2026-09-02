@@ -15,10 +15,23 @@ use Tests\TestCase;
  * Runs against the real local dev Postgres database (see phpunit.xml —
  * sqlite is intentionally NOT used, Stancl schema-per-tenant needs real
  * Postgres). DatabaseTransactions wraps BOTH the central `pgsql`
- * connection (opened automatically by the trait, since it's the default
- * connection before tenancy is touched) and the dynamically-created
- * `tenant` connection (wrapped manually below, since that connection
- * doesn't exist yet when the trait's own beginDatabaseTransaction() runs).
+ * connection and the dynamically-created `tenant` connection (wrapped
+ * manually below, since that connection doesn't exist yet when the trait's
+ * own beginDatabaseTransaction() runs).
+ *
+ * `$connectionsToTransact = ['pgsql']` is load-bearing: without it the
+ * trait transacts the *default* connection resolved by name `null`, and
+ * Stancl's DatabaseTenancyBootstrapper repoints `database.default` at
+ * `tenant` the moment setUp() initializes tenancy. The trait opens its
+ * transaction on `pgsql` (before tenancy) but, at teardown, rolls back
+ * whatever `null` resolves to *then* — `tenant` — leaving the central
+ * transaction (every `User::factory()` insert, every `createToken()` row)
+ * open on an abandoned connection. That zombie `idle in transaction`
+ * backend holds its locks, so the next test that inserts a user with a
+ * colliding unique `username`/`email` blocks forever on it. Naming the
+ * connection explicitly makes the trait resolve `pgsql` by name at both
+ * ends, regardless of where `database.default` points.
+ *
  * Tenancy is initialized once, in setUp(), to the single "swecom" tenant
  * and deliberately never ended during the test — see the ResolveTenant
  * class doc for why re-initializing to the same tenant mid-request is a
@@ -27,6 +40,9 @@ use Tests\TestCase;
 class AuthTest extends TestCase
 {
     use DatabaseTransactions;
+
+    /** @var array<int, string> */
+    protected $connectionsToTransact = ['pgsql'];
 
     protected function setUp(): void
     {
@@ -39,7 +55,9 @@ class AuthTest extends TestCase
         DB::connection('tenant')->beginTransaction();
 
         $this->beforeApplicationDestroyed(function () {
-            DB::connection('tenant')->rollBack();
+            if (DB::connection('tenant')->transactionLevel() > 0) {
+                DB::connection('tenant')->rollBack();
+            }
         });
     }
 
@@ -133,6 +151,29 @@ class AuthTest extends TestCase
 
         $response->assertStatus(403)
             ->assertJsonPath('code', 'FORBIDDEN');
+    }
+
+    public function test_deactivated_tenant_blocks_the_api_even_with_a_valid_token(): void
+    {
+        // Same already-committed owner used by the resolves-role test above.
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $token = $user->createToken('api')->plainTextToken;
+
+        $tenant = Tenant::find('swecom');
+
+        try {
+            $tenant->update(['is_active' => false]);
+            $this->app->make('auth')->forgetGuards();
+
+            $this->withHeader('Authorization', "Bearer {$token}")
+                ->getJson('/api/v1/auth/me')
+                ->assertStatus(403)
+                ->assertJsonPath('code', 'WORKSPACE_SUSPENDED');
+        } finally {
+            // Restore explicitly — Tenant writes are central-pinned and may
+            // land outside this test's rolled-back transaction.
+            Tenant::find('swecom')?->update(['is_active' => true]);
+        }
     }
 
     public function test_user_can_update_own_profile(): void

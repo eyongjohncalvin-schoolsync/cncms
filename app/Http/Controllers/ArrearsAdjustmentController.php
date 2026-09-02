@@ -54,7 +54,15 @@ class ArrearsAdjustmentController extends Controller
 
     public function reject(RejectArrearsAdjustmentRequest $request, ArrearsAdjustment $arrearsAdjustment): RedirectResponse
     {
-        $this->adjustments->reject($arrearsAdjustment, RejectArrearsAdjustmentData::fromArray($request->validated()));
+        try {
+            $this->adjustments->reject($arrearsAdjustment, RejectArrearsAdjustmentData::fromArray($request->validated()));
+        } catch (ValidationException $e) {
+            // Symmetric with approve() above: a request decided between this
+            // controller's policy check and the service's own row-locked
+            // isPending() re-check (see ArrearsAdjustmentService::reject())
+            // surfaces as a friendly flash, not a raw validation-error bag.
+            return back()->with('error', collect($e->errors())->flatten()->first());
+        }
 
         return back()->with('success', 'Arrears adjustment rejected.');
     }

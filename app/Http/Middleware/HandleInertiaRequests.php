@@ -68,8 +68,24 @@ class HandleInertiaRequests extends Middleware
                     // Reports/Index.tsx; ReportPolicy is the real server-side
                     // gate on the /reports route itself.
                     'is_investor' => (bool) $context?->tenantUser->is_investor,
+                    // RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the
+                    // resolved permission list for this user's role, or
+                    // ['*'] for a super role. Wave 1 only SHARES it — no
+                    // frontend consumer yet (AppNav still keys off role
+                    // arrays); Wave 4 swaps those to permissions.includes().
+                    // Mirrored by Api\AuthController::me().
+                    'permissions' => $context ? $context->permissions() : [],
                 ] : null,
             ],
+            // The resolved tenant's company name, for the app chrome
+            // (AppLayout's sidebar). null before a tenant is resolved — the
+            // public auth pages are platform-branded, NOT tenant-branded, so
+            // they must never show a company name. Closure so it's only
+            // resolved (and only queries the tenant `companies` table) when
+            // tenancy is actually initialized.
+            'company' => $context
+                ? fn () => ['name' => \App\Models\Company::cached()?->name ?? tenant()?->name]
+                : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
@@ -80,6 +96,11 @@ class HandleInertiaRequests extends Middleware
                 // so Zones/Index and Customers/Index can render a proper
                 // report table instead of a flattened one-line message.
                 'import' => fn () => $request->session()->get('import'),
+                // The wa.me deep link flashed by PaymentReceiptController::
+                // sendWhatsapp() (Wave 3 of payment-receipts-and-whatsapp.md)
+                // — Payments/Show.tsx opens it in a new tab on the POST's
+                // success callback, then it's gone on the next visit.
+                'whatsapp_url' => fn () => $request->session()->get('whatsapp_url'),
             ],
             // Bell dropdown + emergency banner data (in-app-notifications.md
             // section 4) — a closure so it's re-evaluated on every request,

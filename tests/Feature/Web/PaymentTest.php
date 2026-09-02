@@ -1112,8 +1112,11 @@ class PaymentTest extends TestCase
         ]);
     }
 
-    public function test_editing_frequency_to_months_recomputes_the_expiration_date(): void
+    public function test_editing_frequency_to_months_sets_no_expiration_date_under_draw_down(): void
     {
+        // Draw-down cutover (references/prepayment-drawdown.md): months/yearly
+        // payments no longer carry an expiration_date — their value flows
+        // through the draw-down branch as prepaid months.
         $customer = $this->customer();
         $payment = PaymentFactory::new()->create([
             'customer_id' => $customer->id,
@@ -1136,7 +1139,7 @@ class PaymentTest extends TestCase
 
         $this->assertSame('months', $payment->frequency);
         $this->assertSame(5, $payment->months);
-        $this->assertSame(now()->addMonths(5)->toDateString(), $payment->expiration_date->toDateString());
+        $this->assertNull($payment->expiration_date);
     }
 
     public function test_edit_page_renders_for_a_manager(): void

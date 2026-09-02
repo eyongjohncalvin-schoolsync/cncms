@@ -22,6 +22,6 @@ class AuditLogPolicy
 
     public function viewAny(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('audit.view');
     }
 }

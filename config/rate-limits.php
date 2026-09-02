@@ -65,6 +65,16 @@ return [
         'decay_minutes' => (int) env('RATE_LIMIT_EXPORTS_DECAY_MINUTES', 1),
     ],
 
+    // Public, signed, unauthenticated receipt-PDF share link
+    // (payment-receipts/{uuid}/pdf/shared — the WhatsApp-shareable link, see
+    // payment-receipts-and-whatsapp.md). Keyed by IP since there is no
+    // authenticated user. Low ceiling: a valid signed link is handed to one
+    // customer at a time, so anything hammering this is abuse.
+    'receipt-share' => [
+        'max_attempts' => (int) env('RATE_LIMIT_RECEIPT_SHARE_MAX_ATTEMPTS', 30),
+        'decay_minutes' => (int) env('RATE_LIMIT_RECEIPT_SHARE_DECAY_MINUTES', 1),
+    ],
+
     // Audit log query endpoints (API and web), keyed by authenticated user.
     'audit' => [
         'max_attempts' => (int) env('RATE_LIMIT_AUDIT_MAX_ATTEMPTS', 30),

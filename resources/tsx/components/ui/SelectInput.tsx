@@ -23,7 +23,7 @@ export const SelectInput = forwardRef<HTMLSelectElement, SelectInputProps>(
                 <select
                     ref={ref}
                     id={id}
-                    className={`w-full appearance-none rounded-lg border-0 bg-white px-3.5 py-2 pr-9 text-sm text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 transition-shadow duration-150 hover:ring-slate-400 focus:shadow-none focus:ring-2 focus:ring-inset focus:ring-blue-600 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 disabled:ring-slate-200 ${
+                    className={`w-full appearance-none rounded-lg border-0 bg-white px-3.5 py-2.5 pr-9 text-base text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 transition-shadow duration-150 hover:ring-slate-400 focus:shadow-none focus:ring-2 focus:ring-inset focus:ring-blue-600 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 disabled:ring-slate-200 sm:py-2 sm:text-sm ${
                         error ? 'ring-red-400 hover:ring-red-400 focus:ring-red-500' : ''
                     } ${className}`}
                     {...props}

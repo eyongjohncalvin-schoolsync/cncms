@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { IconArrowLeft, IconCash, IconUpload, IconWallet } from '@tabler/icons-react';
+import { IconArrowLeft, IconBrandWhatsapp, IconCash, IconDownload, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
@@ -10,12 +10,30 @@ import { Modal } from '@/components/ui/Modal';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Payment } from '@/types';
+import type { PageProps, Payment, PaymentReceipt } from '@/types';
+
+function formatRelative(iso: string): string {
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) {
+        return iso;
+    }
+    const seconds = Math.round((Date.now() - then) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.round(hours / 24);
+    if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+    return new Date(iso).toLocaleDateString();
+}
 
 interface PaymentsShowProps {
     payment: Payment;
+    receipt: PaymentReceipt | null;
     can_manage: boolean;
     can_delete: boolean;
+    can_issue_receipt: boolean;
 }
 
 const frequencyLabels: Record<Payment['frequency'], string> = {
@@ -24,11 +42,56 @@ const frequencyLabels: Record<Payment['frequency'], string> = {
     yearly: 'Yearly',
 };
 
-export default function PaymentsShow({ payment, can_manage, can_delete }: PaymentsShowProps) {
+export default function PaymentsShow({ payment, receipt, can_manage, can_delete, can_issue_receipt }: PaymentsShowProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [fileName, setFileName] = useState<string | null>(null);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [destroying, setDestroying] = useState(false);
+    const [issuingReceipt, setIssuingReceipt] = useState(false);
+    const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+
+    // A receipt is only a record of a verified payment. Auto-issued on
+    // verify(); this manual action covers payments recorded before receipts
+    // shipped and re-issuing a voided one (server re-checks the gate + status).
+    const isVerified = payment.verification_status === 'verified';
+    const receiptVoided = receipt?.status === 'void';
+    const canIssueNow = can_issue_receipt && isVerified && (!receipt || receiptVoided);
+    const canSendWhatsapp = !!receipt && !receiptVoided && !!payment.customer_phone;
+
+    // The wa.me link is minted server-side (from the frozen snapshot + a
+    // fresh signed PDF URL) and flashed back on the POST — mirror the bill
+    // "Send Bill" flow: record the send, then let the browser open WhatsApp
+    // itself in a new tab.
+    function sendWhatsapp() {
+        router.post(
+            `/payments/${payment.uuid}/receipt/send-whatsapp`,
+            {},
+            {
+                preserveScroll: true,
+                preserveState: true,
+                onStart: () => setSendingWhatsapp(true),
+                onFinish: () => setSendingWhatsapp(false),
+                onSuccess: (page) => {
+                    const url = (page.props as unknown as PageProps).flash?.whatsapp_url;
+                    if (url) {
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                    }
+                },
+            },
+        );
+    }
+
+    function issueReceipt() {
+        router.post(
+            `/payments/${payment.uuid}/receipt/issue`,
+            {},
+            {
+                preserveScroll: true,
+                onStart: () => setIssuingReceipt(true),
+                onFinish: () => setIssuingReceipt(false),
+            },
+        );
+    }
 
     function closeDeleteModal() {
         if (destroying) {
@@ -113,7 +176,7 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                         any authenticated tenant user, same as ComplaintPolicy::
                         create()), so it renders unconditionally here, unlike
                         Edit/Delete Payment which stay behind can_manage/can_delete. */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <ArrearsAdjustmentModal customer={arrearsCustomer} />
                         {can_manage && (
                             <Link
@@ -220,6 +283,122 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                         )}
                     </CardBody>
                 </Card>
+
+                <Card className="animate-fade-up" style={{ animationDelay: '400ms' }}>
+                    <CardHeader>
+                        <h2 className="text-sm font-semibold text-slate-900">Receipt</h2>
+                    </CardHeader>
+                    <CardBody className="flex flex-col gap-3 text-sm">
+                        {receipt ? (
+                            <>
+                                <div className="flex flex-col divide-y divide-slate-100">
+                                    <Row label="Receipt no." value={receipt.receipt_number} />
+                                    <Row
+                                        label="Issued"
+                                        value={receipt.issued_at ? new Date(receipt.issued_at).toLocaleString() : '—'}
+                                    />
+                                    <Row label="Amount" value={formatCurrency(receipt.amount)} />
+                                    <Row
+                                        label="Status"
+                                        value={
+                                            <span
+                                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                                    receipt.status === 'void'
+                                                        ? 'bg-red-100 text-red-700'
+                                                        : 'bg-green-100 text-green-700'
+                                                }`}
+                                            >
+                                                {receipt.status === 'void' ? 'Void' : 'Issued'}
+                                            </span>
+                                        }
+                                    />
+                                </div>
+
+                                {receipt.status === 'void' && (
+                                    <p className="text-slate-500">
+                                        This receipt was voided (the payment was rejected). Re-verify the payment, or
+                                        re-issue below.
+                                    </p>
+                                )}
+
+                                <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-3">
+                                    <a
+                                        href={receipt.download_url}
+                                        className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                                    >
+                                        <IconDownload size={16} stroke={2} />
+                                        Download PDF
+                                    </a>
+                                    {canIssueNow && (
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            onClick={issueReceipt}
+                                            disabled={issuingReceipt}
+                                            className="rounded-lg px-4 py-2 text-sm font-semibold"
+                                        >
+                                            {issuingReceipt && <LoadingSpinner className="h-4 w-4" />}
+                                            Re-issue
+                                        </Button>
+                                    )}
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={sendWhatsapp}
+                                        disabled={!canSendWhatsapp || sendingWhatsapp}
+                                        title={
+                                            canSendWhatsapp
+                                                ? undefined
+                                                : "This customer has no phone on file — the receipt can't be sent by WhatsApp."
+                                        }
+                                        className="rounded-lg px-4 py-2 text-sm font-semibold"
+                                    >
+                                        {sendingWhatsapp ? (
+                                            <LoadingSpinner className="h-4 w-4" />
+                                        ) : (
+                                            <IconBrandWhatsapp size={16} stroke={2} />
+                                        )}
+                                        Send via WhatsApp
+                                    </Button>
+                                </div>
+
+                                {receipt.last_sent_at && (
+                                    <p className="text-xs text-slate-500">
+                                        Last sent {formatRelative(receipt.last_sent_at)}
+                                        {receipt.sent_count > 1 ? ` (${receipt.sent_count} times)` : ''}.
+                                    </p>
+                                )}
+
+                                {!payment.customer_phone && (
+                                    <p className="text-xs text-slate-500">
+                                        This customer has no phone on file — the receipt can't be sent by WhatsApp.
+                                    </p>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <p className="flex items-center gap-1.5 text-slate-500">
+                                    <IconReceipt size={16} stroke={1.75} />
+                                    {isVerified
+                                        ? 'No receipt issued yet.'
+                                        : 'A receipt is issued automatically once this payment is verified.'}
+                                </p>
+                                {canIssueNow && (
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={issueReceipt}
+                                        disabled={issuingReceipt}
+                                        className="self-start rounded-lg px-4 py-2.5 text-sm font-semibold"
+                                    >
+                                        {issuingReceipt ? <LoadingSpinner className="h-4 w-4" /> : <IconReceipt size={16} stroke={2} />}
+                                        Issue receipt
+                                    </Button>
+                                )}
+                            </>
+                        )}
+                    </CardBody>
+                </Card>
             </div>
 
             <Modal open={confirmingDelete} onClose={closeDeleteModal} title={`Delete ${payment.customer_name}'s payment?`}>
@@ -227,8 +406,8 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                     This permanently removes the payment record{payment.verification ? ' and its verification details' : ''}. This cannot be
                     undone.
                 </p>
-                <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
-                    <Button type="button" variant="secondary" onClick={closeDeleteModal} disabled={destroying}>
+                <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="secondary" onClick={closeDeleteModal} disabled={destroying} className="w-full sm:w-auto">
                         Cancel
                     </Button>
                     <Button
@@ -236,7 +415,7 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                         variant="danger"
                         onClick={submitDelete}
                         disabled={destroying}
-                        className="rounded-lg px-4 py-2.5 text-sm font-semibold"
+                        className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold sm:w-auto"
                     >
                         {destroying && <LoadingSpinner className="h-4 w-4" />}
                         {destroying ? 'Deleting…' : 'Delete'}

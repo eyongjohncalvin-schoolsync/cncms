@@ -30,7 +30,17 @@ trait ResolvesCommandRunBatchProgress
             return [];
         }
 
-        return DB::table('job_batches')
+        // `job_batches` is Laravel's queue-batch table and lives ONLY in the
+        // central schema (database/migrations/0001_01_01_000002_create_jobs_table.php)
+        // — never in a tenant schema. While tenancy is initialized the
+        // default connection is `tenant` (search_path = the tenant schema),
+        // so a bare DB::table('job_batches') resolves to a non-existent
+        // relation. Pin the lookup to the central connection, which keeps
+        // search_path = public. (Latent until now: swecom's real command_runs
+        // are all CLI `manuscript:calculate` rows with batch_id = null, so
+        // this filter was never non-empty for it in production.)
+        return DB::connection(config('tenancy.database.central_connection'))
+            ->table('job_batches')
             ->whereIn('id', $batchIds)
             ->get()
             ->keyBy('id')

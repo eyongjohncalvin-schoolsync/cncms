@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\CustomerRecordExportController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('customers', [CustomerController::class, 'index'])->name('customers.index');
@@ -23,6 +24,13 @@ Route::get('customers/import/template', [CustomerController::class, 'importTempl
 Route::get('customers/{customer}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
 Route::patch('customers/{customer}', [CustomerController::class, 'update'])->name('customers.update');
 Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->name('customers.destroy');
+// Archive / restore (customer-deletion deliberation, 2026-08-29). A
+// customer with billing history is archived (soft-deleted), never
+// hard-deleted — destroy() above stays the zero-history junk-row path.
+// restore() must resolve an already-archived customer, so its binding
+// (and show()'s, further down) opts into trashed rows via ->withTrashed().
+Route::patch('customers/{customer}/archive', [CustomerController::class, 'archive'])->name('customers.archive');
+Route::patch('customers/{customer}/restore', [CustomerController::class, 'restore'])->name('customers.restore')->withTrashed();
 // Dedicated status actions (App\Services\CustomerStatusService) — a fast
 // alternative to the generic update() route above, distinct the same way
 // payments/{payment}/verify is distinct from a generic payment edit.
@@ -36,7 +44,25 @@ Route::patch('customers/{customer}/reconnect', [CustomerController::class, 'reco
 Route::get('customers/{customer}/bill/print', [CustomerController::class, 'printBill'])
     ->name('customers.bill.print')
     ->middleware('throttle:exports');
+// "Export full record" (docs/plans/customer-record-export.md) — one
+// downloadable PDF / multi-sheet XLSX bundling everything CNCMS holds about
+// one customer, for an auditor or a billing dispute. Gated
+// super/admin-only (CustomerPolicy::exportRecord → `customers.export_record`)
+// and 'throttle:exports'-limited like every other export/print route here.
+// ->withTrashed() so an ARCHIVED customer's full history can still be
+// exported. The 'record-export/{pdf,xlsx}' path is a deeper segment than
+// the 'customers/{customer}' show route below, so ordering is unambiguous;
+// kept above it anyway to match this file's "specific paths first"
+// convention.
+Route::get('customers/{customer}/record-export/pdf', [CustomerRecordExportController::class, 'pdf'])
+    ->name('customers.record-export.pdf')
+    ->middleware('throttle:exports')
+    ->withTrashed();
+Route::get('customers/{customer}/record-export/xlsx', [CustomerRecordExportController::class, 'data'])
+    ->name('customers.record-export.xlsx')
+    ->middleware('throttle:exports')
+    ->withTrashed();
 // Lightweight JSON lookup (not an Inertia page) for the Record Payment
 // form's info panel — see CustomerController::lastPayment()'s doc comment.
 Route::get('customers/{customer}/last-payment', [CustomerController::class, 'lastPayment'])->name('customers.last-payment');
-Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
+Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show')->withTrashed();

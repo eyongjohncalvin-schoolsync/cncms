@@ -17,8 +17,6 @@ import type { CustomerDetailApi } from '../../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting' | 'success';
 
-const CAN_DISCONNECT_ROLES = new Set(['super', 'admin', 'manager', 'agent']);
-
 /**
  * Disconnect — the field-triggered counterpart to Reconnect & Pay
  * (app/reconnect/[uuid].tsx), which this deliberately mirrors in shape
@@ -60,7 +58,7 @@ const CAN_DISCONNECT_ROLES = new Set(['super', 'admin', 'manager', 'agent']);
 export default function DisconnectScreen() {
     const { uuid } = useLocalSearchParams<{ uuid: string }>();
     const router = useRouter();
-    const { role } = useAuth();
+    const { role, can } = useAuth();
 
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -199,7 +197,13 @@ export default function DisconnectScreen() {
         );
     }
 
-    const authorized = role !== null && CAN_DISCONNECT_ROLES.has(role);
+    // RBAC v2 Wave 4: `customers.change_status` is the matrix permission for
+    // disconnect/suspend/reconnect (CustomerPolicy). Agents are NOT seeded
+    // it — they get a zone-scoped disconnect via an OR-branch in
+    // CustomerPolicy::disconnect() that a flat permission list can't see —
+    // so `role === 'agent'` is allowed here too as a UI affordance, exactly
+    // mirroring that policy. The backend still enforces the zone match.
+    const authorized = can('customers.change_status') || role === 'agent';
     const submitting = phase === 'submitting';
     const alreadyDisconnected = customer.status === 'disconnected' || customer.status === 'suspended';
 

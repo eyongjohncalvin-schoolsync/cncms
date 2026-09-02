@@ -187,3 +187,49 @@ control (no "back to my workspace" link — investors have no other workspace).
 `ReportController` itself needs no changes — its existing "one route, server picks payload/scope,
 frontend picks layout per role" convention already covers this; investor layout selection is one
 more instance of that same convention, decided client-side off the shared `is_investor` flag.
+
+---
+
+## v2 (2026-09): configurable role→permission matrix
+
+**Status: built and shipped** (RBAC v2, waves 1–4). Full design:
+`docs/plans/rbac-v2-configurable-roles.md`.
+
+The v1 design above still stands **as-is** — the two fine-grained
+payment/verify extensions (`can_record_payments`, agent zone-scoped
+verify), the Investor tier, and every scope fence (`branchId`, `zoneId`)
+are unchanged and still additive OR-branches. What v2 replaced is only the
+**general role-check mechanism** underneath the policies:
+
+- Roles are no longer hardcoded. Each tenant has its own `roles` +
+  `role_permissions` tables (tenant schema). The 5 built-ins (`super`,
+  `admin`, `manager`, `agent`, `worker`) are seeded `is_system` rows with
+  exactly the permissions their old hardcoded checks granted — **no
+  behaviour change on deploy** — plus a tenant can add custom roles.
+- Policies now check `App\Support\TenantContext::can('<permission>')` /
+  `canAny(...)` against that per-tenant matrix (wired through
+  `Gate::before` + a `Gate::define` per permission in
+  `PermissionServiceProvider`), instead of `isAnyOf('super','admin',…)`.
+- The permission **catalog is closed** — `App\Auth\Permission` (a
+  string-backed PHP enum, ~49 cases, `byArea()` for grouping). The matrix
+  UI can only toggle catalog entries, never invent new ones;
+  `Role::syncPermissions()` intersects against `Permission::values()` as a
+  second guard.
+- `super` bypasses every check via `roles.is_super` (`Gate::before`), so a
+  misconfigured matrix can never lock the owner out.
+- Editable in **Users Control Center** (`/users`, not under `/settings`) —
+  Users tab (add user, assign role, investor toggle, deactivate) +
+  Roles & permissions tab (the checkbox matrix, add/clone/delete custom
+  roles). Gated `users.view` / `users.manage` / `roles.manage`.
+- Frontend: `HandleInertiaRequests::share()` and `GET /api/v1/auth/me`
+  both expose `auth.user.permissions: string[]` (`['*']` for super).
+  `AppNav.tsx` (`buildVisibleNavItems`) and every per-page `can*`
+  affordance check a permission via `hasPermission()`
+  (`resources/tsx/lib/permissions.ts`); the mobile app caches the list in
+  its offline session profile and checks it via `useAuth().can()`.
+- `cncms:tenant-role` validates its `role` argument against the tenant's
+  `roles` table, so it can assign custom roles too.
+
+Not built (still out of scope, same as v1): per-**user** permission
+overrides, ceiling/delta-grant tables, scope qualifiers on permissions,
+time-boxed grants, an approval workflow for role changes.

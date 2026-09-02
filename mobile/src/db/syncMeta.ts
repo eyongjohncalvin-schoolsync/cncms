@@ -42,3 +42,26 @@ export async function getLastSyncAt(): Promise<string | null> {
 export async function setLastSyncAt(iso: string): Promise<void> {
     await setMeta('last_sync_at', iso);
 }
+
+/**
+ * Resets the delta-sync watermark so the next pull() is treated as a full
+ * first-login sync (SyncService::pull()'s `$sinceAt` becomes null, so every
+ * eligible customer is returned regardless of `customers.updated_at`) rather
+ * than only customers changed since last_sync_at.
+ *
+ * Exists because `upsertedCustomers()`'s `updated_at >= $since` filter is
+ * blind to any change that doesn't also touch the customer row itself —
+ * manuscript recalculation/deletion never does (no Eloquent `$touches`
+ * relationship exists from Manuscript back to Customer), so a customer's
+ * cached `total_arrears`/`credit` can go stale on-device indefinitely with
+ * no normal sync trigger ever correcting it, most visibly after a direct
+ * database intervention (which additionally bypasses every app-level write
+ * path, including any `updated_at` an ordinary write would produce) but not
+ * exclusively caused by one. See SyncManager.forceFullResync() and
+ * mobile-app-react-native.md's dated addendum on this.
+ */
+export async function clearLastSyncAt(): Promise<void> {
+    const db = await getDatabase();
+
+    await db.runAsync('DELETE FROM sync_meta WHERE key = ?', ['last_sync_at']);
+}

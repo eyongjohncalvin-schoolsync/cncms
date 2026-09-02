@@ -1,3 +1,9 @@
+/**
+ * The 5 built-in system role names. Since RBAC v2 Wave 3 a tenant can also
+ * define custom roles, so a membership row's `role` (TenantUserRow.role) is
+ * a plain `string`, not this union — this alias is kept only for the places
+ * that still specifically mean "one of the built-ins".
+ */
 export type Role = 'super' | 'admin' | 'manager' | 'agent' | 'worker';
 
 export interface AuthUser {
@@ -5,7 +11,14 @@ export interface AuthUser {
     name: string;
     username: string;
     email: string;
-    role: Role | null;
+    /**
+     * The user's role NAME — a built-in (`Role`) or, since RBAC v2 Wave 3,
+     * a tenant-defined custom role, so this is a plain `string`, not the
+     * `Role` union. Display only (RoleBadge, Users Control Center); every
+     * real access decision goes through `permissions` below, resolved from
+     * the per-tenant role→permission matrix.
+     */
+    role: string | null;
     /** Platform-wide flag, independent of role/tenant — see EnsureLandlord. */
     is_landlord: boolean;
     /**
@@ -15,6 +28,14 @@ export interface AuthUser {
      * AppLayout; the server-side gate is ReportPolicy, not this flag.
      */
     is_investor: boolean;
+    /**
+     * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the permission
+     * strings this user's role grants, or `['*']` for a super role. Shared
+     * by HandleInertiaRequests::share(). Since Wave 4 this is what drives
+     * AppNav visibility and every client-side `can*` affordance — see
+     * `buildVisibleNavItems` and the per-page permission checks.
+     */
+    permissions: string[];
 }
 
 export interface ImportFailedRow {
@@ -78,6 +99,12 @@ export interface PageProps {
         user: AuthUser | null;
     };
     /**
+     * The logged-in user's tenant company name — for the app chrome only.
+     * `null` on the public auth pages (which are platform-branded, never
+     * tenant-branded). Set by HandleInertiaRequests::share().
+     */
+    company: { name: string | null } | null;
+    /**
      * Resolved locale for this request ('en' | 'fr'), set by
      * App\Http\Middleware\ResolveLocale and shared by
      * HandleInertiaRequests::share(). Fed into i18next at bootstrap (see
@@ -89,6 +116,8 @@ export interface PageProps {
         success?: string | null;
         error?: string | null;
         import?: ImportReport | null;
+        /** wa.me deep link flashed by the receipt "Send via WhatsApp" action. */
+        whatsapp_url?: string | null;
     };
     notifications: NotificationsFeed | null;
     [key: string]: unknown;
@@ -187,6 +216,18 @@ export interface Customer {
     total_arrears?: string;
     arrears_ratio?: number;
     months_overdue?: number;
+    /**
+     * Customer archiving (customer-deletion deliberation, 2026-08-29).
+     * `has_billing_history` decides "Archive customer" vs "Delete row" in
+     * the list action menu — present on CustomerController::shapeCustomer()
+     * rows (Customers/Index + Show). The archived_* fields are non-null
+     * only for a currently-archived customer (the ?archived=1 view and the
+     * archived detail page).
+     */
+    has_billing_history?: boolean;
+    archived_at?: string | null;
+    archived_by_name?: string | null;
+    archived_reason?: string | null;
 }
 
 export type VerificationStatus = 'pending' | 'verified' | 'rejected';
@@ -203,10 +244,41 @@ export interface PaymentVerification {
     notes: string | null;
 }
 
+export type PaymentReceiptStatus = 'issued' | 'void';
+
+/**
+ * The business-issued receipt for a verified payment (Wave 2 of
+ * docs/plans/payment-receipts-and-whatsapp.md). Distinct from
+ * PaymentVerification.receipt_photo_url (proof-of-payment evidence).
+ */
+export interface PaymentReceipt {
+    uuid: string;
+    receipt_number: string;
+    status: PaymentReceiptStatus;
+    issued_at: string | null;
+    amount: string;
+    /** Authenticated staff PDF download route. */
+    download_url: string;
+    /** Signed ~7-day public link — the WhatsApp-shareable PDF. */
+    shared_url: string;
+    /** How many times the receipt has been sent (any channel) — sent_log length. */
+    sent_count: number;
+    /** ISO timestamp of the most recent send, or null if never sent. */
+    last_sent_at: string | null;
+}
+
+/** The trimmed receipt indicator carried on Payments/Index.tsx list rows. */
+export interface PaymentReceiptSummary {
+    uuid: string;
+    receipt_number: string;
+    status: PaymentReceiptStatus;
+}
+
 export interface Payment {
     uuid: string;
     customer_uuid: string;
     customer_name: string;
+    customer_phone?: string | null;
     customer_bill: string;
     zone_name?: string | null;
     /**
@@ -235,6 +307,8 @@ export interface Payment {
     collected_at: string | null;
     processed_at: string | null;
     verification?: PaymentVerification | null;
+    /** Lightweight receipt indicator (list rows). Null until issued. */
+    receipt?: PaymentReceiptSummary | null;
 }
 
 export interface Manuscript {
@@ -249,13 +323,19 @@ export interface Manuscript {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    /** Draw-down (references/prepayment-drawdown.md): whole billing periods
+     * still covered by a months/yearly prepayment, and the rate locked when
+     * it was paid. 0 / null outside a prepaid window. */
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
     status: CustomerStatus;
     /**
      * wa.me deep link pre-filled with this customer's bill reminder
      * (App\Services\BillNotificationService::waLink()), or null when they
-     * have no usable phone number on file or no manuscript to remind them
-     * about — see Manuscripts/Index.tsx's "Send Bill" action.
+     * have no usable phone number on file, no manuscript to remind them
+     * about, or are not an active customer (bills are only sent to active
+     * customers) — see Manuscripts/Index.tsx's "Send Bill" action.
      */
     wa_link: string | null;
 }
@@ -306,6 +386,8 @@ export interface CustomerManuscriptSummary {
     credit: string;
     total_bill: string;
     payment_expiration: string | null;
+    prepaid_months_remaining: number;
+    prepaid_rate: string | null;
     period: string;
 }
 
@@ -319,13 +401,20 @@ export interface CustomerRecentPayment {
 }
 
 export type ArrearsAdjustmentDirection = 'decrease' | 'increase';
+/** Which side of `net = arrears - credit` a correction lands on. 'credit'
+ * touches only the loose manuscripts.credit figure — never prepaid coverage
+ * (prepaid_months_remaining / prepaid_rate), which is out of scope. */
+export type ArrearsAdjustmentTarget = 'arrears' | 'credit';
 export type ArrearsAdjustmentReasonCategory =
     | 'legacy_migration_error'
     | 'billing_error'
     | 'goodwill_service_outage'
     | 'bad_debt_writeoff'
     | 'credit_clawback'
-    | 'other';
+    | 'other'
+    | 'credit_correction'
+    | 'duplicate_credit'
+    | 'migration_credit_error';
 export type ArrearsAdjustmentStatus = 'pending' | 'pending_second_approval' | 'approved' | 'rejected';
 
 /**
@@ -337,6 +426,10 @@ export interface ArrearsAdjustment {
     uuid: string;
     target_period: string;
     direction: ArrearsAdjustmentDirection;
+    /** 'arrears' (default) or 'credit'. Absent on rows created before the
+     * 2026-08-30 credit-correction addendum — treat a missing value as
+     * 'arrears'. */
+    target: ArrearsAdjustmentTarget;
     amount: string;
     reason_category: ArrearsAdjustmentReasonCategory;
     reason_note: string;
@@ -358,8 +451,20 @@ export interface ArrearsAdjustment {
 export interface ArrearsAdjustmentAuditRow extends ArrearsAdjustment {
     customer_uuid: string | null;
     customer_name: string | null;
+    /** The customer's arrears balance for target_period at request time —
+     * the "before" figure. See ArrearsAdjustmentModal's identical field. */
+    arrears_snapshot: string;
+    /** The credit-side counterpart of arrears_snapshot — the "before" figure
+     * for a `target === 'credit'` row. Null for arrears-target rows and for
+     * rows created before the 2026-08-30 addendum. */
+    credit_snapshot: string | null;
     can_approve: boolean;
     can_reject: boolean;
+    /** True when the signed-in user raised this request. A `super` may still
+     * approve/reject it (the maker≠checker carve-out in
+     * App\Policies\ArrearsAdjustmentPolicy); the review UI shows a
+     * confirmation step first so the bypass is explicit. */
+    is_own_request: boolean;
 }
 
 export interface CustomerDetail extends Customer {
@@ -368,6 +473,9 @@ export interface CustomerDetail extends Customer {
     manuscript: CustomerManuscriptSummary | null;
     recent_payments: CustomerRecentPayment[];
     arrears_adjustments: ArrearsAdjustment[];
+    /** Gates the "Export full record" header control — `customers.export_record`,
+     * seeded super/admin only (docs/plans/customer-record-export.md). */
+    can_export_record: boolean;
 }
 
 export interface Company {
@@ -402,9 +510,41 @@ export interface NotificationSettings {
     twilio_whatsapp_number: string | null;
 }
 
+/** One selectable role in the Users Control Center role dropdown. */
+export interface RoleOption {
+    name: string;
+    label: string;
+    is_system: boolean;
+}
+
+/** One column in the Roles & Permissions matrix (RBAC v2 Wave 3). */
+export interface RoleMatrixRow {
+    uuid: string;
+    name: string;
+    label: string;
+    description: string | null;
+    is_system: boolean;
+    /** The Gate::before bypass role — matrix all-on and read-only. */
+    is_super: boolean;
+    /** Permission strings this role currently grants (empty for is_super). */
+    permissions: string[];
+    /** How many tenant_users rows currently hold this role (blocks delete). */
+    user_count: number;
+}
+
+/** One permission cell definition — `value` is the catalog string. */
+export interface PermissionOption {
+    value: string;
+    label: string;
+}
+
+/** Area heading => its permissions, from App\Auth\Permission::byArea(). */
+export type PermissionsByArea = Record<string, PermissionOption[]>;
+
 export interface TenantUserRow {
     id: number;
-    role: Role;
+    /** A role name — a built-in (see `Role`) or a tenant custom role. */
+    role: string;
     /** Purely descriptive label (e.g. "Recovery Coordinator") — separate from `role`, which drives permissions. */
     job_title: string | null;
     name: string;
@@ -436,7 +576,7 @@ export interface TenantUserRow {
     is_investor: boolean;
 }
 
-export type CommandRunStatus = 'queued' | 'pending_review' | 'published' | 'failed';
+export type CommandRunStatus = 'queued' | 'pending_review' | 'published' | 'failed' | 'rolled_back';
 
 /**
  * Aggregate stats only (App\Services\ManuscriptGenerationBatchService::
@@ -474,6 +614,34 @@ export interface CommandRunEntry {
     computed_result_summary: CommandRunComputedResultSummary | null;
     batch_progress: CommandRunBatchProgress | null;
     published_at: string | null;
+    /** ManuscriptRunLockService::isPeriodLocked() — true once this run's period has passed. A display hint only; the backend enforces the same check independently on every action. */
+    is_locked: boolean;
+}
+
+/** One downloadable artifact from an async bill-generation run (App\Services\BillBatchService). */
+export interface BillBatchFile {
+    uuid: string;
+    kind: 'zone' | 'bulk' | 'zip';
+    zone_name: string | null;
+    bill_count: number;
+    page_count: number | null;
+    size_bytes: number;
+    download_url: string;
+}
+
+/** An asynchronous (queued) bill-generation run for a period (owner's 2026-08-30 ask). */
+export interface BillBatch {
+    uuid: string;
+    status: 'queued' | 'processing' | 'completed' | 'partial' | 'failed' | 'cancelled';
+    period: string;
+    density: number;
+    template: string;
+    total_bills: number;
+    total_zones: number;
+    error_message: string | null;
+    created_at: string;
+    completed_at: string | null;
+    files: BillBatchFile[];
 }
 
 /** Settings > Command Runs' manuscript_generation schedule config (task-scheduler.md section 4). */

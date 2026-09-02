@@ -111,6 +111,23 @@ class AuditLogService
             return "Deleted customer: {$this->label($old, 'name')}";
         }
 
+        // Archiving (customer-deletion deliberation, 2026-08-29) — a soft
+        // delete, recorded as an update that sets/clears archived_by (see
+        // App\Services\CustomerService::archive()/restore() and
+        // AuditableObserver::deleted()'s soft-delete skip).
+        $wasArchived = ! empty($old['archived_by']);
+        $isArchived = ! empty($new['archived_by']);
+
+        if (! $wasArchived && $isArchived) {
+            $reason = trim((string) ($new['archived_reason'] ?? ''));
+
+            return "Archived customer: {$this->label($new, 'name')}".($reason !== '' ? " — {$reason}" : '');
+        }
+
+        if ($wasArchived && ! $isArchived) {
+            return "Restored customer: {$this->label($new, 'name')}";
+        }
+
         if (($old['status'] ?? null) !== ($new['status'] ?? null)) {
             return "Changed customer status: {$this->label($old, 'status')} -> {$this->label($new, 'status')}";
         }

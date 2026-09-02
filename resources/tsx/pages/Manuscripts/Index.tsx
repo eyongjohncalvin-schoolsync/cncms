@@ -1,16 +1,28 @@
-import { Head, router, useForm, usePage } from '@inertiajs/react';
-import { useMemo, useState } from 'react';
+import { Head, router, useForm, usePage, usePoll } from '@inertiajs/react';
+import { MenuItem } from '@headlessui/react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     IconAlertTriangle,
     IconBrandWhatsapp,
     IconCalculator,
     IconCash,
+    IconChevronDown,
     IconDownload,
+    IconFileTypePdf,
+    IconFileTypeXls,
     IconReceipt2,
     IconScale,
+    IconSearch,
     IconUsers,
+    IconFileTypeZip,
+    IconLayoutGrid,
+    IconClock,
+    IconCircleCheck,
+    IconTrash,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
+import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
 import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
 import { Pagination } from '@/components/ui/Pagination';
 import { StatCard } from '@/components/ui/StatCard';
@@ -26,12 +38,15 @@ import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustment
 import { PreRunReviewPanel } from '@/components/manuscripts/PreRunReviewPanel';
 import { usePreRunReview } from '@/hooks/usePreRunReview';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
+import { hasPermission } from '@/lib/permissions';
+import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
+import type { BillBatch, Manuscript, ManuscriptSummary, PageProps, PaginatedResponse, Zone } from '@/types';
 
 interface ManuscriptFilters {
     period?: string;
     zone_uuid?: string;
     status?: string;
+    search?: string;
 }
 
 interface ManuscriptsIndexProps {
@@ -40,27 +55,55 @@ interface ManuscriptsIndexProps {
     manuscripts: PaginatedResponse<Manuscript>;
     summary: ManuscriptSummary;
     zones: Zone[];
+    billBatches: BillBatch[];
 }
 
-const EXPORT_ROLES = ['super', 'admin', 'manager'];
-const CALCULATE_ROLES = ['super', 'admin'];
-// Matches App\Policies\ManuscriptPolicy::sendBill() — same roles as
-// viewAny()/view(), so in practice anyone who can reach this page already
-// qualifies; kept explicit for the same reason EXPORT_ROLES/CALCULATE_ROLES
-// are, rather than assuming that alignment holds forever.
-const SEND_BILL_ROLES = ['super', 'admin', 'manager', 'agent'];
+function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
-export default function ManuscriptsIndex({ period, filters, manuscripts, summary, zones }: ManuscriptsIndexProps) {
+/**
+ * 2026-08-28 correction (business-rules.md section 2): a manuscript run
+ * triggered near month-end governs the UPCOMING month, not the one it's
+ * clicked in — matches the identical default now computed server-side in
+ * ManuscriptController::calculate()/preRunReview()/preRunReviewFull().
+ * Computed independently of the page's own (possibly filtered-to-a-past-
+ * period) `period` prop — Run Calculation must always default to the real
+ * upcoming period regardless of which period the admin happens to be
+ * browsing.
+ */
+function upcomingPeriod(): string {
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export default function ManuscriptsIndex({ period, filters, manuscripts, summary, zones, billBatches }: ManuscriptsIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const canExport = role !== null && EXPORT_ROLES.includes(role);
-    const canCalculate = role !== null && CALCULATE_ROLES.includes(role);
-    const canSendBill = role !== null && SEND_BILL_ROLES.includes(role);
+    // RBAC v2 Wave 4: display affordances from the shared permission matrix
+    // (auth.user.permissions), each mirroring the matching ManuscriptPolicy
+    // method after Wave 2's enforcement swap.
+    const canExport = hasPermission(auth.user?.permissions, 'manuscripts.export');
+    const canCalculate = hasPermission(auth.user?.permissions, 'manuscripts.calculate');
+    const canSendBill = hasPermission(auth.user?.permissions, 'manuscripts.send_bill');
 
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
+    const [search, setSearch] = useState(filters.search ?? '');
+    // Adjust-Arrears modal target. Held at page level, NOT inside the row
+    // <Dropdown> — a Headless UI menu unmounts its contents the instant an
+    // item is clicked, which would tear the modal down mid-open ("flashes
+    // and disappears, backdrop stuck").
+    const [adjustCustomer, setAdjustCustomer] = useState<{
+        uuid: string;
+        name: string;
+        manuscript: { total_arrears: string; credit: string };
+    } | null>(null);
 
-    const calculateForm = useForm({ period, confirmed_rerun: false });
+    const calculateForm = useForm({ period: upcomingPeriod(), confirmed_rerun: false });
 
     // Fetched on-demand, only while the confirm modal is actually open — not
     // on page load or on every filter change (the design ask) — keyed on
@@ -117,6 +160,10 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
         );
     }
 
+    function submitSearch() {
+        applyFilter({ search: search.trim() || undefined });
+    }
+
     function submitCalculate() {
         calculateForm.post('/manuscripts/calculate', {
             onSuccess: () => setConfirmOpen(false),
@@ -138,6 +185,56 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
         );
     }
 
+    // Async bill generation (owner's 2026-08-30 ask). The heavy PDF render
+    // moved off the web request into a Bus::batch (App\Services\BillBatchService);
+    // this page kicks a run off and polls it to completion — the same
+    // lightweight router.reload({ only: [...] }) primitive RunReview.tsx uses
+    // for the compute batch. Only polls while a run is still working.
+    const billBatchesWorking = billBatches.some((b) => b.status === 'queued' || b.status === 'processing');
+    const { start: startBillPoll, stop: stopBillPoll } = usePoll(4000, { only: ['billBatches'] }, { autoStart: false });
+
+    useEffect(() => {
+        if (billBatchesWorking) {
+            startBillPoll();
+        } else {
+            stopBillPoll();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [billBatchesWorking]);
+
+    const [generatingBills, setGeneratingBills] = useState(false);
+
+    function generateBills() {
+        router.post(
+            '/manuscripts/bills/generate',
+            {
+                period,
+                zone_uuid: filters.zone_uuid,
+                status: filters.status,
+                search: filters.search,
+            },
+            {
+                preserveScroll: true,
+                onStart: () => setGeneratingBills(true),
+                onFinish: () => setGeneratingBills(false),
+            },
+        );
+    }
+
+    // Cancel an in-flight run (owner made an error and wants to start over);
+    // clear a finished/cancelled run's artifacts so a fresh Generate starts
+    // from nothing.
+    function cancelBillBatch(uuid: string) {
+        router.post(`/manuscripts/bills/batches/${uuid}/cancel`, {}, { preserveScroll: true });
+    }
+
+    function clearBillBatch(uuid: string) {
+        if (!window.confirm('Delete this run and its generated PDFs? This cannot be undone.')) {
+            return;
+        }
+        router.delete(`/manuscripts/bills/batches/${uuid}`, { preserveScroll: true });
+    }
+
     // Recomputed only when the period/filters actually change, not on every
     // unrelated re-render (e.g. opening the calculate-confirmation modal).
     const exportParams = useMemo(() => {
@@ -145,8 +242,9 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
         params.set('period', period);
         if (filters.zone_uuid) params.set('zone_uuid', filters.zone_uuid);
         if (filters.status) params.set('status', filters.status);
+        if (filters.search) params.set('search', filters.search);
         return params;
-    }, [period, filters.zone_uuid, filters.status]);
+    }, [period, filters.zone_uuid, filters.status, filters.search]);
 
     // Consolidated down to 3 compact cards (was 6, one of them an
     // oversized "hero" card) — the owner's explicit call was fewer/smaller
@@ -178,14 +276,14 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                 formattedArrears: formatCurrency(manuscript.total_arrears),
                 formattedCredit: formatCurrency(manuscript.credit),
                 formattedTotalBill: formatCurrency(manuscript.total_bill),
-                // Mapped into the `{uuid, name, manuscript: {total_arrears}}`
+                // Mapped into the `{uuid, name, manuscript: {total_arrears, credit}}`
                 // shape ArrearsAdjustmentModal expects (same shape
                 // Customers/Show.tsx already passes it) — trivial reshaping
                 // of fields this row already carries, not a new fetch.
                 arrearsCustomer: {
                     uuid: manuscript.customer_uuid,
                     name: manuscript.customer_name,
-                    manuscript: { total_arrears: manuscript.total_arrears },
+                    manuscript: { total_arrears: manuscript.total_arrears, credit: manuscript.credit },
                 },
             })),
         [manuscripts.data],
@@ -200,15 +298,75 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                     <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">Manuscripts — Current Period</h1>
                     <p className="mt-1 text-sm text-slate-500">Billing snapshot, arrears and collection status for every customer.</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     {canExport && (
-                        <a
-                            href={`/manuscripts/export?${exportParams.toString()}`}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
+                        <Dropdown
+                            align="end"
+                            trigger={
+                                <span className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50">
+                                    <IconDownload size={18} stroke={1.75} />
+                                    Export
+                                    <IconChevronDown size={16} stroke={1.75} />
+                                </span>
+                            }
                         >
-                            <IconDownload size={18} stroke={1.75} />
-                            Export
-                        </a>
+                            {/* Plain <a download> anchors, not Inertia <Link>s / DropdownItem's
+                                href branch — these are file downloads the browser must handle
+                                itself, not client-side visits. */}
+                            {/* Portrait is the default register layout (fits more
+                                customer rows per page); landscape is the wider
+                                alternative — both map to ?orientation on the same
+                                export route. */}
+                            <MenuItem>
+                                <a
+                                    href={`/manuscripts/export?${exportParams.toString()}&orientation=portrait`}
+                                    download
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                >
+                                    <IconFileTypePdf size={16} stroke={1.75} />
+                                    Download PDF (Portrait)
+                                </a>
+                            </MenuItem>
+                            <MenuItem>
+                                <a
+                                    href={`/manuscripts/export?${exportParams.toString()}&orientation=landscape`}
+                                    download
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                >
+                                    <IconFileTypePdf size={16} stroke={1.75} />
+                                    Download PDF (Landscape)
+                                </a>
+                            </MenuItem>
+                            <MenuItem>
+                                <a
+                                    href={`/manuscripts/export?${exportParams.toString()}&format=xlsx`}
+                                    download
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100"
+                                >
+                                    <IconFileTypeXls size={16} stroke={1.75} />
+                                    Download Excel
+                                </a>
+                            </MenuItem>
+
+                            <div className="my-1 h-px bg-slate-200" />
+
+                            {/* The actual customer bill slips (not the register). The
+                                render moved off the web request into a background
+                                Bus::batch — this kicks a run off; the artifacts show
+                                up in the "Generated Bills" panel below once ready.
+                                Honours the same period/zone/status/search filters. */}
+                            <MenuItem>
+                                <button
+                                    type="button"
+                                    onClick={generateBills}
+                                    disabled={generatingBills}
+                                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors data-focus:bg-slate-100 disabled:opacity-50"
+                                >
+                                    <IconReceipt2 size={16} stroke={1.75} />
+                                    Generate Bills (background)
+                                </button>
+                            </MenuItem>
+                        </Dropdown>
                     )}
                     {canCalculate && (
                         <Button onClick={openConfirm} className="rounded-lg px-3.5 py-2.5 text-sm font-semibold shadow-sm shadow-blue-600/20">
@@ -286,9 +444,141 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                         <option value="disconnected">Disconnected</option>
                         <option value="suspended">Suspended</option>
                     </SelectInput>
+                    <div className="flex w-full items-end gap-2 sm:w-auto">
+                        <TextInput
+                            id="search"
+                            label="Search"
+                            placeholder="Customer name or phone"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
+                            className="rounded-lg bg-white"
+                        />
+                        <Button type="button" variant="secondary" onClick={submitSearch} className="h-[38px]">
+                            <IconSearch size={15} stroke={1.75} />
+                            Search
+                        </Button>
+                    </div>
                     {isFiltering && <LoadingSpinner className="mb-2 text-slate-400" />}
                 </div>
             </div>
+
+            {canExport && billBatches.length > 0 && (
+                <Card className="animate-fade-up mb-4" style={{ animationDelay: '0.28s' }}>
+                    <CardHeader>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h2 className="text-sm font-semibold text-slate-900">Generated Bills — {period}</h2>
+                            {billBatchesWorking && (
+                                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600">
+                                    <LoadingSpinner className="h-3.5 w-3.5" />
+                                    Generating… (runs in the background — keep the queue worker running)
+                                </span>
+                            )}
+                        </div>
+                    </CardHeader>
+                    <CardBody className="flex flex-col gap-4">
+                        {billBatches.map((batch) => {
+                            const working = batch.status === 'queued' || batch.status === 'processing';
+                            const tone =
+                                batch.status === 'completed'
+                                    ? 'green'
+                                    : batch.status === 'partial'
+                                      ? 'yellow'
+                                      : batch.status === 'failed'
+                                        ? 'red'
+                                        : batch.status === 'cancelled'
+                                          ? 'slate'
+                                          : 'blue';
+                            return (
+                                <div key={batch.uuid} className="rounded-lg border border-slate-200 p-3">
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <Badge tone={tone}>
+                                            {working ? (
+                                                <IconClock size={12} className="mr-1 inline" stroke={2} />
+                                            ) : batch.status === 'completed' ? (
+                                                <IconCircleCheck size={12} className="mr-1 inline" stroke={2} />
+                                            ) : (
+                                                <IconAlertTriangle size={12} className="mr-1 inline" stroke={2} />
+                                            )}
+                                            {batch.status}
+                                        </Badge>
+                                        <span className="text-xs text-slate-500">
+                                            {batch.total_bills} bills · {batch.total_zones} zones · {batch.template} ×{batch.density}
+                                        </span>
+                                        <div className="ml-auto flex items-center gap-1">
+                                            {working ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => cancelBillBatch(batch.uuid)}
+                                                    className="rounded-md px-2 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-50"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => clearBillBatch(batch.uuid)}
+                                                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50"
+                                                >
+                                                    <IconTrash size={13} stroke={1.75} />
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {batch.error_message && (
+                                        <p className="mb-2 text-xs text-red-600">{batch.error_message}</p>
+                                    )}
+
+                                    {working ? (
+                                        <p className="text-xs text-slate-400">
+                                            The PDFs are being rendered in the background. This panel refreshes itself.
+                                        </p>
+                                    ) : batch.status === 'cancelled' ? (
+                                        <p className="text-xs text-slate-400">
+                                            Run cancelled — its PDFs were discarded. Start a new generation when ready.
+                                        </p>
+                                    ) : batch.files.length === 0 ? (
+                                        <p className="text-xs text-slate-400">No artifacts were produced.</p>
+                                    ) : (
+                                        <div className="flex flex-col gap-1">
+                                            {batch.files.map((file) => (
+                                                <a
+                                                    key={file.uuid}
+                                                    href={file.download_url}
+                                                    download
+                                                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50"
+                                                >
+                                                    {file.kind === 'bulk' ? (
+                                                        <IconLayoutGrid size={16} stroke={1.75} />
+                                                    ) : file.kind === 'zip' ? (
+                                                        <IconFileTypeZip size={16} stroke={1.75} />
+                                                    ) : (
+                                                        <IconReceipt2 size={16} stroke={1.75} />
+                                                    )}
+                                                    <span>
+                                                        {file.kind === 'bulk'
+                                                            ? 'All zones — single bulk PDF'
+                                                            : file.kind === 'zip'
+                                                              ? 'All per-zone PDFs (ZIP)'
+                                                              : `Zone: ${file.zone_name ?? 'Unzoned'}`}
+                                                    </span>
+                                                    <span className="text-xs font-normal text-slate-400">
+                                                        {file.bill_count} bills
+                                                        {file.page_count ? ` · ${file.page_count}p` : ''} ·{' '}
+                                                        {formatBytes(file.size_bytes)}
+                                                    </span>
+                                                </a>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </CardBody>
+                </Card>
+            )}
 
             <div className="animate-fade-up" style={{ animationDelay: '0.3s' }}>
                 {manuscripts.data.length === 0 ? (
@@ -323,7 +613,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                         <Td>{formattedBill}</Td>
                                         <Td>{formattedArrears}</Td>
                                         <Td>{formattedCredit}</Td>
-                                        <Td>{manuscript.payment_expiration ?? '—'}</Td>
+                                        <Td>{prepaidCoverageLabel(manuscript)}</Td>
                                         <Td>{formattedTotalBill}</Td>
                                         <Td>
                                             <StatusBadge status={manuscript.status} />
@@ -334,14 +624,12 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                                 pre-existing Send Bill action alongside the new Adjust Arrears
                                                 entry, one dropdown per row, distinctly labeled. */}
                                             <Dropdown label={`Actions for ${manuscript.customer_name}`}>
-                                                <ArrearsAdjustmentModal
-                                                    customer={arrearsCustomer}
-                                                    trigger={(open) => (
-                                                        <DropdownItem onClick={open} icon={<IconScale size={16} stroke={1.75} />}>
-                                                            Adjust Arrears
-                                                        </DropdownItem>
-                                                    )}
-                                                />
+                                                <DropdownItem
+                                                    onClick={() => setAdjustCustomer(arrearsCustomer)}
+                                                    icon={<IconScale size={16} stroke={1.75} />}
+                                                >
+                                                    Adjust Arrears
+                                                </DropdownItem>
                                                 {canSendBill && (
                                                     <>
                                                         <DropdownDivider />
@@ -361,6 +649,16 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                                                 icon={<IconBrandWhatsapp size={16} stroke={1.75} />}
                                                             >
                                                                 Send Bill
+                                                            </DropdownItem>
+                                                        ) : manuscript.status !== 'active' ? (
+                                                            // A null wa_link for a non-active customer is the
+                                                            // server refusing to send a bill (owner decision,
+                                                            // 2026-08 — BillNotificationService::composeMessage()),
+                                                            // NOT a missing phone. Say so plainly; the server
+                                                            // refusal in ManuscriptController::sendBill() stays
+                                                            // the real guard.
+                                                            <DropdownItem disabled icon={<IconBrandWhatsapp size={16} stroke={1.75} />}>
+                                                                Customer not active
                                                             </DropdownItem>
                                                         ) : (
                                                             <DropdownItem disabled icon={<IconBrandWhatsapp size={16} stroke={1.75} />}>
@@ -467,6 +765,19 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                     </Button>
                 </div>
             </Modal>
+
+            {/* Rendered here, outside the table/Dropdown, so clicking the
+                menu item (which closes the Dropdown) can't unmount it.
+                Keyed by uuid + only mounted while a target is selected, so
+                each open starts with a clean form for the right customer. */}
+            {adjustCustomer && (
+                <ArrearsAdjustmentModal
+                    key={adjustCustomer.uuid}
+                    customer={adjustCustomer}
+                    open
+                    onClose={() => setAdjustCustomer(null)}
+                />
+            )}
         </AppLayout>
     );
 }

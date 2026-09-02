@@ -16,7 +16,7 @@ description: >
 **Product name:** CNCMS (ShalomTech branding)
 **Operator:** SWECOM PLC
 **Location:** 3/Corners, Kumba 3, South West Region, Cameroon
-**Stack:** Laravel 13 (PHP 8.3) · PostgreSQL 16 · Stancl Tenancy (schema-per-tenant, single physical DB) · React + TypeScript + Inertia.js (web) · React Native/Expo (mobile, design stage — see `references/mobile-app-react-native.md`) · RESTful API (Sanctum) · runs locally at `127.0.0.1:8000`
+**Stack:** Laravel 13 (PHP **8.4** — the `php84` Herd binary; older docs say 8.3) · PostgreSQL **18** (standalone `C:\Program Files\PostgreSQL\18`, NOT Herd's bundled one; older docs say 16) · Stancl Tenancy (schema-per-tenant, single physical DB `cncms`) · React + TypeScript + Inertia.js (web) · React Native/Expo (mobile — partially built, see `references/mobile-app-react-native.md`) · RESTful API (Sanctum) · `QUEUE_CONNECTION=database` (needs a running `queue:work` for manuscript runs + bill generation) · runs locally at `127.0.0.1:8000` · deployment/hosting not started — see `references/deployment.md`
 **Payment channel:** MTN/Orange Mobile Money (MOMO) — numbers `676876509 / 672528022`
 **Reconnection fine:** 2,000 FCFA for late payers
 **Currency:** FCFA (Central African Franc)
@@ -462,6 +462,20 @@ All mutations are audit-logged. All responses use UUIDs for entity references.
   pattern for any new scheduled tasks.
 - Laravel Artisan commands follow the pattern `namespace:action` (e.g. `manuscript:calculate`,
   `expenditure:monthly-summary`).
+- **`YYYY-MM` period strings: parse with `Carbon::createFromFormat('!Y-m', $period)`, never a
+  bare `'Y-m'`.** A bare parse keeps today's day-of-month, so on the 29th–31st a short target
+  month rolls forward (a Sept bill generated Aug 31 was labelled "October"). A trailing
+  `->startOfMonth()` does not fix it — the overflow already happened. `Carbon::now()->format('Y-m')`
+  and `->addMonthNoOverflow()->format('Y-m')` are safe. Fixed session-wide in commit `c5e762de`;
+  see `references/bill-printing.md` §6.
+- **`job_batches` (Laravel `Bus::batch`) lives ONLY in the central schema**, never a tenant
+  schema. Inside tenancy, read/write it via
+  `DB::connection(config('tenancy.database.central_connection'))->table('job_batches')` — a bare
+  `Bus::findBatch()` / `DB::table('job_batches')` errors. See `App\Support\ResolvesCommandRunBatchProgress`
+  and `BillBatchService::cancelBusBatch()`.
+- **`php artisan tenants:prune-disposable`** drops every tenant NOT in the hard-coded
+  `['swecom','multimedia-digital-cable-network']` allowlist (dry-run by default, `--force` to
+  apply). Use it if killed disposable-tenant test runs leave orphan schemas in `cncms`.
 - The web admin panel uses Inertia.js + React + TypeScript (SSR with SPA feel, no separate API needed for page loads).
   The mobile agent app (design stage) will use React Native + Expo and call the REST API
   directly for data operations, with local SQLite (`expo-sqlite`) for offline storage — see
@@ -492,9 +506,13 @@ All mutations are audit-logged. All responses use UUIDs for entity references.
 - **Task scheduler (manuscript/bill scheduling, chunked jobs):** `references/task-scheduler.md`
 - **In-app notification system:** `references/in-app-notifications.md`
 - **Complaint Desk (web + mobile):** `references/complaint-desk.md`
-- **Prepaid-time preservation across suspend/disconnect:** `references/prepaid-pause-handling.md`
+- **Prepayment as draw-down credit (APPROVED direction, supersedes the freeze branch):** `references/prepayment-drawdown.md`
+- **Prepaid-time preservation across suspend/disconnect (SUPERSEDED by draw-down — do not build):** `references/prepaid-pause-handling.md`
 - **Arrears Adjustment (write-off) — maker-checker workflow, where to find it in the UI:** `references/arrears-adjustment.md`
 - **Backup & restore process (design, not yet implemented):** `references/backup-strategy.md`
+- **Bill printing — slips, the monthly register PDF/Excel, the N-up grid, async bulk generation (`BillBatch`), cancel/clear:** `references/bill-printing.md`
+- **Deployment / hosting prep + the unfinished landlord (platform) context — NEXT work session:** `references/deployment.md`
+- **SWECOM real-data migration into production (zones/customers/agents/payments/manuscripts imports) — planned, own session:** `references/swecom-data-migration.md`
 
 Note: this file and `.ai/skills/cncms-context/SKILL.md` are kept byte-identical; a third,
 older copy at `.ai/skills/cncms/cncms-context/` has drifted (different tenancy-model wording, a

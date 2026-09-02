@@ -40,6 +40,10 @@ final readonly class PaymentData
         public ?string $recordedByDevice = null,
         public ?string $localUuid = null,
         public ?string $collectedAt = null,
+        // Draw-down (references/prepayment-drawdown.md Q1): the agent's
+        // toggle — a months/yearly payment pays down outstanding arrears
+        // before buying prepaid months. Ignored for `monthly`.
+        public ?bool $clearArrearsFirst = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -54,6 +58,7 @@ final readonly class PaymentData
             recordedByDevice: $data['recorded_by_device'] ?? null,
             localUuid: $data['local_uuid'] ?? null,
             collectedAt: $data['collected_at'] ?? null,
+            clearArrearsFirst: array_key_exists('clear_arrears_first', $data) ? (bool) $data['clear_arrears_first'] : null,
         );
     }
 
@@ -69,6 +74,7 @@ final readonly class PaymentData
             'credit' => $this->credit,
             'frequency' => $this->frequency,
             'months' => $this->months,
+            'clear_arrears_first' => $this->clearArrearsFirst,
             'recorded_offline' => $this->recordedOffline,
             'recorded_by_device' => $this->recordedByDevice,
             'local_uuid' => $this->localUuid,

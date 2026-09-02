@@ -197,6 +197,24 @@ Applied via `php artisan tenants:migrate --force` against both existing tenants 
 `multimedia-digital-cable-network`, the second tenant from earlier self-registration testing) —
 verified via `Schema::hasTable('media')` inside `tenancy()->initialize()` for each.
 
+## 6b. `tech_number` and the tabbed-form save bug (fixed 2026-08-31, commit `4dd19ca6`)
+
+`companies.tech_number` (technical support phone, shown on bill slips as "Support: …") exists,
+is fillable, and is `nullable` in `UpdateCompanyRequest`. But `Settings/Company.tsx` split the
+form into five tabs and **conditionally rendered** each (`{activeSection === 'contact' && (…)}`).
+React unmounts the hidden tabs, so Inertia's `<Form method="patch">` serialized only the
+inputs currently on screen. Saving from the "Contact & Support" tab PATCHed just
+`email`/`phone`/`tech_number` — and `UpdateCompanyRequest` marks `name`, `location`,
+`reconnection_fine`, and `arrears_second_approval_threshold` (fields on *other* tabs) as
+`required`, so the save 422'd with "name is required" pointing at a field the user couldn't see,
+and nothing persisted.
+
+**Fix**: all tab sections stay mounted; visibility toggles via a `hidden` class. The full
+company payload always submits regardless of active tab — matching `Settings/Notifications.tsx`
+and `Settings/BillPrinting.tsx`. No backend change. **Any future tabbed settings form must do
+the same** — never conditionally render form sections that hold fields the submit needs.
+Covered by `tests/Feature/Web/SettingsCompanyTest.php`.
+
 ## 7. Authorization
 
 No new policy work was needed — `app/Policies/CompanyPolicy.php` already existed (`view()`: any
@@ -226,13 +244,9 @@ cannot save any Company Info field, logo included — covered by
 - `database/factories/CompanyFactory.php` had its `'logo' => null` line removed (the column no
   longer exists) — every existing test using `CompanyFactory` was re-verified passing after this.
 
-## 9. Incidental finding (not fixed — out of scope)
+## 9. Incidental finding — FIXED 2026-08-31
 
-While testing, `tests/Feature/Web/ManuscriptTest.php::test_manager_can_export_the_manuscript_register_as_a_pdf`
-was found to OOM (`Allowed memory size of 134217728 bytes exhausted`) against the **web**
-`App\Http\Controllers\ManuscriptController::export()` route. This reproduces identically on the
-pre-existing, unmodified `manuscript.blade.php` (verified via `git stash` before/after comparison)
-— it's a pre-existing bug: unlike `Api\ManuscriptController::export()`, the web controller never
-calls `ini_set('memory_limit', '1024M')` before rendering. Left unfixed here since
-`app/Http/Controllers/ManuscriptController.php` is outside this task's scope — worth a follow-up
-fix (mirror the API controller's `ini_set` call) whenever that file is next touched.
+The web `ManuscriptController::export()` register PDF used to OOM at 128M (unlike the API
+sibling it never called `ini_set('memory_limit', '1024M')`). Fixed as part of the register PDF
+work this cycle — the web controller now raises memory + time before rendering, and also
+supports `?orientation` and the Excel format. See `bill-printing.md` §3.

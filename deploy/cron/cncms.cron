@@ -1,0 +1,8 @@
+# /etc/cron.d/cncms  —  owner root, mode 644
+# Laravel scheduler (ticks routes/console.php — currently tasks:run-due
+# every 15 min) + nightly DB dump. Both run as the `cncms` user.
+
+PATH=/usr/local/bin:/usr/bin:/bin
+
+* * * * *   cncms   cd /var/www/cncms && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+15 3 * * *  cncms   /var/www/cncms/deploy/scripts/backup-db.sh >> /var/log/cncms-backup.log 2>&1

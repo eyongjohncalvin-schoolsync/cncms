@@ -22,11 +22,11 @@ class NotificationSettingPolicy
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('company.view');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('company.update');
     }
 }

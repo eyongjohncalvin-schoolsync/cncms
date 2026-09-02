@@ -56,11 +56,11 @@ export default function LandlordTenantsCreate() {
                                     className="rounded-lg px-3.5 py-2.5"
                                 />
 
-                                <div className="flex items-center gap-3 border-t border-slate-100 pt-4">
+                                <div className="flex flex-col-reverse items-center gap-3 border-t border-slate-100 pt-4 sm:flex-row">
                                     <Button
                                         type="submit"
                                         disabled={processing}
-                                        className="rounded-lg px-5 py-2.5 text-sm font-semibold"
+                                        className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
                                     >
                                         {processing && <LoadingSpinner className="mr-1.5 text-white" />}
                                         {processing ? 'Provisioning…' : 'Create Tenant'}

@@ -48,6 +48,14 @@ final readonly class ManuscriptCalculationResult
         public ?string $frozenReason,
         public Collection $processedPayments,
         public Collection $processedAdjustments,
+        // Draw-down credit (references/prepayment-drawdown.md): whole billing
+        // periods still covered by a months/yearly prepayment, and the rate
+        // it was bought at (reporting/refund only — a covered month is not
+        // charged, so the arithmetic never reads this). Both carry forward
+        // on the manuscript row. 0 / null for everyone not in a prepaid
+        // window.
+        public int $prepaidMonthsRemaining = 0,
+        public ?string $prepaidRate = null,
     ) {}
 
     /**
@@ -61,6 +69,8 @@ final readonly class ManuscriptCalculationResult
             'credit' => $this->credit,
             'total_bill' => $this->totalBill,
             'payment_expiration' => $this->paymentExpiration,
+            'prepaid_months_remaining' => $this->prepaidMonthsRemaining,
+            'prepaid_rate' => $this->prepaidRate,
         ];
     }
 }

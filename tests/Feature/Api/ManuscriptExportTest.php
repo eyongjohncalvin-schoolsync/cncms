@@ -96,6 +96,33 @@ class ManuscriptExportTest extends TestCase
         $response->assertHeader('content-type', 'application/pdf');
     }
 
+    /**
+     * Orientation mirrors the web export: optional, defaults to portrait,
+     * `landscape` opts into the wide layout, anything else is a 422.
+     */
+    public function test_export_orientation_defaults_to_portrait_and_validates(): void
+    {
+        $period = Carbon::now()->format('Y-m');
+        $customer = CustomerFactory::new()->create();
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+
+        $token = $this->tokenForRole('manager');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->get('/api/v1/manuscripts/export?period='.$period)
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->get('/api/v1/manuscripts/export?period='.$period.'&orientation=landscape')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->get('/api/v1/manuscripts/export?period='.$period.'&orientation=sideways')
+            ->assertStatus(422);
+    }
+
     public function test_agent_cannot_export_the_manuscript_register(): void
     {
         $period = Carbon::now()->format('Y-m');

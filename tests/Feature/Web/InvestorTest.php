@@ -60,7 +60,7 @@ class InvestorTest extends TestCase
         ['get', '/resources', 'ExpenditurePolicy::viewDashboard'],
         ['get', '/resources/expenditures/create', 'ExpenditurePolicy::create'],
         ['post', '/resources/categories', 'ExpenseCategoryPolicy::create'],
-        ['get', '/settings/users', 'TenantUserPolicy::viewAny'],
+        ['get', '/users', 'TenantUserPolicy::viewAny'],
         ['get', '/settings/command-runs', 'CommandRunPolicy::viewAny'],
         ['patch', '/settings/company', 'UpdateCompanyRequest::authorize (CompanyPolicy::update)'],
         ['get', '/audit/logs', 'AuditLogPolicy::viewAny'],
@@ -267,9 +267,9 @@ class InvestorTest extends TestCase
     }
 
     // -----------------------------------------------------------------
-    // Admin grant/revoke UI (Settings/Users.tsx's per-user checkbox — see
-    // app/Http/Controllers/SettingsUserController.php::update() and
-    // UpdateTenantUserRequest, mirroring the can_record_payments precedent).
+    // Admin grant/revoke UI (Users Control Center's per-user checkbox — see
+    // app/Http/Controllers/UsersControlCenter/UserController.php::update()
+    // and UpdateTenantUserRequest, mirroring the can_record_payments precedent).
     // -----------------------------------------------------------------
 
     public function test_super_can_grant_and_then_revoke_investor_status_with_the_audit_trail_stamped(): void
@@ -280,9 +280,9 @@ class InvestorTest extends TestCase
 
         $tenantUser = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
 
-        $response = $this->patch("/settings/users/{$tenantUser->id}", ['is_investor' => true]);
+        $response = $this->patch("/users/{$tenantUser->id}", ['is_investor' => true]);
 
-        $response->assertRedirect('/settings/users');
+        $response->assertRedirect('/users');
         $response->assertSessionHas('success');
 
         $fresh = TenantUser::query()->find($tenantUser->id);
@@ -291,10 +291,10 @@ class InvestorTest extends TestCase
         $this->assertNotNull($fresh->investor_granted_at);
 
         // Revoking clears the grant AND the audit trail — mirrors
-        // SettingsUserController::update()'s defensive can_record_payments
+        // UserController::update()'s defensive can_record_payments
         // clear-on-role-change, applied here to is_investor's own toggle.
-        $revokeResponse = $this->patch("/settings/users/{$tenantUser->id}", ['is_investor' => false]);
-        $revokeResponse->assertRedirect('/settings/users');
+        $revokeResponse = $this->patch("/users/{$tenantUser->id}", ['is_investor' => false]);
+        $revokeResponse->assertRedirect('/users');
 
         $revoked = TenantUser::query()->find($tenantUser->id);
         $this->assertFalse($revoked->is_investor);
@@ -310,7 +310,7 @@ class InvestorTest extends TestCase
 
         $tenantUser = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
 
-        $this->patch("/settings/users/{$tenantUser->id}", ['is_investor' => true])->assertForbidden();
+        $this->patch("/users/{$tenantUser->id}", ['is_investor' => true])->assertForbidden();
 
         $this->assertFalse(TenantUser::query()->find($tenantUser->id)->is_investor);
     }
@@ -338,7 +338,7 @@ class InvestorTest extends TestCase
         // (see InteractsWithTenantRoles's doc comment), so pre-flipping
         // their own role to 'manager' before the request would make them
         // unable to authorize the request at all.
-        $response = $this->patch("/settings/users/{$tenantUser->id}", ['role' => 'manager', 'is_investor' => true]);
+        $response = $this->patch("/users/{$tenantUser->id}", ['role' => 'manager', 'is_investor' => true]);
 
         $response->assertSessionDoesntHaveErrors();
 

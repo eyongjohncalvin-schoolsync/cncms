@@ -106,13 +106,25 @@ final class ManuscriptPreRunReviewService
     }
 
     /**
-     * Rule 3: excluded only when payment_expiration is set AND still in the
-     * future as of $asOf — a null or already-elapsed expiration excludes
-     * nobody.
+     * Rule 3: excluded when the customer is inside a prepaid window — either
+     * the draw-down counter (references/prepayment-drawdown.md:
+     * prepaid_months_remaining > 0) OR the legacy calendar freeze
+     * (payment_expiration set and still future as of $asOf). Null / elapsed
+     * / zero on both excludes nobody.
      */
     private function coveredByPrepaidWindow(Customer $customer, Carbon $asOf): bool
     {
-        $expiration = $customer->latestManuscript?->payment_expiration;
+        $manuscript = $customer->latestManuscript;
+
+        if ($manuscript === null) {
+            return false;
+        }
+
+        if ((int) $manuscript->prepaid_months_remaining > 0) {
+            return true;
+        }
+
+        $expiration = $manuscript->payment_expiration;
 
         return $expiration !== null && Carbon::parse($expiration)->greaterThan($asOf);
     }

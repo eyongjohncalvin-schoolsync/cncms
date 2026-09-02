@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
-    'customer_id', 'amount', 'credit', 'frequency', 'expiration_date', 'months',
+    'customer_id', 'amount', 'credit', 'frequency', 'expiration_date', 'months', 'prepaid_rate', 'clear_arrears_first',
     'verification_status', 'processed_at', 'processed_period', 'recorded_offline', 'recorded_by_device', 'local_uuid',
     // The field agent's actual offline-collection timestamp — see the
     // add_collected_at_to_payments_table migration and
@@ -43,6 +43,8 @@ class Payment extends Model
         return [
             'amount' => 'decimal:2',
             'credit' => 'decimal:2',
+            'prepaid_rate' => 'decimal:2',
+            'clear_arrears_first' => 'boolean',
             'expiration_date' => 'date',
             'processed_at' => 'datetime',
             'collected_at' => 'datetime',
@@ -58,6 +60,19 @@ class Payment extends Model
     public function verification(): HasOne
     {
         return $this->hasOne(PaymentVerification::class);
+    }
+
+    /**
+     * The business-issued receipt for this payment (Wave 2 of
+     * docs/plans/payment-receipts-and-whatsapp.md). At most one row —
+     * `payment_receipts.payment_id` is UNIQUE — auto-issued by
+     * App\Services\PaymentVerificationService::verify() on approval, voided
+     * (never deleted) on a later rejection. Distinct from verification()'s
+     * `receipt_photo_path`, which is proof-of-payment evidence.
+     */
+    public function receipt(): HasOne
+    {
+        return $this->hasOne(PaymentReceipt::class);
     }
 
     /**

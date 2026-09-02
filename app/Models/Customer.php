@@ -13,17 +13,28 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * `status_changed_at`/`prepaid_paused` back the prepaid-time preservation
  * feature — see .claude/skills/cncms-context/references/prepaid-pause-handling.md
  * and App\Services\CustomerStatusService, the only writer of either column.
+ *
+ * SoftDeletes backs customer archiving (customer-deletion deliberation,
+ * 2026-08-29) — the first and only soft-deleting model in the app. A
+ * customer with billing history is archived, never hard-deleted; the
+ * SoftDeletes global scope drops archived customers from every ordinary
+ * Customer::query() (lists, manuscript runs, eligibility scans, the
+ * dashboard) while their payment/manuscript history stays physically
+ * intact. `archived_by`/`archived_reason` are set only by
+ * App\Services\CustomerService::archive()/restore() — deliberately NOT in
+ * Fillable, so a customer edit form can never touch them.
  */
 #[Fillable(['zone_id', 'name', 'location', 'bill', 'others', 'phone', 'description', 'level', 'status', 'status_reason', 'status_note', 'status_changed_at', 'prepaid_paused'])]
 #[RouteKey('uuid')]
 class Customer extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, HasUuid, ScopesRouteBindingToBranch, SoftDeletes;
 
     protected function casts(): array
     {
@@ -32,12 +43,25 @@ class Customer extends Model
             'others' => 'decimal:2',
             'status_changed_at' => 'datetime',
             'prepaid_paused' => 'boolean',
+            'deleted_at' => 'datetime',
         ];
     }
 
     public function zone(): BelongsTo
     {
         return $this->belongsTo(Zone::class);
+    }
+
+    /**
+     * Who archived this customer (customer-deletion deliberation) — a
+     * central `users` row (User pins itself to the central `pgsql`
+     * connection, so this cross-schema belongsTo resolves regardless of the
+     * active tenant schema, same as TenantUser::user()). Null unless the
+     * customer is currently archived.
+     */
+    public function archivedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'archived_by');
     }
 
     public function payments(): HasMany

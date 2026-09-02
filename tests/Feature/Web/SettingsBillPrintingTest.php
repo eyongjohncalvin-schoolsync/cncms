@@ -116,10 +116,28 @@ class SettingsBillPrintingTest extends TestCase
 
         $response = $this->patch('/settings/bill-printing', [
             'bill_template' => 'classic',
-            'bills_per_page' => 3,
+            'bills_per_page' => 5,
         ]);
 
         $response->assertSessionHasErrors('bills_per_page');
+    }
+
+    public function test_three_bills_per_page_is_accepted(): void
+    {
+        CompanyFactory::new()->create();
+        Company::forgetCache();
+
+        $this->actingAsRole('admin');
+
+        $response = $this->patch('/settings/bill-printing', [
+            'bill_template' => 'classic',
+            'bills_per_page' => 3,
+        ]);
+
+        $response->assertRedirect(route('settings.bill-printing.edit'));
+        $response->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('companies', ['bills_per_page' => 3]);
     }
 
     /**
@@ -235,7 +253,10 @@ class SettingsBillPrintingTest extends TestCase
         Company::forgetCache();
 
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+        // ->active(): CustomerController::printBill() now refuses a
+        // non-active customer (ManuscriptService::billData()), and the
+        // factory default status is random (~20% 'disconnected').
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id, 'bill' => 2500]);
         ManuscriptFactory::new()
             ->forPeriod(now()->format('Y-m'))
             ->create(['customer_id' => $customer->id, 'bill' => 2500, 'total_bill' => 2500]);

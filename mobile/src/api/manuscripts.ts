@@ -38,13 +38,15 @@ export function currentPeriod(): string {
  * mobile-app-react-native.md §13) found a "latest manuscript of any period"
  * relationship silently trusting 1,509 bogus future-dated rows as "current"
  * for every customer, corrupting arrears/total_bill figures app-wide. This
- * function always sends `period` as today's real calendar month
- * (`currentPeriod()`), even though the server
+ * function always sends an explicit `period` — either today's real calendar
+ * month (`currentPeriod()`, the default) or a specific past month the
+ * manuscript screen's month stepper resolved via real calendar arithmetic
+ * (bounded to not-future) — even though the server
  * (App\Services\ManuscriptService::scopedFilters()) independently
- * defaults+validates to the exact same value when `period` is omitted —
- * belt-and-braces: this client is explicit about what period it means
- * rather than silently relying on a server default it never looks at, and
- * this is a plain calendar computation, never "whatever sorts highest."
+ * defaults+validates when `period` is omitted. Belt-and-braces: this client
+ * is explicit about what period it means rather than silently relying on a
+ * server default it never looks at, and every value it sends is a plain
+ * calendar computation, never "whatever sorts highest."
  *
  * ZONE SCOPING — deliberately sends no zone_uuid. The server force-scopes
  * an `agent` caller to their own zone regardless of any zone_uuid sent

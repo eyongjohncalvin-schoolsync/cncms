@@ -15,6 +15,11 @@ Route::get('manuscripts/export', [ManuscriptController::class, 'export'])
     ->name('manuscripts.export')
     ->middleware('throttle:exports');
 
+// Bill generation moved to an asynchronous (queued) Bus::batch that writes
+// downloadable PDF artifacts — the synchronous GET /manuscripts/bills (which
+// rendered every bill inside the web request behind a 1024M/180s ceiling)
+// is gone. See routes/web/bills.php and App\Services\BillBatchService.
+
 Route::post('manuscripts/calculate', [ManuscriptController::class, 'calculate'])->name('manuscripts.calculate');
 
 // The new one-click "just-triggered, watch it compute, then review and

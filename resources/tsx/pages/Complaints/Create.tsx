@@ -163,7 +163,7 @@ export default function ComplaintsCreate({ customers }: ComplaintsCreateProps) {
                                 <select
                                     value={data.customer_uuid}
                                     onChange={(e) => setData('customer_uuid', e.target.value)}
-                                    className={`rounded-lg border-0 bg-white px-3.5 py-2 text-sm text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-inset focus:ring-blue-600 ${
+                                    className={`rounded-lg border-0 bg-white px-3.5 py-2.5 text-base text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:py-2 sm:text-sm ${
                                         errors.customer_uuid ? 'ring-red-400' : ''
                                     }`}
                                 >
@@ -243,7 +243,7 @@ export default function ComplaintsCreate({ customers }: ComplaintsCreateProps) {
                                     value={data.description}
                                     onChange={(e) => setData('description', e.target.value)}
                                     placeholder="Anything that helps whoever picks this up…"
-                                    className="rounded-lg border-0 bg-white px-3.5 py-2 text-sm text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600"
+                                    className="rounded-lg border-0 bg-white px-3.5 py-2 text-base text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm"
                                 />
                             )}
                             {errors.description && <p className="text-xs text-red-600">{errors.description}</p>}
@@ -284,13 +284,13 @@ export default function ComplaintsCreate({ customers }: ComplaintsCreateProps) {
                             </span>
                         </label>
 
-                        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-                            <Link href="/complaints">
-                                <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                        <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+                            <Link href="/complaints" className="w-full sm:w-auto">
+                                <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                     Cancel
                                 </Button>
                             </Link>
-                            <Button type="submit" disabled={processing} className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                            <Button type="submit" disabled={processing} className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                 {processing ? <LoadingSpinner className="h-4 w-4" /> : <IconMessageReport size={16} stroke={2} />}
                                 {processing ? 'Submitting…' : 'Submit Complaint'}
                             </Button>

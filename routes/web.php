@@ -19,6 +19,11 @@ require __DIR__.'/web/workspace.php';
 // routes/web/landlord.php's doc comment.
 require __DIR__.'/web/landlord.php';
 
+// Public, signed, unauthenticated receipt-PDF link — its own top-level
+// require for the same reason as landlord.php above: it must NOT go through
+// ['auth', 'tenant.web']. See that file's doc comment.
+require __DIR__.'/web/payment-receipts-public.php';
+
 /*
 |--------------------------------------------------------------------------
 | Tenant-scoped Inertia pages
@@ -43,6 +48,7 @@ require __DIR__.'/web/landlord.php';
 Route::middleware(['auth', 'tenant.web', 'throttle:web'])->group(function () {
     require __DIR__.'/web/dashboard.php';
     require __DIR__.'/web/manuscripts.php';
+    require __DIR__.'/web/bills.php';
     require __DIR__.'/web/agents.php';
     require __DIR__.'/web/payments.php';
     require __DIR__.'/web/customers.php';
@@ -50,10 +56,12 @@ Route::middleware(['auth', 'tenant.web', 'throttle:web'])->group(function () {
     require __DIR__.'/web/zones.php';
     require __DIR__.'/web/branches.php';
     require __DIR__.'/web/settings.php';
+    require __DIR__.'/web/users.php';
     require __DIR__.'/web/audit.php';
     require __DIR__.'/web/resources.php';
     require __DIR__.'/web/reports.php';
     require __DIR__.'/web/notifications.php';
     require __DIR__.'/web/complaints.php';
     require __DIR__.'/web/arrears-adjustments.php';
+    require __DIR__.'/web/agent-app.php';
 });
