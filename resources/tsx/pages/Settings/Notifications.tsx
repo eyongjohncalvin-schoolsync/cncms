@@ -189,7 +189,7 @@ export default function SettingsNotifications({ settings, bulk_whatsapp_entitled
                                 </CardBody>
                             </Card>
 
-                            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
                                     {recentlySuccessful && (
                                         <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 animate-fade-up">
@@ -207,7 +207,7 @@ export default function SettingsNotifications({ settings, bulk_whatsapp_entitled
                                 <Button
                                     type="submit"
                                     disabled={processing}
-                                    className="rounded-xl px-6 py-2.5 text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-lg shadow-slate-900/10"
+                                    className="w-full rounded-xl px-6 py-2.5 text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-lg shadow-slate-900/10 sm:w-auto"
                                 >
                                     {processing && <LoadingSpinner className="mr-2 text-white" />}
                                     {processing ? 'Saving…' : 'Save Changes'}

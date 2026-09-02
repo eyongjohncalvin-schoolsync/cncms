@@ -303,7 +303,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                     <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">Manuscripts — Current Period</h1>
                     <p className="mt-1 text-sm text-slate-500">Billing snapshot, arrears and collection status for every customer.</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     {canExport && (
                         <Dropdown
                             align="end"
@@ -449,7 +449,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                         <option value="disconnected">Disconnected</option>
                         <option value="suspended">Suspended</option>
                     </SelectInput>
-                    <div className="flex items-end gap-2">
+                    <div className="flex w-full items-end gap-2 sm:w-auto">
                         <TextInput
                             id="search"
                             label="Search"

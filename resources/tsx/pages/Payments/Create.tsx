@@ -426,13 +426,13 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
                             error={errors.credit}
                         />
 
-                        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-                            <Link href="/payments">
-                                <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                        <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+                            <Link href="/payments" className="w-full sm:w-auto">
+                                <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                     Cancel
                                 </Button>
                             </Link>
-                            <Button type="submit" disabled={processing} className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                            <Button type="submit" disabled={processing} className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                 {processing && <LoadingSpinner className="h-4 w-4" />}
                                 {processing ? 'Saving…' : 'Record Payment'}
                             </Button>
@@ -707,20 +707,20 @@ function BulkPaymentForm({ customers }: { customers: Customer[] }) {
                         />
                     )}
 
-                    <div className="flex items-center justify-between border-t border-slate-200 pt-4">
+                    <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-sm text-slate-600">
                             {selected.size} payment{selected.size === 1 ? '' : 's'} · total {formatCurrency(String(totalAmount))}
                         </p>
-                        <div className="flex gap-2">
-                            <Link href="/payments">
-                                <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                            <Link href="/payments" className="w-full sm:w-auto">
+                                <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                     Cancel
                                 </Button>
                             </Link>
                             <Button
                                 type="submit"
                                 disabled={processing || selected.size === 0}
-                                className="rounded-lg px-5 py-2.5 text-sm font-semibold"
+                                className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
                             >
                                 {processing && <LoadingSpinner className="h-4 w-4" />}
                                 {processing ? 'Saving…' : `Record ${selected.size || ''} Payments`}

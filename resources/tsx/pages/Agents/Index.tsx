@@ -93,13 +93,13 @@ export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps
                 className="mb-4 animate-fade-up rounded-lg border border-slate-200 bg-slate-50 p-4"
                 style={{ animationDelay: '0.08s' }}
             >
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                     <SelectInput
                         id="zone"
                         label="Zone"
                         value={filters.zone_uuid ?? ''}
                         onChange={(e) => applyFilter({ zone_uuid: e.target.value || undefined })}
-                        className="rounded-lg bg-white"
+                        className="w-full rounded-lg bg-white sm:w-auto"
                     >
                         <option value="">All zones</option>
                         {zones.map((zone) => (
@@ -113,7 +113,7 @@ export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps
                         label="Status"
                         value={filters.status ?? ''}
                         onChange={(e) => applyFilter({ status: e.target.value || undefined })}
-                        className="rounded-lg bg-white"
+                        className="w-full rounded-lg bg-white sm:w-auto"
                     >
                         <option value="">All statuses</option>
                         <option value="active">Active</option>

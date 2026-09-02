@@ -113,7 +113,7 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                         any authenticated tenant user, same as ComplaintPolicy::
                         create()), so it renders unconditionally here, unlike
                         Edit/Delete Payment which stay behind can_manage/can_delete. */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <ArrearsAdjustmentModal customer={arrearsCustomer} />
                         {can_manage && (
                             <Link
@@ -227,8 +227,8 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                     This permanently removes the payment record{payment.verification ? ' and its verification details' : ''}. This cannot be
                     undone.
                 </p>
-                <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
-                    <Button type="button" variant="secondary" onClick={closeDeleteModal} disabled={destroying}>
+                <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="secondary" onClick={closeDeleteModal} disabled={destroying} className="w-full sm:w-auto">
                         Cancel
                     </Button>
                     <Button
@@ -236,7 +236,7 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                         variant="danger"
                         onClick={submitDelete}
                         disabled={destroying}
-                        className="rounded-lg px-4 py-2.5 text-sm font-semibold"
+                        className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold sm:w-auto"
                     >
                         {destroying && <LoadingSpinner className="h-4 w-4" />}
                         {destroying ? 'Deleting…' : 'Delete'}

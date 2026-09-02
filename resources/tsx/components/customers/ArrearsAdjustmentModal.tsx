@@ -270,7 +270,7 @@ export function ArrearsAdjustmentModal({
                         ))}
                     </SelectInput>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <SelectInput
                             id="direction"
                             label="Direction"
@@ -337,7 +337,7 @@ export function ArrearsAdjustmentModal({
                             value={data.reason_note}
                             onChange={(e) => setData('reason_note', e.target.value)}
                             placeholder="Explain why this correction is needed — this is a permanent audit record."
-                            className={`rounded-lg border-0 px-3 py-2 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-purple-600 ${
+                            className={`rounded-lg border-0 px-3 py-2 text-base text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-purple-600 sm:text-sm ${
                                 errors.reason_note ? 'ring-red-400 focus:ring-red-500' : ''
                             }`}
                         />
@@ -360,19 +360,19 @@ export function ArrearsAdjustmentModal({
                         </div>
                     )}
 
-                    <div className="sticky -bottom-5 -mx-5 -mb-5 mt-2 flex justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4">
+                    <div className="sticky -bottom-5 -mx-5 -mb-5 mt-2 flex flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:justify-end">
                         <button
                             type="button"
                             onClick={close}
                             disabled={processing}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-all duration-150 hover:bg-slate-50 hover:ring-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-all duration-150 hover:bg-slate-50 hover:ring-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
                             disabled={processing}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-purple-600/20 transition-all duration-150 hover:bg-purple-700 hover:shadow-purple-600/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-purple-600/20 transition-all duration-150 hover:bg-purple-700 hover:shadow-purple-600/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98] sm:w-auto"
                         >
                             {processing && <LoadingSpinner className="h-4 w-4" />}
                             Submit Request

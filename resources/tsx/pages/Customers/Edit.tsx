@@ -230,7 +230,7 @@ export default function CustomersEdit({ customer, zones }: CustomersEditProps) {
                             </Card>
 
                             {/* Action Bar */}
-                            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                                 <Link
                                     href={`/customers/${customer.uuid}`}
                                     className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700"
@@ -238,16 +238,16 @@ export default function CustomersEdit({ customer, zones }: CustomersEditProps) {
                                     <IconArrowLeft size={16} stroke={1.75} />
                                     Back to Profile
                                 </Link>
-                                <div className="flex items-center gap-3">
-                                    <Link href={`/customers/${customer.uuid}`}>
-                                        <Button type="button" variant="secondary" className="rounded-xl px-5 py-2.5 text-sm font-medium">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                    <Link href={`/customers/${customer.uuid}`} className="w-full sm:w-auto">
+                                        <Button type="button" variant="secondary" className="w-full rounded-xl px-5 py-2.5 text-sm font-medium sm:w-auto">
                                             Cancel
                                         </Button>
                                     </Link>
                                     <Button
                                         type="submit"
                                         disabled={processing}
-                                        className="rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800"
+                                        className="w-full rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 sm:w-auto"
                                     >
                                         {processing && <LoadingSpinner className="mr-2 text-white" />}
                                         {processing ? 'Saving…' : 'Save Changes'}

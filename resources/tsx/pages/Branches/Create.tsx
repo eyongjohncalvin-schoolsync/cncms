@@ -25,13 +25,13 @@ export default function BranchesCreate() {
                             <>
                                 <TextInput id="name" name="name" label="Name" error={errors.name} required />
 
-                                <div className="flex items-center gap-3 border-t border-slate-200 pt-4">
-                                    <Button type="submit" disabled={processing} className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                                <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center">
+                                    <Button type="submit" disabled={processing} className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                         {processing && <LoadingSpinner className="text-white" />}
                                         {processing ? 'Creating…' : 'Create Branch'}
                                     </Button>
-                                    <Link href="/branches">
-                                        <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                                    <Link href="/branches" className="w-full sm:w-auto">
+                                        <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                             Cancel
                                         </Button>
                                     </Link>

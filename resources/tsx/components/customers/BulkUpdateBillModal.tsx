@@ -286,13 +286,13 @@ export function BulkUpdateBillModal({
                         </div>
                     )}
 
-                    <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                    <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
                         <Button
                             type="button"
                             variant="secondary"
                             onClick={close}
                             disabled={applying}
-                            className="rounded-lg px-4 py-2.5 text-sm font-semibold"
+                            className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold sm:w-auto"
                         >
                             Cancel
                         </Button>
@@ -300,7 +300,7 @@ export function BulkUpdateBillModal({
                             type="button"
                             onClick={apply}
                             disabled={applying || !preview || preview.preview.length === 0}
-                            className="rounded-lg px-4 py-2.5 text-sm font-semibold"
+                            className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold sm:w-auto"
                         >
                             {applying && <LoadingSpinner className="h-4 w-4" />}
                             Apply to {applyCount} Customer{applyCount === 1 ? '' : 's'}

@@ -23,7 +23,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
             <input
                 ref={ref}
                 id={id}
-                className={`rounded-lg border-0 bg-white px-3.5 py-2 text-sm text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 transition-shadow duration-150 placeholder:text-slate-400 hover:ring-slate-400 focus:shadow-none focus:ring-2 focus:ring-inset focus:ring-blue-600 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 disabled:ring-slate-200 ${
+                className={`w-full rounded-lg border-0 bg-white px-3.5 py-2.5 text-base text-slate-900 shadow-xs ring-1 ring-inset ring-slate-300 transition-shadow duration-150 placeholder:text-slate-400 hover:ring-slate-400 focus:shadow-none focus:ring-2 focus:ring-inset focus:ring-blue-600 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 disabled:ring-slate-200 sm:py-2 sm:text-sm ${
                     error ? 'ring-red-400 hover:ring-red-400 focus:ring-red-500' : ''
                 } ${className}`}
                 {...props}

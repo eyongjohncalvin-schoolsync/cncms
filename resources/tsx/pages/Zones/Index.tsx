@@ -89,7 +89,7 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
             <ImportReportCard report={flash.import} expectedType="zones" />
 
             <div
-                className="animate-fade-up mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4"
+                className="animate-fade-up mb-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:flex-wrap sm:items-end"
                 style={{ animationDelay: '0.05s' }}
             >
                 <TextInput

@@ -13,7 +13,7 @@ import type { CommandRunComputedResultSummary } from '@/types';
  */
 export function ManuscriptRunSummary({ summary }: { summary: CommandRunComputedResultSummary }) {
     return (
-        <dl className="grid grid-cols-2 gap-3 text-sm">
+        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <div>
                 <dt className="text-xs text-slate-500">Customers processed</dt>
                 <dd className="font-medium text-slate-900">{summary.customers_processed}</dd>

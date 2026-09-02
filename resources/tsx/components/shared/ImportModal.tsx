@@ -87,11 +87,11 @@ export function ImportModal({ open, onClose, action, entityLabel, columnsHelp, t
                     className="rounded-lg text-sm text-slate-600 ring-1 ring-inset ring-slate-300 transition-shadow duration-150 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:ring-slate-400 hover:file:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                 />
                 {errors.file && <p className="text-xs text-red-600">{errors.file}</p>}
-                <div className="mt-2 flex justify-end gap-2">
-                    <Button type="button" variant="secondary" onClick={handleClose} disabled={processing}>
+                <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="secondary" onClick={handleClose} disabled={processing} className="w-full sm:w-auto">
                         Cancel
                     </Button>
-                    <Button type="submit" disabled={processing || !fileName}>
+                    <Button type="submit" disabled={processing || !fileName} className="w-full sm:w-auto">
                         {processing ? <LoadingSpinner className="h-4 w-4" /> : <IconUpload size={16} stroke={2} />}
                         {processing ? 'Importing…' : 'Import'}
                     </Button>

@@ -159,13 +159,13 @@ function ActivityTab({
         <>
             <Card className="animate-fade-up mb-4 p-4" style={{ animationDelay: '80ms' }}>
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Filters</p>
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                     <SelectInput
                         id="filter-table"
                         label="Table"
                         value={filters.table_name ?? ''}
                         onChange={(e) => apply({ table_name: e.target.value || null })}
-                        className="min-w-[10rem]"
+                        className="w-full sm:w-auto sm:min-w-[10rem]"
                     >
                         <option value="">All tables</option>
                         {tables.map((table) => (
@@ -180,7 +180,7 @@ function ActivityTab({
                         label="User"
                         value={filters.user_uuid ?? ''}
                         onChange={(e) => apply({ user_uuid: e.target.value || null })}
-                        className="min-w-[10rem]"
+                        className="w-full sm:w-auto sm:min-w-[10rem]"
                     >
                         <option value="">All users</option>
                         {users.map((user) => (
@@ -206,7 +206,7 @@ function ActivityTab({
                         onChange={(e) => apply({ to: e.target.value || null })}
                     />
 
-                    <div className="flex flex-1 items-end gap-2">
+                    <div className="flex w-full items-end gap-2 sm:flex-1">
                         <TextInput
                             id="filter-search"
                             label="Search"
@@ -214,7 +214,7 @@ function ActivityTab({
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
-                            className="min-w-[16rem]"
+                            className="w-full sm:min-w-[16rem]"
                         />
                         <Button type="button" variant="secondary" onClick={submitSearch} className="h-[38px]">
                             <IconSearch size={15} stroke={1.75} />

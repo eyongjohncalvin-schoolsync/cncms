@@ -114,7 +114,7 @@ export function ArchiveCustomerModal({ open, onClose, customer }: ArchiveCustome
                         value={data.name}
                         onChange={(e) => setData('name', e.target.value)}
                         placeholder={customer.name}
-                        className={`rounded-lg border-0 px-3 py-2 text-sm text-slate-900 ring-1 ring-inset placeholder:text-slate-400 focus:ring-2 focus:ring-inset ${
+                        className={`rounded-lg border-0 px-3 py-2.5 text-base text-slate-900 ring-1 ring-inset placeholder:text-slate-400 focus:ring-2 focus:ring-inset sm:py-2 sm:text-sm ${
                             data.name.length > 0 && !nameMatches
                                 ? 'ring-red-400 focus:ring-red-500'
                                 : 'ring-slate-300 focus:ring-amber-600'
@@ -133,18 +133,18 @@ export function ArchiveCustomerModal({ open, onClose, customer }: ArchiveCustome
                         value={data.reason}
                         onChange={(e) => setData('reason', e.target.value)}
                         placeholder='e.g. "Moved out of Kumba 3, line cut Apr 2026, confirmed by agent Etienne." — this is a permanent audit record.'
-                        className={`rounded-lg border-0 px-3 py-2 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-amber-600 ${
+                        className={`rounded-lg border-0 px-3 py-2 text-base text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-amber-600 sm:text-sm ${
                             errors.reason ? 'ring-red-400 focus:ring-red-500' : ''
                         }`}
                     />
                     {errors.reason && <p className="text-xs text-red-600">{errors.reason}</p>}
                 </div>
 
-                <div className="flex justify-end gap-2">
-                    <Button type="button" variant="secondary" onClick={onClose}>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="secondary" onClick={onClose} className="w-full sm:w-auto">
                         Cancel
                     </Button>
-                    <Button type="submit" variant="warning" disabled={!canSubmit}>
+                    <Button type="submit" variant="warning" disabled={!canSubmit} className="w-full sm:w-auto">
                         Archive customer
                     </Button>
                 </div>

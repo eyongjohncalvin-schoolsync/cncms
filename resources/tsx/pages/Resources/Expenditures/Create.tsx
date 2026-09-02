@@ -85,20 +85,20 @@ export default function ExpendituresCreate({ categories }: ExpendituresCreatePro
                                         id="notes"
                                         name="notes"
                                         rows={3}
-                                        className={`rounded-md border-0 px-3 py-2 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 ${
+                                        className={`rounded-md border-0 px-3 py-2 text-base text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm ${
                                             errors.notes ? 'ring-red-400 focus:ring-red-500' : ''
                                         }`}
                                     />
                                     {errors.notes && <p className="text-xs text-red-600">{errors.notes}</p>}
                                 </div>
 
-                                <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
-                                    <Link href="/resources/expenditures">
-                                        <Button type="button" variant="secondary" className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                                <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-end">
+                                    <Link href="/resources/expenditures" className="w-full sm:w-auto">
+                                        <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                             Cancel
                                         </Button>
                                     </Link>
-                                    <Button type="submit" disabled={processing} className="rounded-lg px-5 py-2.5 text-sm font-semibold">
+                                    <Button type="submit" disabled={processing} className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                         {processing && <LoadingSpinner className="text-white" />}
                                         {processing ? 'Saving…' : 'Record Expense'}
                                     </Button>
