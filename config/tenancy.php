@@ -193,9 +193,15 @@ return [
     /**
      * Should tenancy routes be registered.
      *
-     * Tenancy routes include tenant asset routes. By default, this route is
-     * enabled. But it may be useful to disable them if you use external
-     * storage (e.g. S3 / Dropbox) or have a custom asset controller.
+     * Keep TRUE — this only controls Stancl's `stancl.tenancy.asset` route
+     * (serves tenant-scoped uploaded files; the dashboard and media URLs
+     * rely on it). It does NOT control `routes/tenant.php`, which is a
+     * separate, CUSTOM concern (App\Providers\TenancyServiceProvider::
+     * mapRoutes()). That file is deleted: CNCMS resolves tenancy from the
+     * authenticated user's membership, never the request domain, so the
+     * Stancl scaffold's `InitializeTenancyByDomain` smoke-test route is
+     * pure liability — it 500s on any host with no `domains` row (e.g. the
+     * production URL: "Tenant could not be identified on domain ...").
      */
     'routes' => true,
 

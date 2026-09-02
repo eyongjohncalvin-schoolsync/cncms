@@ -125,6 +125,18 @@ class TenancyServiceProvider extends ServiceProvider
 
     protected function mapRoutes()
     {
+        // CNCMS resolves tenancy from the authenticated user's tenant_users
+        // membership (App\Http\Middleware\ResolveTenant / ResolveTenantWeb),
+        // never from the request domain/subdomain/path. There are no
+        // domain-identified tenant routes — `routes/tenant.php` is gone and
+        // `config('tenancy.routes')` is false, so this is a no-op. Guarded
+        // both ways so a re-added stub file can't reintroduce
+        // `InitializeTenancyByDomain` (which 500s on any host with no
+        // `domains` row — e.g. the production URL).
+        if (! ($this->app['config']['tenancy.routes'] ?? true)) {
+            return;
+        }
+
         $this->app->booted(function () {
             if (file_exists(base_path('routes/tenant.php'))) {
                 Route::namespace(static::$controllerNamespace)
