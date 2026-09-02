@@ -25,6 +25,7 @@ use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
+use App\Support\TenantContext;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -54,6 +55,7 @@ class CustomerController extends Controller
         private readonly ZoneService $zones,
         private readonly CustomerImportService $customerImports,
         private readonly ArrearsAdjustmentService $arrearsAdjustments,
+        private readonly TenantContext $context,
     ) {}
 
     public function index(Request $request): Response
@@ -559,6 +561,13 @@ class CustomerController extends Controller
             ] : null,
             'recent_payments' => $customer->payments->map(fn (Payment $payment) => $this->shapePayment($payment))->all(),
             'arrears_adjustments' => $this->shapeArrearsAdjustments($customer),
+            // Gates the "Export full record" control in the page header
+            // (docs/plans/customer-record-export.md) — a full unredacted
+            // data dump, seeded super/admin only. The frontend also has the
+            // shared `auth.user.permissions` list; this prop mirrors the
+            // other `can_*` Show props (e.g. Payments/Show's
+            // can_issue_receipt) for consistency.
+            'can_export_record' => $this->context->can('customers.export_record'),
         ];
     }
 

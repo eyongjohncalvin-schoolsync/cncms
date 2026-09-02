@@ -473,6 +473,9 @@ export interface CustomerDetail extends Customer {
     manuscript: CustomerManuscriptSummary | null;
     recent_payments: CustomerRecentPayment[];
     arrears_adjustments: ArrearsAdjustment[];
+    /** Gates the "Export full record" header control — `customers.export_record`,
+     * seeded super/admin only (docs/plans/customer-record-export.md). */
+    can_export_record: boolean;
 }
 
 export interface Company {

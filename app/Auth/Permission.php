@@ -46,6 +46,18 @@ enum Permission: string
     case CustomersStatusBoard = 'customers.status_board';
     /** The arrears "flagged for non-payment" list — broader than the status board: agents see their own zone (CustomerPolicy::viewEligibilityBoard). */
     case CustomersEligibilityBoard = 'customers.eligibility_board';
+    /**
+     * The "Export full record" action on Customers/Show — a single
+     * downloadable PDF / multi-sheet XLSX bundling EVERYTHING CNCMS holds
+     * about one customer (profile, every payment + verification + receipt,
+     * every manuscript, arrears adjustments, messages, complaints, the full
+     * audit trail), for an auditor or a billing dispute. See
+     * App\Services\CustomerRecordExportService and
+     * docs/plans/customer-record-export.md. It is a complete, UNREDACTED
+     * data dump, so DefaultRolesSeeder seeds it to super + admin only — it
+     * is deliberately NOT in the manager / agent / worker sets.
+     */
+    case CustomersExportRecord = 'customers.export_record';
 
     // ---- Payments -----------------------------------------------------
     case PaymentsView = 'payments.view';

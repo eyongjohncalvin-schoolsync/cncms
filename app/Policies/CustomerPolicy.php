@@ -66,6 +66,22 @@ class CustomerPolicy
     }
 
     /**
+     * "Export full record" (docs/plans/customer-record-export.md) — a
+     * single downloadable PDF / multi-sheet XLSX bundling EVERYTHING CNCMS
+     * holds about this customer (profile, every payment + verification +
+     * receipt, every manuscript, arrears adjustments, messages, complaints,
+     * the full audit trail). It is a complete, UNREDACTED data dump for an
+     * auditor or a dispute, so `customers.export_record` is seeded
+     * super/admin only — deliberately narrower than the plain `view` gate.
+     * The route binds the customer ->withTrashed(), so this must also allow
+     * exporting an archived customer.
+     */
+    public function exportRecord(User $user, Customer $customer): bool
+    {
+        return $this->context->can('customers.export_record');
+    }
+
+    /**
      * Printing a customer's bill slip (business-rules.md section 3 /
      * api-spec.md section 9.1): role table row "Print bills" allows
      * super/admin/manager/agent — workers cannot print.

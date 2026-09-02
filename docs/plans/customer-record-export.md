@@ -5,6 +5,41 @@ entire system — we might need it for audit or verification."
 
 One agent, one wave. Mostly additive.
 
+## Status: ✅ DONE (awaiting coordinator commit)
+
+Built on branch `prepayment-drawdown-credit`:
+
+- **Permission** — `Permission::CustomersExportRecord = 'customers.export_record'`
+  added to the Customers area. Seeded **super + admin only** (`super` bypasses;
+  `admin` via `Permission::values()` for new tenants + idempotent tenant
+  migration `2026_09_05_000000_grant_customers_export_record_permission.php`
+  for existing schemas). `tenants:migrate` run — verified on `swecom`
+  (`role_permissions`: only `admin` carries the row).
+- **Service** — `app/Services/CustomerRecordExportService.php` `gather(Customer): array`,
+  one heavily-commented method per section, newest-first, eager-loaded.
+- **Controller** — `app/Http/Controllers/CustomerRecordExportController.php`
+  `pdf()` (dompdf `->download()`) + `data()` (multi-sheet XLSX via
+  `app/Exports/CustomerRecordExport.php` + generic `CustomerRecordSheet`).
+- **Routes** — `customers/{customer}/record-export/{pdf,xlsx}`, `throttle:exports`,
+  `->withTrashed()` (two named routes).
+- **Policy** — `CustomerPolicy::exportRecord()`.
+- **PDF view** — `resources/views/pdf/customer-record.blade.php` (A4 portrait,
+  company header matched to `bill.blade.php`, page-break per section).
+- **Frontend** — `Customers/Show.tsx` "Export Record" dropdown (As PDF / As
+  spreadsheet), gated on `customers.export_record`, shown for archived
+  customers too. Payload gains `can_export_record`.
+- **Sections gathered:** profile (all columns + zone/branch + soft-delete
+  state), payments (+ verifications + receipts), manuscripts (+ command run),
+  arrears_adjustments, messages, complaints (escalation level derived from
+  `complaint_escalations`), status_history (**no dedicated table** — derived
+  from `audit_logs` where `table_name='customers'` and `status` changed),
+  audit_trail (customer + its payments/manuscripts uuids, **capped at 500
+  most recent**, `truncated` flag + note in output), meta.
+- **Tests** — `tests/Feature/Web/CustomerRecordExportTest.php` (13 tests, 84
+  assertions, all green). Regression: `CustomerTest` (35), `RolePermissionResolutionTest`
+  (8), `RoleManagementTest` (13) all green. `tsc` clean (6 pre-existing
+  errors only), `npm run build` green.
+
 ## What it produces
 
 A single downloadable file bundling **everything CNCMS holds about one

@@ -18,9 +18,13 @@ import {
     IconCalendarTime,
     IconClipboardList,
     IconScale,
+    IconFileExport,
+    IconFileTypePdf,
+    IconFileSpreadsheet,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Button } from '@/components/ui/Button';
+import { Dropdown, DropdownItem } from '@/components/ui/Dropdown';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
@@ -48,8 +52,42 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
     const { auth } = usePage<PageProps>().props;
     // RBAC v2 Wave 4: CustomerPolicy::archive/restore/delete → `customers.archive`.
     const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
+    // "Export full record" — a full unredacted data dump gated
+    // `customers.export_record` (super/admin only). Prefer the shared
+    // permissions list; the `can_export_record` prop resolves the same
+    // thing server-side and is the fallback.
+    const canExportRecord =
+        hasPermission(auth.user?.permissions, 'customers.export_record') || customer.can_export_record;
     const isArchived = Boolean(customer.archived_at);
     const [archiveOpen, setArchiveOpen] = useState(false);
+
+    // A real browser navigation (not an Inertia visit) so the server's
+    // Content-Disposition: attachment actually downloads the file.
+    const exportRecordMenu = canExportRecord ? (
+        <Dropdown
+            align="end"
+            label="Export full customer record"
+            trigger={
+                <span className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                    <IconFileExport size={16} stroke={1.75} />
+                    Export Record
+                </span>
+            }
+        >
+            <DropdownItem
+                icon={<IconFileTypePdf size={16} stroke={1.75} />}
+                onClick={() => window.location.assign(`/customers/${customer.uuid}/record-export/pdf`)}
+            >
+                As PDF
+            </DropdownItem>
+            <DropdownItem
+                icon={<IconFileSpreadsheet size={16} stroke={1.75} />}
+                onClick={() => window.location.assign(`/customers/${customer.uuid}/record-export/xlsx`)}
+            >
+                As spreadsheet
+            </DropdownItem>
+        </Dropdown>
+    ) : null;
 
     const pendingAdjustments = useMemo(
         () => customer.arrears_adjustments.filter((a) => a.status === 'pending' || a.status === 'pending_second_approval').length,
@@ -158,6 +196,7 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
 
                     {!isArchived && (
                         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                            {exportRecordMenu}
                             <CustomerStatusActions customer={customer} />
                             <ArrearsAdjustmentModal customer={customer} />
                             {/* Bills only ever print for an active customer — a
@@ -216,21 +255,24 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                                 </p>
                             </div>
                         </div>
-                        {canArchive && (
-                            <Button
-                                type="button"
-                                variant="secondary"
-                                className="shrink-0 px-4 py-2.5 text-sm font-semibold"
-                                onClick={() => {
-                                    if (confirm(`Restore ${customer.name}? They will reappear in the register and the next manuscript run.`)) {
-                                        router.patch(`/customers/${customer.uuid}/restore`, {}, { preserveScroll: true });
-                                    }
-                                }}
-                            >
-                                <IconRestore size={16} stroke={1.75} />
-                                Restore customer
-                            </Button>
-                        )}
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                            {exportRecordMenu}
+                            {canArchive && (
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    className="px-4 py-2.5 text-sm font-semibold"
+                                    onClick={() => {
+                                        if (confirm(`Restore ${customer.name}? They will reappear in the register and the next manuscript run.`)) {
+                                            router.patch(`/customers/${customer.uuid}/restore`, {}, { preserveScroll: true });
+                                        }
+                                    }}
+                                >
+                                    <IconRestore size={16} stroke={1.75} />
+                                    Restore customer
+                                </Button>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
