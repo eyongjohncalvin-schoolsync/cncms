@@ -15,6 +15,7 @@ import {
     IconUserOff,
     IconChartBar,
     IconMessageReport,
+    IconDeviceMobile,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -55,6 +56,10 @@ const NAV_ACCENTS: Record<string, NavAccent> = {
     // contradicting the "calm until actually urgent" rule this app already
     // established for the mobile sync strip. fuchsia is genuinely new.
     fuchsia: { active: 'bg-fuchsia-100 text-fuchsia-800', hover: 'hover:bg-fuchsia-50 hover:text-fuchsia-700', border: 'border-fuchsia-600', icon: 'text-fuchsia-400' },
+    // "Agent App" (mobile build download) — every accent above is claimed;
+    // lime is the last unused Tailwind hue that stays distinct from green
+    // (Payments) and teal (Zones) at the muted icon tint.
+    lime: { active: 'bg-lime-100 text-lime-800', hover: 'hover:bg-lime-50 hover:text-lime-700', border: 'border-lime-600', icon: 'text-lime-500' },
 };
 
 // `labelKey` is an i18next key (resources/tsx/lang/{en,fr}/common.json)
@@ -137,6 +142,13 @@ const ELIGIBILITY_NAV_ROLES = ['agent'];
 const reportsNavItem = { href: '/reports', labelKey: 'common.reports', icon: IconChartBar, accent: 'orange' as const };
 const REPORTS_ROLES = ['super', 'admin', 'manager', 'agent'];
 
+// "Get the Agent App" (/agent-app) — the mobile field app's install page.
+// Gated to the app's actual audience (agent primary, manager supervisory,
+// admin/super oversight); `worker` excluded. AgentAppController enforces
+// the same set server-side — this only hides the link.
+const agentAppNavItem = { href: '/agent-app', labelKey: 'common.agent_app', icon: IconDeviceMobile, accent: 'lime' as const };
+const AGENT_APP_ROLES = ['super', 'admin', 'manager', 'agent'];
+
 /**
  * The role-gated nav list, in display order. Identical for the desktop
  * `<aside>` and the mobile drawer — both call this so the item set, order,
@@ -149,6 +161,7 @@ export function buildVisibleNavItems(role: string | null) {
         ...(role !== null && DISCONNECTIONS_ROLES.includes(role) ? [disconnectionsNavItem] : []),
         ...(role !== null && ELIGIBILITY_NAV_ROLES.includes(role) ? [eligibilityNavItem] : []),
         ...(role !== null && REPORTS_ROLES.includes(role) ? [reportsNavItem] : []),
+        ...(role !== null && AGENT_APP_ROLES.includes(role) ? [agentAppNavItem] : []),
         ...(role !== null && RESOURCES_ROLES.includes(role) ? [resourcesNavItem] : []),
         ...(role !== null && AUDIT_ROLES.includes(role) ? [auditNavItem] : []),
         ...(role !== null && BRANCHES_ROLES.includes(role) ? [branchesNavItem] : []),

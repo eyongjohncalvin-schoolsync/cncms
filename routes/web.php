@@ -57,4 +57,5 @@ Route::middleware(['auth', 'tenant.web', 'throttle:web'])->group(function () {
     require __DIR__.'/web/notifications.php';
     require __DIR__.'/web/complaints.php';
     require __DIR__.'/web/arrears-adjustments.php';
+    require __DIR__.'/web/agent-app.php';
 });
