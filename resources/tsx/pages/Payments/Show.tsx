@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { IconArrowLeft, IconCash, IconUpload, IconWallet } from '@tabler/icons-react';
+import { IconArrowLeft, IconCash, IconDownload, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
@@ -10,12 +10,14 @@ import { Modal } from '@/components/ui/Modal';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Payment } from '@/types';
+import type { Payment, PaymentReceipt } from '@/types';
 
 interface PaymentsShowProps {
     payment: Payment;
+    receipt: PaymentReceipt | null;
     can_manage: boolean;
     can_delete: boolean;
+    can_issue_receipt: boolean;
 }
 
 const frequencyLabels: Record<Payment['frequency'], string> = {
@@ -24,11 +26,31 @@ const frequencyLabels: Record<Payment['frequency'], string> = {
     yearly: 'Yearly',
 };
 
-export default function PaymentsShow({ payment, can_manage, can_delete }: PaymentsShowProps) {
+export default function PaymentsShow({ payment, receipt, can_manage, can_delete, can_issue_receipt }: PaymentsShowProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [fileName, setFileName] = useState<string | null>(null);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [destroying, setDestroying] = useState(false);
+    const [issuingReceipt, setIssuingReceipt] = useState(false);
+
+    // A receipt is only a record of a verified payment. Auto-issued on
+    // verify(); this manual action covers payments recorded before receipts
+    // shipped and re-issuing a voided one (server re-checks the gate + status).
+    const isVerified = payment.verification_status === 'verified';
+    const receiptVoided = receipt?.status === 'void';
+    const canIssueNow = can_issue_receipt && isVerified && (!receipt || receiptVoided);
+
+    function issueReceipt() {
+        router.post(
+            `/payments/${payment.uuid}/receipt/issue`,
+            {},
+            {
+                preserveScroll: true,
+                onStart: () => setIssuingReceipt(true),
+                onFinish: () => setIssuingReceipt(false),
+            },
+        );
+    }
 
     function closeDeleteModal() {
         if (destroying) {
@@ -217,6 +239,96 @@ export default function PaymentsShow({ payment, can_manage, can_delete }: Paymen
                                     {processing ? 'Uploading…' : 'Upload Receipt'}
                                 </Button>
                             </form>
+                        )}
+                    </CardBody>
+                </Card>
+
+                <Card className="animate-fade-up" style={{ animationDelay: '400ms' }}>
+                    <CardHeader>
+                        <h2 className="text-sm font-semibold text-slate-900">Receipt</h2>
+                    </CardHeader>
+                    <CardBody className="flex flex-col gap-3 text-sm">
+                        {receipt ? (
+                            <>
+                                <div className="flex flex-col divide-y divide-slate-100">
+                                    <Row label="Receipt no." value={receipt.receipt_number} />
+                                    <Row
+                                        label="Issued"
+                                        value={receipt.issued_at ? new Date(receipt.issued_at).toLocaleString() : '—'}
+                                    />
+                                    <Row label="Amount" value={formatCurrency(receipt.amount)} />
+                                    <Row
+                                        label="Status"
+                                        value={
+                                            <span
+                                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                                    receipt.status === 'void'
+                                                        ? 'bg-red-100 text-red-700'
+                                                        : 'bg-green-100 text-green-700'
+                                                }`}
+                                            >
+                                                {receipt.status === 'void' ? 'Void' : 'Issued'}
+                                            </span>
+                                        }
+                                    />
+                                </div>
+
+                                {receipt.status === 'void' && (
+                                    <p className="text-slate-500">
+                                        This receipt was voided (the payment was rejected). Re-verify the payment, or
+                                        re-issue below.
+                                    </p>
+                                )}
+
+                                <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-3">
+                                    <a
+                                        href={receipt.download_url}
+                                        className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                                    >
+                                        <IconDownload size={16} stroke={2} />
+                                        Download PDF
+                                    </a>
+                                    {canIssueNow && (
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            onClick={issueReceipt}
+                                            disabled={issuingReceipt}
+                                            className="rounded-lg px-4 py-2 text-sm font-semibold"
+                                        >
+                                            {issuingReceipt && <LoadingSpinner className="h-4 w-4" />}
+                                            Re-issue
+                                        </Button>
+                                    )}
+                                </div>
+
+                                {!payment.customer_phone && (
+                                    <p className="text-xs text-slate-500">
+                                        This customer has no phone on file — the receipt can't be sent by WhatsApp.
+                                    </p>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <p className="flex items-center gap-1.5 text-slate-500">
+                                    <IconReceipt size={16} stroke={1.75} />
+                                    {isVerified
+                                        ? 'No receipt issued yet.'
+                                        : 'A receipt is issued automatically once this payment is verified.'}
+                                </p>
+                                {canIssueNow && (
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={issueReceipt}
+                                        disabled={issuingReceipt}
+                                        className="self-start rounded-lg px-4 py-2.5 text-sm font-semibold"
+                                    >
+                                        {issuingReceipt ? <LoadingSpinner className="h-4 w-4" /> : <IconReceipt size={16} stroke={2} />}
+                                        Issue receipt
+                                    </Button>
+                                )}
+                            </>
                         )}
                     </CardBody>
                 </Card>

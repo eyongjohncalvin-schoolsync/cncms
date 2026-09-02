@@ -500,6 +500,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                             <Th>Amount</Th>
                             <Th>Freq.</Th>
                             <Th>Verification</Th>
+                            <Th>Receipt</Th>
                             <Th>Recorded</Th>
                             <Th>Actions</Th>
                         </TableHead>
@@ -538,6 +539,28 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                             </button>
                                         ) : (
                                             <VerificationBadge status={payment.verification_status} />
+                                        )}
+                                    </Td>
+                                    <Td>
+                                        {payment.receipt ? (
+                                            <Link
+                                                href={`/payments/${payment.uuid}`}
+                                                className={`inline-flex items-center gap-1 text-xs font-medium ${
+                                                    payment.receipt.status === 'void'
+                                                        ? 'text-slate-400 line-through'
+                                                        : 'text-green-700 hover:text-green-800'
+                                                }`}
+                                                title={
+                                                    payment.receipt.status === 'void'
+                                                        ? 'Receipt voided'
+                                                        : `Receipt ${payment.receipt.receipt_number}`
+                                                }
+                                            >
+                                                <IconCheck size={14} stroke={2.5} />
+                                                {payment.receipt.receipt_number}
+                                            </Link>
+                                        ) : (
+                                            <span className="text-xs text-slate-400">—</span>
                                         )}
                                     </Td>
                                     <Td>

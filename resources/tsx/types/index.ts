@@ -242,10 +242,37 @@ export interface PaymentVerification {
     notes: string | null;
 }
 
+export type PaymentReceiptStatus = 'issued' | 'void';
+
+/**
+ * The business-issued receipt for a verified payment (Wave 2 of
+ * docs/plans/payment-receipts-and-whatsapp.md). Distinct from
+ * PaymentVerification.receipt_photo_url (proof-of-payment evidence).
+ */
+export interface PaymentReceipt {
+    uuid: string;
+    receipt_number: string;
+    status: PaymentReceiptStatus;
+    issued_at: string | null;
+    amount: string;
+    /** Authenticated staff PDF download route. */
+    download_url: string;
+    /** Signed ~7-day public link — the WhatsApp-shareable PDF. */
+    shared_url: string;
+}
+
+/** The trimmed receipt indicator carried on Payments/Index.tsx list rows. */
+export interface PaymentReceiptSummary {
+    uuid: string;
+    receipt_number: string;
+    status: PaymentReceiptStatus;
+}
+
 export interface Payment {
     uuid: string;
     customer_uuid: string;
     customer_name: string;
+    customer_phone?: string | null;
     customer_bill: string;
     zone_name?: string | null;
     /**
@@ -274,6 +301,8 @@ export interface Payment {
     collected_at: string | null;
     processed_at: string | null;
     verification?: PaymentVerification | null;
+    /** Lightweight receipt indicator (list rows). Null until issued. */
+    receipt?: PaymentReceiptSummary | null;
 }
 
 export interface Manuscript {

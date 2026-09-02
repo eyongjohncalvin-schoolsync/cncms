@@ -98,7 +98,72 @@ existing verified payments — idempotent, safe on `tenantswecom`.
 Tests: `PaymentReceiptTest` (issue on verify, number uniqueness under a
 simulated race, snapshot immutability, void on later rejection).
 
-### Wave 2 — view / download (web + API + mobile)
+### Wave 2 — view / download (web + API + mobile) — ✅ BUILT (awaiting coordinator commit)
+
+Delivered:
+- `app/Models/Payment.php` — `receipt(): HasOne`.
+- `app/Policies/PaymentReceiptPolicy.php` (registered explicitly in
+  `AppServiceProvider`): `view` → `payments.view`, `issue` →
+  `payments.issue_receipt`.
+- `app/Http/Controllers/PaymentReceiptController.php` — `downloadPdf`
+  (auth staff PDF stream), `issue` (manual issue/re-issue, refuses a
+  non-verified payment), `sharedPdf` (the signed public link).
+- `app/Support/PaymentReceiptLink.php` — `shared(PaymentReceipt)` builds the
+  `URL::temporarySignedRoute` (7-day expiry). **Wave 3's WhatsApp message
+  builder should call this** — do not re-implement.
+- `app/Http/Controllers/PaymentController.php::show()` — `receipt` prop
+  (number, issued_at, status, amount, `download_url`, `shared_url`) +
+  `can_issue_receipt`; `index()`/`show()` list rows carry a trimmed
+  `receipt` indicator (`uuid`, `receipt_number`, `status`); `customer_phone`
+  added to `formatPayment`.
+- `routes/web/payments.php` — `payment-receipts/{receipt}/pdf`,
+  `payments/{payment}/receipt/issue`.
+- `routes/web/payment-receipts-public.php` (new top-level require in
+  `routes/web.php`, OUTSIDE `['auth','tenant.web']`) —
+  `payment-receipts/{receiptUuid}/pdf/shared`, middleware
+  `['signed','throttle:receipt-share']`.
+- **Signed-public-route tenant resolution:** the route has no user, so
+  ResolveTenantWeb never runs. The tenant key travels in the signed URL as
+  `?tenant=<key>` (part of the signature — tamper breaks it), and
+  `sharedPdf()` calls `tenancy()->initialize()` from it before any
+  tenant-schema query. `{receiptUuid}` is a plain string param, NOT
+  route-model binding (binding would query the central connection first).
+  A voided receipt 404s regardless of a still-valid signature.
+- `config/rate-limits.php` + `AppServiceProvider` — new `receipt-share`
+  limiter (IP-keyed, 30/min default, env-tunable).
+- API: `app/Http/Resources/PaymentReceiptResource.php` (uuid,
+  receipt_number, status, issued_at, amount, `pdf_url` token endpoint,
+  `shared_pdf_url`), `app/Http/Controllers/Api/PaymentReceiptController.php`
+  (`show` by payment uuid → 404 when none; `downloadPdf` by receipt uuid),
+  `routes/api/payment-receipts.php` (new require in `routes/api.php`).
+- Web frontend: `resources/tsx/pages/Payments/Show.tsx` Receipt card
+  (number / issued date / amount / status pill / Download PDF; Issue /
+  Re-issue button when `can_issue_receipt` && verified && no live receipt;
+  "no phone on file" note; **no WhatsApp button — Wave 3**);
+  `resources/tsx/pages/Payments/Index.tsx` receipt column (check icon +
+  number linking to the payment, struck-through when void);
+  `resources/tsx/types/index.ts` (`PaymentReceipt`, `PaymentReceiptSummary`).
+- Mobile: `mobile/src/api/paymentReceipts.ts` (`fetchPaymentReceipt`,
+  `openReceiptPdf` → `Linking.openURL(shared_pdf_url)` — the app has no
+  PDF/file-system libs), `mobile/app/receipt/[uuid].tsx` (read-only view by
+  payment uuid, gated on `can('payments.view')`, "View PDF" action),
+  registered in `mobile/app/_layout.tsx`; a "View receipt" link on
+  `mobile/app/(tabs)/customers/[uuid].tsx`'s Last-payment card (shown once
+  the payment has a `server_uuid` and is `verified`).
+- Tests: `tests/Feature/Web/PaymentReceiptViewTest.php` (12),
+  `tests/Feature/Api/PaymentReceiptTest.php` (5). Regression: Web/Api
+  `PaymentTest` + Wave 1 `PaymentReceiptTest` all green (72).
+
+Notes for Wave 3: the signed public PDF route + `PaymentReceiptLink::shared()`
+already exist — Wave 3's `wa.me` message just embeds that URL alongside the
+receipt number + amount. `sent_log` (jsonb `[]`) is still untouched and ready
+to append `{channel, at, by, to}`. The web Show page has `receipt.shared_url`
+already in its payload and a `customer_phone` field for the no-phone guard;
+the "Send via WhatsApp" button is the only missing UI. Mobile can reuse
+`buildWhatsAppBillLink` / `normalizeCameroonPhoneForWhatsapp`
+(`mobile/src/utils/whatsapp.ts`).
+
+Original scope:
 Owns: `app/Http/Controllers/PaymentReceiptController.php` (show, downloadPdf),
 `routes/web/payments.php` (+ receipt routes), `app/Http/Controllers/Api/`
 receipt endpoint, `app/Http/Resources/PaymentReceiptResource.php`,

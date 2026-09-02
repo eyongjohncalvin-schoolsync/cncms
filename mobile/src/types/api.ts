@@ -608,6 +608,30 @@ export interface RequestArrearsAdjustmentResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Payment receipts (Wave 2 of payment-receipts-and-whatsapp.md) — read-only
+// view + PDF share. GET /api/v1/payments/{uuid}/receipt
+// ---------------------------------------------------------------------------
+
+export type PaymentReceiptStatus = 'issued' | 'void';
+
+export interface PaymentReceiptApi {
+    uuid: string;
+    receipt_number: string;
+    status: PaymentReceiptStatus;
+    issued_at: string | null;
+    amount: string;
+    payment_uuid?: string;
+    /** Sanctum-token API download endpoint. */
+    pdf_url: string;
+    /** Signed ~7-day public link — opened in the device browser / WhatsApp. */
+    shared_pdf_url: string;
+}
+
+export interface PaymentReceiptResponse {
+    data: PaymentReceiptApi;
+}
+
+// ---------------------------------------------------------------------------
 // Generic API error envelope (401/403/422/500 all share this shape)
 // ---------------------------------------------------------------------------
 

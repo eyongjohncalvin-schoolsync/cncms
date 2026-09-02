@@ -63,6 +63,19 @@ class Payment extends Model
     }
 
     /**
+     * The business-issued receipt for this payment (Wave 2 of
+     * docs/plans/payment-receipts-and-whatsapp.md). At most one row —
+     * `payment_receipts.payment_id` is UNIQUE — auto-issued by
+     * App\Services\PaymentVerificationService::verify() on approval, voided
+     * (never deleted) on a later rejection. Distinct from verification()'s
+     * `receipt_photo_path`, which is proof-of-payment evidence.
+     */
+    public function receipt(): HasOne
+    {
+        return $this->hasOne(PaymentReceipt::class);
+    }
+
+    /**
      * The single, canonical "eligible income for period P" predicate —
      * previously duplicated verbatim in TWO places
      * (App\Support\ScheduledTasks\ManuscriptChunkDataResolver::resolve() and

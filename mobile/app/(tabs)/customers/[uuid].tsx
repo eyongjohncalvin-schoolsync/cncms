@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Card } from '../../../src/components/ui/Card';
 import { Button } from '../../../src/components/ui/Button';
@@ -202,16 +202,35 @@ export default function CustomerDetailScreen() {
             <Card>
                 <Text style={styles.sectionTitle}>Last payment</Text>
                 {lastPayment ? (
-                    <View style={styles.lastPaymentRow}>
-                        <View>
-                            <Text style={styles.lastPaymentAmount}>{formatFcfa(lastPayment.amount)}</Text>
-                            <Text style={styles.lastPaymentDate}>{formatDate(lastPayment.created_at)}</Text>
+                    <>
+                        <View style={styles.lastPaymentRow}>
+                            <View>
+                                <Text style={styles.lastPaymentAmount}>{formatFcfa(lastPayment.amount)}</Text>
+                                <Text style={styles.lastPaymentDate}>{formatDate(lastPayment.created_at)}</Text>
+                            </View>
+                            <Badge
+                                label={PAYMENT_SYNC_BADGE[lastPayment.sync_status].label}
+                                tone={PAYMENT_SYNC_BADGE[lastPayment.sync_status].tone}
+                            />
                         </View>
-                        <Badge
-                            label={PAYMENT_SYNC_BADGE[lastPayment.sync_status].label}
-                            tone={PAYMENT_SYNC_BADGE[lastPayment.sync_status].tone}
-                        />
-                    </View>
+                        {/*
+                          A receipt only exists once a payment has synced (so a
+                          real server_uuid exists to address it) AND been
+                          verified by the office — the same choke point that
+                          auto-issues it (payment-receipts-and-whatsapp.md). The
+                          receipt screen itself re-checks and shows a friendly
+                          "not issued yet" state if it 404s.
+                        */}
+                        {lastPayment.server_uuid && lastPayment.verification_status === 'verified' ? (
+                            <Pressable
+                                accessibilityRole="button"
+                                onPress={() => router.push(`/receipt/${lastPayment.server_uuid}`)}
+                                style={styles.receiptLink}
+                            >
+                                <Text style={styles.receiptLinkText}>View receipt</Text>
+                            </Pressable>
+                        ) : null}
+                    </>
                 ) : (
                     <Text style={styles.noPayment}>No payment recorded from this device yet.</Text>
                 )}
@@ -304,6 +323,8 @@ const styles = StyleSheet.create({
     lastPaymentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     lastPaymentAmount: { fontSize: fontSize.lg, fontWeight: '800', color: colors.textPrimary },
     lastPaymentDate: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
+    receiptLink: { marginTop: spacing.md, alignSelf: 'flex-start' },
+    receiptLinkText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.accent.payment },
     noPayment: { fontSize: fontSize.sm, color: colors.textSecondary },
     // Groups WhatsApp + Disconnect under one labeled, visually-separated
     // cluster (marginTop, not just the screen's default content gap) so it

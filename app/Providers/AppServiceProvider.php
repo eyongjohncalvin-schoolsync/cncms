@@ -4,8 +4,10 @@ namespace App\Providers;
 
 use App\Models\Company;
 use App\Models\PersonalAccessToken;
+use App\Models\PaymentReceipt;
 use App\Models\Report;
 use App\Models\Role;
+use App\Policies\PaymentReceiptPolicy;
 use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -49,6 +51,12 @@ class AppServiceProvider extends ServiceProvider
         // to naming-convention discovery — keeps all policy wiring in one
         // visible place.
         Gate::policy(Role::class, RolePolicy::class);
+
+        // Payment receipts (Wave 2 of payment-receipts-and-whatsapp.md).
+        // PaymentReceiptPolicy::view() takes a PaymentReceipt argument, so it
+        // is registered here explicitly alongside the others rather than left
+        // to naming-convention discovery — see PaymentReceiptPolicy's docblock.
+        Gate::policy(PaymentReceipt::class, PaymentReceiptPolicy::class);
 
         // Win 2 (perf): App\Models\Company::cached()'s per-request memo is
         // keyed by tenant id, but a long-lived worker that hops tenants (or
@@ -119,6 +127,14 @@ class AppServiceProvider extends ServiceProvider
             config('rate-limits.audit.decay_minutes'),
             config('rate-limits.audit.max_attempts'),
         )->by($request->user()?->getAuthIdentifier() ?? $request->ip()));
+
+        // Public signed receipt-PDF share link. Always keyed by IP — this
+        // route is deliberately unauthenticated (a WhatsApp recipient with
+        // no account), so there is never a user id to key by.
+        RateLimiter::for('receipt-share', fn (Request $request) => Limit::perMinutes(
+            config('rate-limits.receipt-share.decay_minutes'),
+            config('rate-limits.receipt-share.max_attempts'),
+        )->by($request->ip()));
 
         // General ceiling for the authenticated tenant-scoped web/Inertia
         // panel. Keyed by authenticated user id (falls back to IP

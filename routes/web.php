@@ -19,6 +19,11 @@ require __DIR__.'/web/workspace.php';
 // routes/web/landlord.php's doc comment.
 require __DIR__.'/web/landlord.php';
 
+// Public, signed, unauthenticated receipt-PDF link — its own top-level
+// require for the same reason as landlord.php above: it must NOT go through
+// ['auth', 'tenant.web']. See that file's doc comment.
+require __DIR__.'/web/payment-receipts-public.php';
+
 /*
 |--------------------------------------------------------------------------
 | Tenant-scoped Inertia pages

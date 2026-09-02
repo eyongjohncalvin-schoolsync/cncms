@@ -13,7 +13,9 @@ use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
 use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\PaymentReceipt;
 use App\Models\PaymentVerification;
+use App\Support\PaymentReceiptLink;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
@@ -78,7 +80,7 @@ class PaymentController extends Controller
         }
 
         $payments = $this->payments->list($filters, $perPage);
-        $payments->getCollection()->load(['customer.zone', 'verification.verifier']);
+        $payments->getCollection()->load(['customer.zone', 'verification.verifier', 'receipt']);
 
         $raw = $payments->toArray();
 
@@ -244,10 +246,18 @@ class PaymentController extends Controller
         // not a repository contract change) purely so Payments/Show.tsx can
         // offer an "Adjust Arrears" entry point without a page navigation —
         // see this feature's design doc, 2026-08-27 addendum.
-        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier']);
+        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier', 'receipt']);
 
         return Inertia::render('Payments/Show', [
             'payment' => $this->formatPayment($payment),
+            // The business-issued receipt (Wave 2 of
+            // payment-receipts-and-whatsapp.md) — null until a receipt is
+            // issued (auto on verify, or the manual action below).
+            'receipt' => $payment->receipt ? $this->formatReceipt($payment->receipt) : null,
+            // Mirrors PaymentReceiptPolicy::issue() — the class-level
+            // `payments.issue_receipt` gate, computed controller-side the
+            // same way can_manage/can_delete are.
+            'can_issue_receipt' => $this->context->can('payments.issue_receipt'),
             // Mirrors PaymentPolicy::update()'s own role check exactly (that
             // policy method takes no target Payment — it's a pure
             // class-level role gate) — same "compute the flag the page
@@ -347,6 +357,7 @@ class PaymentController extends Controller
             'uuid' => $payment->uuid,
             'customer_uuid' => $payment->customer->uuid,
             'customer_name' => $payment->customer->name,
+            'customer_phone' => $payment->customer->phone,
             'customer_bill' => (string) $payment->customer->bill,
             'zone_name' => $payment->customer->zone?->name,
             // Only populated on Payments/Show.tsx (where `customer.
@@ -370,6 +381,36 @@ class PaymentController extends Controller
             'collected_at' => $payment->collected_at?->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),
             'verification' => $payment->verification ? $this->formatVerification($payment->verification) : null,
+            // Lightweight receipt indicator for Payments/Index.tsx's column
+            // (and harmless on Show, which reads the richer top-level
+            // `receipt` prop instead). Null when no receipt has been issued.
+            'receipt' => $payment->relationLoaded('receipt') && $payment->receipt
+                ? [
+                    'uuid' => $payment->receipt->uuid,
+                    'receipt_number' => $payment->receipt->receipt_number,
+                    'status' => $payment->receipt->status,
+                ]
+                : null,
+        ];
+    }
+
+    /**
+     * The full receipt payload for Payments/Show.tsx's Receipt card.
+     *
+     * @return array<string, mixed>
+     */
+    private function formatReceipt(PaymentReceipt $receipt): array
+    {
+        return [
+            'uuid' => $receipt->uuid,
+            'receipt_number' => $receipt->receipt_number,
+            'status' => $receipt->status,
+            'issued_at' => $receipt->issued_at?->toIso8601String(),
+            'amount' => (string) $receipt->amount,
+            'download_url' => route('payment-receipts.pdf', $receipt),
+            // Signed ~7-day public link — Wave 3's WhatsApp Send button reuses
+            // this verbatim; harmless to mint on each page load.
+            'shared_url' => PaymentReceiptLink::shared($receipt),
         ];
     }
 

@@ -49,6 +49,7 @@ Route::prefix('v1')->group(function () {
             require __DIR__.'/api/zones.php';
             require __DIR__.'/api/customers.php';
             require __DIR__.'/api/payments.php';
+            require __DIR__.'/api/payment-receipts.php';
             require __DIR__.'/api/agents.php';
             require __DIR__.'/api/manuscripts.php';
             require __DIR__.'/api/bills.php';

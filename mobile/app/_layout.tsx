@@ -149,6 +149,17 @@ function RootNavigation() {
                 options={{ presentation: 'modal', headerShown: true, title: 'Adjust Arrears / Credit' }}
             />
             {/*
+              Wave 2 of payment-receipts-and-whatsapp.md — read-only view of a
+              verified payment's business-issued receipt, reached by the
+              payment's server uuid from Customer Detail's "Last payment"
+              card. Same per-customer, online-only, modal-with-a-title shape
+              as reconnect/disconnect/adjust-arrears above.
+            */}
+            <Stack.Screen
+                name="receipt/[uuid]"
+                options={{ presentation: 'modal', headerShown: true, title: 'Receipt' }}
+            />
+            {/*
               2026-08-27: 7 new screens landed in parallel this session (see
               (tabs)/more.tsx's doc comment for the full IA reasoning), each
               reachable from the new More tab. Every one already sets its own
