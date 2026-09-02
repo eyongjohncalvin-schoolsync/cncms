@@ -13,6 +13,7 @@ use Database\Factories\ArrearsAdjustmentFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
@@ -685,6 +686,12 @@ class ArrearsAdjustmentTest extends TestCase
             ->approved($this->seededUserId('terence@shalomtech.dev'))
             ->withAmount('3000.00')
             ->create(['customer_id' => $customer->id, 'approved_at' => now()]);
+
+        // dashboard() is cached behind a per-tenant version key bumped by
+        // create()/approve()/reject() (Win 4). The factory writes straight
+        // to the table, bypassing those — so clear the cache by hand before
+        // re-reading, exactly as a real create()/approve() would have.
+        Cache::flush();
 
         $after = $service->dashboard();
 

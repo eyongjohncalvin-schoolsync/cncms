@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -35,6 +36,16 @@ use Illuminate\Validation\ValidationException;
  */
 class ArrearsAdjustmentService
 {
+    /**
+     * Win 4 (perf): per-tenant cache version fronting dashboard(). Same
+     * pattern as App\Services\NotificationService's feed version — appended
+     * to the cache key, bumped on every create / approve / reject, O(1)
+     * invalidation with no need to reason about which of the three counts
+     * moved. Plain string key; App\Tenancy\CacheTenancyBootstrapper scopes
+     * it per tenant.
+     */
+    private const string DASHBOARD_VERSION_KEY = 'arrears_adjustments:dashboard_version';
+
     public function __construct(
         private readonly ArrearsAdjustmentRepositoryInterface $adjustments,
         private readonly CustomerRepositoryInterface $customers,
@@ -75,7 +86,35 @@ class ArrearsAdjustmentService
      */
     public function dashboard(): array
     {
-        return $this->adjustments->dashboardCounts();
+        // Win 4 (perf): 3 aggregate COUNT/SUM queries, otherwise run on
+        // every Dashboard load AND every Audit Log arrears-tab load. Cache
+        // behind the per-tenant version key below (bumped on every
+        // create/approve/reject); 60s TTL as a backstop, matching
+        // DashboardController's own inline dashboard:counts cache.
+        return Cache::remember(
+            'arrears_adjustments:dashboard:v'.$this->dashboardVersion(),
+            now()->addSeconds(60),
+            fn (): array => $this->adjustments->dashboardCounts(),
+        );
+    }
+
+    /**
+     * Current per-tenant dashboard cache version (0 when never bumped).
+     */
+    private function dashboardVersion(): int
+    {
+        return (int) Cache::get(self::DASHBOARD_VERSION_KEY, 0);
+    }
+
+    /**
+     * Invalidates the cached dashboard() counts for the active tenant.
+     * Cache::add seeds the key so the first increment on a cold cache
+     * store doesn't no-op.
+     */
+    private function bumpDashboardVersion(): void
+    {
+        Cache::add(self::DASHBOARD_VERSION_KEY, 0);
+        Cache::increment(self::DASHBOARD_VERSION_KEY);
     }
 
     /**
@@ -122,6 +161,9 @@ class ArrearsAdjustmentService
             'status' => 'pending',
         ]);
 
+        // New pending request → pending_approval count moved.
+        $this->bumpDashboardVersion();
+
         return $adjustment->load(['customer.zone', 'requestedBy']);
     }
 
@@ -149,7 +191,7 @@ class ArrearsAdjustmentService
      */
     public function approve(ArrearsAdjustment $adjustment, User $actor): ArrearsAdjustment
     {
-        return DB::transaction(function () use ($adjustment, $actor): ArrearsAdjustment {
+        $result = DB::transaction(function () use ($adjustment, $actor): ArrearsAdjustment {
             // Re-fetch under a row lock rather than trusting the caller's
             // in-memory copy: two requests that both loaded the same
             // 'pending' row before either committed a decision must not
@@ -226,6 +268,16 @@ class ArrearsAdjustmentService
 
             return $adjustment->fresh(['customer.zone', 'requestedBy', 'approvedBy', 'secondApprovedBy']);
         });
+
+        // Any approve outcome can move a dashboard count: a first approval
+        // that applies shifts pending_approval → applied_this_month (and
+        // total_written_off for a 'decrease'); a first approval that only
+        // advances to pending_second_approval leaves the counts alone but is
+        // cheap to over-invalidate. Bumped outside the transaction so a
+        // rolled-back approval never bumps.
+        $this->bumpDashboardVersion();
+
+        return $result;
     }
 
     /**
@@ -236,7 +288,7 @@ class ArrearsAdjustmentService
      */
     public function reject(ArrearsAdjustment $adjustment, RejectArrearsAdjustmentData $data): ArrearsAdjustment
     {
-        return DB::transaction(function () use ($adjustment, $data): ArrearsAdjustment {
+        $result = DB::transaction(function () use ($adjustment, $data): ArrearsAdjustment {
             // Same stale-read close as approve() above — re-fetch under a
             // row lock rather than trusting the caller's in-memory copy.
             $adjustment = ArrearsAdjustment::query()->lockForUpdate()->findOrFail($adjustment->id);
@@ -256,6 +308,12 @@ class ArrearsAdjustmentService
 
             return $adjustment;
         });
+
+        // pending_approval dropped by one. Bumped outside the transaction so
+        // a rolled-back reject never bumps.
+        $this->bumpDashboardVersion();
+
+        return $result;
     }
 
     /**

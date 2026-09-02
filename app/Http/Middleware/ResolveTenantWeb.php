@@ -29,6 +29,18 @@ class ResolveTenantWeb
             return redirect()->route('login');
         }
 
+        // Win 1 (perf): see App\Http\Middleware\ResolveTenant for the full
+        // rationale. Session-auth normally runs this middleware once per
+        // request, but a re-dispatch within the same request would repeat
+        // three central-DB lookups + TenantContext::resolve()'s query for
+        // nothing. `tenant_user` on the Request is set only after this body
+        // has fully run (approval/is_active gates included), and the Request
+        // instance is per-HTTP-request, so this never masks a stale gate
+        // across navigations.
+        if ($request->attributes->has('tenant_user') && tenancy()->initialized) {
+            return $next($request);
+        }
+
         $indexEntry = TenantUserIndex::query()->where('user_id', $user->id)->first();
 
         abort_if(! $indexEntry, 403, 'You do not have access to any tenant yet.');

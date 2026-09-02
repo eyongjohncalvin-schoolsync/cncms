@@ -2,15 +2,19 @@
 
 namespace App\Providers;
 
+use App\Models\Company;
 use App\Models\PersonalAccessToken;
 use App\Models\Report;
 use App\Policies\ReportPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
+use Stancl\Tenancy\Events\TenancyEnded;
+use Stancl\Tenancy\Events\TenancyInitialized;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -36,6 +40,14 @@ class AppServiceProvider extends ServiceProvider
         // table) — see its class doc for why this is registered explicitly
         // rather than relying on Laravel's naming-convention auto-discovery.
         Gate::policy(Report::class, ReportPolicy::class);
+
+        // Win 2 (perf): App\Models\Company::cached()'s per-request memo is
+        // keyed by tenant id, but a long-lived worker that hops tenants (or
+        // the test suite, which re-initializes tenancy every method) must
+        // still start each tenant with a clean slate rather than risk a
+        // key colliding after a reactivation/re-provision. Flushing on both
+        // tenancy transitions bounds any staleness to a single job/test.
+        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => Company::flushMemo());
 
         $this->configureRateLimiting();
     }

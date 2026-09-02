@@ -130,15 +130,54 @@ class Company extends Model implements HasMedia
     }
 
     /**
+     * Win 2 (perf): request-level memo in front of the 1-hour
+     * Cache::remember() in cached() below. cached() is called at least 3x
+     * per request (ResolveLocale, HandleInertiaRequests,
+     * ArrearsAdjustmentService::requiresSecondApproval, plus
+     * SettingsCompany/BillPrinting controllers, CustomerResource and the
+     * bill views), and every one of those is otherwise a round-trip to the
+     * cache store — a Redis GET, each behind its own TLS handshake on
+     * Laravel Cloud. The row can't change within a single request without
+     * going through forgetCache(), which drops this memo too.
+     *
+     * Keyed by "<tenant>:<branch fence>" rather than a bare static so a
+     * long-lived process that hops tenants (queue worker, test suite) can
+     * never serve one tenant's Company row to another; also flushed on
+     * every tenancy initialized/ended transition (AppServiceProvider::boot())
+     * as a second guard for that same case.
+     *
+     * @var array<string, self|null>
+     */
+    private static array $memo = [];
+
+    /**
      * Cached read of the single Company settings row. Company is a
      * single-row settings table (see TenantDatabaseSeeder::seedCompany)
      * that's read on nearly every settings page load and on every
      * bill/manuscript PDF export, so it's cached for an hour and
-     * invalidated explicitly via forgetCache() below.
+     * invalidated explicitly via forgetCache() below — fronted by the
+     * per-request memo described on self::$memo.
      */
     public static function cached(): ?self
     {
-        return Cache::remember(self::cacheKey(), now()->addHour(), fn () => static::query()->first());
+        $memoKey = (tenant()?->getTenantKey() ?? 'central').':'.(TenantContext::currentBranchId() ?? 'all');
+
+        if (array_key_exists($memoKey, self::$memo)) {
+            return self::$memo[$memoKey];
+        }
+
+        return self::$memo[$memoKey] = Cache::remember(self::cacheKey(), now()->addHour(), fn () => static::query()->first());
+    }
+
+    /**
+     * Drops only the per-request memo built by cached() — never the shared
+     * cache entry. For the tenancy initialized/ended listeners wired in
+     * AppServiceProvider::boot(), which must not fire a Cache::forget() on
+     * every tenant transition.
+     */
+    public static function flushMemo(): void
+    {
+        self::$memo = [];
     }
 
     /**
@@ -153,6 +192,7 @@ class Company extends Model implements HasMedia
      */
     public static function forgetCache(): void
     {
+        self::flushMemo();
         Cache::forget(self::cacheKey());
         Cache::forget(self::CACHE_KEY.':all');
     }
