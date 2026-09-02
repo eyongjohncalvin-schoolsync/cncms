@@ -21,6 +21,7 @@ import {
     IconFileExport,
     IconFileTypePdf,
     IconFileSpreadsheet,
+    IconBroadcast,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Button } from '@/components/ui/Button';
@@ -347,6 +348,46 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                             </div>
                         ) : (
                             <EmptyState title="No manuscript calculated yet" />
+                        )}
+                    </CardBody>
+                </Card>
+            </div>
+
+            {/* Services — services.md section 8. `customer.services` is only
+                present when the show payload eager-loaded subscriptions
+                (always true for CustomerController::show()); the empty-
+                array fallback just keeps this defensive for any future
+                caller of this same component. */}
+            <div className="animate-fade-up mt-6" style={{ animationDelay: '0.13s' }}>
+                <Card>
+                    <CardHeader className="border-b border-slate-100">
+                        <div className="flex items-center gap-3">
+                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                                <IconBroadcast size={18} stroke={1.75} />
+                            </span>
+                            <div>
+                                <h3 className="text-base font-semibold text-slate-900">Services</h3>
+                                <p className="mt-0.5 text-xs text-slate-500">What this customer has applied for — the monthly bill above is their total</p>
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardBody className="p-6">
+                        {customer.services && customer.services.length > 0 ? (
+                            <ul className="divide-y divide-slate-100">
+                                {customer.services.map((service) => (
+                                    <li
+                                        key={`${service.service_uuid}:${service.service_variant_uuid ?? 'base'}`}
+                                        className={`flex items-center justify-between py-2.5 text-sm ${service.service_variant_uuid ? 'pl-5' : ''}`}
+                                    >
+                                        <span className={service.service_variant_uuid ? 'text-slate-600' : 'font-medium text-slate-900'}>
+                                            {service.service_variant_uuid ? service.service_variant_name : service.service_name}
+                                        </span>
+                                        <span className="font-medium text-slate-700 tabular-nums">{formatCurrency(service.price)}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <EmptyState title="No services on file" description="This customer predates the services feature or has none recorded yet." />
                         )}
                     </CardBody>
                 </Card>

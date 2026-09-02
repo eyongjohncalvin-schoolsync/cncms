@@ -74,7 +74,11 @@ class CustomerService
             "customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all').($withTrashed ? ':trashed' : ''),
             now()->addSeconds(60),
             function () use ($uuid, $withTrashed): Customer {
-                $customer = $this->customers->findByUuid($uuid, ['zone', 'latestManuscript'], $withTrashed);
+                $customer = $this->customers->findByUuid(
+                    $uuid,
+                    ['zone', 'latestManuscript', 'subscriptions.service', 'subscriptions.serviceVariant'],
+                    $withTrashed,
+                );
 
                 if (! $customer) {
                     throw new ModelNotFoundException("Customer [{$uuid}] not found.");

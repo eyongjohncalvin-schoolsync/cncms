@@ -1,13 +1,23 @@
 # Services — company service catalogue & per-customer subscriptions
 
-Status: **Backend foundation BUILT & TESTED 2026-09-06** (sections 3–5: schema,
-migrations, models, `CustomerSubscriptionService`, variant support, the
-`services.manage` permission). **Not yet built: sections 6–8** — the
-`StoreCustomerRequest`/`UpdateCustomerRequest`/`CustomerResource` wiring, the
-Settings → Services catalogue screen, and the customer add/edit form UI.
-Until those land, `services` cannot be set from the web form — every
-customer still gets the single default service via the legacy `bill` field
-(`CustomerSubscriptionService::defaultSelection()`'s backward-compat path).
+Status: **BUILT & TESTED end to end 2026-09-06** — schema, models,
+`CustomerSubscriptionService`, variant support, the `services.manage`
+permission (sections 3–5), the request/controller wiring, the customer
+add/edit form's tickable-services UI, the Show page's Services card, and
+the Settings → Services catalogue screen with per-service "options"
+(variants) sub-CRUD (sections 6–8). The legacy `bill`-only path
+(`CustomerSubscriptionService::defaultSelection()`'s `$bill` parameter)
+stays as permanent backward compatibility for `CustomerImportService` (xlsx
+import still sends raw `bill`, by design — section 9), not as a
+transitional stopgap.
+
+**Deferred (not built, fast-follow candidates, no open design question):**
+the API `CustomerResource` and `SyncService::upsertedCustomers()` don't
+carry `services` yet — the web Inertia payload (`CustomerController::
+shapeCustomer()`) does, which was the actual ask. Add these two only if a
+concrete need for the mobile customer-detail screen or an external API
+consumer to see per-service line items comes up.
+
 Requested by the owner: "the company can offer different services… TV supply is just one,
 internet, VOD, satellite hosting, etc. but the default would be TV
 services, and in the customer add form we can make the services tickable —

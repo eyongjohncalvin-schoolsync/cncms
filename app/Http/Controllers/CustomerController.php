@@ -17,7 +17,10 @@ use App\Http\Requests\UpdateCustomerRequest;
 use App\Models\ArrearsAdjustment;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerSubscription;
 use App\Models\Payment;
+use App\Models\Service;
+use App\Models\ServiceVariant;
 use App\Models\Zone;
 use App\Services\ArrearsAdjustmentService;
 use App\Services\CustomerImportService;
@@ -102,6 +105,7 @@ class CustomerController extends Controller
 
         return Inertia::render('Customers/Create', [
             'zones' => $this->zonesForSelect(),
+            'service_catalogue' => $this->serviceCatalogue(),
         ]);
     }
 
@@ -245,9 +249,12 @@ class CustomerController extends Controller
     {
         $this->authorize('update', $customer);
 
+        $customer->loadMissing(['zone', 'subscriptions.service', 'subscriptions.serviceVariant']);
+
         return Inertia::render('Customers/Edit', [
-            'customer' => $this->shapeCustomer($customer->loadMissing('zone')),
+            'customer' => $this->shapeCustomer($customer),
             'zones' => $this->zonesForSelect(),
+            'service_catalogue' => $this->serviceCatalogue($customer),
         ]);
     }
 
@@ -509,7 +516,71 @@ class CustomerController extends Controller
             'archived_at' => $customer->deleted_at?->toISOString(),
             'archived_by_name' => $customer->relationLoaded('archivedBy') ? $customer->archivedBy?->name : null,
             'archived_reason' => $customer->archived_reason,
+            // services.md section 6 — the customer's ticked services/options,
+            // feeding both the Edit form's prefill and the Show page's
+            // "Services" card. Omitted (not just empty) when `subscriptions`
+            // wasn't eager-loaded, matching this codebase's existing
+            // relationLoaded() convention above rather than lazy-loading here.
+            'services' => $customer->relationLoaded('subscriptions')
+                ? $customer->subscriptions->map(fn (CustomerSubscription $row): array => [
+                    'service_uuid' => $row->service->uuid,
+                    'service_name' => $row->service->name,
+                    'service_variant_uuid' => $row->serviceVariant?->uuid,
+                    'service_variant_name' => $row->serviceVariant?->name,
+                    'price' => $row->price,
+                ])->values()->all()
+                : null,
         ];
+    }
+
+    /**
+     * The tick-list a customer add/edit form renders: every active service
+     * (with its active variants), PLUS — when editing $customer — any
+     * service/variant they already hold even if it has since gone inactive
+     * (services.md section 8: shown ticked with a muted "(inactive)" tag
+     * rather than silently dropped off the form). Omitted from the Create
+     * form's $customer-less call.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function serviceCatalogue(?Customer $customer = null): array
+    {
+        $heldServiceIds = $customer?->relationLoaded('subscriptions')
+            ? $customer->subscriptions->pluck('service_id')->unique()->all()
+            : [];
+        $heldVariantIds = $customer?->relationLoaded('subscriptions')
+            ? $customer->subscriptions->pluck('service_variant_id')->filter()->unique()->all()
+            : [];
+
+        return Service::query()
+            ->where(fn ($query) => $query->where('active', true)->when(
+                $heldServiceIds !== [],
+                fn ($inner) => $inner->orWhereIn('id', $heldServiceIds)
+            ))
+            ->ordered()
+            ->with(['variants' => fn ($query) => $query
+                ->where(fn ($inner) => $inner->where('active', true)->when(
+                    $heldVariantIds !== [],
+                    fn ($innermost) => $innermost->orWhereIn('id', $heldVariantIds)
+                ))
+                ->ordered()])
+            ->get()
+            ->map(fn (Service $service): array => [
+                'uuid' => $service->uuid,
+                'name' => $service->name,
+                'description' => $service->description,
+                'price' => $service->price,
+                'is_default' => $service->is_default,
+                'active' => $service->active,
+                'variants' => $service->variants->map(fn (ServiceVariant $variant): array => [
+                    'uuid' => $variant->uuid,
+                    'name' => $variant->name,
+                    'price' => $variant->price,
+                    'active' => $variant->active,
+                ])->values()->all(),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

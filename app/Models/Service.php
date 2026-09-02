@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 /**
  * A company service catalogue entry — something the operator sells (TV
@@ -30,6 +31,36 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Service extends Model
 {
     use Auditable, HasUuid;
+
+    /**
+     * Settings -> Services (services.md section 6-7) lets an operator name
+     * a service (e.g. "Premium Support") without ever typing a `slug` —
+     * the 4 seeded rows (tv/internet/vod/satellite-hosting) got theirs from
+     * the seed migration directly, but anything created through the
+     * catalogue screen needs one derived here, since the column is NOT
+     * NULL + unique with no DB default. Only fires when the caller didn't
+     * already set one (the seed migration's raw DB::table() inserts bypass
+     * Eloquent entirely and are unaffected).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Service $service): void {
+            if (! empty($service->slug)) {
+                return;
+            }
+
+            $base = Str::slug($service->name) ?: 'service';
+            $slug = $base;
+            $suffix = 2;
+
+            while (static::query()->where('slug', $slug)->exists()) {
+                $slug = "{$base}-{$suffix}";
+                $suffix++;
+            }
+
+            $service->slug = $slug;
+        });
+    }
 
     protected function casts(): array
     {

@@ -54,9 +54,20 @@ class CustomerRepository implements CustomerRepositoryInterface
             ->first();
     }
 
+    /**
+     * `bill` defaults to '0' here when the caller omitted it (a services[]
+     * payload — services.md section 6 — has no raw `bill` at all). The
+     * column is NOT NULL with no DB default, so the INSERT needs SOME
+     * value; App\Services\CustomerService::create() always calls
+     * CustomerSubscriptionService::sync() immediately after, in the same
+     * transaction, which overwrites this placeholder with the real summed
+     * bill before anything else ever reads it. `...$data->toAttributes()`
+     * comes after so an explicitly-provided `bill` (the legacy path) still
+     * wins here exactly as before.
+     */
     public function create(int $zoneId, CustomerData $data): Customer
     {
-        return Customer::query()->create(['zone_id' => $zoneId, ...$data->toAttributes()]);
+        return Customer::query()->create(['zone_id' => $zoneId, 'bill' => $data->bill ?? '0', ...$data->toAttributes()]);
     }
 
     public function update(Customer $customer, CustomerData $data, ?int $zoneId = null): Customer

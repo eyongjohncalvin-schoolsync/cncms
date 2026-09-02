@@ -7,6 +7,7 @@ use App\Http\Controllers\SettingsCommandRunController;
 use App\Http\Controllers\SettingsCompanyController;
 use App\Http\Controllers\SettingsLocaleController;
 use App\Http\Controllers\SettingsNotificationController;
+use App\Http\Controllers\SettingsServiceController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -68,3 +69,18 @@ Route::patch('settings/notifications', [SettingsNotificationController::class, '
 Route::get('settings/bill-printing', [SettingsBillPrintingController::class, 'edit'])->name('settings.bill-printing.edit');
 Route::patch('settings/bill-printing', [SettingsBillPrintingController::class, 'update'])->name('settings.bill-printing.update');
 Route::get('settings/bill-printing/preview/{template}', [SettingsBillPrintingController::class, 'preview'])->name('settings.bill-printing.preview');
+
+// The company's service catalogue (services.md sections 6-7) — TV/Internet/
+// VOD/Satellite Hosting and, one level under each, its priced "options"
+// (variants — e.g. a specific TV channel broadcast). `services.manage`
+// gates the whole surface via ServicePolicy, options included.
+Route::get('settings/services', [SettingsServiceController::class, 'index'])->name('settings.services.index');
+Route::post('settings/services', [SettingsServiceController::class, 'store'])->name('settings.services.store');
+Route::patch('settings/services/{service}', [SettingsServiceController::class, 'update'])->name('settings.services.update');
+Route::delete('settings/services/{service}', [SettingsServiceController::class, 'destroy'])->name('settings.services.destroy');
+Route::post('settings/services/{service}/apply-price', [SettingsServiceController::class, 'applyPrice'])->name('settings.services.apply-price');
+
+Route::post('settings/services/{service}/variants', [SettingsServiceController::class, 'storeVariant'])->name('settings.services.variants.store');
+Route::patch('settings/services/{service}/variants/{variant}', [SettingsServiceController::class, 'updateVariant'])->name('settings.services.variants.update');
+Route::delete('settings/services/{service}/variants/{variant}', [SettingsServiceController::class, 'destroyVariant'])->name('settings.services.variants.destroy');
+Route::post('settings/services/{service}/variants/{variant}/apply-price', [SettingsServiceController::class, 'applyVariantPrice'])->name('settings.services.variants.apply-price');

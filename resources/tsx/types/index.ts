@@ -228,6 +228,54 @@ export interface Customer {
     archived_at?: string | null;
     archived_by_name?: string | null;
     archived_reason?: string | null;
+    /**
+     * This customer's ticked services/options (services.md section 6) —
+     * `bill` above is the sum of these. Present only where
+     * CustomerController::shapeCustomer() eager-loaded `subscriptions`
+     * (Customers/Edit + Show); `undefined` elsewhere (the Index list, the
+     * Disconnections board), matching the other optional fields above.
+     */
+    services?: CustomerServiceSummary[];
+}
+
+/** One row of `Customer.services` — a ticked base service or one of its options. */
+export interface CustomerServiceSummary {
+    service_uuid: string;
+    service_name: string;
+    service_variant_uuid: string | null;
+    service_variant_name: string | null;
+    price: string;
+}
+
+/** One option ("channel") a service offers — services.md section 4. */
+export interface ServiceVariantOption {
+    uuid: string;
+    name: string;
+    price: string;
+    active: boolean;
+}
+
+/**
+ * One entry of `service_catalogue`, the tick-list `Customers/Create.tsx` and
+ * `Customers/Edit.tsx` render (CustomerController::serviceCatalogue()).
+ * Every ACTIVE service, plus — when editing an existing customer — any
+ * service/option they already hold even if it has since gone inactive.
+ */
+export interface ServiceCatalogueEntry {
+    uuid: string;
+    name: string;
+    description: string | null;
+    price: string;
+    is_default: boolean;
+    active: boolean;
+    variants: ServiceVariantOption[];
+}
+
+/** A ticked service (or one of its options) on the customer add/edit form. */
+export interface CustomerServiceSelectionForm {
+    service_uuid: string;
+    service_variant_uuid: string | null;
+    price: string;
 }
 
 export type VerificationStatus = 'pending' | 'verified' | 'rejected';

@@ -106,9 +106,10 @@ const navItems = [
 // the nav link and the real gate never disagree.
 
 // Settings — there is no single "settings" permission; the real gates on
-// the Settings surface are CompanyPolicy::update (`company.update`) and
-// CommandRunPolicy::viewAny (`command_runs.view`). Shown if the user holds
-// either.
+// the Settings surface are CompanyPolicy::update (`company.update`),
+// CommandRunPolicy::viewAny (`command_runs.view`), and ServicePolicy
+// (`services.manage`, services.md sections 6-7). Shown if the user holds
+// any of the three.
 const settingsNavItem = { href: '/settings/company', labelKey: 'common.settings', icon: IconSettings, accent: 'slate' as const };
 
 // Manage Branches — BranchPolicy::create/update/delete → `branches.manage`.
@@ -180,7 +181,7 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(can('audit.view') ? [auditNavItem] : []),
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),
-        ...(canAny('company.update', 'command_runs.view') ? [settingsNavItem] : []),
+        ...(canAny('company.update', 'command_runs.view', 'services.manage') ? [settingsNavItem] : []),
     ];
 }
 

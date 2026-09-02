@@ -14,6 +14,19 @@ class UpdateCustomerRequest extends FormRequest
     }
 
     /**
+     * `services` is `sometimes`, matching every other field here — this
+     * request already serves several different partial-update callers
+     * (the full edit form, a status change, etc.), and
+     * CustomerData::$services === null already means "don't touch
+     * subscriptions" (services.md section 5). The rebuilt Edit.tsx form
+     * always resubmits its full current tick list, so in practice this is
+     * present whenever the edit form itself posts.
+     *
+     * See StoreCustomerRequest's doc comment for why the deeper
+     * invariants (duplicates, an option needs its base service, unknown
+     * uuids) live in CustomerSubscriptionService::sync() and aren't
+     * duplicated here.
+     *
      * @return array<string, mixed>
      */
     public function rules(): array
@@ -28,6 +41,10 @@ class UpdateCustomerRequest extends FormRequest
             'description' => ['sometimes', 'nullable', 'string'],
             'level' => ['sometimes', 'nullable', 'string', 'in:normal,Vip,Operator'],
             'status' => ['sometimes', 'nullable', 'string', 'in:active,passive,disconnected,suspended'],
+            'services' => ['sometimes', 'array', 'min:1'],
+            'services.*.service_uuid' => ['required_with:services', 'uuid', 'exists:services,uuid'],
+            'services.*.service_variant_uuid' => ['nullable', 'uuid', 'exists:service_variants,uuid'],
+            'services.*.price' => ['required_with:services', 'numeric', 'gte:0', 'max:999999999.99', 'decimal:0,2'],
         ];
     }
 }
