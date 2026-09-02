@@ -202,13 +202,69 @@ Tests: run every `tests/Feature/**/*Policy*`, `PaymentTest`, `CustomerTest`,
 `SettingsTest`, `LandlordTest` — all must stay green (behaviour identical
 because the seed matches the old checks).
 
-### Wave 3 — Users Control Center UI + controllers
+### Wave 3 — Users Control Center UI + controllers  ✅ BUILT (awaiting coordinator commit)
 Owns: `app/Http/Controllers/UsersControlCenter/*`, `routes/web/users.php`,
 `resources/tsx/pages/UsersControlCenter/*`,
 `resources/tsx/components/shared/AppNav.tsx` (new nav item + drop old
 Settings→Users nav), `app/Http/Requests/StoreRole*`, `UpdateRole*`.
 Depends on wave 1. Can start once wave 2 is merged.
 Tests: `UsersControlCenterTest`, `RoleManagementTest`.
+
+**Delivered:**
+- Migration `database/migrations/tenant/2026_09_03_000000_relax_tenant_users_role_check.php`
+  — **drops** the `tenant_users_role_check` CHECK constraint (Postgres
+  artefact of the original `$table->enum('role', …)`). No replacement FK;
+  `Store/UpdateTenantUserRequest`'s `role` rule is now
+  `Rule::exists('roles', 'name')` (validates against the tenant `roles`
+  table, system + custom). Applied to every tenant via `tenants:migrate`.
+- `app/Http/Controllers/UsersControlCenter/UserController.php` — the retired
+  `SettingsUserController` relocated verbatim (two-connection create,
+  `resolveBranchId`, role≠worker clears `can_record_payments`, investor
+  audit stamps). Renders `UsersControlCenter/Users`; role `<select>` is now
+  fed from a `roles` prop (the tenant's own roles), not a literal list.
+- `app/Http/Controllers/UsersControlCenter/RoleController.php` — matrix
+  `index` (roles + `permissionsByArea` from `Permission::byArea()`,
+  per-role `user_count`), `store` (name/label/description + optional
+  `clone_from` by uuid), `update` (label/description + full permission
+  list via `Role::syncPermissions`), `destroy` (422 `ValidationException`
+  listing the members who still hold it).
+- `app/Policies/RolePolicy.php` (registered in `AppServiceProvider` next to
+  `ReportPolicy`) — everything gated `roles.manage`; `update` also blocks
+  `is_super`, `delete` also blocks `is_system`.
+- `app/Http/Requests/StoreRoleRequest.php` (lowercase-normalised name,
+  `/^[a-z0-9][a-z0-9_-]*$/`, `notIn` the 5 reserved names, `unique:roles`)
+  + `UpdateRoleRequest.php` (`permissions.*` → `Rule::in(Permission::values())`,
+  hard 422 on an unknown string — the "catalog is closed" guard).
+- `routes/web/users.php` (required from `routes/web.php` inside
+  `['auth','tenant.web','throttle:web']`): `users` GET/POST,
+  `users/{tenantUser}` PATCH, `users/{tenantUser}/deactivate` POST,
+  `users/roles` GET/POST, `users/roles/{role}` PATCH/DELETE. `settings/users`
+  is now `Route::redirect('settings/users', '/users')` (name kept as
+  `settings.users.index`); `SettingsUserController` + `Settings/Users.tsx`
+  deleted; the "Users & Roles" tab removed from `SettingsTabs`.
+- Frontend: `resources/tsx/pages/UsersControlCenter/{Users,Roles}.tsx` +
+  `resources/tsx/components/users/UsersControlCenterTabs.tsx` (mirrors
+  `SettingsTabs`). No separate `Index.tsx` shell — each page renders
+  `AppLayout` + the tabs directly, exactly as the Settings pages do (the
+  plan's "Index.tsx shell" would fork from that established pattern).
+- `AppNav.tsx`: new `Users Control Center` item (`/users`, `sky` accent,
+  `IconShieldLock`), gated by `permissions.includes('users.view')` (or
+  `'*'`). `buildVisibleNavItems(role, permissions)` + `AppNav`/`MobileNavDrawer`
+  thread `auth.user.permissions` through. The other items' `_ROLES` arrays
+  are untouched — Wave 4's job. `common.users_control_center` added to
+  en/fr.
+- Roles matrix save model: a read-only ✓/— grid for the overview; editing
+  is one role at a time via a modal (label + description + the full
+  permission checklist grouped by area) that PATCHes
+  `/users/roles/{uuid}` **once** with the complete `permissions` array —
+  no per-cell requests, no multi-role batch. `is_super`'s column has no
+  Edit button; `is_system` rows show the locked key but an editable
+  checklist; custom rows also get a Delete button (disabled with a reason
+  when `user_count > 0`).
+- Tests: `tests/Feature/Web/UsersControlCenterTest.php` (10),
+  `tests/Feature/Web/RoleManagementTest.php` (13). Regression: `SettingsTest`
+  (Users assertions moved out; legacy-redirect test added), `RoleLoginTest`
+  (`/settings/users` → `/users`), `InvestorTest` (grant/revoke paths moved).
 
 ### Wave 4 — frontend enforcement + mobile + cleanup
 Owns: `resources/tsx/components/shared/AppNav.tsx` (swap role arrays →
@@ -389,3 +445,40 @@ Nesting holds: `worker ⊂ agent ⊂ manager ⊂ admin`.
   `Api\SyncController::authorizeSync` both check the exact `S A M G` set —
   Wave 4 (mobile) can either reuse `manuscripts.view` or add a
   `mobile.sync` permission; not seeded now.
+
+### Notes for Wave 4 (from Wave 3)
+
+- **`AppNav.tsx` is now half-migrated on purpose.** Only
+  `usersControlCenterNavItem` is permission-gated
+  (`can('users.view')` where `can` also honours `'*'`);
+  `buildVisibleNavItems(role, permissions)` takes both args. Every other
+  item still uses its `*_ROLES` array against `auth.user.role`. Wave 4
+  swaps the rest: `SETTINGS_ROLES`→`company.view`-ish (or a dedicated
+  `settings.view`? — there's no such permission; `command_runs.view` +
+  `company.update` are the real Settings gates, so gate the Settings link
+  on `canAny('company.update','command_runs.view')`), `RESOURCES_ROLES`→
+  `expenditures.dashboard`, `AUDIT_ROLES`→`audit.view`,
+  `DISCONNECTIONS_ROLES`→`customers.status_board`,
+  `ELIGIBILITY_NAV_ROLES`→`customers.eligibility_board` (but keep it
+  agent-only-visually if desired), `REPORTS_ROLES`→`reports.view`,
+  `AGENT_APP_ROLES`→(no permission yet — see the `mobile.sync` note above).
+  `RoleLoginTest`/`InvestorTest` assert these endpoints by URL, not by
+  nav, so they won't need changes — but any *nav-rendering* test will.
+- **`AuthUser.role` (TS) is still typed `Role | null`** (the 5-literal
+  union). A user on a custom role is currently a type lie there. Wave 4
+  should widen it to `string | null` and audit `resources/tsx` +
+  `mobile/src` for `role === 'literal'` comparisons (there are several —
+  e.g. `AppNav`'s arrays, `Users.tsx`'s `role === 'agent'`/`'worker'`
+  branches which are still *correct* since those are system roles, but
+  worth a pass). `TenantUserRow.role` and `RoleOption`/`RoleMatrixRow` are
+  already `string`.
+- **`/auth/me` (`Api\AuthController::me`)** already returns `permissions`
+  (Wave 1). Mobile guards that switch on `role` move to permission checks;
+  the offline session cache needs the `permissions` array added alongside
+  `role` (see `offline-sync-strategy.md`).
+- **`cncms:tenant-role` command** still `Rule::in`s the 5 names somewhere
+  in its validation — Wave 4 (or whoever) should let it target custom
+  roles too, or explicitly document it as system-roles-only.
+- The `Role` model's `syncPermissions()` already intersects against
+  `Permission::values()`, so even a future bug that lets an unknown string
+  past the request layer can't persist one.

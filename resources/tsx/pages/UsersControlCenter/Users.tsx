@@ -2,7 +2,7 @@ import { Form, Head, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import { IconEdit, IconInfoCircle, IconUsersGroup } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
-import { SettingsTabs } from '@/components/settings/SettingsTabs';
+import { UsersControlCenterTabs } from '@/components/users/UsersControlCenterTabs';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
@@ -13,9 +13,7 @@ import { SelectInput } from '@/components/ui/SelectInput';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RoleBadge } from '@/components/shared/StatusBadge';
-import type { Branch, Role, TenantUserRow } from '@/types';
-
-const ROLES: Role[] = ['super', 'admin', 'manager', 'agent', 'worker'];
+import type { Branch, RoleOption, TenantUserRow } from '@/types';
 
 // Free-text convenience only (see the tenant_users migration's doc block) —
 // paired with a plain <input list="..."> so admins can still type any job
@@ -46,7 +44,15 @@ function initials(name: string): string {
     return `${first}${last}`.toUpperCase() || '?';
 }
 
-export default function SettingsUsers({ users, branches }: { users: TenantUserRow[]; branches: Branch[] }) {
+export default function UsersControlCenterUsers({
+    users,
+    roles,
+    branches,
+}: {
+    users: TenantUserRow[];
+    roles: RoleOption[];
+    branches: Branch[];
+}) {
     const showBranchControls = branches.length > 1;
     const [createOpen, setCreateOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<TenantUserRow | null>(null);
@@ -67,7 +73,7 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
             return;
         }
 
-        router.patch(`/settings/users/${tenantUser.id}`, { role }, { preserveScroll: true });
+        router.patch(`/users/${tenantUser.id}`, { role }, { preserveScroll: true });
     }
 
     function changeBranch(tenantUser: TenantUserRow, branchUuid: string) {
@@ -77,7 +83,7 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
 
         // Empty option value = clear back to unrestricted (branch_id: null).
         router.patch(
-            `/settings/users/${tenantUser.id}`,
+            `/users/${tenantUser.id}`,
             { branch_uuid: branchUuid || null },
             { preserveScroll: true },
         );
@@ -88,34 +94,28 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
     // this one field alone, same "each control patches its own field"
     // pattern as changeRole()/changeBranch() above.
     function toggleCanRecordPayments(tenantUser: TenantUserRow, checked: boolean) {
-        router.patch(`/settings/users/${tenantUser.id}`, { can_record_payments: checked }, { preserveScroll: true });
+        router.patch(`/users/${tenantUser.id}`, { can_record_payments: checked }, { preserveScroll: true });
     }
 
     // Investor tier grant — see app/Policies/ReportPolicy.php's view() doc
-    // comment and references/rbac-permissions.md section 7. Unlike
-    // toggleCanRecordPayments above, this is deliberately NOT restricted to
-    // one role: it's a pure additive OR (view /reports only) that makes
-    // sense to grant on any role, so the checkbox below renders for every
-    // row rather than being conditional. Same "each control patches its
-    // own field" pattern as the other toggles here.
+    // comment. Renders for every row (a pure additive OR, not role-scoped
+    // like can_record_payments). Same "each control patches its own field"
+    // pattern as the other toggles here.
     function toggleIsInvestor(tenantUser: TenantUserRow, checked: boolean) {
-        router.patch(`/settings/users/${tenantUser.id}`, { is_investor: checked }, { preserveScroll: true });
+        router.patch(`/users/${tenantUser.id}`, { is_investor: checked }, { preserveScroll: true });
     }
 
     function deactivate(tenantUser: TenantUserRow) {
         if (confirm(`Deactivate ${tenantUser.name}? They will no longer be able to sign in.`)) {
-            router.post(`/settings/users/${tenantUser.id}/deactivate`, {}, { preserveScroll: true });
+            router.post(`/users/${tenantUser.id}/deactivate`, {}, { preserveScroll: true });
         }
     }
 
     return (
-        <AppLayout
-            title="Users & Roles"
-            breadcrumbs={[{ label: 'Settings', href: '/settings/company' }, { label: 'Users' }]}
-        >
-            <Head title="Settings — Users & Roles" />
+        <AppLayout title="Users Control Center" breadcrumbs={[{ label: 'Users Control Center' }]}>
+            <Head title="Users Control Center — Users" />
 
-            <SettingsTabs active="users" />
+            <UsersControlCenterTabs active="users" />
 
             {/* Shared by both the Add User and Edit Job Title forms below. */}
             <datalist id={JOB_TITLE_DATALIST_ID}>
@@ -126,29 +126,28 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
 
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 animate-fade-up">
                 <div className="flex items-center gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 text-purple-700">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <IconUsersGroup size={20} stroke={1.75} />
                     </span>
                     <div>
                         <div className="flex items-center gap-2">
-                            <h1 className="font-display text-2xl text-slate-900">Users & Roles</h1>
+                            <h1 className="font-display text-2xl text-slate-900">Users</h1>
                             {isLoading && <LoadingSpinner className="text-blue-600" />}
                         </div>
-                        <p className="text-sm text-slate-500">Manage workspace staff accounts and permissions.</p>
+                        <p className="text-sm text-slate-500">Manage workspace staff accounts and their permission role.</p>
                     </div>
                 </div>
                 <Button onClick={() => setCreateOpen(true)}>Add User</Button>
             </div>
 
-            <div
-                className="mb-4 flex animate-fade-up items-start gap-2.5 rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-sm text-blue-800 [animation-delay:60ms]"
-            >
+            <div className="mb-4 flex animate-fade-up items-start gap-2.5 rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-sm text-blue-800 [animation-delay:60ms]">
                 <IconInfoCircle size={18} stroke={1.75} className="mt-0.5 shrink-0 text-blue-500" />
                 <p>
                     <span className="font-medium">Job title</span> is a free-text label for a person's real-world
                     position (e.g. "Recovery Coordinator") — it's purely descriptive.{' '}
                     <span className="font-medium">Permission role</span> is what actually controls what they can do
-                    in the app. Changing one never changes the other.
+                    in the app. Edit what each role can do on the{' '}
+                    <span className="font-medium">Roles &amp; permissions</span> tab.
                 </p>
             </div>
 
@@ -156,7 +155,7 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
                 <EmptyState title="No users found" description="Add a user to get started." />
             ) : (
                 <Card className="p-0 animate-fade-up [animation-delay:100ms]">
-                    <Table>
+                    <Table label="Users">
                         <TableHead>
                             <Th>Staff</Th>
                             <Th>Username</Th>
@@ -201,9 +200,15 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
                                             onChange={(e) => changeRole(tenantUser, e.target.value)}
                                             className="py-1.5"
                                         >
-                                            {ROLES.map((role) => (
-                                                <option key={role} value={role}>
-                                                    {role}
+                                            {/* A row could hold a role since deleted/renamed —
+                                                keep the current value selectable so the <select>
+                                                doesn't silently jump to another role. */}
+                                            {!roles.some((r) => r.name === tenantUser.role) && (
+                                                <option value={tenantUser.role}>{tenantUser.role}</option>
+                                            )}
+                                            {roles.map((role) => (
+                                                <option key={role.name} value={role.name}>
+                                                    {role.label}
                                                 </option>
                                             ))}
                                         </SelectInput>
@@ -301,7 +306,7 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
 
             <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add User">
                 <Form
-                    action="/settings/users"
+                    action="/users"
                     method="post"
                     resetOnSuccess
                     onSuccess={() => setCreateOpen(false)}
@@ -309,41 +314,10 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
                 >
                     {({ errors, processing }) => (
                         <>
-                            <TextInput
-                                id="name"
-                                name="name"
-                                label="Name"
-                                error={errors.name}
-                                required
-                                className="rounded-lg px-3.5 py-2.5"
-                            />
-                            <TextInput
-                                id="username"
-                                name="username"
-                                label="Username"
-                                error={errors.username}
-                                required
-                                className="rounded-lg px-3.5 py-2.5"
-                            />
-                            <TextInput
-                                id="email"
-                                name="email"
-                                type="email"
-                                label="Email"
-                                error={errors.email}
-                                required
-                                className="rounded-lg px-3.5 py-2.5"
-                            />
-                            <TextInput
-                                id="password"
-                                name="password"
-                                type="password"
-                                label="Password"
-                                error={errors.password}
-                                minLength={8}
-                                required
-                                className="rounded-lg px-3.5 py-2.5"
-                            />
+                            <TextInput id="name" name="name" label="Name" error={errors.name} required className="rounded-lg px-3.5 py-2.5" />
+                            <TextInput id="username" name="username" label="Username" error={errors.username} required className="rounded-lg px-3.5 py-2.5" />
+                            <TextInput id="email" name="email" type="email" label="Email" error={errors.email} required className="rounded-lg px-3.5 py-2.5" />
+                            <TextInput id="password" name="password" type="password" label="Password" error={errors.password} minLength={8} required className="rounded-lg px-3.5 py-2.5" />
                             <SelectInput
                                 id="role"
                                 name="role"
@@ -353,9 +327,9 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
                                 required
                                 className="rounded-lg px-3.5 py-2.5"
                             >
-                                {ROLES.map((role) => (
-                                    <option key={role} value={role}>
-                                        {role}
+                                {roles.map((role) => (
+                                    <option key={role.name} value={role.name}>
+                                        {role.label}
                                     </option>
                                 ))}
                             </SelectInput>
@@ -415,7 +389,7 @@ export default function SettingsUsers({ users, branches }: { users: TenantUserRo
                 {editingUser && (
                     <Form
                         key={editingUser.id}
-                        action={`/settings/users/${editingUser.id}`}
+                        action={`/users/${editingUser.id}`}
                         method="patch"
                         onSuccess={() => setEditingUser(null)}
                         className="flex flex-col gap-4"

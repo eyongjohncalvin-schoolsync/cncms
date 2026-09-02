@@ -51,6 +51,7 @@ export function AppLayout({
     const { auth, flash, notifications, company } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
     const role = auth.user?.role ?? null;
+    const permissions = auth.user?.permissions ?? [];
     const { t } = useTranslation();
 
     // Keeps the bell/badge and emergency banner fresh without a real-time
@@ -101,7 +102,7 @@ export function AppLayout({
                     <div className="absolute -top-16 left-1/2 h-52 w-52 -translate-x-1/2 rounded-full bg-blue-200/25 blur-3xl" />
                 </div>
 
-                <AppNav role={role} currentPath={currentPath} companyName={company?.name} />
+                <AppNav role={role} permissions={permissions} currentPath={currentPath} companyName={company?.name} />
             </aside>
 
             <MobileNavDrawer
@@ -109,6 +110,7 @@ export function AppLayout({
                 onClose={() => setDrawerOpen(false)}
                 id={MOBILE_NAV_ID}
                 role={role}
+                permissions={permissions}
                 currentPath={currentPath}
                 companyName={company?.name}
             />

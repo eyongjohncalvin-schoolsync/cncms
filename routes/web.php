@@ -51,6 +51,7 @@ Route::middleware(['auth', 'tenant.web', 'throttle:web'])->group(function () {
     require __DIR__.'/web/zones.php';
     require __DIR__.'/web/branches.php';
     require __DIR__.'/web/settings.php';
+    require __DIR__.'/web/users.php';
     require __DIR__.'/web/audit.php';
     require __DIR__.'/web/resources.php';
     require __DIR__.'/web/reports.php';

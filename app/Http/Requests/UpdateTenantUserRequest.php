@@ -26,10 +26,13 @@ class UpdateTenantUserRequest extends FormRequest
             // independently (the role <select> patches {role} alone, the
             // job title editor patches {job_title} alone), so neither can be
             // unconditionally 'required' here.
-            'role' => ['sometimes', 'required', 'string', Rule::in(['super', 'admin', 'manager', 'agent', 'worker'])],
+            // RBAC v2 Wave 3: configurable roles — the name must exist in
+            // this tenant's `roles` table (system or custom). See
+            // StoreTenantUserRequest's identical rule.
+            'role' => ['sometimes', 'required', 'string', Rule::exists('roles', 'name')],
             'job_title' => ['sometimes', 'nullable', 'string', 'max:60'],
-            // Multi-branch RBAC — the Branch <select> on Settings/Users.tsx
-            // patches this alone, same "each control patches its own field"
+            // Multi-branch RBAC — the Branch <select> on the Users Control
+            // Center Users page patches this alone, same "each control patches its own field"
             // pattern as role/job_title. null clears the fence back to
             // unrestricted (see StoreTenantUserRequest's doc comment).
             'branch_uuid' => ['sometimes', 'nullable', 'string'],
@@ -37,13 +40,13 @@ class UpdateTenantUserRequest extends FormRequest
             // PaymentPolicy::create()'s doc comment and the
             // add_can_record_payments_to_tenant_users_table migration.
             // authorize() above already restricts this whole request to
-            // super/admin; this rule additionally rejects (not silently
+            // users.manage; this rule additionally rejects (not silently
             // ignores) an attempt to set it on any row whose role isn't
-            // currently `worker` — the flag is meaningless for
-            // super/admin/manager/agent, who already have payments.create
-            // via role. Checked against the route-bound TenantUser's
-            // CURRENT role: this checkbox is only ever submitted alone
-            // (Settings/Users.tsx patches one field per request, same
+            // currently `worker` — the flag is meaningless for every other
+            // role, which already has payments.create via role. Checked
+            // against the route-bound TenantUser's CURRENT role: this
+            // checkbox is only ever submitted alone (the Users Control
+            // Center page patches one field per request, same
             // convention as role/job_title/branch_uuid above), so there is
             // no simultaneous role change to account for here.
             'can_record_payments' => [

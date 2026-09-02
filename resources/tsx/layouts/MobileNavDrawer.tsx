@@ -23,6 +23,7 @@ export function MobileNavDrawer({
     onClose,
     id,
     role,
+    permissions = [],
     currentPath,
     companyName,
 }: {
@@ -30,6 +31,7 @@ export function MobileNavDrawer({
     onClose: () => void;
     id: string;
     role: string | null;
+    permissions?: string[];
     currentPath: string;
     companyName?: string | null;
 }) {
@@ -70,6 +72,7 @@ export function MobileNavDrawer({
 
                         <AppNav
                             role={role}
+                            permissions={permissions}
                             currentPath={currentPath}
                             companyName={companyName}
                             onNavigate={onClose}

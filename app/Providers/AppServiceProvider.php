@@ -5,7 +5,9 @@ namespace App\Providers;
 use App\Models\Company;
 use App\Models\PersonalAccessToken;
 use App\Models\Report;
+use App\Models\Role;
 use App\Policies\ReportPolicy;
+use App\Policies\RolePolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
@@ -40,6 +42,13 @@ class AppServiceProvider extends ServiceProvider
         // table) — see its class doc for why this is registered explicitly
         // rather than relying on Laravel's naming-convention auto-discovery.
         Gate::policy(Report::class, ReportPolicy::class);
+
+        // RBAC v2 Wave 3: RolePolicy takes a Role model argument on
+        // update()/delete() (to block the is_super / is_system rows), so it
+        // is registered explicitly alongside ReportPolicy rather than left
+        // to naming-convention discovery — keeps all policy wiring in one
+        // visible place.
+        Gate::policy(Role::class, RolePolicy::class);
 
         // Win 2 (perf): App\Models\Company::cached()'s per-request memo is
         // keyed by tenant id, but a long-lived worker that hops tenants (or

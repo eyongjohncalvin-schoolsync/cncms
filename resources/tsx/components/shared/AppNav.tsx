@@ -16,6 +16,7 @@ import {
     IconChartBar,
     IconMessageReport,
     IconDeviceMobile,
+    IconShieldLock,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -60,6 +61,10 @@ const NAV_ACCENTS: Record<string, NavAccent> = {
     // lime is the last unused Tailwind hue that stays distinct from green
     // (Payments) and teal (Zones) at the muted icon tint.
     lime: { active: 'bg-lime-100 text-lime-800', hover: 'hover:bg-lime-50 hover:text-lime-700', border: 'border-lime-600', icon: 'text-lime-500' },
+    // "Users Control Center" (RBAC v2 Wave 3) — sky is the one remaining
+    // blue-family hue not used by Dashboard (blue) / Customers (indigo) /
+    // Audit (cyan), fitting for an access-control surface without colliding.
+    sky: { active: 'bg-sky-100 text-sky-800', hover: 'hover:bg-sky-50 hover:text-sky-700', border: 'border-sky-600', icon: 'text-sky-400' },
 };
 
 // `labelKey` is an i18next key (resources/tsx/lang/{en,fr}/common.json)
@@ -149,13 +154,24 @@ const REPORTS_ROLES = ['super', 'admin', 'manager', 'agent'];
 const agentAppNavItem = { href: '/agent-app', labelKey: 'common.agent_app', icon: IconDeviceMobile, accent: 'lime' as const };
 const AGENT_APP_ROLES = ['super', 'admin', 'manager', 'agent'];
 
+// "Users Control Center" (/users) — RBAC v2 Wave 3. This is the FIRST nav
+// item gated by a permission string rather than a hardcoded `_ROLES` array:
+// it's shown when the resolved permission list (auth.user.permissions,
+// already in the Inertia share since Wave 1 — `['*']` for super) contains
+// `users.view`. Wave 4 migrates the other items' role arrays to the same
+// permission model; until then this item is the only one on the new path.
+// TenantUserPolicy::viewAny is the real server-side gate on /users.
+const usersControlCenterNavItem = { href: '/users', labelKey: 'common.users_control_center', icon: IconShieldLock, accent: 'sky' as const };
+
 /**
  * The role-gated nav list, in display order. Identical for the desktop
  * `<aside>` and the mobile drawer — both call this so the item set, order,
  * and gating never fork. `role` is `auth.user?.role ?? null`; a null role
  * (no authenticated user) gets just the ungated base items.
  */
-export function buildVisibleNavItems(role: string | null) {
+export function buildVisibleNavItems(role: string | null, permissions: string[] = []) {
+    const can = (permission: string) => permissions.includes('*') || permissions.includes(permission);
+
     return [
         ...navItems,
         ...(role !== null && DISCONNECTIONS_ROLES.includes(role) ? [disconnectionsNavItem] : []),
@@ -165,6 +181,7 @@ export function buildVisibleNavItems(role: string | null) {
         ...(role !== null && RESOURCES_ROLES.includes(role) ? [resourcesNavItem] : []),
         ...(role !== null && AUDIT_ROLES.includes(role) ? [auditNavItem] : []),
         ...(role !== null && BRANCHES_ROLES.includes(role) ? [branchesNavItem] : []),
+        ...(can('users.view') ? [usersControlCenterNavItem] : []),
         ...(role !== null && SETTINGS_ROLES.includes(role) ? [settingsNavItem] : []),
     ];
 }
@@ -183,17 +200,20 @@ export function buildVisibleNavItems(role: string | null) {
  */
 export function AppNav({
     role,
+    permissions = [],
     currentPath,
     companyName,
     onNavigate,
 }: {
     role: string | null;
+    /** auth.user.permissions from the Inertia share (`['*']` for super). */
+    permissions?: string[];
     currentPath: string;
     companyName?: string | null;
     onNavigate?: () => void;
 }) {
     const { t } = useTranslation();
-    const visibleNavItems = buildVisibleNavItems(role);
+    const visibleNavItems = buildVisibleNavItems(role, permissions);
 
     return (
         <>

@@ -7,7 +7,6 @@ use App\Http\Controllers\SettingsCommandRunController;
 use App\Http\Controllers\SettingsCompanyController;
 use App\Http\Controllers\SettingsLocaleController;
 use App\Http\Controllers\SettingsNotificationController;
-use App\Http\Controllers\SettingsUserController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -25,10 +24,12 @@ use Illuminate\Support\Facades\Route;
 Route::get('settings/company', [SettingsCompanyController::class, 'edit'])->name('settings.company.edit');
 Route::patch('settings/company', [SettingsCompanyController::class, 'update'])->name('settings.company.update');
 
-Route::get('settings/users', [SettingsUserController::class, 'index'])->name('settings.users.index');
-Route::post('settings/users', [SettingsUserController::class, 'store'])->name('settings.users.store');
-Route::patch('settings/users/{tenantUser}', [SettingsUserController::class, 'update'])->name('settings.users.update');
-Route::post('settings/users/{tenantUser}/deactivate', [SettingsUserController::class, 'deactivate'])->name('settings.users.deactivate');
+// Users & Roles moved to the top-level Users Control Center (/users) in
+// RBAC v2 Wave 3 — detached from Settings per the plan doc. This redirect
+// keeps the old bookmark/muscle-memory URL alive (GET only; the old
+// mutation routes are gone — nothing but the retired page ever posted to
+// them).
+Route::redirect('settings/users', '/users')->name('settings.users.index');
 
 Route::get('settings/command-runs', [SettingsCommandRunController::class, 'index'])->name('settings.command-runs.index');
 Route::patch('settings/command-runs/schedule', [SettingsCommandRunController::class, 'updateSchedule'])->name('settings.command-runs.schedule.update');

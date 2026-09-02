@@ -59,7 +59,7 @@ class RoleLoginTest extends TestCase
      * @var array<string, string>
      */
     private const NAV_GATED_ENDPOINTS = [
-        'Settings > Users (TenantUserPolicy::viewAny)' => '/settings/users',
+        'Users Control Center (TenantUserPolicy::viewAny)' => '/users',
         'Resources dashboard (ExpenditurePolicy::viewDashboard)' => '/resources',
         'Audit Log (AuditLogPolicy::viewAny)' => '/audit/logs',
         'Disconnections status board (CustomerPolicy::viewStatusBoard)' => '/disconnections',

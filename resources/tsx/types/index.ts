@@ -1,3 +1,9 @@
+/**
+ * The 5 built-in system role names. Since RBAC v2 Wave 3 a tenant can also
+ * define custom roles, so a membership row's `role` (TenantUserRow.role) is
+ * a plain `string`, not this union — this alias is kept only for the places
+ * that still specifically mean "one of the built-ins".
+ */
 export type Role = 'super' | 'admin' | 'manager' | 'agent' | 'worker';
 
 export interface AuthUser {
@@ -458,9 +464,41 @@ export interface NotificationSettings {
     twilio_whatsapp_number: string | null;
 }
 
+/** One selectable role in the Users Control Center role dropdown. */
+export interface RoleOption {
+    name: string;
+    label: string;
+    is_system: boolean;
+}
+
+/** One column in the Roles & Permissions matrix (RBAC v2 Wave 3). */
+export interface RoleMatrixRow {
+    uuid: string;
+    name: string;
+    label: string;
+    description: string | null;
+    is_system: boolean;
+    /** The Gate::before bypass role — matrix all-on and read-only. */
+    is_super: boolean;
+    /** Permission strings this role currently grants (empty for is_super). */
+    permissions: string[];
+    /** How many tenant_users rows currently hold this role (blocks delete). */
+    user_count: number;
+}
+
+/** One permission cell definition — `value` is the catalog string. */
+export interface PermissionOption {
+    value: string;
+    label: string;
+}
+
+/** Area heading => its permissions, from App\Auth\Permission::byArea(). */
+export type PermissionsByArea = Record<string, PermissionOption[]>;
+
 export interface TenantUserRow {
     id: number;
-    role: Role;
+    /** A role name — a built-in (see `Role`) or a tenant custom role. */
+    role: string;
     /** Purely descriptive label (e.g. "Recovery Coordinator") — separate from `role`, which drives permissions. */
     job_title: string | null;
     name: string;
