@@ -1,21 +1,24 @@
 import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { useEffect } from 'react';
-import { IconClockHour4, IconLoader2, IconMoodSad } from '@tabler/icons-react';
+import { IconClockHour4, IconLoader2, IconLock, IconMoodSad } from '@tabler/icons-react';
 import { AuthLayout } from '@/layouts/AuthLayout';
 
 interface PendingProps {
     /** The tenant schema is still being built on the queue (no membership row yet). */
     provisioning: boolean;
-    status: 'pending' | 'rejected' | 'approved';
+    status: 'pending' | 'rejected' | 'approved' | 'suspended';
     workspace_name?: string | null;
 }
 
 export default function Pending({ provisioning, status, workspace_name }: PendingProps) {
     const isRejected = status === 'rejected';
+    const isSuspended = status === 'suspended';
+    const isBlocked = isRejected || isSuspended;
 
     // Poll while the workspace is still being set up OR is waiting on a
     // landlord — advance to the dashboard the moment it's approved, so the
-    // user never has to refresh by hand.
+    // user never has to refresh by hand. 'rejected' / 'suspended' are
+    // terminal — no polling.
     const polling = provisioning || status === 'pending';
     usePoll(polling ? 5000 : 0, { only: ['provisioning', 'status', 'workspace_name'] });
 
@@ -25,7 +28,13 @@ export default function Pending({ provisioning, status, workspace_name }: Pendin
         }
     }, [status]);
 
-    const title = isRejected ? 'Workspace not approved' : provisioning ? 'Setting up your workspace' : 'Awaiting approval';
+    const title = isSuspended
+        ? 'Workspace deactivated'
+        : isRejected
+          ? 'Workspace not approved'
+          : provisioning
+            ? 'Setting up your workspace'
+            : 'Awaiting approval';
 
     return (
         <AuthLayout>
@@ -33,10 +42,12 @@ export default function Pending({ provisioning, status, workspace_name }: Pendin
             <div className="animate-fade-up flex flex-col items-center text-center">
                 <span
                     className={`mb-4 inline-flex h-14 w-14 items-center justify-center rounded-full ${
-                        isRejected ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
+                        isBlocked ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
                     }`}
                 >
-                    {isRejected ? (
+                    {isSuspended ? (
+                        <IconLock size={28} stroke={1.75} />
+                    ) : isRejected ? (
                         <IconMoodSad size={28} stroke={1.75} />
                     ) : provisioning ? (
                         <IconLoader2 size={28} stroke={1.75} className="animate-spin" />
@@ -45,11 +56,13 @@ export default function Pending({ provisioning, status, workspace_name }: Pendin
                     )}
                 </span>
                 <h2 className="font-display text-2xl text-slate-900">
-                    {isRejected
-                        ? 'This workspace was not approved'
-                        : provisioning
-                          ? 'Setting up your workspace…'
-                          : 'Your workspace is awaiting approval'}
+                    {isSuspended
+                        ? 'This workspace has been deactivated'
+                        : isRejected
+                          ? 'This workspace was not approved'
+                          : provisioning
+                            ? 'Setting up your workspace…'
+                            : 'Your workspace is awaiting approval'}
                 </h2>
                 <p className="mt-1.5 text-sm text-slate-500">
                     {workspace_name && (
@@ -58,11 +71,13 @@ export default function Pending({ provisioning, status, workspace_name }: Pendin
                             <br />
                         </>
                     )}
-                    {isRejected
-                        ? 'Contact support if you believe this is a mistake.'
-                        : provisioning
-                          ? 'This takes a minute — the page updates itself when it’s ready.'
-                          : 'A landlord reviews new workspace requests before access is granted. This page updates itself once approved.'}
+                    {isSuspended
+                        ? 'Access has been turned off by the platform administrator. Contact them to restore it.'
+                        : isRejected
+                          ? 'Contact support if you believe this is a mistake.'
+                          : provisioning
+                            ? 'This takes a minute — the page updates itself when it’s ready.'
+                            : 'A landlord reviews new workspace requests before access is granted. This page updates itself once approved.'}
                 </p>
                 <Link
                     href="/logout"

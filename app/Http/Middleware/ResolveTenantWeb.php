@@ -37,7 +37,11 @@ class ResolveTenantWeb
 
         abort_if(! $tenant, 500, 'Tenant not found.');
 
-        if (! $tenant->isApproved()) {
+        // Awaiting approval OR deactivated by a landlord — either way this
+        // user gets no further than the holding page. `is_active` is a
+        // VirtualColumn defaulting to true (Tenant::isActive), so a tenant
+        // that predates the flag is unaffected.
+        if (! $tenant->isApproved() || ! $tenant->is_active) {
             return redirect()->route('workspace.pending');
         }
 

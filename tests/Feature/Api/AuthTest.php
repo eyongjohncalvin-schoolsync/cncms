@@ -135,6 +135,29 @@ class AuthTest extends TestCase
             ->assertJsonPath('code', 'FORBIDDEN');
     }
 
+    public function test_deactivated_tenant_blocks_the_api_even_with_a_valid_token(): void
+    {
+        // Same already-committed owner used by the resolves-role test above.
+        $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $token = $user->createToken('api')->plainTextToken;
+
+        $tenant = Tenant::find('swecom');
+
+        try {
+            $tenant->update(['is_active' => false]);
+            $this->app->make('auth')->forgetGuards();
+
+            $this->withHeader('Authorization', "Bearer {$token}")
+                ->getJson('/api/v1/auth/me')
+                ->assertStatus(403)
+                ->assertJsonPath('code', 'WORKSPACE_SUSPENDED');
+        } finally {
+            // Restore explicitly — Tenant writes are central-pinned and may
+            // land outside this test's rolled-back transaction.
+            Tenant::find('swecom')?->update(['is_active' => true]);
+        }
+    }
+
     public function test_user_can_update_own_profile(): void
     {
         $user = User::factory()->create([

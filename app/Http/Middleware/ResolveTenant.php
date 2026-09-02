@@ -63,6 +63,17 @@ class ResolveTenant
             ], 403);
         }
 
+        // A landlord can deactivate a tenant (is_active = false). Its users
+        // keep valid credentials and a membership row, but must not reach
+        // tenant data. `is_active` is a VirtualColumn defaulting to true, so
+        // tenants that predate the flag are unaffected.
+        if (! $tenant->is_active) {
+            return response()->json([
+                'message' => 'This workspace has been deactivated. Contact your administrator.',
+                'code' => 'WORKSPACE_SUSPENDED',
+            ], 403);
+        }
+
         tenancy()->initialize($tenant);
 
         $tenantUser = TenantUser::query()
