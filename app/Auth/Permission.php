@@ -132,6 +132,15 @@ enum Permission: string
     case CompanyView = 'company.view';
     /** Company info + notification settings update (CompanyPolicy::update / NotificationSettingPolicy::update). */
     case CompanyUpdate = 'company.update';
+    /**
+     * The Settings -> Services catalogue (create / edit / activate /
+     * deactivate / delete a service, "apply price to all subscribers") —
+     * App\Policies\ServicePolicy. Seeded to `admin` only (super bypasses);
+     * `manager` is NOT granted it — catalogue pricing is an admin decision
+     * (services.md section 6). Viewing the tick list on the customer form
+     * needs no permission (any user who can create a customer sees it).
+     */
+    case ServicesManage = 'services.manage';
 
     // ---- Command runs / task scheduler --------------------
     case CommandRunsView = 'command_runs.view';
@@ -192,7 +201,7 @@ enum Permission: string
             'complaints' => 'Complaints',
             'arrears' => 'Arrears adjustments',
             'audit' => 'Audit',
-            'company' => 'Company & settings',
+            'company', 'services' => 'Company & settings',
             'command_runs' => 'Task scheduler',
             'users', 'roles' => 'Users & roles',
             default => 'Other',

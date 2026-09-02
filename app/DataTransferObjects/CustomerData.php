@@ -16,6 +16,14 @@ namespace App\DataTransferObjects;
  */
 final readonly class CustomerData
 {
+    /**
+     * @param  list<CustomerServiceSelection>|null  $services  null = "don't
+     *                                                         touch this customer's subscriptions" (bulk bill update, status
+     *                                                         changes, generic partial edits). A (possibly empty) array =
+     *                                                         the full desired set (add/edit form) — App\Services\
+     *                                                         CustomerSubscriptionService::sync() diffs the pivot to match
+     *                                                         it and recomputes `bill`.
+     */
     public function __construct(
         public ?string $zoneUuid = null,
         public ?string $name = null,
@@ -26,6 +34,7 @@ final readonly class CustomerData
         public ?string $description = null,
         public ?string $level = null,
         public ?string $status = null,
+        public ?array $services = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -40,6 +49,14 @@ final readonly class CustomerData
             description: $data['description'] ?? null,
             level: $data['level'] ?? null,
             status: $data['status'] ?? null,
+            services: array_key_exists('services', $data) && is_array($data['services'])
+                ? array_values(array_map(
+                    static fn ($selection): CustomerServiceSelection => $selection instanceof CustomerServiceSelection
+                        ? $selection
+                        : CustomerServiceSelection::fromArray((array) $selection),
+                    $data['services'],
+                ))
+                : null,
         );
     }
 

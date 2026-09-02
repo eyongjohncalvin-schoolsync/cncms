@@ -33,6 +33,7 @@ class CustomerService
     public function __construct(
         private readonly CustomerRepositoryInterface $customers,
         private readonly ZoneRepositoryInterface $zones,
+        private readonly CustomerSubscriptionService $subscriptions,
     ) {}
 
     /**
@@ -89,20 +90,47 @@ class CustomerService
         );
     }
 
+    /**
+     * The customer row and its service subscriptions are written in ONE
+     * transaction — `customers.bill` is a cached projection of
+     * `sum(customer_service.price)` and must never be left out of sync with
+     * the pivot (services.md section 2). A request with no `services` key
+     * (CustomerData::$services === null) defaults a brand-new customer to
+     * the single default service, priced at the legacy `bill` field if the
+     * caller sent one (StoreCustomerRequest hasn't been migrated to require
+     * `services` yet — see services.md section 6 — so a raw `bill` must
+     * keep working exactly as before, not get silently reset to the
+     * service's catalogue price by the recompute below).
+     */
     public function create(CustomerData $data): Customer
     {
         $zoneId = $this->resolveZoneId($data->zoneUuid);
 
-        $customer = $this->customers->create($zoneId, $data);
+        return DB::transaction(function () use ($zoneId, $data): Customer {
+            $customer = $this->customers->create($zoneId, $data);
 
-        return $customer->load('zone');
+            $selections = $data->services ?? [$this->subscriptions->defaultSelection($data->bill)];
+            $this->subscriptions->sync($customer, $selections);
+
+            return $customer->load('zone');
+        });
     }
 
     public function update(Customer $customer, CustomerData $data): Customer
     {
         $zoneId = $data->zoneUuid !== null ? $this->resolveZoneId($data->zoneUuid) : null;
 
-        $customer = $this->customers->update($customer, $data, $zoneId);
+        $customer = DB::transaction(function () use ($customer, $data, $zoneId): Customer {
+            $customer = $this->customers->update($customer, $data, $zoneId);
+
+            // null = leave subscriptions alone (bulk bill update, a status
+            // change, any partial edit that didn't touch the services block).
+            if ($data->services !== null) {
+                $this->subscriptions->sync($customer, $data->services);
+            }
+
+            return $customer;
+        });
 
         $this->forgetShowCache($customer->uuid);
 
@@ -341,7 +369,11 @@ class CustomerService
                 continue;
             }
 
-            $this->customers->update($customer, new CustomerData(bill: $row['new_bill']));
+            // services.md section 8: the bulk-bill tool only ever adjusts a
+            // SINGLE-service customer — it rewrites that one subscription's
+            // price and lets recomputeBill() re-derive `customers.bill`.
+            // Multi-service customers are skipped above (planBulkBillUpdate).
+            $this->subscriptions->setSingleServicePrice($customer, $row['new_bill']);
             $this->forgetShowCache($customer->uuid);
 
             $updated[] = $customer->uuid;
@@ -364,7 +396,21 @@ class CustomerService
     {
         $customers = $this->resolveCustomersForBulkBillUpdate($customerUuids, $filters);
 
+        // services.md section 8: a customer holding 2+ services can't have a
+        // single bulk figure applied — their bill is a sum across services,
+        // each priced independently. Skipped with a reason (never silently
+        // touched), same partial-success shape as an out-of-range bill.
+        $customers->loadCount('subscriptions');
+
         return $customers->map(function (Customer $customer) use ($mode, $value): array {
+            if ((int) ($customer->subscriptions_count ?? 0) >= 2) {
+                return [
+                    'customer' => $customer,
+                    'new_bill' => null,
+                    'reason' => "{$customer->name} has multiple services — adjust each one in Settings -> Services or on the customer's edit form.",
+                ];
+            }
+
             $newBill = $this->computeAdjustedBill((string) $customer->bill, $mode, $value);
 
             try {

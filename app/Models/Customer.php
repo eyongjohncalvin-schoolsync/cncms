@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -97,5 +98,26 @@ class Customer extends Model
     public function messages(): HasMany
     {
         return $this->hasMany(Message::class);
+    }
+
+    /**
+     * The services this customer subscribes to (services.md). `pivot.price`
+     * is the price actually charged for each; `customers.bill` is the cached
+     * SUM of these, rewritten by App\Services\CustomerSubscriptionService in
+     * the same transaction as any pivot change. A customer always holds >= 1
+     * service.
+     */
+    public function services(): BelongsToMany
+    {
+        return $this->belongsToMany(Service::class, 'customer_service')
+            ->using(CustomerSubscription::class)
+            ->withPivot(['id', 'uuid', 'price', 'service_variant_id'])
+            ->withTimestamps();
+    }
+
+    /** Pivot rows as first-class models — the write path for subscriptions. */
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(CustomerSubscription::class);
     }
 }
