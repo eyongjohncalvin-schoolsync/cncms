@@ -24,15 +24,17 @@ use Inertia\Response;
  */
 class AgentAppController extends Controller
 {
-    private const ALLOWED_ROLES = ['super', 'admin', 'manager', 'agent'];
-
     public function __construct(
         private readonly TenantContext $context,
     ) {}
 
     public function show(Request $request): Response
     {
-        abort_unless($this->context->isAnyOf(...self::ALLOWED_ROLES), 403);
+        // RBAC v2: the app's audience (super/admin/manager/agent) is exactly
+        // the `manuscripts.view` role set, so this reuses that permission
+        // rather than a hardcoded role list. Wave 4 (mobile) may split this
+        // out into a dedicated `mobile.sync` permission if needed.
+        abort_unless($this->context->can('manuscripts.view'), 403);
 
         return Inertia::render('AgentApp/Index', [
             'android_url' => config('agent-app.android_url'),

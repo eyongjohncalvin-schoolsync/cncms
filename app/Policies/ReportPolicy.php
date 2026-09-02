@@ -42,12 +42,15 @@ class ReportPolicy
 
     public function view(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent')
+        // RBAC v2: the role gate is now the `reports.view` catalog permission;
+        // the Investor tier stays an additive OR (a per-user flag, never a
+        // role — see this class's docblock and Wave 2 rules).
+        return $this->context->can('reports.view')
             || $this->context->tenantUser->is_investor;
     }
 
     public function export(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('reports.export');
     }
 }

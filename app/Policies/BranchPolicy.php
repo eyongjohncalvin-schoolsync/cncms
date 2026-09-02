@@ -24,26 +24,26 @@ class BranchPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('branches.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('branches.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('branches.manage');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('branches.manage');
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('branches.manage');
     }
 }

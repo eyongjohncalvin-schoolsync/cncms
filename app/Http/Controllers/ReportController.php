@@ -55,7 +55,7 @@ class ReportController extends Controller
             'tier' => $tier,
             'date' => $date,
             'report' => $report,
-            'can_export' => $this->context->isAnyOf('super', 'admin', 'manager'),
+            'can_export' => $this->context->can('reports.export'),
         ]);
     }
 

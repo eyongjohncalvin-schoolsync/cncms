@@ -59,7 +59,7 @@ class ComplaintController extends Controller
         // full list); agent/worker land on the submission-first view (the
         // same list, but the page leads with "Log a Complaint" rather than
         // the counts row) — references/complaint-desk.md section 6.
-        $isDashboardView = $this->context->isAnyOf('super', 'admin', 'manager');
+        $isDashboardView = $this->context->can('complaints.resolve');
 
         return Inertia::render('Complaints/Index', [
             'view' => $isDashboardView ? 'dashboard' : 'submission',
@@ -156,7 +156,7 @@ class ComplaintController extends Controller
         // Single flag covers both Resolve and Reopen — ComplaintPolicy's
         // resolve() and reopen() are the identical rule (super/admin/
         // manager, never the submitter), just named for each action.
-        $canManage = $this->context->isAnyOf('super', 'admin', 'manager')
+        $canManage = $this->context->can('complaints.resolve')
             && $complaint->submitted_by !== $this->context->tenantUser->user_id;
 
         // The Level 3 human gate (references/complaint-desk.md section 3):
@@ -170,8 +170,8 @@ class ComplaintController extends Controller
         return Inertia::render('Complaints/Show', [
             'complaint' => $this->formatComplaint($complaint),
             'can_manage' => $canManage,
-            'can_link_duplicate' => $this->context->isAnyOf('super', 'admin', 'manager'),
-            'can_notify_investors' => $this->context->isAnyOf('super', 'admin')
+            'can_link_duplicate' => $this->context->can('complaints.resolve'),
+            'can_notify_investors' => $this->context->can('complaints.notify_investors')
                 && $investorNoticeRow === null
                 && $this->escalations->isInvestorNoticeArmed($complaint),
             'investor_notice_sent_at' => $investorNoticeRow?->escalated_at?->toIso8601String(),

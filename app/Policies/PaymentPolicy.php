@@ -30,12 +30,12 @@ class PaymentPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('payments.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('payments.view');
     }
 
     /**
@@ -52,7 +52,11 @@ class PaymentPolicy
      */
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent')
+        // RBAC v2: the role gate is now the `payments.create` catalog
+        // permission; the worker `can_record_payments` grant stays an
+        // additive OR (a per-user flag — worker's role is NOT seeded
+        // `payments.create`; see this method's docblock and Wave 2 rules).
+        return $this->context->can('payments.create')
             || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
     }
 
@@ -63,18 +67,18 @@ class PaymentPolicy
      */
     public function bulkCreate(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent')
+        return $this->context->can('payments.create')
             || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('payments.update');
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('payments.delete');
     }
 
     /**
@@ -88,7 +92,10 @@ class PaymentPolicy
      */
     public function verify(User $user, Payment $payment): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager')
+        // RBAC v2: the office gate is now the `payments.verify` catalog
+        // permission; the agent zone-scoped branch stays an additive OR
+        // (agent is NOT seeded `payments.verify` — see Wave 2 rules).
+        return $this->context->can('payments.verify')
             || ($this->context->role === 'agent'
                 && $this->context->zoneId !== null
                 && $payment->customer->zone_id === $this->context->zoneId);
@@ -107,7 +114,13 @@ class PaymentPolicy
      */
     public function bulkVerify(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        // RBAC v2: `payments.verify` is the office gate; `agent` stays in
+        // this class-level gate as an additive OR (agent is NOT seeded
+        // `payments.verify`) exactly as before — the real per-payment zone
+        // fence for an agent is re-checked per item in
+        // App\Services\PaymentVerificationService::verifyMany() (untouched).
+        return $this->context->can('payments.verify')
+            || $this->context->role === 'agent';
     }
 
     /**
@@ -119,7 +132,7 @@ class PaymentPolicy
      */
     public function attachReceipt(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent')
+        return $this->context->can('payments.create')
             || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
     }
 }

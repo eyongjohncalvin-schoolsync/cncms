@@ -22,27 +22,27 @@ class CustomerPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('customers.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('customers.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.create');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.update');
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.delete');
     }
 
     /**
@@ -57,12 +57,12 @@ class CustomerPolicy
      */
     public function archive(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.archive');
     }
 
     public function restore(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.archive');
     }
 
     /**
@@ -72,7 +72,7 @@ class CustomerPolicy
      */
     public function printBill(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('customers.print_bill');
     }
 
     /**
@@ -99,7 +99,11 @@ class CustomerPolicy
      */
     public function disconnect(User $user, Customer $customer): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager')
+        // RBAC v2: the office gate is now the `customers.change_status`
+        // catalog permission; the agent zone-scoped branch stays an additive
+        // OR (agent is NOT seeded `customers.change_status` — see Wave 2
+        // rules and TenantContext::zoneId).
+        return $this->context->can('customers.change_status')
             || ($this->context->role === 'agent'
                 && $this->context->zoneId !== null
                 && $customer->zone_id === $this->context->zoneId);
@@ -107,12 +111,12 @@ class CustomerPolicy
 
     public function suspend(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     public function reconnect(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     /**
@@ -123,7 +127,7 @@ class CustomerPolicy
      */
     public function viewStatusBoard(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.status_board');
     }
 
     /**
@@ -140,7 +144,7 @@ class CustomerPolicy
      */
     public function viewEligibilityBoard(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('customers.eligibility_board');
     }
 
     /**
@@ -151,16 +155,16 @@ class CustomerPolicy
      */
     public function bulkDisconnect(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     public function bulkSuspend(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 
     public function bulkReconnect(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('customers.change_status');
     }
 }

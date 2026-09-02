@@ -118,7 +118,11 @@ class PaymentService
     {
         $customer = $this->resolveCustomer($data->customerUuid);
 
-        $canAutoVerify = $this->context->isAnyOf('super', 'admin', 'manager')
+        // RBAC v2: mirrors PaymentPolicy::verify() exactly — the office gate
+        // is now the `payments.verify` catalog permission; the agent
+        // zone-scoped branch stays an additive OR (agent is NOT seeded
+        // `payments.verify`).
+        $canAutoVerify = $this->context->can('payments.verify')
             || ($this->context->role === 'agent'
                 && $this->context->zoneId !== null
                 && $customer->zone_id === $this->context->zoneId);

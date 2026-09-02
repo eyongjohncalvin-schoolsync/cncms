@@ -35,27 +35,38 @@ class ComplaintPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('complaints.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('complaints.view');
     }
 
     public function create(User $user): bool
     {
-        return true;
+        return $this->context->can('complaints.create');
     }
 
+    /**
+     * RBAC v2: the role gate is now the `complaints.resolve` catalog
+     * permission, but the "never the submitter" exclusion stays hardcoded
+     * and is evaluated FIRST — so even a `super` (who bypasses the
+     * permission check) still cannot resolve a complaint they filed
+     * themselves. Wave 1's Gate::before is deliberately catalog-scoped and
+     * never touches this `resolve` ability, so this explicit check is
+     * authoritative.
+     */
     public function resolve(User $user, Complaint $complaint): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager') && $complaint->submitted_by !== $user->id;
+        return $complaint->submitted_by !== $user->id
+            && $this->context->can('complaints.resolve');
     }
 
     public function reopen(User $user, Complaint $complaint): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager') && $complaint->submitted_by !== $user->id;
+        return $complaint->submitted_by !== $user->id
+            && $this->context->can('complaints.resolve');
     }
 
     /**
@@ -70,7 +81,7 @@ class ComplaintPolicy
      */
     public function linkDuplicate(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('complaints.resolve');
     }
 
     /**
@@ -80,7 +91,7 @@ class ComplaintPolicy
      */
     public function assign(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('complaints.assign');
     }
 
     /**
@@ -95,6 +106,6 @@ class ComplaintPolicy
      */
     public function notifyInvestors(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('complaints.notify_investors');
     }
 }

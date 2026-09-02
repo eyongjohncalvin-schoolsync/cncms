@@ -26,31 +26,31 @@ class ExpenditurePolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('expenditures.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('expenditures.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager', 'agent');
+        return $this->context->can('expenditures.create');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('expenditures.update');
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin');
+        return $this->context->can('expenditures.delete');
     }
 
     public function viewDashboard(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('expenditures.dashboard');
     }
 }

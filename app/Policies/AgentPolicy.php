@@ -21,26 +21,26 @@ class AgentPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('agents.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('agents.view');
     }
 
     public function create(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('agents.manage');
     }
 
     public function update(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('agents.manage');
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->isAnyOf('super', 'admin', 'manager');
+        return $this->context->can('agents.manage');
     }
 }

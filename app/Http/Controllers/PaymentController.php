@@ -253,11 +253,11 @@ class PaymentController extends Controller
             // class-level role gate) — same "compute the flag the page
             // needs, controller-side" idiom ComplaintController::show() uses
             // for its own can_manage prop.
-            'can_manage' => $this->context->isAnyOf('super', 'admin', 'manager'),
+            'can_manage' => $this->context->can('payments.update'),
             // Same idiom as can_manage above, but mirroring PaymentPolicy::
             // delete()'s stricter super/admin-only role check instead of
             // update()'s super/admin/manager.
-            'can_delete' => $this->context->isAnyOf('super', 'admin'),
+            'can_delete' => $this->context->can('payments.delete'),
         ]);
     }
 

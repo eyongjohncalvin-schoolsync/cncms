@@ -60,26 +60,39 @@ class ArrearsAdjustmentPolicy
 
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->context->can('arrears.view');
     }
 
     public function view(User $user): bool
     {
-        return true;
+        return $this->context->can('arrears.view');
     }
 
     public function create(User $user): bool
     {
-        return true;
+        return $this->context->can('arrears.request');
     }
 
+    /**
+     * RBAC v2: only the STAGE-1 flat role gate becomes a catalog permission
+     * (`arrears.approve`, seeded to admin + manager, super via bypass). The
+     * rest stays hardcoded and orthogonal to "does this role hold the
+     * permission", exactly as the plan's Wave 2 rules require:
+     *   - the STAGE-2 (`pending_second_approval`) admin/super-only narrowing
+     *     — `manager` DOES hold `arrears.approve` but is still excluded here;
+     *   - the maker≠checker / second-approver≠first-approver identity checks;
+     *   - the `super` self-approval carve-out (unchanged from `is('super')`);
+     *   - the terminal-state `default => false`.
+     * Wave 1's Gate::before is catalog-scoped and never touches this
+     * `approve`/`reject` ability, so this method body is authoritative.
+     */
     public function approve(User $user, ArrearsAdjustment $adjustment): bool
     {
         return match ($adjustment->status) {
-            'pending' => $this->context->isAnyOf('super', 'admin', 'manager')
-                && ($user->id !== $adjustment->requested_by || $this->context->is('super')),
+            'pending' => $this->context->can('arrears.approve')
+                && ($user->id !== $adjustment->requested_by || $this->context->isSuper()),
             'pending_second_approval' => $this->context->isAnyOf('super', 'admin')
-                && ($this->context->is('super')
+                && ($this->context->isSuper()
                     || ($user->id !== $adjustment->requested_by
                         && $user->id !== $adjustment->approved_by)),
             default => false,
