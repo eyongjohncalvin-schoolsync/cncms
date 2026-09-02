@@ -631,6 +631,25 @@ export interface PaymentReceiptResponse {
     data: PaymentReceiptApi;
 }
 
+/**
+ * GET /api/v1/payments/{uuid}/receipt/whatsapp-message (Wave 3) — the two
+ * raw ingredients for the manual "Send via WhatsApp" action, same shape as
+ * BillWhatsappMessageApi. The client builds the wa.me link itself
+ * (src/utils/whatsapp.ts). A voided receipt is a 422, not a `reason` here.
+ */
+export interface ReceiptWhatsappMessageApi {
+    has_phone: boolean;
+    available: boolean;
+    reason: 'no_phone' | null;
+    /** Digits-only, '237'-prefixed international form, or null. */
+    phone: string | null;
+    message: string | null;
+}
+
+export interface ReceiptWhatsappMessageResponse {
+    data: ReceiptWhatsappMessageApi;
+}
+
 // ---------------------------------------------------------------------------
 // Generic API error envelope (401/403/422/500 all share this shape)
 // ---------------------------------------------------------------------------

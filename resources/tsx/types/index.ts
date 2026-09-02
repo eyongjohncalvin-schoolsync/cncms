@@ -116,6 +116,8 @@ export interface PageProps {
         success?: string | null;
         error?: string | null;
         import?: ImportReport | null;
+        /** wa.me deep link flashed by the receipt "Send via WhatsApp" action. */
+        whatsapp_url?: string | null;
     };
     notifications: NotificationsFeed | null;
     [key: string]: unknown;
@@ -259,6 +261,10 @@ export interface PaymentReceipt {
     download_url: string;
     /** Signed ~7-day public link — the WhatsApp-shareable PDF. */
     shared_url: string;
+    /** How many times the receipt has been sent (any channel) — sent_log length. */
+    sent_count: number;
+    /** ISO timestamp of the most recent send, or null if never sent. */
+    last_sent_at: string | null;
 }
 
 /** The trimmed receipt indicator carried on Payments/Index.tsx list rows. */

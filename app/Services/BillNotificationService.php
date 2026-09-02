@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Manuscript;
+use App\Support\CameroonPhone;
 use Illuminate\Support\Carbon;
 
 /**
@@ -129,34 +130,14 @@ final class BillNotificationService
     }
 
     /**
-     * Normalizes a raw customers.phone value (formats vary wildly in real
-     * data — '677440670', '(67) 321-7927', etc., per
-     * cncms-context/references/database-schema.md's known-issues list)
-     * into the digits-only, country-code-prefixed form wa.me requires.
-     * Cameroon mobile numbers are 9 local digits; returns null rather than
-     * guessing when the digit count doesn't match that shape — a wrong
-     * number is worse than no link.
+     * Normalizes a raw customers.phone value into the digits-only,
+     * country-code-prefixed form wa.me requires. Delegates to the canonical
+     * App\Support\CameroonPhone::forWhatsapp() — the same normaliser
+     * App\Services\ReceiptWhatsAppService uses — so the rule lives in one
+     * place. See that class for the full behaviour / edge cases.
      */
     private function normalizePhoneForWhatsapp(?string $phone): ?string
     {
-        if ($phone === null || trim($phone) === '') {
-            return null;
-        }
-
-        $digits = preg_replace('/\D+/', '', $phone) ?? '';
-
-        if ($digits === '') {
-            return null;
-        }
-
-        if (str_starts_with($digits, '237') && strlen($digits) === 12) {
-            return $digits;
-        }
-
-        if (str_starts_with($digits, '0')) {
-            $digits = substr($digits, 1);
-        }
-
-        return strlen($digits) === 9 ? '237'.$digits : null;
+        return CameroonPhone::forWhatsapp($phone);
     }
 }

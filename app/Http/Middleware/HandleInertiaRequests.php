@@ -96,6 +96,11 @@ class HandleInertiaRequests extends Middleware
                 // so Zones/Index and Customers/Index can render a proper
                 // report table instead of a flattened one-line message.
                 'import' => fn () => $request->session()->get('import'),
+                // The wa.me deep link flashed by PaymentReceiptController::
+                // sendWhatsapp() (Wave 3 of payment-receipts-and-whatsapp.md)
+                // — Payments/Show.tsx opens it in a new tab on the POST's
+                // success callback, then it's gone on the next visit.
+                'whatsapp_url' => fn () => $request->session()->get('whatsapp_url'),
             ],
             // Bell dropdown + emergency banner data (in-app-notifications.md
             // section 4) — a closure so it's re-evaluated on every request,

@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
-import { fetchPaymentReceipt, openReceiptPdf } from '../../src/api/paymentReceipts';
+import { fetchPaymentReceipt, fetchReceiptWhatsappMessage, openReceiptPdf } from '../../src/api/paymentReceipts';
+import { buildWhatsAppBillLink } from '../../src/utils/whatsapp';
 import { extractErrorMessage, isNetworkError } from '../../src/api/client';
 import { getSyncState, subscribeSyncState } from '../../src/sync/syncStore';
 import { Card } from '../../src/components/ui/Card';
@@ -55,6 +56,7 @@ export default function ReceiptScreen() {
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [receipt, setReceipt] = useState<PaymentReceiptApi | null>(null);
+    const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
     const phaseRef = useRef<Phase>('loading');
 
     // RBAC v2: PaymentReceiptPolicy::view → `payments.view`.
@@ -107,6 +109,43 @@ export default function ReceiptScreen() {
             });
         }, [load]),
     );
+
+    /**
+     * "Send via WhatsApp" — manual mode (bill-notifications.md §1): a wa.me
+     * deep link the staff member opens to send from their OWN WhatsApp
+     * session. The message + normalized phone are composed fresh server-side
+     * (which also logs the send to sent_log); this only builds the link and
+     * hands it to the OS. Online-only, same as "View PDF".
+     */
+    async function handleSendWhatsapp() {
+        if (!uuid || sendingWhatsapp) {
+            return;
+        }
+
+        setSendingWhatsapp(true);
+
+        try {
+            const { data } = await fetchReceiptWhatsappMessage(uuid);
+
+            if (!data.available) {
+                Alert.alert('Cannot send receipt', 'This customer has no valid WhatsApp number on file.');
+                return;
+            }
+
+            const link = buildWhatsAppBillLink(data.phone, data.message);
+
+            if (!link) {
+                Alert.alert('Cannot send receipt', 'Could not prepare the WhatsApp message.');
+                return;
+            }
+
+            await Linking.openURL(link);
+        } catch (error) {
+            Alert.alert('Could not prepare WhatsApp message', extractErrorMessage(error, "Couldn't reach the server."));
+        } finally {
+            setSendingWhatsapp(false);
+        }
+    }
 
     if (authStatus === 'loading') {
         return (
@@ -197,7 +236,16 @@ export default function ReceiptScreen() {
                     </Text>
                 </Card>
             ) : (
-                <Button title="View PDF" size="large" onPress={() => void openReceiptPdf(receipt.shared_pdf_url)} />
+                <>
+                    <Button title="View PDF" size="large" onPress={() => void openReceiptPdf(receipt.shared_pdf_url)} />
+                    <Button
+                        title={sendingWhatsapp ? 'Preparing…' : 'Send via WhatsApp'}
+                        loading={sendingWhatsapp}
+                        disabled={sendingWhatsapp}
+                        onPress={() => void handleSendWhatsapp()}
+                        style={styles.whatsappButton}
+                    />
+                </>
             )}
         </ScrollView>
     );
@@ -212,6 +260,9 @@ const styles = StyleSheet.create({
     amount: { fontSize: fontSize.xxl, fontWeight: '800', color: colors.textPrimary, marginTop: spacing.sm },
     issued: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.xs },
     voidNote: { fontSize: fontSize.sm, color: colors.textSecondary },
+    // WhatsApp-brand treatment, same darker AAA-safe teal as Customer
+    // Detail's "Send Bill via WhatsApp" — see colors.whatsapp's doc comment.
+    whatsappButton: { backgroundColor: colors.whatsapp },
     blockedTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     blockedBody: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.xs },
 });

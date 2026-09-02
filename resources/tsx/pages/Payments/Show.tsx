@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { IconArrowLeft, IconCash, IconDownload, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
+import { IconArrowLeft, IconBrandWhatsapp, IconCash, IconDownload, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
@@ -10,7 +10,23 @@ import { Modal } from '@/components/ui/Modal';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Payment, PaymentReceipt } from '@/types';
+import type { PageProps, Payment, PaymentReceipt } from '@/types';
+
+function formatRelative(iso: string): string {
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) {
+        return iso;
+    }
+    const seconds = Math.round((Date.now() - then) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.round(hours / 24);
+    if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+    return new Date(iso).toLocaleDateString();
+}
 
 interface PaymentsShowProps {
     payment: Payment;
@@ -32,6 +48,7 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [destroying, setDestroying] = useState(false);
     const [issuingReceipt, setIssuingReceipt] = useState(false);
+    const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
 
     // A receipt is only a record of a verified payment. Auto-issued on
     // verify(); this manual action covers payments recorded before receipts
@@ -39,6 +56,30 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
     const isVerified = payment.verification_status === 'verified';
     const receiptVoided = receipt?.status === 'void';
     const canIssueNow = can_issue_receipt && isVerified && (!receipt || receiptVoided);
+    const canSendWhatsapp = !!receipt && !receiptVoided && !!payment.customer_phone;
+
+    // The wa.me link is minted server-side (from the frozen snapshot + a
+    // fresh signed PDF URL) and flashed back on the POST — mirror the bill
+    // "Send Bill" flow: record the send, then let the browser open WhatsApp
+    // itself in a new tab.
+    function sendWhatsapp() {
+        router.post(
+            `/payments/${payment.uuid}/receipt/send-whatsapp`,
+            {},
+            {
+                preserveScroll: true,
+                preserveState: true,
+                onStart: () => setSendingWhatsapp(true),
+                onFinish: () => setSendingWhatsapp(false),
+                onSuccess: (page) => {
+                    const url = (page.props as unknown as PageProps).flash?.whatsapp_url;
+                    if (url) {
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                    }
+                },
+            },
+        );
+    }
 
     function issueReceipt() {
         router.post(
@@ -300,7 +341,33 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                                             Re-issue
                                         </Button>
                                     )}
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={sendWhatsapp}
+                                        disabled={!canSendWhatsapp || sendingWhatsapp}
+                                        title={
+                                            canSendWhatsapp
+                                                ? undefined
+                                                : "This customer has no phone on file — the receipt can't be sent by WhatsApp."
+                                        }
+                                        className="rounded-lg px-4 py-2 text-sm font-semibold"
+                                    >
+                                        {sendingWhatsapp ? (
+                                            <LoadingSpinner className="h-4 w-4" />
+                                        ) : (
+                                            <IconBrandWhatsapp size={16} stroke={2} />
+                                        )}
+                                        Send via WhatsApp
+                                    </Button>
                                 </div>
+
+                                {receipt.last_sent_at && (
+                                    <p className="text-xs text-slate-500">
+                                        Last sent {formatRelative(receipt.last_sent_at)}
+                                        {receipt.sent_count > 1 ? ` (${receipt.sent_count} times)` : ''}.
+                                    </p>
+                                )}
 
                                 {!payment.customer_phone && (
                                     <p className="text-xs text-slate-500">

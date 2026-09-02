@@ -1,6 +1,6 @@
 import { Linking } from 'react-native';
 import { apiClient } from './client';
-import type { PaymentReceiptResponse } from '../types/api';
+import type { PaymentReceiptResponse, ReceiptWhatsappMessageResponse } from '../types/api';
 
 /**
  * GET /api/v1/payments/{uuid}/receipt — the business-issued receipt for a
@@ -29,4 +29,21 @@ export async function fetchPaymentReceipt(paymentUuid: string): Promise<PaymentR
  */
 export async function openReceiptPdf(sharedPdfUrl: string): Promise<void> {
     await Linking.openURL(sharedPdfUrl);
+}
+
+/**
+ * GET /api/v1/payments/{uuid}/receipt/whatsapp-message (Wave 3 of
+ * payment-receipts-and-whatsapp.md) — the pre-formatted receipt-confirmation
+ * message + normalized phone for the manual "Send via WhatsApp" action on
+ * the receipt screen. Online-only, composed fresh server-side (same as
+ * fetchBillWhatsappMessage). Also records the send to the receipt's
+ * sent_log server-side — there is no separate "record" endpoint.
+ *
+ * Rejects with 404 when the payment has no receipt, 422 when the receipt is
+ * voided.
+ */
+export async function fetchReceiptWhatsappMessage(paymentUuid: string): Promise<ReceiptWhatsappMessageResponse> {
+    const { data } = await apiClient.get<ReceiptWhatsappMessageResponse>(`/payments/${paymentUuid}/receipt/whatsapp-message`);
+
+    return data;
 }

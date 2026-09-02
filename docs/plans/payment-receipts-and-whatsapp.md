@@ -177,7 +177,61 @@ Signed URL: `Storage::temporaryUrl` or a signed route
 WhatsApp-shareable link — must work for an unauthenticated recipient.
 Tests: `PaymentReceiptViewTest`, API test, `cd mobile && npm test`.
 
-### Wave 3 — WhatsApp send
+### Wave 3 — WhatsApp send — ✅ BUILT (awaiting coordinator commit)
+
+Delivered (manual mode only — bulk/Twilio DEFERRED, see note):
+- `app/Support/CameroonPhone.php` — `forWhatsapp(?string): ?string`, the
+  canonical Cameroon-mobile → `237`+9-digit normaliser (now also strips a
+  `00` international-access prefix, which the old inline version dropped on
+  the floor). `BillNotificationService::normalizePhoneForWhatsapp()` now
+  delegates here; the client mirror
+  `mobile/src/utils/whatsapp.ts::normalizeCameroonPhoneForWhatsapp()` got
+  the same `00` handling to stay in lockstep.
+- `app/Services/ReceiptWhatsAppService.php` — `composeMessage()` (short
+  receipt confirmation, FCFA formatted like BillNotificationService, reads
+  the frozen `snapshot` + `PaymentReceiptLink::shared()`), `manualLink()`
+  (full `wa.me` link or null), `recipientPhone()`, `recordSent()` (appends
+  `{channel, at, by, to}` to `sent_log`).
+- `PaymentReceiptController::sendWhatsapp()` (web) — `payments.view` gated
+  (a staff member sending a receipt they can see, NOT `issue`), 422 for
+  no-receipt / voided / no-phone, records `whatsapp_manual` and flashes
+  `whatsapp_url` (mirrored to Inertia by `HandleInertiaRequests`, which
+  gained a `flash.whatsapp_url` key). Route:
+  `POST payments/{payment}/receipt/send-whatsapp`.
+- `Api\PaymentReceiptController::whatsappMessage()` — returns
+  `{has_phone, available, reason, phone, message}` (same shape as
+  `Api\BillController::whatsappMessage()`), records to `sent_log` when a
+  link is deliverable, 404 no-receipt / 422 voided. Route:
+  `GET payments/{payment}/receipt/whatsapp-message`.
+- `PaymentController::show()` — `receipt` payload gains `sent_count` +
+  `last_sent_at` (read from `sent_log`) for the "Last sent …" line.
+- Web: `Payments/Show.tsx` — "Send via WhatsApp" button on the Receipt
+  card (disabled for a void receipt / no phone), opens the flashed
+  `wa.me` URL in a new tab on POST success, "Last sent {relative}" line.
+  Types updated (`PaymentReceipt.sent_count/last_sent_at`,
+  `PageProps.flash.whatsapp_url`).
+- Mobile: `mobile/src/api/paymentReceipts.ts::fetchReceiptWhatsappMessage()`,
+  `mobile/src/types/api.ts` (`ReceiptWhatsappMessageApi/Response`),
+  `mobile/app/receipt/[uuid].tsx` — "Send via WhatsApp" action (fetch
+  `{phone, message}`, `buildWhatsAppBillLink`, `Linking.openURL`).
+- Tests: `tests/Feature/Web/ReceiptWhatsAppTest.php` +
+  `tests/Feature/Api/ReceiptWhatsAppTest.php` (25 combined, incl. the
+  11-case phone-normalisation data-provider), one new mobile
+  `whatsapp.test.ts` case. Regression green:
+  `BillNotificationTest` (8), `BillWhatsappMessageTest` (10),
+  `PaymentReceiptTest` Wave 1+API (16), `PaymentReceiptViewTest` (12),
+  `PaymentReceiptBackfillTest` (2), Web/Api `PaymentTest` (61),
+  `PaymentVerificationTest` (8); mobile `npm test` 101; web `npm run build`.
+
+**Twilio bulk mode DEFERRED (not half-built):** there is no Twilio client
+or send pipeline anywhere in the app yet — `NotificationSetting` stores
+credentials and `tenants.data.bulk_whatsapp_enabled` is the landlord gate,
+but nothing consumes either. Standing up a Twilio media-send path from
+scratch (SDK wiring, Meta-approved template, delivery-status tracking) is
+its own piece of work per bill-notifications.md §6. Manual mode is complete
+and is the owner's stated near-term need.
+
+Original scope:
 Owns: `app/Services/ReceiptWhatsAppService.php` (or extend
 `BillNotificationService` — coordinator decides), the `wa.me` link builder
 (phone normalisation to E.164 for Cameroon +237, pre-filled message with

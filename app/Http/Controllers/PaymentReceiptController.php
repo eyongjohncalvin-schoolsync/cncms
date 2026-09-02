@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\Tenant;
 use App\Services\PaymentReceiptService;
+use App\Services\ReceiptWhatsAppService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -27,6 +28,7 @@ class PaymentReceiptController extends Controller
 {
     public function __construct(
         private readonly PaymentReceiptService $receipts,
+        private readonly ReceiptWhatsAppService $whatsapp,
     ) {}
 
     /**
@@ -62,6 +64,43 @@ class PaymentReceiptController extends Controller
         $this->receipts->issueFor($payment, request()->user());
 
         return back()->with('success', 'Receipt issued.');
+    }
+
+    /**
+     * Manual "Send via WhatsApp" — logs the send to the receipt's
+     * `sent_log` and hands the caller a wa.me deep link to open (flashed as
+     * `whatsapp_url`, mirrored to Inertia by HandleInertiaRequests). Gated
+     * on `payments.view` (any staff member who can see the receipt can send
+     * it — the message carries nothing the payment page doesn't already
+     * show that role), NOT on `payments.issue_receipt`.
+     *
+     * The actual send is client-side (the browser opens the wa.me link
+     * itself) — this endpoint just records that it happened, the same
+     * pattern as ManuscriptController::sendBill().
+     *
+     * 422 (not a soft flash) for the three states the UI already disables
+     * the button for — no receipt, a voided receipt, no usable phone — so a
+     * stale page that POSTs anyway gets a clear rejection.
+     */
+    public function sendWhatsapp(Request $request, Payment $payment): RedirectResponse
+    {
+        $receipt = $payment->receipt;
+
+        abort_if($receipt === null, 422, 'No receipt has been issued for this payment.');
+
+        $this->authorize('view', $receipt);
+
+        abort_if($receipt->isVoid(), 422, 'This receipt has been voided and cannot be sent.');
+
+        $phone = $this->whatsapp->recipientPhone($receipt);
+
+        abort_if($phone === null, 422, 'This customer has no phone number that can receive WhatsApp.');
+
+        $link = $this->whatsapp->manualLink($receipt);
+
+        $this->whatsapp->recordSent($receipt, ReceiptWhatsAppService::CHANNEL_MANUAL, $request->user(), $phone);
+
+        return back()->with('whatsapp_url', $link);
     }
 
     /**

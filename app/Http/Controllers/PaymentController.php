@@ -411,6 +411,12 @@ class PaymentController extends Controller
             // Signed ~7-day public link — Wave 3's WhatsApp Send button reuses
             // this verbatim; harmless to mint on each page load.
             'shared_url' => PaymentReceiptLink::shared($receipt),
+            // Wave 3 — "Last sent" line on the Receipt card, read from the
+            // sent_log jsonb array the WhatsApp send appends to.
+            'sent_count' => count($receipt->sent_log ?? []),
+            'last_sent_at' => ! empty($receipt->sent_log)
+                ? ($receipt->sent_log[array_key_last($receipt->sent_log)]['at'] ?? null)
+                : null,
         ];
     }
 

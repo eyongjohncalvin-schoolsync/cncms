@@ -25,3 +25,7 @@ Route::post('payments/{payment}/receipt', [PaymentController::class, 'uploadRece
 // this auth/tenant.web group.
 Route::get('payment-receipts/{receipt}/pdf', [PaymentReceiptController::class, 'downloadPdf'])->name('payment-receipts.pdf');
 Route::post('payments/{payment}/receipt/issue', [PaymentReceiptController::class, 'issue'])->name('payments.receipt.issue');
+// Wave 3 — manual "Send via WhatsApp": records the send to sent_log and
+// flashes back a wa.me link the browser opens itself. Gated on payments.view
+// inside the controller (a staff member sending a receipt they can see).
+Route::post('payments/{payment}/receipt/send-whatsapp', [PaymentReceiptController::class, 'sendWhatsapp'])->name('payments.receipt.send-whatsapp');
