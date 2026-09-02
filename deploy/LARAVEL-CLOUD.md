@@ -173,15 +173,25 @@ uploaded on Cloud won't survive a redeploy.
 ## 5. First landlord + the swecom data
 
 **Landlord.** A fresh deploy has zero landlords — `users.is_landlord` has no
-UI and isn't seeded. Bootstrap it:
+UI and isn't seeded. From the environment's **Commands** panel:
 
-1. Register yourself at `https://<cloud-url>/register` (this also creates a
-   pending workspace — ignore it or delete it later).
-2. Dashboard → the environment → **Commands**, run:
-   ```
-   php artisan cncms:grant-landlord you@your-email.com
-   ```
-3. `/landlord/tenants` now works. From there you approve/reject workspaces.
+```
+php artisan cncms:grant-landlord you@your-email.com --create --name="You" --password="pick-one"
+```
+
+Log in with that email/password → you land on `/landlord/tenants`. (Drop
+`--create` if you already registered a normal account.)
+
+**Getting into a workspace / fixing a role.** The Landlord "Add Tenant"
+flow provisions a workspace with **no owner membership**, and self-service
+registration makes the registrant `super`. To assign or change a role:
+
+```
+php artisan cncms:tenant-role <tenant-slug> you@your-email.com super
+```
+
+Company Info, Settings, and most admin screens need `super` or `admin` —
+without it the Settings nav link doesn't even show.
 
 **swecom's existing data.** The Supabase database starts empty; swecom's
 ~450 customers / manuscripts / payments live only in the dev box's local
@@ -198,7 +208,26 @@ Postgres (schema `tenantswecom`). Two-phase:
   project first. Building `tenants:migrate` first then loading data-only
   sidesteps the PG18→Supabase version gap (only data moves, not DDL).
 
-## 6. Testing checklist
+## 6. If it feels slow
+
+CNCMS does several DB round-trips per request (session read/write,
+`ResolveTenantWeb`'s membership lookups, tenancy `SET search_path`, then
+the page's own queries) plus cache hits. Over the internet those add up.
+
+1. **Co-locate all three services in the same region** — Laravel Cloud
+   compute, Supabase, Upstash. This is by far the biggest factor; spread
+   across regions means every request crosses oceans 4–6 times.
+2. Use the Supabase **session pooler** connection string (not the direct
+   one) — it holds fewer connections open and reconnects faster from
+   ephemeral containers.
+3. `APP_DEBUG=false` (debug mode has real overhead).
+4. The first request after a deploy is a cold container / opcache warm-up —
+   not representative; measure the 2nd+.
+5. Only *after* co-locating: `SESSION_DRIVER=redis` + `CACHE_STORE=redis`
+   cut the Supabase round-trips, but need Upstash off the free tier (the
+   session churn blows the 10k/day command cap).
+
+## 7. Testing checklist
 
 - [ ] `https://<cloud-url>/login` and `/register` load; a test sign-up
       lands on "awaiting approval".
