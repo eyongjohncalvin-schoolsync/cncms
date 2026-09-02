@@ -148,13 +148,17 @@ return [
         'suffix_storage_path' => true,
 
         /**
-         * By default, asset() calls are made multi-tenant too. You can use global_asset() and mix()
-         * for global, non-tenant-specific assets. However, you might have some issues when using
-         * packages that use asset() calls inside the tenant app. To avoid such issues, you can
-         * disable asset() helper tenancy and explicitly use tenant_asset() calls in places
-         * where you want to use tenant-specific assets (product images, avatars, etc).
+         * FALSE for CNCMS. With this true, `asset()` (used by the `@vite`
+         * tags in the Inertia root view) gets rewritten to
+         * `/tenancy/assets/...` — Stancl's tenant asset route, which does
+         * domain identification and 500s on any host with no `domains` row
+         * (the production URL). CNCMS's compiled front-end assets are
+         * PUBLIC static files served straight from `/build/` by the web
+         * server / CDN — they are not tenant-scoped. Per-tenant uploads
+         * (company logos, receipt photos) go through Spatie Media Library /
+         * `Storage::disk('public')->url()`, never `tenant_asset()`.
          */
-        'asset_helper_tenancy' => true,
+        'asset_helper_tenancy' => false,
     ],
 
     /**
@@ -193,17 +197,19 @@ return [
     /**
      * Should tenancy routes be registered.
      *
-     * Keep TRUE — this only controls Stancl's `stancl.tenancy.asset` route
-     * (serves tenant-scoped uploaded files; the dashboard and media URLs
-     * rely on it). It does NOT control `routes/tenant.php`, which is a
-     * separate, CUSTOM concern (App\Providers\TenancyServiceProvider::
-     * mapRoutes()). That file is deleted: CNCMS resolves tenancy from the
-     * authenticated user's membership, never the request domain, so the
-     * Stancl scaffold's `InitializeTenancyByDomain` smoke-test route is
-     * pure liability — it 500s on any host with no `domains` row (e.g. the
-     * production URL: "Tenant could not be identified on domain ...").
+     * FALSE for CNCMS. This registers Stancl's `/tenancy/assets/{path}`
+     * route (`stancl.tenancy.asset`), which is wrapped in
+     * `InitializeTenancyByDomain` and 500s on any host with no `domains`
+     * row (the production URL: "Tenant could not be identified on domain
+     * ..."). Nothing in CNCMS needs it: front-end build assets are public
+     * static files under `/build/`, and `asset_helper_tenancy` is off (see
+     * the filesystem block above) so `asset()` never routes through it.
+     * Per-tenant uploads use Spatie Media / `Storage::disk('public')`.
+     * (`routes/tenant.php` — the domain-identified tenant route group — is
+     * also deleted; that's a separate CUSTOM concern, see
+     * App\Providers\TenancyServiceProvider::mapRoutes().)
      */
-    'routes' => true,
+    'routes' => false,
 
     /**
      * Parameters used by the tenants:migrate command.
