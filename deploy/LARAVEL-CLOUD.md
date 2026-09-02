@@ -54,9 +54,12 @@ REDIS_CLIENT=predis          # or phpredis + REDIS_SCHEME=tls (see below)
     "Class Predis\Client not found" — it's in composer now.
 - **`REDIS_CACHE_DB=0`** — Laravel's cache connection defaults to DB 1 and
   Upstash only has DB 0, so without this every cache op fails.
-- **Free tier = 10k commands/day.** A `queue:work` Redis worker polls every
-  few seconds → ~25k commands/day idling → limit hit within hours. On the
-  free tier keep the **queue on Postgres** and use Redis for cache only.
+- **Free tier ≈ 500K commands/month (~16.6K/day); at the cap, commands are
+  rejected** (surfaces as cache errors, then slower). A `queue:work` Redis
+  worker polls constantly, and CNCMS already spends ~8–12 commands per
+  authenticated page (doubled by per-tenant cache tagging) plus the 20s
+  notification poll from every open tab. So on the free tier keep the
+  **queue on Postgres** and use Redis for **cache only**.
 
 ### Recommended split (Supabase + free Upstash)
 
@@ -225,7 +228,7 @@ the page's own queries) plus cache hits. Over the internet those add up.
    not representative; measure the 2nd+.
 5. Only *after* co-locating: `SESSION_DRIVER=redis` + `CACHE_STORE=redis`
    cut the Supabase round-trips, but need Upstash off the free tier (the
-   session churn blows the 10k/day command cap).
+   session churn would blow the free command cap).
 
 ## 7. Testing checklist
 
