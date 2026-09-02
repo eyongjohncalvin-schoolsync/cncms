@@ -56,7 +56,12 @@ class UsersControlCenterTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('UsersControlCenter/Users')
                 ->has('users')
-                ->has('roles', 5) // the 5 seeded system roles
+                // The 5 seeded system roles must all be offered; an admin
+                // may also have added custom roles on the real `tenantswecom`
+                // schema this runs against, so don't assert an exact count.
+                ->where('roles', fn ($roles) => collect($roles)->pluck('name')
+                    ->intersect(['super', 'admin', 'manager', 'agent', 'worker'])
+                    ->count() === 5)
                 ->has('branches'));
     }
 

@@ -55,7 +55,13 @@ class RoleManagementTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('UsersControlCenter/Roles')
-                ->has('roles', 5)
+                // >= 5, not == 5: this runs against the real `tenantswecom`
+                // schema, where an admin may have added custom roles through
+                // this very screen. Assert the 5 seeded system roles are all
+                // present rather than that nothing else is.
+                ->where('roles', fn ($roles) => collect($roles)->pluck('name')
+                    ->intersect(['super', 'admin', 'manager', 'agent', 'worker'])
+                    ->count() === 5)
                 ->has('permissionsByArea'));
     }
 

@@ -6,6 +6,7 @@ namespace App\Support;
 
 use App\Models\Agent;
 use App\Models\TenantUser;
+use Database\Seeders\DefaultRolesSeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -138,9 +139,10 @@ final class TenantContext
      * request (both middleware call resolve(), and the Gate/share read it),
      * so it stays as cheap as the branch/zone lookups already here.
      *
-     * A role name with no matching `roles` row (a schema mid-migration
-     * before the seed ran, or a hand-set `tenant_users.role` string that
-     * doesn't exist) fails closed: not super, zero permissions.
+     * A schema with no `roles` table yet, or no row for this role name,
+     * falls back to the built-in system-role defaults (see
+     * defaultRoleState) so an unseeded deploy isn't bricked; a genuinely
+     * unknown (never-created) role name still fails closed.
      *
      * @return array{is_super: bool, permissions: list<string>}
      */
@@ -151,15 +153,19 @@ final class TenantContext
         }
 
         // `roles` not yet created in this schema — the window between this
-        // migration landing in the codebase and `tenants:migrate` running.
+        // migration landing in the codebase and `tenants:migrate` running
+        // (a fresh deploy whose release commands didn't run tenants:migrate,
+        // or a tenant provisioned before the seed migration existed).
         // Checked with Schema::hasTable (a clean information_schema SELECT),
         // NOT a try/catch around the real query: a failed statement inside
         // a transaction poisons it on Postgres ("current transaction is
         // aborted"), which the transaction-wrapped feature-test suite runs
-        // into on every authenticated request. Fail closed — Wave 1 changes
-        // no Policy, so this degrades to exactly today's behaviour.
+        // into on every authenticated request. Fall back to the built-in
+        // system-role defaults (DefaultRolesSeeder — the exact sets the old
+        // hardcoded checks granted) rather than failing closed: an unseeded
+        // schema must NOT brick the app, and must never lock out `super`.
         if (! Schema::hasTable('roles')) {
-            return $this->roleState = ['is_super' => false, 'permissions' => []];
+            return $this->roleState = $this->defaultRoleState();
         }
 
         $rows = DB::table('roles')
@@ -167,13 +173,44 @@ final class TenantContext
             ->where('roles.name', $this->role)
             ->get(['roles.is_super', 'role_permissions.permission']);
 
+        // No `roles` row for this name at all — the table exists (someone's
+        // migrated) but this role was never seeded, or `tenant_users.role`
+        // holds a string that predates the roles table. Same fallback: a
+        // known system-role name resolves to its default set; a genuinely
+        // unknown custom name that was never created still fails closed.
         if ($rows->isEmpty()) {
-            return $this->roleState = ['is_super' => false, 'permissions' => []];
+            return $this->roleState = $this->defaultRoleState();
         }
 
         return $this->roleState = [
             'is_super' => (bool) $rows->first()->is_super,
             'permissions' => $rows->pluck('permission')->filter()->values()->all(),
+        ];
+    }
+
+    /**
+     * The role state to assume when this schema has no seeded `roles` data
+     * for `$this->role` — the exact {is_super, permissions} the pre-RBAC-v2
+     * hardcoded checks granted, taken from the single source of truth
+     * (Database\Seeders\DefaultRolesSeeder::definitions()). A known system
+     * role (`super`/`admin`/`manager`/`agent`/`worker`) resolves to its
+     * default; anything else fails closed. This is a floor, not an
+     * override: the moment `tenants:migrate` seeds the tables, the real
+     * query above wins — including any customisation an admin has made.
+     *
+     * @return array{is_super: bool, permissions: list<string>}
+     */
+    private function defaultRoleState(): array
+    {
+        $definition = DefaultRolesSeeder::definitions()[$this->role] ?? null;
+
+        if ($definition === null) {
+            return ['is_super' => false, 'permissions' => []];
+        }
+
+        return [
+            'is_super' => $definition['is_super'] ?? false,
+            'permissions' => $definition['permissions'],
         ];
     }
 

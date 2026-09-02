@@ -153,6 +153,42 @@ class RolePermissionResolutionTest extends TestCase
         $this->assertTrue($super->canAny('nope.one', 'nope.two'));
     }
 
+    /**
+     * A schema whose `roles` table was never seeded (a fresh deploy whose
+     * release commands skipped `tenants:migrate`, or a tenant provisioned
+     * before the seed migration existed) must NOT brick the app: every
+     * system role falls back to its day-1 default set, and `super` is never
+     * locked out. The moment the tables get seeded, the real query wins.
+     */
+    public function test_unseeded_roles_table_falls_back_to_system_defaults(): void
+    {
+        DB::table('role_permissions')->delete();
+        DB::table('roles')->delete();
+
+        // Contexts memoise, so build fresh ones after wiping the rows.
+        $super = $this->contextFor('super');
+        $this->assertTrue($super->isSuper());
+        $this->assertSame(['*'], $super->permissions());
+
+        $manager = $this->contextFor('manager');
+        $this->assertFalse($manager->isSuper());
+        $expected = DefaultRolesSeeder::definitions()['manager']['permissions'];
+        $actual = $manager->permissions();
+        sort($expected);
+        sort($actual);
+        $this->assertSame($expected, $actual);
+        $this->assertTrue($manager->can('customers.create'));
+
+        // A genuinely unknown role name still fails closed.
+        $unknown = TenantContext::resolve(new TenantUser([
+            'user_id' => $this->users['worker']->id,
+            'tenant_id' => $this->tenant->id,
+            'role' => 'nonexistent-role',
+        ]));
+        $this->assertFalse($unknown->isSuper());
+        $this->assertSame([], $unknown->permissions());
+    }
+
     public function test_super_bypass_flows_through_the_gate(): void
     {
         app()->instance(TenantContext::class, $this->contextFor('super'));
