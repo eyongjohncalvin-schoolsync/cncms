@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Tabs } from 'expo-router';
 import { SyncStatusStrip } from '../../src/components/ui/SyncStatusStrip';
 import { EmergencyBanner } from '../../src/components/ui/EmergencyBanner';
@@ -59,6 +59,17 @@ export default function TabsLayout() {
     const notificationsState = useSyncExternalStore(subscribeNotificationsState, getNotificationsState);
     const hasUnacknowledgedEmergency = notificationsState.unacknowledgedEmergencies.length > 0;
 
+    // Android phones with gesture/3-button navigation reserve a strip at
+    // the very bottom of the screen for the system UI. The tab bar used to
+    // sit at a fixed 64px tall with no regard for that strip, so on a
+    // device with a tall nav bar the bottom row of tab icons/labels ended
+    // up UNDER the system bar — tapping "More" (the rightmost, closest to
+    // the edge) registered as the OS back/home gesture instead of the app
+    // tab. `useSafeAreaInsets()` reports that reserved height per-device
+    // (0 on devices with none), so we grow the bar by exactly that much
+    // rather than guessing a fixed value that's wrong on other phones.
+    const insets = useSafeAreaInsets();
+
     return (
         <View style={styles.flex}>
             <SafeAreaView edges={['top']} style={styles.stripSafeArea}>
@@ -71,7 +82,7 @@ export default function TabsLayout() {
                     headerShown: false,
                     tabBarActiveTintColor: colors.textPrimary,
                     tabBarInactiveTintColor: colors.textSecondary,
-                    tabBarStyle: styles.tabBar,
+                    tabBarStyle: [styles.tabBar, { height: 64 + insets.bottom, paddingBottom: 8 + insets.bottom }],
                     tabBarLabelStyle: styles.tabLabel,
                 }}
             >
@@ -129,8 +140,8 @@ const styles = StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
     stripSafeArea: { backgroundColor: colors.background },
     tabBar: {
-        height: 64,
-        paddingBottom: 8,
+        // height/paddingBottom are overridden per-render with the device's
+        // safe-area bottom inset added in — see useSafeAreaInsets() above.
         paddingTop: 6,
         backgroundColor: colors.background,
         borderTopColor: colors.border,

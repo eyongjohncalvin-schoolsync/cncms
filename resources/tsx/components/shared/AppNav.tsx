@@ -1,7 +1,6 @@
 import { Link } from '@inertiajs/react';
 import { useTranslation } from 'react-i18next';
 import {
-    IconBroadcast,
     IconLayoutDashboard,
     IconUsers,
     IconMapPin,
@@ -215,9 +214,11 @@ export function AppNav({
     return (
         <>
             <div className="relative flex h-16 shrink-0 items-center gap-2.5 border-b border-slate-200/70 px-4">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-md shadow-blue-600/25 ring-1 ring-white/20">
-                    <IconBroadcast size={19} stroke={1.75} />
-                </span>
+                <img
+                    src="/onetech-icon.png"
+                    alt=""
+                    className="h-9 w-9 shrink-0 rounded-xl shadow-md shadow-violet-900/25 ring-1 ring-white/10"
+                />
                 <div className="min-w-0 leading-tight">
                     <p className="font-display text-lg text-slate-900">CNCMS</p>
                     {companyName && (

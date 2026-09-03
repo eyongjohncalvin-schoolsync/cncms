@@ -26,7 +26,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         // Android market share dominance means iOS isn't a v1 priority.
         package: 'com.shalomtech.cncms.mobile',
         adaptiveIcon: {
-            backgroundColor: '#E6F4FE',
+            // Matches the OneTech mark's own gradient base (dark purple) —
+            // only used as a fallback fill if backgroundImage can't load,
+            // so keep it in the same family as android-icon-background.png.
+            backgroundColor: '#1E0B4B',
             foregroundImage: './assets/android-icon-foreground.png',
             backgroundImage: './assets/android-icon-background.png',
             monochromeImage: './assets/android-icon-monochrome.png',
@@ -40,7 +43,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     plugins: [
         'expo-router',
         'expo-secure-store',
-        'expo-splash-screen',
+        [
+            'expo-splash-screen',
+            {
+                // Was previously registered with no options — the native
+                // splash screen fell back to Expo's own default (a plain
+                // white flash) even though assets/splash-icon.png existed
+                // in the repo; it was never actually wired to anything.
+                image: './assets/splash-icon.png',
+                imageWidth: 200,
+                backgroundColor: '#1E0B4B',
+                dark: {
+                    image: './assets/splash-icon.png',
+                    backgroundColor: '#1E0B4B',
+                },
+            },
+        ],
         'expo-sqlite',
         'expo-status-bar',
         [
