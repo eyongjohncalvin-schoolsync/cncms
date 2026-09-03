@@ -138,19 +138,24 @@ return new class extends Migration
     }
 
     /**
-     * The four services the owner named (services.md section 3). Seed price
-     * is 0.00 on purpose — a real price is operator-specific and set in the
-     * catalogue screen; the add form warns on a ticked 0.00 service.
+     * The four services the owner named (services.md section 3). TV seeds
+     * at 2,500 FCFA — SWECOM's actual real-world base rate
+     * (cncms-context's own database reference), so a brand-new tenant (or
+     * the office adding their first customer) never has to remember to go
+     * set it before it's usable. The other three seed at 0.00 — there's no
+     * comparable "obvious default" for Internet/VOD/Satellite Hosting, so
+     * those genuinely are operator-specific and stay for the catalogue
+     * screen to set. Every price stays editable there regardless.
      * firstOrCreate by slug so re-running never duplicates and never
      * overwrites a price the operator has since set.
      */
     private function seedDefaultServices(): void
     {
         $rows = [
-            ['slug' => 'tv', 'name' => 'TV Service', 'is_default' => true, 'sort_order' => 1],
-            ['slug' => 'internet', 'name' => 'Internet', 'is_default' => false, 'sort_order' => 2],
-            ['slug' => 'vod', 'name' => 'Video on Demand', 'is_default' => false, 'sort_order' => 3],
-            ['slug' => 'satellite-hosting', 'name' => 'Satellite Hosting', 'is_default' => false, 'sort_order' => 4],
+            ['slug' => 'tv', 'name' => 'TV Service', 'is_default' => true, 'sort_order' => 1, 'price' => 2500],
+            ['slug' => 'internet', 'name' => 'Internet', 'is_default' => false, 'sort_order' => 2, 'price' => 0],
+            ['slug' => 'vod', 'name' => 'Video on Demand', 'is_default' => false, 'sort_order' => 3, 'price' => 0],
+            ['slug' => 'satellite-hosting', 'name' => 'Satellite Hosting', 'is_default' => false, 'sort_order' => 4, 'price' => 0],
         ];
 
         $now = now();
@@ -165,7 +170,7 @@ return new class extends Migration
             DB::table('services')->insert([
                 'slug' => $row['slug'],
                 'name' => $row['name'],
-                'price' => 0,
+                'price' => $row['price'],
                 'is_default' => $row['is_default'],
                 'active' => true,
                 'sort_order' => $row['sort_order'],

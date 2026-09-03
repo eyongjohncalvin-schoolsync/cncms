@@ -131,15 +131,29 @@ tenant on `tenants:migrate` and on provisioning — same pattern as
 
 | slug | name | is_default | active | price (seed) |
 |---|---|---|---|---|
-| `tv` | TV Service | **true** | true | `0.00` — operator sets the real price in the catalogue screen |
+| `tv` | TV Service | **true** | true | `2500.00` (2026-09-03 addendum — SWECOM's real base rate, cncms-context's own database reference; no more "set it up every time" for the one service that actually has an obvious default) |
 | `internet` | Internet | false | true | `0.00` |
 | `vod` | Video on Demand | false | true | `0.00` |
 | `satellite-hosting` | Satellite Hosting | false | true | `0.00` |
 
-Seed prices are `0.00` on purpose — a real price is operator-specific and
-set in the catalogue UI. No variants are seeded — the operator adds channels
-under TV themselves once the feature ships (there's no universal default
-channel list to guess at).
+Internet/VOD/Satellite Hosting stay at `0.00` — there's no comparable
+"obvious default" for them, so those genuinely are operator-specific and
+set in the catalogue UI. Every price, TV included, stays editable there
+regardless. No variants are seeded — the operator adds channels under TV
+themselves once the feature ships (there's no universal default channel
+list to guess at).
+
+**2026-09-03 addendum**: a top-up migration
+(`2026_09_06_000300_default_tv_service_price_to_2500`) brings the `tv`
+price to 2500 on schemas that ran the create+seed migration before this
+default existed — guarded to only touch a row still at the untouched
+`0.00` seed value, so it can never clobber an operator's own deliberate
+price. Verified: swecom already had it set to `2500.00` independently
+(untouched by the migration); the second real tenant
+(`multimedia-digital-cable-network`) was still at `0.00` and got bumped.
+Changing the catalogue price never retroactively changes an existing
+customer's bill (`customer_service.price` is an independent snapshot) —
+this only changes what a brand-new customer's TV subscription defaults to.
 
 ### Backfill migration `2026_09_06_000100_backfill_customer_services_from_bill`
 
