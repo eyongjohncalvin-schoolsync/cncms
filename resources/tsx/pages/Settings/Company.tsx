@@ -21,9 +21,39 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { Company } from '@/types';
 import { useState } from 'react'; // Add this import
 
+/**
+ * Empty defaults for a tenant with no `companies` row yet — a queued
+ * SeedDatabase job that never ran/failed on tenant creation (see
+ * SettingsCompanyController::update()'s doc comment), or any other reason
+ * the row is simply missing. Previously this page dead-ended here with
+ * "Contact a super administrator to initialize your company profile" and
+ * no form at all — including for a super administrator, who could never
+ * actually reach one. The fix is this file's half of the bug: always
+ * render the real form, prefilled with these safe defaults instead of
+ * `company`'s fields, and let the (now create-or-update-safe) PATCH
+ * handler create the row on first save.
+ */
+const EMPTY_COMPANY: Company = {
+    uuid: '',
+    name: '',
+    location: '',
+    head_office: null,
+    email: null,
+    phone: '',
+    tech_number: null,
+    momo_number: null,
+    momo_name: null,
+    reconnection_fine: '2000',
+    arrears_second_approval_threshold: '20000',
+    rccm_number: null,
+    niu: null,
+    logo_url: null,
+};
+
 export default function SettingsCompany({ company }: { company: Company | null }) {
     // Add state declaration here
     const [activeSection, setActiveSection] = useState('general');
+    const values = company ?? EMPTY_COMPANY;
 
     // Add sections array here
     const sections = [
@@ -55,36 +85,41 @@ export default function SettingsCompany({ company }: { company: Company | null }
                         </div>
                         <div>
                             <h1 className="font-display text-3xl font-semibold text-slate-900 tracking-tight">
-                                Company Information
+                                {company ? 'Company Information' : 'Set Up Your Company'}
                             </h1>
                             <p className="mt-1 text-sm text-slate-500">
-                                Manage your company profile, contact details, and payment settings
+                                {company
+                                    ? 'Manage your company profile, contact details, and payment settings'
+                                    : 'Fill in your company profile, contact details, and payment settings to get started'}
                             </p>
                         </div>
                     </div>
-                    {company && (
+                    {company ? (
                         <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-medium">
                             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
                             Active
+                        </div>
+                    ) : (
+                        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full text-xs font-medium">
+                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                            Setup needed
                         </div>
                     )}
                 </div>
             </div>
 
-            {!company ? (
-                <Card className="max-w-3xl mx-auto">
-                    <CardBody className="text-center py-12">
-                        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
-                            <IconAlertCircle className="h-8 w-8 text-amber-600" />
-                        </div>
-                        <h3 className="mt-4 text-lg font-medium text-slate-900">No Company Record Found</h3>
-                        <p className="mt-2 text-sm text-slate-500 max-w-md mx-auto">
-                            Contact a super administrator to initialize your company profile and settings.
+            {!company && (
+                <Card className="max-w-5xl mx-auto mb-6 border-amber-200 bg-amber-50/60">
+                    <CardBody className="flex items-start gap-3 py-4">
+                        <IconAlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
+                        <p className="text-sm text-amber-800">
+                            No company record exists for this workspace yet. Fill in the form below and save — this creates it.
                         </p>
                     </CardBody>
                 </Card>
-            ) : (
-                <div className="max-w-5xl mx-auto">
+            )}
+
+            <div className="max-w-5xl mx-auto">
                     {/* Section Navigation */}
                     <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
                         {sections.map((section) => {
@@ -143,7 +178,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         id="name"
                                                         name="name"
                                                         label="Company Name"
-                                                        defaultValue={company.name}
+                                                        defaultValue={values.name}
                                                         error={errors.name}
                                                         required
                                                         placeholder="Enter company name"
@@ -155,7 +190,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         id="location"
                                                         name="location"
                                                         label="Location"
-                                                        defaultValue={company.location}
+                                                        defaultValue={values.location}
                                                         error={errors.location}
                                                         required
                                                         placeholder="e.g., 3/CORNERS"
@@ -171,7 +206,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         id="head_office"
                                                         name="head_office"
                                                         label="Head Office Address"
-                                                        defaultValue={company.head_office ?? ''}
+                                                        defaultValue={values.head_office ?? ''}
                                                         error={errors.head_office}
                                                         placeholder="Full postal address"
                                                         className="rounded-xl px-4 py-3"
@@ -206,7 +241,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         name="email"
                                                         type="email"
                                                         label="Email Address"
-                                                        defaultValue={company.email ?? ''}
+                                                        defaultValue={values.email ?? ''}
                                                         error={errors.email}
                                                         placeholder="contact@company.com"
                                                         className="rounded-xl px-4 py-3"
@@ -221,7 +256,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         id="phone"
                                                         name="phone"
                                                         label="Phone Number"
-                                                        defaultValue={company.phone}
+                                                        defaultValue={values.phone}
                                                         error={errors.phone}
                                                         required
                                                         placeholder="+237 XXX XXX XXX"
@@ -237,7 +272,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         id="tech_number"
                                                         name="tech_number"
                                                         label="Technical Support Number"
-                                                        defaultValue={company.tech_number ?? ''}
+                                                        defaultValue={values.tech_number ?? ''}
                                                         error={errors.tech_number}
                                                         placeholder="+237 XXX XXX XXX"
                                                         className="rounded-xl px-4 py-3"
@@ -271,7 +306,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         id="momo_number"
                                                         name="momo_number"
                                                         label="MOMO Number(s)"
-                                                        defaultValue={company.momo_number ?? ''}
+                                                        defaultValue={values.momo_number ?? ''}
                                                         error={errors.momo_number}
                                                         placeholder="+237 XXX XXX XXX"
                                                         className="rounded-xl px-4 py-3"
@@ -285,7 +320,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         id="momo_name"
                                                         name="momo_name"
                                                         label="MOMO Account Name(s)"
-                                                        defaultValue={company.momo_name ?? ''}
+                                                        defaultValue={values.momo_name ?? ''}
                                                         error={errors.momo_name}
                                                         placeholder="Account holder name"
                                                         className="rounded-xl px-4 py-3"
@@ -302,7 +337,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         min="0"
                                                         step="0.01"
                                                         label="Reconnection Fine (FCFA)"
-                                                        defaultValue={company.reconnection_fine}
+                                                        defaultValue={values.reconnection_fine}
                                                         error={errors.reconnection_fine}
                                                         required
                                                         placeholder="5000"
@@ -320,7 +355,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         min="0"
                                                         step="0.01"
                                                         label="Arrears Adjustment — Second Approval Threshold (FCFA)"
-                                                        defaultValue={company.arrears_second_approval_threshold}
+                                                        defaultValue={values.arrears_second_approval_threshold}
                                                         error={errors.arrears_second_approval_threshold}
                                                         required
                                                         placeholder="20000"
@@ -356,7 +391,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         name="rccm_number"
                                                         label="RCCM Number"
                                                         placeholder="RC/DLA/2019/PM/127651"
-                                                        defaultValue={company.rccm_number ?? ''}
+                                                        defaultValue={values.rccm_number ?? ''}
                                                         error={errors.rccm_number}
                                                         className="rounded-xl px-4 py-3"
                                                     />
@@ -370,7 +405,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         name="niu"
                                                         label="NIU (Taxpayer Number)"
                                                         placeholder="M012345678901A"
-                                                        defaultValue={company.niu ?? ''}
+                                                        defaultValue={values.niu ?? ''}
                                                         error={errors.niu}
                                                         className="rounded-xl px-4 py-3"
                                                     />
@@ -402,10 +437,10 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                     Company Logo
                                                 </label>
                                                 <div className="flex flex-col sm:flex-row items-start gap-4 p-6 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 hover:border-slate-300 transition-colors">
-                                                    {company.logo_url ? (
+                                                    {values.logo_url ? (
                                                         <div className="relative group">
                                                             <img
-                                                                src={company.logo_url}
+                                                                src={values.logo_url}
                                                                 alt="Current company logo"
                                                                 className="h-24 w-24 rounded-xl border border-slate-200 bg-white object-contain p-2 shadow-sm"
                                                             />
@@ -472,7 +507,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                             className="w-full rounded-xl px-6 py-2.5 text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-lg shadow-slate-900/10 sm:w-auto"
                                         >
                                             {processing && <LoadingSpinner className="mr-2 text-white" />}
-                                            {processing ? 'Saving Changes...' : 'Save Changes'}
+                                            {processing ? 'Saving…' : company ? 'Save Changes' : 'Create Company Info'}
                                         </Button>
                                     </div>
                                 </div>
@@ -480,7 +515,6 @@ export default function SettingsCompany({ company }: { company: Company | null }
                         )}
                     </Form>
                 </div>
-            )}
         </AppLayout>
     );
 }

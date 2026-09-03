@@ -141,4 +141,35 @@ class SettingsCompanyTest extends TestCase
 
         $response->assertSessionHasErrors(['name', 'reconnection_fine']);
     }
+
+    /**
+     * The bug this closes: a tenant whose `companies` row never got seeded
+     * (a queued SeedDatabase job that never ran/failed — see
+     * SettingsCompanyController::update()'s doc comment) previously had no
+     * way to ever create one — the edit page dead-ended with "Contact a
+     * super administrator to initialize your company profile," even for a
+     * super administrator, and a bare `first()->update()` fatally errored
+     * on the null. Both halves fixed together: the edit page always renders
+     * the real form now (Settings/Company.tsx), and this proves the write
+     * side actually creates the row rather than crashing.
+     */
+    public function test_super_can_create_the_company_record_when_none_exists_yet(): void
+    {
+        $this->actingAsRole('super');
+
+        Company::query()->delete();
+        Company::forgetCache();
+        $this->assertDatabaseCount('companies', 0);
+
+        $editResponse = $this->get('/settings/company');
+        $editResponse->assertOk();
+        $editResponse->assertInertia(fn ($page) => $page->where('company', null));
+
+        $response = $this->patch('/settings/company', $this->fullPayload());
+
+        $response->assertRedirect(route('settings.company.edit'));
+        $response->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('companies', ['name' => 'SWECOM PLC', 'location' => '3/CORNERS']);
+        $this->assertDatabaseCount('companies', 1);
+    }
 }

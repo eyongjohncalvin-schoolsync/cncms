@@ -44,11 +44,28 @@ class SettingsCompanyController extends Controller
         ]);
     }
 
+    /**
+     * `updateOrCreate`, not a bare `first()->update()`: a tenant whose
+     * `companies` row never got seeded (the queued SeedDatabase job never
+     * ran or failed — see TenancyServiceProvider's `shouldBeQueued(true)`
+     * doc comment on tenant creation, "needs the queue worker running")
+     * previously hit a fatal "call to a member function update() on null"
+     * here, with no way to recover except a manual DB insert — this was
+     * surfaced as "no way to see the option to create company info," even
+     * though every field this form needs is already validated
+     * create-or-update-safely by UpdateCompanyRequest. There is
+     * deliberately no separate `company.create` ability/permission: Company
+     * is a strict one-row-per-tenant settings record (no create/delete
+     * concept, same as CompanyPolicy's own doc comment implies), so
+     * `company.update` is the one ability that covers "set up OR edit the
+     * company info," and this single controller method now handles both.
+     */
     public function update(UpdateCompanyRequest $request): RedirectResponse
     {
-        $company = Company::query()->first();
+        $company = Company::query()->firstOrNew();
 
-        $company->update($request->safe()->except('logo'));
+        $company->fill($request->safe()->except('logo'));
+        $company->save();
 
         if ($request->hasFile('logo')) {
             // singleFile() collection (see Company::registerMediaCollections)
