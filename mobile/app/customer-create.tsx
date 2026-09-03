@@ -14,12 +14,35 @@ import { TextInput } from '../src/components/ui/TextInput';
 import { EmptyState } from '../src/components/ui/EmptyState';
 import { ServicesPicker } from '../src/components/customers/ServicesPicker';
 import { colors } from '../src/theme/colors';
-import { fontSize, radius, spacing } from '../src/theme/tokens';
+import { fontSize, radius, spacing, touchTarget } from '../src/theme/tokens';
 import type { CustomerServiceSelection, ServiceCatalogueApi } from '../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting';
 
 const LEVELS: Array<'normal' | 'Vip' | 'Operator'> = ['normal', 'Vip', 'Operator'];
+
+/**
+ * Laravel's standard 422 `{message, errors: {field: [...]}}` shape — same
+ * ad-hoc, scoped-locally extraction edit-profile.tsx/adjust-arrears/[uuid].tsx
+ * already use (no shared helper for this exists in src/api/client.ts; see
+ * edit-profile.tsx's own doc comment for why that's deliberate).
+ */
+function extractFieldErrors(error: unknown): Record<string, string[]> | undefined {
+    return (error as { response?: { data?: { errors?: Record<string, string[]> } } })?.response?.data?.errors;
+}
+
+/**
+ * `services`/`services.*.service_uuid`/`services.*.price`/etc. — Laravel
+ * flattens array-item rule failures to dotted keys (StoreCustomerRequest's
+ * `services.*` rules), so surface whichever one fired first under the
+ * Services section rather than only handling the bare `services` key
+ * (required/min:1) and silently dropping a per-row failure.
+ */
+function firstServicesError(fieldErrors: Record<string, string[]>): string | undefined {
+    const key = Object.keys(fieldErrors).find((k) => k === 'services' || k.startsWith('services.'));
+
+    return key ? fieldErrors[key][0] : undefined;
+}
 
 /**
  * Add Customer — mobile counterpart of resources/tsx/pages/Customers/
@@ -155,6 +178,25 @@ export default function CustomerCreateScreen() {
             ]);
         } catch (error) {
             setPhase('ready');
+
+            // Surface StoreCustomerRequest's actual per-field 422 reasons
+            // inline (same helper this app already uses in edit-profile.tsx/
+            // adjust-arrears/[uuid].tsx) rather than letting the fallback
+            // Alert show Laravel's generic "The given data was invalid." —
+            // that message alone gives the user nothing to fix.
+            const fieldErrors = extractFieldErrors(error);
+
+            if (fieldErrors) {
+                setErrors((prev) => ({
+                    ...prev,
+                    name: fieldErrors.name?.[0],
+                    phone: fieldErrors.phone?.[0],
+                    zone_uuid: fieldErrors.zone_uuid?.[0],
+                    location: fieldErrors.location?.[0],
+                    services: firstServicesError(fieldErrors) ?? prev.services,
+                }));
+            }
+
             Alert.alert('Could not add customer', extractErrorMessage(error, 'Something went wrong.'));
         }
     }
@@ -283,7 +325,18 @@ export default function CustomerCreateScreen() {
 
             <Card>
                 <Text style={styles.sectionTitle}>Services</Text>
-                <ServicesPicker catalogue={catalogue} value={services} onChange={setServices} error={errors.services} />
+                <ServicesPicker
+                    catalogue={catalogue}
+                    value={services}
+                    onChange={(next) => {
+                        setServices(next);
+                        // Matches every other field on this form: the error
+                        // clears the moment the user acts on it, rather than
+                        // sitting stale until the next submit attempt.
+                        setErrors((prev) => ({ ...prev, services: undefined }));
+                    }}
+                    error={errors.services}
+                />
             </Card>
 
             <Button
@@ -304,9 +357,16 @@ const styles = StyleSheet.create({
     sectionTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textSecondary, marginBottom: spacing.sm },
     fieldError: { fontSize: fontSize.xs, color: colors.danger, marginBottom: spacing.sm },
     zoneList: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+    // minHeight/justifyContent: 'center' — mobile-app-react-native.md §6's
+    // 48dp touch-target floor. paddingVertical: spacing.sm (8) alone left
+    // this chip around ~36dp, the exact class of bug that section's own
+    // dated audits found (and fixed the same way) on the Customers list's
+    // filter chips and Log a Complaint's category chips.
     zoneChip: {
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.sm,
+        minHeight: touchTarget.floor,
+        justifyContent: 'center',
         borderRadius: radius.pill,
         borderWidth: 1,
         borderColor: colors.border,
@@ -320,6 +380,8 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         paddingVertical: spacing.sm,
+        minHeight: touchTarget.floor,
+        justifyContent: 'center',
         borderRadius: radius.lg,
         borderWidth: 1,
         borderColor: colors.border,

@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { TextInput } from '../ui/TextInput';
 import { colors } from '../../theme/colors';
-import { fontSize, radius, spacing } from '../../theme/tokens';
+import { fontSize, radius, spacing, touchTarget } from '../../theme/tokens';
 import { formatFcfa } from '../../utils/format';
 import type { CustomerServiceSelection, ServiceCatalogueApi } from '../../types/api';
 
@@ -170,7 +170,14 @@ const styles = StyleSheet.create({
         borderColor: colors.accent.customers,
         backgroundColor: colors.background,
     },
-    serviceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    // minHeight/justifyContent: 'center' added per mobile-app-react-native.md
+    // §6's 48dp touch-target floor — this Pressable's un-padded content
+    // (a 22px checkbox + a name label, no description on many services)
+    // measured well under 48dp on its own; ticking a service is this
+    // screen's single most-tapped interaction, so this gets an actual
+    // resize (the "resize what's tapped constantly" rule from the
+    // Customers-list/Log-a-Complaint touch-target audits), not hitSlop.
+    serviceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: touchTarget.floor },
     checkbox: {
         width: 22,
         height: 22,
@@ -208,7 +215,9 @@ const styles = StyleSheet.create({
         borderLeftColor: colors.border,
         gap: spacing.sm,
     },
-    variantRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    // Same touch-target reasoning as serviceRow above — ticking an option is
+    // a real, frequent interaction on any service that has them.
+    variantRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: touchTarget.floor },
     variantName: { fontSize: fontSize.sm, color: colors.textPrimary, flex: 1 },
     variantPriceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs, marginLeft: 26 },
     variantPriceInput: { flex: 1, marginBottom: 0 },

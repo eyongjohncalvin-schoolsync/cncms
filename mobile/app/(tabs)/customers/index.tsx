@@ -62,6 +62,41 @@ function matchesSearch(customer: LocalCustomer, query: string): boolean {
  * customer array, never a fresh-every-render callback) lets FlatList's
  * own default `shouldComponentUpdate`-equivalent actually skip rows
  * whose `item`/`onPress`/`onCall` didn't change.
+ *
+ * 2026-09-03 addendum — the same warning fired again post-launch, this time
+ * with `{"contentLength": 18294.67, "dt": 718, "prevDt": 82729}` (an 82.7-
+ * SECOND prevDt). Investigated end-to-end rather than re-applying more memo:
+ *
+ * 1. This memoization is still fully intact (verified by reading this file)
+ *    — `CustomerRow` is still `memo`'d, and `handleOpenCustomer`/`handleCall`/
+ *    `renderItem` below are still stable `useCallback`s. Nothing regressed
+ *    here.
+ * 2. `dt`/`prevDt` are NOT a render-cost or JS-thread-block measurement at
+ *    all — they're computed in `_onScroll` in
+ *    `@react-native/virtualized-lists/Lists/VirtualizedList.js` as
+ *    `timestamp - this._scrollMetrics.timestamp`, i.e. the wall-clock gap
+ *    between two consecutive **native onScroll events**. The warning fires
+ *    once per list instance (`!this._hasWarned.perf`) when two consecutive
+ *    such gaps both exceed 500ms and `contentLength > 5 * visibleLength`
+ *    (true for any list this tall). A prevDt of 82.7s just means the agent's
+ *    finger was off the screen for 82.7s between two drags (reading a row,
+ *    answering a call, whatever) — nothing in this app can block the JS
+ *    thread synchronously for 82 real seconds, so a literal 82s stall was
+ *    never on the table.
+ * 3. Ruled out the sync-timing hypothesis with real numbers, not a guess: a
+ *    Node `node:sqlite` benchmark reproducing `upsertCustomers()`'s exact
+ *    insert shape (12 columns incl. the `services` JSON column added the
+ *    same day) at 550 rows, sequential awaited calls inside one transaction,
+ *    completed in ~48ms total (JSON.stringify of the services array: ~7ms
+ *    total, ~13us/row). `getAllCustomers()`'s `SELECT * ORDER BY name` over
+ *    550 rows: ~14ms. Even generous real-device bridge overhead on top of
+ *    that floor doesn't get within three orders of magnitude of 82 seconds.
+ *
+ * Conclusion: no code defect here or in src/db/customers.ts — this is a
+ * known-noisy RN heuristic that will eventually fire once on any list this
+ * tall given ordinary pause-then-resume scrolling, regardless of render
+ * efficiency. Left as-is deliberately; see the investigating agent's report
+ * for the full writeup.
  */
 const CustomerRow = memo(function CustomerRow({
     customer,

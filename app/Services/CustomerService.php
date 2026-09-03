@@ -70,13 +70,13 @@ class CustomerService
 
     public function findOrFail(string $uuid, bool $withTrashed = false): Customer
     {
-        return Cache::remember(
+        $customer = Cache::remember(
             "customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all').($withTrashed ? ':trashed' : ''),
             now()->addSeconds(60),
             function () use ($uuid, $withTrashed): Customer {
                 $customer = $this->customers->findByUuid(
                     $uuid,
-                    ['zone', 'latestManuscript', 'subscriptions.service', 'subscriptions.serviceVariant'],
+                    ['zone', 'latestManuscript'],
                     $withTrashed,
                 );
 
@@ -92,6 +92,37 @@ class CustomerService
                 return $customer;
             },
         );
+
+        // `subscriptions.service`/`subscriptions.serviceVariant` are
+        // deliberately loaded FRESH here, every call, never inside the
+        // Cache::remember above. Found 2026-09-03 during mobile QA: this
+        // app's CACHE_STORE is 'database' (Postgres), and PHP's serialize()
+        // of an object encodes protected/private property names with
+        // embedded NUL (\0) bytes — a byte Postgres `text`/`varchar` columns
+        // cannot hold. Caching a Customer with subscriptions eager-loaded
+        // (CustomerSubscription extends Pivot, itself carrying
+        // protected/private properties) silently corrupts the stored blob;
+        // reading it back on the next cache HIT produces
+        // __PHP_Incomplete_Class objects in place of CustomerSubscription
+        // rows, and CustomerResource::toArray()'s services mapping then
+        // fatals with a TypeError — reproduced live: a cold GET succeeds
+        // (cache MISS, computes fresh), the very next identical GET within
+        // the 60s TTL 500s (cache HIT, corrupted unserialize), every time.
+        // This hit both the web Customer Show page and every mobile screen
+        // that calls GET /customers/{uuid} (Customer Detail's live refresh,
+        // customer-edit/[uuid].tsx, reconnect/disconnect/adjust-arrears).
+        // Excluding subscriptions from what gets cached — `zone`/
+        // `latestManuscript` have no such nested Pivot model and were
+        // already caching safely before today — and loading them
+        // separately on every call (uncached; a small extra query, but
+        // avoids a data-integrity/serialization risk entirely) closes this
+        // without touching the wider 'database' cache store used
+        // everywhere else in this class.
+        if (! $customer->relationLoaded('subscriptions')) {
+            $customer->load('subscriptions.service', 'subscriptions.serviceVariant');
+        }
+
+        return $customer;
     }
 
     /**

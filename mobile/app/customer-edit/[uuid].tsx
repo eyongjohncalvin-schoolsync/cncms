@@ -14,12 +14,35 @@ import { TextInput } from '../../src/components/ui/TextInput';
 import { EmptyState } from '../../src/components/ui/EmptyState';
 import { ServicesPicker } from '../../src/components/customers/ServicesPicker';
 import { colors } from '../../src/theme/colors';
-import { fontSize, radius, spacing } from '../../src/theme/tokens';
+import { fontSize, radius, spacing, touchTarget } from '../../src/theme/tokens';
 import type { CustomerDetailApi, CustomerServiceSelection, ServiceCatalogueApi } from '../../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting';
 
 const LEVELS: Array<'normal' | 'Vip' | 'Operator'> = ['normal', 'Vip', 'Operator'];
+
+/**
+ * Laravel's standard 422 `{message, errors: {field: [...]}}` shape — same
+ * ad-hoc, scoped-locally extraction edit-profile.tsx/adjust-arrears/[uuid].tsx
+ * already use (no shared helper for this exists in src/api/client.ts; see
+ * edit-profile.tsx's own doc comment for why that's deliberate).
+ */
+function extractFieldErrors(error: unknown): Record<string, string[]> | undefined {
+    return (error as { response?: { data?: { errors?: Record<string, string[]> } } })?.response?.data?.errors;
+}
+
+/**
+ * `services`/`services.*.service_uuid`/`services.*.price`/etc. — Laravel
+ * flattens array-item rule failures to dotted keys (UpdateCustomerRequest's
+ * `services.*` rules), so surface whichever one fired first under the
+ * Services section rather than only handling the bare `services` key
+ * (required/min:1) and silently dropping a per-row failure.
+ */
+function firstServicesError(fieldErrors: Record<string, string[]>): string | undefined {
+    const key = Object.keys(fieldErrors).find((k) => k === 'services' || k.startsWith('services.'));
+
+    return key ? fieldErrors[key][0] : undefined;
+}
 
 /**
  * Edit Customer — mobile counterpart of resources/tsx/pages/Customers/
@@ -38,12 +61,41 @@ const LEVELS: Array<'normal' | 'Vip' | 'Operator'> = ['normal', 'Vip', 'Operator
 function buildCatalogue(activeCatalogue: ServiceCatalogueApi[], held: CustomerDetailApi['services']): ServiceCatalogueApi[] {
     const byUuid = new Map(activeCatalogue.map((s) => [s.uuid, s]));
 
-    for (const row of held) {
+    // Base rows (service_variant_uuid === null) processed in their own pass,
+    // BEFORE any variant row — `held` is whatever order CustomerDetailApi
+    // returned (not guaranteed base-before-variant). A bug found during this
+    // pass: iterating in one flat loop meant that if a variant row happened
+    // to come before its own base row, the synthesized "held but inactive"
+    // service entry got stamped with the VARIANT's price (that row's own
+    // `price`) instead of the base subscription's actual price — wrong
+    // forever after, until the user unticks and re-ticks that service. Two
+    // passes make the result correct regardless of the array's order.
+    const baseRows = held.filter((row) => row.service_variant_uuid === null);
+    const variantRows = held.filter((row) => row.service_variant_uuid !== null);
+
+    for (const row of baseRows) {
+        if (!byUuid.has(row.service_uuid)) {
+            // Held but the base service itself is now inactive — synthesize
+            // a minimal entry so it still renders (and stays ticked).
+            byUuid.set(row.service_uuid, {
+                uuid: row.service_uuid,
+                name: `${row.service_name} (inactive)`,
+                description: null,
+                price: row.price,
+                is_default: false,
+                variants: [],
+            });
+        }
+    }
+
+    for (const row of variantRows) {
         let service = byUuid.get(row.service_uuid);
 
         if (!service) {
-            // Held but the base service itself is now inactive — synthesize
-            // a minimal entry so it still renders (and stays ticked).
+            // Defensive only — section 4's invariant guarantees a variant is
+            // never held without its base service also held (so `baseRows`
+            // above should have already created this entry), but don't let a
+            // malformed payload crash the form.
             service = {
                 uuid: row.service_uuid,
                 name: `${row.service_name} (inactive)`,
@@ -55,10 +107,10 @@ function buildCatalogue(activeCatalogue: ServiceCatalogueApi[], held: CustomerDe
             byUuid.set(row.service_uuid, service);
         }
 
-        if (row.service_variant_uuid && !service.variants.some((v) => v.uuid === row.service_variant_uuid)) {
+        if (!service.variants.some((v) => v.uuid === row.service_variant_uuid)) {
             service.variants = [
                 ...service.variants,
-                { uuid: row.service_variant_uuid, name: `${row.service_variant_name} (inactive)`, price: row.price },
+                { uuid: row.service_variant_uuid as string, name: `${row.service_variant_name} (inactive)`, price: row.price },
             ];
         }
     }
@@ -195,6 +247,25 @@ export default function CustomerEditScreen() {
             ]);
         } catch (error) {
             setPhase('ready');
+
+            // Surface UpdateCustomerRequest's actual per-field 422 reasons
+            // inline (same helper this app already uses in edit-profile.tsx/
+            // adjust-arrears/[uuid].tsx) rather than letting the fallback
+            // Alert show Laravel's generic "The given data was invalid." —
+            // that message alone gives the user nothing to fix.
+            const fieldErrors = extractFieldErrors(error);
+
+            if (fieldErrors) {
+                setErrors((prev) => ({
+                    ...prev,
+                    name: fieldErrors.name?.[0],
+                    phone: fieldErrors.phone?.[0],
+                    zone_uuid: fieldErrors.zone_uuid?.[0],
+                    location: fieldErrors.location?.[0],
+                    services: firstServicesError(fieldErrors) ?? prev.services,
+                }));
+            }
+
             Alert.alert('Could not save changes', extractErrorMessage(error, 'Something went wrong.'));
         }
     }
@@ -260,7 +331,17 @@ export default function CustomerEditScreen() {
                     }}
                     error={errors.name}
                 />
-                <TextInput label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="6XX XXX XXX" />
+                <TextInput
+                    label="Phone"
+                    value={phone}
+                    onChangeText={(text) => {
+                        setPhone(text);
+                        setErrors((prev) => ({ ...prev, phone: undefined }));
+                    }}
+                    error={errors.phone}
+                    keyboardType="phone-pad"
+                    placeholder="6XX XXX XXX"
+                />
                 <TextInput label="Location (optional)" value={location} onChangeText={setLocation} placeholder="House / street / landmark" />
             </Card>
 
@@ -312,7 +393,18 @@ export default function CustomerEditScreen() {
 
             <Card>
                 <Text style={styles.sectionTitle}>Services</Text>
-                <ServicesPicker catalogue={catalogue} value={services} onChange={setServices} error={errors.services} />
+                <ServicesPicker
+                    catalogue={catalogue}
+                    value={services}
+                    onChange={(next) => {
+                        setServices(next);
+                        // Matches every other field on this form: the error
+                        // clears the moment the user acts on it, rather than
+                        // sitting stale until the next submit attempt.
+                        setErrors((prev) => ({ ...prev, services: undefined }));
+                    }}
+                    error={errors.services}
+                />
             </Card>
 
             <Button
@@ -333,9 +425,16 @@ const styles = StyleSheet.create({
     sectionTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textSecondary, marginBottom: spacing.sm },
     fieldError: { fontSize: fontSize.xs, color: colors.danger, marginBottom: spacing.sm },
     zoneList: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+    // minHeight/justifyContent: 'center' — mobile-app-react-native.md §6's
+    // 48dp touch-target floor. paddingVertical: spacing.sm (8) alone left
+    // this chip around ~36dp, the exact class of bug that section's own
+    // dated audits found (and fixed the same way) on the Customers list's
+    // filter chips and Log a Complaint's category chips.
     zoneChip: {
         paddingHorizontal: spacing.md,
         paddingVertical: spacing.sm,
+        minHeight: touchTarget.floor,
+        justifyContent: 'center',
         borderRadius: radius.pill,
         borderWidth: 1,
         borderColor: colors.border,
@@ -349,6 +448,8 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         paddingVertical: spacing.sm,
+        minHeight: touchTarget.floor,
+        justifyContent: 'center',
         borderRadius: radius.lg,
         borderWidth: 1,
         borderColor: colors.border,
