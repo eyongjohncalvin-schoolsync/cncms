@@ -1,7 +1,6 @@
 import { ReactNode } from 'react';
 import {
     IconAntenna,
-    IconBroadcast,
     IconChartBar,
     IconDeviceTvOld,
     IconPlugConnected,
@@ -80,9 +79,11 @@ export function AuthLayout({ children }: { children: ReactNode }) {
 
                 <div className="relative z-10 mx-auto flex w-full max-w-md flex-1 flex-col">
                     <div className="animate-fade-up flex items-center gap-2.5">
-                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-950/40 ring-1 ring-white/10">
-                            <IconBroadcast size={22} stroke={1.75} />
-                        </span>
+                        <img
+                            src="/onetech-icon.png"
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded-xl shadow-lg shadow-blue-950/40 ring-1 ring-white/10"
+                        />
                         <div className="leading-tight">
                             <p className="font-display text-xl text-white">CNCMS</p>
                             <p className="text-[11px] font-medium tracking-wide text-blue-200/60">Cable Network Management</p>

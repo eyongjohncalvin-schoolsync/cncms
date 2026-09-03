@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+    Image,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -50,6 +51,7 @@ export default function LoginScreen() {
         >
             <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
                 <View style={styles.header}>
+                    <Image source={require('../../assets/brand-mark.png')} style={styles.brandMark} />
                     <Text style={styles.title}>CNCMS Field Agent</Text>
                     <Text style={styles.subtitle}>Sign in to record payments and expenses in the field.</Text>
                 </View>
@@ -97,7 +99,13 @@ const styles = StyleSheet.create({
         padding: spacing.xl,
         gap: spacing.xl,
     },
-    header: { gap: spacing.xs },
+    header: { alignItems: 'flex-start', gap: spacing.xs },
+    brandMark: {
+        width: 56,
+        height: 56,
+        borderRadius: 14,
+        marginBottom: spacing.xs,
+    },
     title: {
         fontSize: fontSize.xxl,
         fontWeight: '800',
