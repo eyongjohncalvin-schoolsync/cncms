@@ -153,6 +153,23 @@ export interface SyncPushResponse {
     errors: Array<{ entity_type: string; local_uuid: string | null; message: string }>;
 }
 
+/**
+ * One line of a customer's ticked services (services.md section 6) — a
+ * plain service, or one of its "options" (variants — section 4, e.g. a
+ * specific TV channel broadcast) when `service_variant_uuid` is set. Same
+ * field names server-side and on both API resources
+ * (CustomerResource/App\Http\Resources\ServiceCatalogueResource) and the
+ * pull() payload, so this one shape covers all of them.
+ */
+export interface CustomerServiceApi {
+    service_uuid: string;
+    service_name: string;
+    service_variant_uuid: string | null;
+    service_variant_name: string | null;
+    /** Numeric string, e.g. "5000.00". */
+    price: string;
+}
+
 export interface SyncPullCustomer {
     uuid: string;
     name: string;
@@ -172,6 +189,14 @@ export interface SyncPullCustomer {
      */
     total_arrears: string | null;
     credit: string | null;
+    /**
+     * services.md section 6, added 2026-09-03. Customer Detail (app/(tabs)/
+     * customers/[uuid].tsx) renders entirely from the local SQLite cache
+     * with no live call, so this is the ONLY way that screen ever sees a
+     * customer's services — see src/db/customers.ts's `services` column
+     * (stored as a JSON-encoded string, parsed on read).
+     */
+    services: CustomerServiceApi[];
 }
 
 export interface SyncPullChangedPayment {
@@ -330,10 +355,79 @@ export interface CustomerDetailApi {
      * comment.
      */
     reconnection_fine: string | null;
+    /** services.md section 6 — this customer's ticked services/options; `bill` above is their sum. */
+    services: CustomerServiceApi[];
 }
 
 export interface CustomerDetailResponse {
     data: CustomerDetailApi;
+}
+
+// ---------------------------------------------------------------------------
+// Customer create/edit — POST/PATCH /api/v1/customers[/{uuid}], mirroring
+// App\Http\Requests\StoreCustomerRequest / UpdateCustomerRequest exactly
+// (services.md sections 6-8). Added 2026-09-03 — customer create/edit
+// wasn't on mobile before; every other write action here (payments,
+// expenditures, complaints) has its own offline-queue story, but a new
+// customer needs a server-issued uuid and a zone/services relationship
+// checked against live data, so — like reconnect/disconnect above — this
+// is online-only, no offline queue.
+// ---------------------------------------------------------------------------
+
+/** One ticked row on the create/edit form — same shape the server expects in `services[]`. */
+export interface CustomerServiceSelection {
+    service_uuid: string;
+    service_variant_uuid: string | null;
+    /** Numeric string, e.g. "5000.00" — matches how every other amount field in this app is typed. */
+    price: string;
+}
+
+export interface CreateCustomerRequestBody {
+    zone_uuid: string;
+    name: string;
+    phone: string;
+    location?: string;
+    level?: 'normal' | 'Vip' | 'Operator';
+    description?: string;
+    services: CustomerServiceSelection[];
+}
+
+/** All fields optional (StoreCustomerRequest -> UpdateCustomerRequest's `sometimes` rules) — the edit form always sends the full set it has, in practice. */
+export type UpdateCustomerRequestBody = Partial<CreateCustomerRequestBody>;
+
+export interface CreateCustomerResponse {
+    data: CustomerDetailApi;
+}
+
+export interface UpdateCustomerResponse {
+    data: CustomerDetailApi;
+}
+
+// ---------------------------------------------------------------------------
+// Service catalogue — GET /api/v1/services (Api\ServiceController), the
+// tick-list the create/edit form renders. Active services + their active
+// options only; the edit form merges in whatever the customer already
+// holds (from CustomerDetailApi.services) client-side — see
+// src/api/services.ts's doc comment.
+// ---------------------------------------------------------------------------
+
+export interface ServiceVariantOptionApi {
+    uuid: string;
+    name: string;
+    price: string;
+}
+
+export interface ServiceCatalogueApi {
+    uuid: string;
+    name: string;
+    description: string | null;
+    price: string;
+    is_default: boolean;
+    variants: ServiceVariantOptionApi[];
+}
+
+export interface ServiceCatalogueResponse {
+    data: ServiceCatalogueApi[];
 }
 
 /**

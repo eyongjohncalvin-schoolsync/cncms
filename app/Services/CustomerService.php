@@ -101,10 +101,17 @@ class CustomerService
      * the pivot (services.md section 2). A request with no `services` key
      * (CustomerData::$services === null) defaults a brand-new customer to
      * the single default service, priced at the legacy `bill` field if the
-     * caller sent one (StoreCustomerRequest hasn't been migrated to require
-     * `services` yet — see services.md section 6 — so a raw `bill` must
-     * keep working exactly as before, not get silently reset to the
-     * service's catalogue price by the recompute below).
+     * caller sent one — StoreCustomerRequest accepts either `bill` or
+     * `services` (services.md section 6; CustomerImportService's xlsx path
+     * deliberately keeps sending raw `bill` forever, not just during a
+     * transition), so a raw `bill` must keep working exactly as before, not
+     * get silently reset to the service's catalogue price by the recompute
+     * below.
+     *
+     * Eager-loads `subscriptions.service`/`subscriptions.serviceVariant` on
+     * the way out so CustomerResource's `services` field (mobile app) and
+     * the web controller's own shapeCustomer() both see it immediately,
+     * without a second round trip right after create.
      */
     public function create(CustomerData $data): Customer
     {
@@ -116,7 +123,7 @@ class CustomerService
             $selections = $data->services ?? [$this->subscriptions->defaultSelection($data->bill)];
             $this->subscriptions->sync($customer, $selections);
 
-            return $customer->load('zone');
+            return $customer->load(['zone', 'subscriptions.service', 'subscriptions.serviceVariant']);
         });
     }
 
@@ -138,7 +145,7 @@ class CustomerService
 
         $this->forgetShowCache($customer->uuid);
 
-        return $customer->load('zone');
+        return $customer->load(['zone', 'subscriptions.service', 'subscriptions.serviceVariant']);
     }
 
     /**

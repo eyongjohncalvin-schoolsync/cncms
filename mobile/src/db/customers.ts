@@ -1,7 +1,30 @@
 import { getDatabase } from './database';
 import type { LocalCustomer } from '../types/db';
-import type { SyncPullCustomer } from '../types/api';
+import type { CustomerServiceApi, SyncPullCustomer } from '../types/api';
 import { nowIso } from '../utils/format';
+
+/**
+ * `LocalCustomer.services` is a JSON-encoded string (SQLite has no native
+ * array column) — parse it through here rather than a bare `JSON.parse`,
+ * which also covers `null` (a row cached before this column existed, or a
+ * customer with zero services, which shouldn't happen but isn't this
+ * function's job to assert) and a malformed value (defensive; never
+ * expected, but a parse crash on the Customer Detail screen would be worse
+ * than an empty list).
+ */
+export function parseLocalCustomerServices(customer: Pick<LocalCustomer, 'services'>): CustomerServiceApi[] {
+    if (!customer.services) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(customer.services);
+
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
 
 /**
  * `customers` is a read-only cache, fully replaced/merged from pull()'s
@@ -19,8 +42,8 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
     await db.withTransactionAsync(async () => {
         for (const customer of customers) {
             await db.runAsync(
-                `INSERT INTO customers (uuid, name, phone, bill, location, level, status, zone_uuid, cached_at, total_arrears, credit)
-                 VALUES ($uuid, $name, $phone, $bill, $location, $level, $status, $zone_uuid, $cached_at, $total_arrears, $credit)
+                `INSERT INTO customers (uuid, name, phone, bill, location, level, status, zone_uuid, cached_at, total_arrears, credit, services)
+                 VALUES ($uuid, $name, $phone, $bill, $location, $level, $status, $zone_uuid, $cached_at, $total_arrears, $credit, $services)
                  ON CONFLICT(uuid) DO UPDATE SET
                     name = excluded.name,
                     phone = excluded.phone,
@@ -31,7 +54,8 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
                     zone_uuid = excluded.zone_uuid,
                     cached_at = excluded.cached_at,
                     total_arrears = excluded.total_arrears,
-                    credit = excluded.credit`,
+                    credit = excluded.credit,
+                    services = excluded.services`,
                 {
                     $uuid: customer.uuid,
                     $name: customer.name,
@@ -44,6 +68,7 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
                     $cached_at: cachedAt,
                     $total_arrears: customer.total_arrears === null || customer.total_arrears === undefined ? null : Number(customer.total_arrears),
                     $credit: customer.credit === null || customer.credit === undefined ? null : Number(customer.credit),
+                    $services: JSON.stringify(customer.services ?? []),
                 },
             );
         }

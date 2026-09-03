@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Card } from '../../../src/components/ui/Card';
 import { TextInput } from '../../../src/components/ui/TextInput';
 import { EmptyState } from '../../../src/components/ui/EmptyState';
 import { getAllCustomers } from '../../../src/db/customers';
 import { subscribeSyncState, getSyncState } from '../../../src/sync/syncStore';
+import { useAuth } from '../../../src/auth/AuthContext';
 import { colors } from '../../../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../../../src/theme/tokens';
 import { formatFcfa } from '../../../src/utils/format';
@@ -123,6 +124,13 @@ function matchesFilter(customer: LocalCustomer, filter: FilterKey): boolean {
 export default function CustomersScreen() {
     const router = useRouter();
     const params = useLocalSearchParams<{ filter?: string }>();
+    const { can } = useAuth();
+    // customers.create isn't seeded to `agent` by default (DefaultRolesSeeder)
+    // — this button only shows for a manager/admin/super caller. Reaching
+    // customer-create.tsx directly (a deep link, a stale bookmark) still
+    // re-checks and shows its own "Not authorized" card, same defensive
+    // pattern as every other permission-gated entry point in this app.
+    const canAddCustomer = can('customers.create');
 
     const [customers, setCustomers] = useState<LocalCustomer[]>([]);
     const [loading, setLoading] = useState(true);
@@ -192,6 +200,24 @@ export default function CustomersScreen() {
 
     return (
         <View style={styles.flex}>
+            {canAddCustomer ? (
+                <Stack.Screen
+                    options={{
+                        headerRight: () => (
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel="Add customer"
+                                onPress={() => router.push('/customer-create')}
+                                hitSlop={8}
+                                style={styles.addButton}
+                            >
+                                <Text style={styles.addButtonLabel}>+ Add</Text>
+                            </Pressable>
+                        ),
+                    }}
+                />
+            ) : null}
+
             <View style={styles.header}>
                 <TextInput
                     placeholder="Search by name or phone"
@@ -277,4 +303,6 @@ const styles = StyleSheet.create({
     arrears: { fontSize: fontSize.md, fontWeight: '800', color: colors.danger },
     phone: { fontSize: fontSize.sm, color: colors.accent.home, fontWeight: '600' },
     phoneMissing: { fontSize: fontSize.sm, color: colors.textSecondary },
+    addButton: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+    addButtonLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.accent.customers },
 });

@@ -22,6 +22,14 @@ export interface LocalCustomer {
      * SyncPullCustomer. `null` when the customer has no manuscript yet. */
     total_arrears: number | null;
     credit: number | null;
+    /**
+     * services.md section 6, added 2026-09-03. A JSON-encoded
+     * `CustomerServiceApi[]` (SQLite has no native array/JSON column type)
+     * — `null` for a row cached before this column existed. Parse with
+     * `parseLocalCustomerServices()` (src/db/customers.ts) rather than
+     * `JSON.parse` directly, which also handles that null/malformed case.
+     */
+    services: string | null;
 }
 
 export interface LocalPayment {

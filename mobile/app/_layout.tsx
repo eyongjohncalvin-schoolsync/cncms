@@ -138,6 +138,22 @@ function RootNavigation() {
                 options={{ presentation: 'modal', headerShown: true, title: 'Disconnect' }}
             />
             {/*
+              services.md sections 6-8, added 2026-09-03 — customer create/
+              edit wasn't on mobile at all before. Same per-customer (or,
+              for create, no-customer-yet), online-only, modal-with-a-title
+              shape as reconnect/disconnect/adjust-arrears; each screen's own
+              <Stack.Screen options> sets the real title (Add vs Edit), this
+              is just the fallback + presentation.
+            */}
+            <Stack.Screen
+                name="customer-create"
+                options={{ presentation: 'modal', headerShown: true, title: 'Add Customer' }}
+            />
+            <Stack.Screen
+                name="customer-edit/[uuid]"
+                options={{ presentation: 'modal', headerShown: true, title: 'Edit Customer' }}
+            />
+            {/*
               2026-08-28: the mobile REQUEST side of the Arrears Adjustment
               maker-checker workflow (arrears-adjustment.md) — see
               app/adjust-arrears/[uuid].tsx's own doc comment. Registered

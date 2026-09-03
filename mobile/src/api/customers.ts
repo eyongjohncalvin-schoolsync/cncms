@@ -1,11 +1,15 @@
 import { apiClient } from './client';
 import type {
+    CreateCustomerRequestBody,
+    CreateCustomerResponse,
     CustomerDetailResponse,
     DisconnectCustomerRequestBody,
     DisconnectCustomerResponse,
     EligibleForDisconnectionResponse,
     ReconnectCustomerRequestBody,
     ReconnectCustomerResponse,
+    UpdateCustomerRequestBody,
+    UpdateCustomerResponse,
 } from '../types/api';
 
 /**
@@ -18,6 +22,36 @@ import type {
  */
 export async function fetchCustomerDetail(uuid: string): Promise<CustomerDetailResponse> {
     const { data } = await apiClient.get<CustomerDetailResponse>(`/customers/${uuid}`);
+
+    return data;
+}
+
+/**
+ * POST /api/v1/customers — App\Http\Controllers\Api\CustomerController::
+ * store() (App\Http\Requests\StoreCustomerRequest ->
+ * App\Services\CustomerService::create()). Gated server-side by
+ * CustomerPolicy::create() (`customers.create` — NOT seeded to `agent` by
+ * default, see DefaultRolesSeeder; a `manager`/`admin`/`super` caller
+ * passes). Online-only, same reasoning as reconnect/disconnect below: a
+ * new customer needs a server-issued uuid and its zone/services validated
+ * against live data, so this deliberately does NOT go through the offline
+ * /sync/push queue (no local_uuid idempotency exists for it either).
+ */
+export async function createCustomer(body: CreateCustomerRequestBody): Promise<CreateCustomerResponse> {
+    const { data } = await apiClient.post<CreateCustomerResponse>('/customers', body);
+
+    return data;
+}
+
+/**
+ * PATCH /api/v1/customers/{uuid} — App\Http\Controllers\Api\
+ * CustomerController::update() (App\Http\Requests\UpdateCustomerRequest ->
+ * App\Services\CustomerService::update()). Gated server-side by
+ * CustomerPolicy::update() (`customers.update`). Same online-only
+ * reasoning as createCustomer() above.
+ */
+export async function updateCustomer(uuid: string, body: UpdateCustomerRequestBody): Promise<UpdateCustomerResponse> {
+    const { data } = await apiClient.patch<UpdateCustomerResponse>(`/customers/${uuid}`, body);
 
     return data;
 }

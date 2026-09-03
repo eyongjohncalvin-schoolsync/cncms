@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS customers (
     zone_uuid       TEXT,
     cached_at       TEXT NOT NULL,
     total_arrears   REAL,
-    credit          REAL
+    credit          REAL,
+    services        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_customers_zone ON customers(zone_uuid);
@@ -169,6 +170,10 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     // Draw-down (references/prepayment-drawdown.md Q1): the agent's
     // "pay down arrears first" toggle on a months/yearly prepayment.
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN clear_arrears_first INTEGER NOT NULL DEFAULT 0' },
+    // services.md section 6 (2026-09-03) — a JSON-encoded CustomerServiceApi[]
+    // per customer, the only way Customer Detail (which never makes a live
+    // call) can show services at all.
+    { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN services TEXT' },
 ];
 
 /**

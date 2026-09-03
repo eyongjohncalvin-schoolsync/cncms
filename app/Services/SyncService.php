@@ -10,6 +10,7 @@ use App\DataTransferObjects\PaymentData;
 use App\Models\Agent;
 use App\Models\Complaint;
 use App\Models\Customer;
+use App\Models\CustomerSubscription;
 use App\Models\Expenditure;
 use App\Models\Payment;
 use App\Models\SyncQueue;
@@ -488,7 +489,12 @@ class SyncService
             // section 4) has arrears/credit to render offline without a
             // second round trip per customer — CustomerResource::toArray()
             // exposes the same relation for the online show endpoint.
-            ->with(['zone', 'latestManuscript'])
+            // `subscriptions.*` (services.md section 6) is the same idea for
+            // the customer's ticked services — Customer Detail
+            // (app/(tabs)/customers/[uuid].tsx) renders entirely from the
+            // local SQLite cache with no live call, so this is the only way
+            // that screen ever sees service details at all.
+            ->with(['zone', 'latestManuscript', 'subscriptions.service', 'subscriptions.serviceVariant'])
             ->when($sinceAt, fn ($query) => $query->where('updated_at', '>=', $sinceAt))
             ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
             ->when(
@@ -507,6 +513,13 @@ class SyncService
                 'zone_uuid' => $customer->zone?->uuid,
                 'total_arrears' => $customer->latestManuscript?->total_arrears,
                 'credit' => $customer->latestManuscript?->credit,
+                'services' => $customer->subscriptions->map(fn (CustomerSubscription $row): array => [
+                    'service_uuid' => $row->service->uuid,
+                    'service_name' => $row->service->name,
+                    'service_variant_uuid' => $row->serviceVariant?->uuid,
+                    'service_variant_name' => $row->serviceVariant?->name,
+                    'price' => $row->price,
+                ])->values()->all(),
             ])
             ->all();
     }

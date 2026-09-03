@@ -6,6 +6,7 @@ namespace App\Http\Resources;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerSubscription;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -63,6 +64,21 @@ class CustomerResource extends JsonResource
                 'frequency' => $payment->frequency,
                 'verification_status' => $payment->verification_status,
                 'created_at' => $payment->created_at,
+            ])),
+            // services.md section 6 — this customer's ticked services/
+            // options; `bill` above is their sum. Same shape as the web
+            // Inertia payload (CustomerController::shapeCustomer()) so the
+            // mobile app and the web admin never disagree about what a
+            // "service" row looks like. Omitted when `subscriptions` wasn't
+            // eager-loaded (CustomerService::findOrFail() always loads it,
+            // so this is present on every GET/POST/PATCH response the
+            // mobile app actually hits).
+            'services' => $this->whenLoaded('subscriptions', fn () => $this->subscriptions->map(fn (CustomerSubscription $row) => [
+                'service_uuid' => $row->service->uuid,
+                'service_name' => $row->service->name,
+                'service_variant_uuid' => $row->serviceVariant?->uuid,
+                'service_variant_name' => $row->serviceVariant?->name,
+                'price' => $row->price,
             ])),
         ];
     }

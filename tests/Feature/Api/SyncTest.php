@@ -8,6 +8,7 @@ use App\Models\Complaint;
 use App\Models\Customer;
 use App\Models\Expenditure;
 use App\Models\Payment;
+use App\Models\Service;
 use App\Models\User;
 use App\Services\NotificationService;
 use Database\Factories\AgentFactory;
@@ -718,6 +719,31 @@ class SyncTest extends TestCase
         $deletedUuids = $response->json('changes.customers.deleted');
         $this->assertNotContains($a->uuid, $deletedUuids);
         $this->assertNotContains($b->uuid, $deletedUuids);
+    }
+
+    /**
+     * services.md section 6 — Customer Detail (app/(tabs)/customers/
+     * [uuid].tsx) renders entirely from the local SQLite cache with no
+     * live call, so pull() is the ONLY way that screen ever sees a
+     * customer's services at all.
+     */
+    public function test_pull_carries_each_customers_services(): void
+    {
+        $customer = $this->customer();
+        $tv = Service::query()->where('slug', 'tv')->firstOrFail();
+        $customer->subscriptions()->create(['service_id' => $tv->id, 'price' => 5000]);
+
+        $token = $this->tokenForRole('agent');
+
+        $response = $this->withHeader('Authorization', "Bearer {$token}")->getJson('/api/v1/sync/pull');
+
+        $response->assertOk();
+
+        $row = collect($response->json('changes.customers.upserted'))->firstWhere('uuid', $customer->uuid);
+        $this->assertNotNull($row);
+        $this->assertCount(1, $row['services']);
+        $this->assertSame($tv->uuid, $row['services'][0]['service_uuid']);
+        $this->assertSame('5000.00', $row['services'][0]['price']);
     }
 
     /**

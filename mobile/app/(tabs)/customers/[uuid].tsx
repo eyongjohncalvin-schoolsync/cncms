@@ -1,14 +1,15 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Card } from '../../../src/components/ui/Card';
 import { Button } from '../../../src/components/ui/Button';
 import { Badge, type BadgeTone } from '../../../src/components/ui/Badge';
 import { EmptyState } from '../../../src/components/ui/EmptyState';
-import { getCustomerByUuid } from '../../../src/db/customers';
+import { getCustomerByUuid, parseLocalCustomerServices } from '../../../src/db/customers';
 import { getLastPaymentForCustomer } from '../../../src/db/payments';
 import { fetchBillWhatsappMessage } from '../../../src/api/bills';
 import { extractErrorMessage } from '../../../src/api/client';
+import { useAuth } from '../../../src/auth/AuthContext';
 import { colors } from '../../../src/theme/colors';
 import { fontSize, spacing } from '../../../src/theme/tokens';
 import { formatFcfa } from '../../../src/utils/format';
@@ -43,18 +44,28 @@ function formatDate(iso: string): string {
  * Customer Detail — reads entirely from the local SQLite cache (customers +
  * this device's own payments table), same offline-first principle as the
  * Customers list: no live API call on this screen. `total_arrears`/`credit`
- * now come down through pull() (see SyncService::upsertedCustomers()), so
- * this renders correctly offline. The Reconnect & Pay flow (app/reconnect/
- * [uuid].tsx) is the one screen that DOES call the live API, because it's
- * inherently an online-only server action — see that screen's doc comment.
+ * (and, since services.md section 6, `services`) come down through pull()
+ * (see SyncService::upsertedCustomers()), so this renders correctly
+ * offline. The Reconnect & Pay flow (app/reconnect/[uuid].tsx) is the one
+ * screen that DOES call the live API, because it's inherently an
+ * online-only server action — see that screen's doc comment. The "Edit"
+ * header button (gated by `customers.update`) is the one exception: it
+ * navigates to customer-edit/[uuid].tsx, which is itself online-only, same
+ * reasoning as reconnect/disconnect.
  */
 export default function CustomerDetailScreen() {
     const { uuid } = useLocalSearchParams<{ uuid: string }>();
     const router = useRouter();
+    const { can } = useAuth();
 
     const [customer, setCustomer] = useState<LocalCustomer | null | undefined>(undefined);
     const [lastPayment, setLastPayment] = useState<LocalPayment | null>(null);
     const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+
+    // services.md section 6 — parsed once per customer row, not on every
+    // render; `customer` only changes on focus/refresh (useFocusEffect
+    // above), not on the unrelated local state below (sendingWhatsapp etc).
+    const services = useMemo(() => (customer ? parseLocalCustomerServices(customer) : []), [customer]);
 
     useFocusEffect(
         useCallback(() => {
@@ -160,7 +171,28 @@ export default function CustomerDetailScreen() {
 
     return (
         <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
-            <Stack.Screen options={{ title: customer.name }} />
+            <Stack.Screen
+                options={{
+                    title: customer.name,
+                    // customers.update isn't seeded to `agent` by default
+                    // (DefaultRolesSeeder) — hidden for the typical field
+                    // agent; customer-edit/[uuid].tsx re-checks and shows
+                    // its own "Not authorized" card if reached directly.
+                    headerRight: can('customers.update')
+                        ? () => (
+                              <Pressable
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Edit customer"
+                                  onPress={() => router.push(`/customer-edit/${uuid}`)}
+                                  hitSlop={8}
+                                  style={styles.editButton}
+                              >
+                                  <Text style={styles.editButtonLabel}>Edit</Text>
+                              </Pressable>
+                          )
+                        : undefined,
+                }}
+            />
 
             <View style={styles.headerRow}>
                 <Text style={styles.name}>{customer.name}</Text>
@@ -198,6 +230,28 @@ export default function CustomerDetailScreen() {
                     </Text>
                 </Card>
             </View>
+
+            {/* services.md section 6 — from the local cache only (pull()'s
+                subscriptions eager-load), same offline-first rule as the
+                rest of this screen. */}
+            <Card>
+                <Text style={styles.sectionTitle}>Services</Text>
+                {services.length > 0 ? (
+                    services.map((service) => (
+                        <View
+                            key={`${service.service_uuid}:${service.service_variant_uuid ?? 'base'}`}
+                            style={[styles.serviceRow, service.service_variant_uuid ? styles.serviceRowVariant : null]}
+                        >
+                            <Text style={service.service_variant_uuid ? styles.serviceVariantName : styles.serviceName}>
+                                {service.service_variant_uuid ? service.service_variant_name : service.service_name}
+                            </Text>
+                            <Text style={styles.servicePrice}>{formatFcfa(Number(service.price))}</Text>
+                        </View>
+                    ))
+                ) : (
+                    <Text style={styles.noServices}>No services on file for this customer.</Text>
+                )}
+            </Card>
 
             <Card>
                 <Text style={styles.sectionTitle}>Last payment</Text>
@@ -347,4 +401,17 @@ const styles = StyleSheet.create({
     // without needing a whole new Button variant just for one screen's
     // entry point.
     arrearsButton: { borderColor: colors.accent.arrears },
+    editButton: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+    editButtonLabel: { fontSize: fontSize.md, fontWeight: '700', color: colors.accent.customers },
+    serviceRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: spacing.xs,
+    },
+    serviceRowVariant: { paddingLeft: spacing.md },
+    serviceName: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+    serviceVariantName: { fontSize: fontSize.sm, color: colors.textSecondary },
+    servicePrice: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textPrimary },
+    noServices: { fontSize: fontSize.sm, color: colors.textSecondary },
 });
