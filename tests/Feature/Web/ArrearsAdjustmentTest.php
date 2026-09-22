@@ -22,7 +22,7 @@ use Tests\TestCase;
 /**
  * The Arrears Adjustment maker-checker workflow: request (Customers/Show.tsx's
  * "Adjust Arrears" modal, POST /arrears-adjustments), approve/reject
- * (Audit/Index.tsx's "Arrears Adjustments" sub-tab), and — the one thing
+ * (ArrearsAdjustments/Index.tsx, its own page at /arrears-adjustments), and — the one thing
  * that actually matters end to end — that an approved adjustment lands on
  * the customer's real manuscript arrears figure via a genuine
  * ManuscriptCalculator recalculation, never a direct write. See
@@ -596,7 +596,7 @@ class ArrearsAdjustmentTest extends TestCase
         $service->approve($secondRead, $actor);
     }
 
-    public function test_the_audit_log_arrears_adjustments_tab_lists_pending_and_decided_requests_with_stats(): void
+    public function test_the_arrears_adjustments_page_lists_pending_and_decided_requests_with_stats(): void
     {
         // Runs against the real seeded tenant (InteractsWithTenantRoles), which
         // may already hold adjustments from prior owner activity — assert the
@@ -614,16 +614,15 @@ class ArrearsAdjustmentTest extends TestCase
 
         $this->actingAsSeededUser('patience@shalomtech.dev'); // admin
 
-        $this->get('/audit/logs?view=arrears_adjustments')
+        $this->get('/arrears-adjustments')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->component('Audit/Index')
-                ->where('view', 'arrears_adjustments')
-                ->has('arrears_adjustments.stats')
-                ->has('arrears_adjustments.adjustments.data', min($before + 2, 25)));
+                ->component('ArrearsAdjustments/Index')
+                ->has('stats')
+                ->has('adjustments.data', min($before + 2, 25)));
     }
 
-    public function test_the_audit_tab_row_payload_carries_the_context_and_per_row_decision_flags_the_review_ui_needs(): void
+    public function test_the_review_page_row_payload_carries_the_context_and_per_row_decision_flags_the_review_ui_needs(): void
     {
         $customer = CustomerFactory::new()->active()->create();
         ArrearsAdjustmentFactory::new()
@@ -632,10 +631,10 @@ class ArrearsAdjustmentTest extends TestCase
 
         $this->actingAsSeededUser('patience@shalomtech.dev'); // admin — eligible first approver, not the requester
 
-        $this->get('/audit/logs?view=arrears_adjustments')
+        $this->get('/arrears-adjustments')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->has('arrears_adjustments.adjustments.data.0', fn (Assert $row) => $row
+                ->has('adjustments.data.0', fn (Assert $row) => $row
                     ->where('reason_note', 'Double-charged in the March migration.')
                     ->where('customer_uuid', $customer->uuid)
                     ->where('can_approve', true)
@@ -658,14 +657,74 @@ class ArrearsAdjustmentTest extends TestCase
         // approval itself is already covered by
         // test_a_large_adjustment_requires_a_second_approval_...().
         $this->actingAsSeededUser('patience@shalomtech.dev');
-        $this->get('/audit/logs?view=arrears_adjustments')
+        $this->get('/arrears-adjustments')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->has('arrears_adjustments.adjustments.data.0', fn (Assert $row) => $row
+                ->has('adjustments.data.0', fn (Assert $row) => $row
                     ->where('status', 'pending_second_approval')
                     ->where('can_approve', true)
                     ->where('can_reject', true)
                     ->etc()));
+    }
+
+    public function test_the_old_audit_log_tab_url_redirects_to_the_dedicated_page(): void
+    {
+        $this->actingAsRole('admin');
+
+        $this->get('/audit/logs?view=arrears_adjustments&status=approved&page=2')
+            ->assertRedirect('/arrears-adjustments?status=approved&page=2');
+    }
+
+    public function test_page_links_keep_the_status_filter(): void
+    {
+        $requesterId = $this->seededUserId('divine@shalomtech.dev');
+        $customer = CustomerFactory::new()->active()->create();
+        ArrearsAdjustmentFactory::new()->count(26)->requestedBy($requesterId)->create(['customer_id' => $customer->id]);
+
+        $this->actingAsRole('admin');
+
+        $this->get('/arrears-adjustments?status=awaiting_approval')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('filters.status', 'awaiting_approval')
+                ->where('adjustments.links', fn ($links) => collect($links)
+                    ->pluck('url')
+                    ->filter()
+                    ->every(fn (string $url): bool => str_contains($url, 'status=awaiting_approval'))));
+    }
+
+    public function test_the_awaiting_approval_filter_covers_both_pending_stages_only(): void
+    {
+        $requesterId = $this->seededUserId('divine@shalomtech.dev');
+        $customer = CustomerFactory::new()->active()->create();
+        ArrearsAdjustmentFactory::new()->requestedBy($requesterId)->create(['customer_id' => $customer->id]);
+        ArrearsAdjustmentFactory::new()->requestedBy($requesterId)
+            ->pendingSecondApproval($this->seededUserId('terence@shalomtech.dev'))
+            ->create(['customer_id' => $customer->id]);
+        ArrearsAdjustmentFactory::new()->requestedBy($requesterId)
+            ->approved($this->seededUserId('terence@shalomtech.dev'))
+            ->create(['customer_id' => $customer->id, 'approved_at' => now()]);
+
+        $this->actingAsRole('admin');
+
+        $this->get('/arrears-adjustments?status=awaiting_approval')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('adjustments.data', fn ($rows) => collect($rows)->isNotEmpty()
+                    && collect($rows)->every(fn (array $row): bool => in_array($row['status'], ['pending', 'pending_second_approval'], true))));
+    }
+
+    public function test_approvers_and_auditors_can_open_the_page_but_agents_and_workers_cannot(): void
+    {
+        foreach (['super', 'admin', 'manager'] as $role) {
+            $this->actingAsRole($role);
+            $this->get('/arrears-adjustments')->assertOk();
+        }
+
+        foreach (['agent', 'worker'] as $role) {
+            $this->actingAsRole($role);
+            $this->get('/arrears-adjustments')->assertForbidden();
+        }
     }
 
     public function test_service_dashboard_counts_reflect_pending_and_applied_totals(): void
@@ -698,6 +757,136 @@ class ArrearsAdjustmentTest extends TestCase
         $this->assertSame($before['pending_approval'] + 1, $after['pending_approval']);
         $this->assertSame($before['applied_this_month'] + 1, $after['applied_this_month']);
         $this->assertSame(bcadd((string) $before['total_written_off'], '3000.00', 2), (string) $after['total_written_off']);
+    }
+
+    /**
+     * A fresh customer whose previous-period manuscript carries
+     * $previousArrears, plus a pending current-period 'decrease' request
+     * whose snapshot matches it — i.e. one that will pass the staleness
+     * re-check when approved.
+     */
+    private function pendingAdjustmentFor(int $requesterId, string $amount = '1000.00', string $previousArrears = '10000.00'): ArrearsAdjustment
+    {
+        $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
+
+        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+            'customer_id' => $customer->id,
+            'bill' => 2500,
+            'total_arrears' => $previousArrears,
+            'credit' => 0,
+            'total_bill' => bcadd($previousArrears, '2500', 2),
+        ]);
+
+        return ArrearsAdjustmentFactory::new()
+            ->requestedBy($requesterId)
+            ->forPeriod(now()->format('Y-m'))
+            ->withAmount($amount)
+            ->withArrearsSnapshot($previousArrears)
+            ->create(['customer_id' => $customer->id]);
+    }
+
+    public function test_bulk_approve_approves_every_selected_request_the_actor_may_approve(): void
+    {
+        $requesterId = $this->seededUserId('divine@shalomtech.dev');
+        $first = $this->pendingAdjustmentFor($requesterId);
+        $second = $this->pendingAdjustmentFor($requesterId);
+
+        $this->actingAsSeededUser('terence@shalomtech.dev'); // manager
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => [$first->uuid, $second->uuid]])
+            ->assertRedirect()
+            ->assertSessionHas('success', '2 adjustments approved and applied.');
+
+        $this->assertSame('approved', $first->refresh()->status);
+        $this->assertSame('approved', $second->refresh()->status);
+    }
+
+    public function test_bulk_approve_skips_an_admins_own_requests_and_approves_the_rest(): void
+    {
+        $admin = $this->actingAsRole('admin');
+        $own = $this->pendingAdjustmentFor($admin->id);
+        $someoneElses = $this->pendingAdjustmentFor($this->seededUserId('divine@shalomtech.dev'));
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => [$own->uuid, $someoneElses->uuid]])
+            ->assertRedirect()
+            ->assertSessionHas('success', fn (string $message): bool => str_contains($message, '1 adjustment approved')
+                && str_contains($message, '1 was skipped'));
+
+        $this->assertSame('pending', $own->refresh()->status);
+        $this->assertSame('approved', $someoneElses->refresh()->status);
+    }
+
+    public function test_bulk_approve_reports_an_error_when_nothing_could_be_approved(): void
+    {
+        $admin = $this->actingAsRole('admin');
+        $own = $this->pendingAdjustmentFor($admin->id);
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => [$own->uuid]])
+            ->assertRedirect()
+            ->assertSessionHas('error', fn (string $message): bool => str_starts_with($message, 'Nothing was approved.'));
+
+        $this->assertSame('pending', $own->refresh()->status);
+    }
+
+    public function test_a_super_can_bulk_approve_their_own_requests(): void
+    {
+        $super = $this->actingAsRole('super');
+        $own = $this->pendingAdjustmentFor($super->id);
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => [$own->uuid]])
+            ->assertSessionHas('success', '1 adjustment approved and applied.');
+
+        $this->assertSame('approved', $own->refresh()->status);
+    }
+
+    public function test_bulk_approve_moves_a_large_request_to_second_approval(): void
+    {
+        $large = $this->pendingAdjustmentFor($this->seededUserId('divine@shalomtech.dev'), '25000.00', '30000.00');
+
+        $this->actingAsSeededUser('terence@shalomtech.dev'); // manager
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => [$large->uuid]])
+            ->assertSessionHas('success', '1 now needs a second approval.');
+
+        $this->assertSame('pending_second_approval', $large->refresh()->status);
+    }
+
+    public function test_bulk_approve_skips_an_already_decided_request(): void
+    {
+        $rejected = $this->pendingAdjustmentFor($this->seededUserId('divine@shalomtech.dev'));
+        $rejected->update(['status' => 'rejected']);
+
+        $this->actingAsSeededUser('terence@shalomtech.dev');
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => [$rejected->uuid]])
+            ->assertSessionHas('error');
+
+        $this->assertSame('rejected', $rejected->refresh()->status);
+    }
+
+    public function test_agents_and_workers_cannot_bulk_approve(): void
+    {
+        $adjustment = $this->pendingAdjustmentFor($this->seededUserId('divine@shalomtech.dev'));
+
+        foreach (['agent', 'worker'] as $role) {
+            $this->actingAsRole($role);
+
+            $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => [$adjustment->uuid]])
+                ->assertForbidden();
+        }
+
+        $this->assertSame('pending', $adjustment->refresh()->status);
+    }
+
+    public function test_bulk_approve_requires_a_non_empty_list_of_uuids(): void
+    {
+        $this->actingAsRole('manager');
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => []])
+            ->assertSessionHasErrors('adjustment_uuids');
+
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => ['not-a-uuid']])
+            ->assertSessionHasErrors('adjustment_uuids.0');
     }
 
     // Credit-target corrections + the imported-baseline delta-vs-recalc branch

@@ -16,6 +16,7 @@ import {
     IconMessageReport,
     IconDeviceMobile,
     IconShieldLock,
+    IconScale,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -123,6 +124,10 @@ const resourcesNavItem = { href: '/resources', labelKey: 'common.resources', ico
 // Audit Log — AuditLogPolicy::viewAny → `audit.view`.
 const auditNavItem = { href: '/audit/logs', labelKey: 'common.audit_log', icon: IconHistory, accent: 'cyan' as const };
 
+// Arrears Adjustments review queue — ArrearsAdjustmentPolicy::review →
+// `arrears.approve` OR `audit.view` (it used to be an Audit Log sub-tab).
+const arrearsAdjustmentsNavItem = { href: '/arrears-adjustments', labelKey: 'common.arrears_adjustments', icon: IconScale, accent: 'purple' as const };
+
 // Disconnections (bulk customer status workboard) — CustomerPolicy::
 // viewStatusBoard → `customers.status_board`.
 const disconnectionsNavItem = { href: '/disconnections', labelKey: 'common.disconnections', icon: IconUserOff, accent: 'red' as const };
@@ -177,6 +182,7 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(can('reports.view') ? [reportsNavItem] : []),
         ...(can('manuscripts.view') ? [agentAppNavItem] : []),
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
+        ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
         ...(can('audit.view') ? [auditNavItem] : []),
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),

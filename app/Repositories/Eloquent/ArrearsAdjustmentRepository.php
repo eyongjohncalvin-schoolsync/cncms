@@ -97,7 +97,11 @@ class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterfac
     private function scoped(array $filters): Builder
     {
         return ArrearsAdjustment::query()
-            ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $query->where('status', $status))
+            // 'awaiting_approval' = both pending stages — the same set the
+            // dashboard's pending_approval count uses (dashboardCounts()).
+            ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $status === 'awaiting_approval'
+                ? $query->whereIn('status', ['pending', 'pending_second_approval'])
+                : $query->where('status', $status))
             ->when(
                 $filters['customer_uuid'] ?? null,
                 fn (Builder $query, string $uuid) => $query->whereHas('customer', fn (Builder $inner) => $inner->where('uuid', $uuid))

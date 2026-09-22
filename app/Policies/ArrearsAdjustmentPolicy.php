@@ -68,6 +68,17 @@ class ArrearsAdjustmentPolicy
         return $this->context->can('arrears.view');
     }
 
+    /**
+     * The dedicated Arrears Adjustments review page (formerly the Audit Log
+     * "Arrears Adjustments" sub-tab, so `audit.view` keeps the same access it
+     * had there) — plus anyone who can approve, who needs it to act. Agents
+     * and workers, who only `arrears.request`, stay out.
+     */
+    public function review(User $user): bool
+    {
+        return $this->context->canAny('arrears.approve', 'audit.view');
+    }
+
     public function create(User $user): bool
     {
         return $this->context->can('arrears.request');

@@ -114,19 +114,16 @@ export default function Dashboard({ period, stats }: DashboardProps) {
                     />
                 </div>
                 {/*
-                    Pending Arrears Adjustments — the maker-checker review
-                    queue's only top-level pointer anywhere in the app (the
-                    "Adjust Arrears" request modal lives on each customer's
-                    own page, and the approve/reject queue itself lives on
-                    the Audit Log page's "Arrears Adjustments" sub-tab; this
-                    card is the thing that tells someone that queue exists
-                    at all, and links straight to it). Same
-                    "pending-count-as-a-nudge" idea as "Pending Verification"
-                    above, for the same maker-checker shape
+                    Pending Arrears Adjustments — a nudge to the maker-checker
+                    review queue (the "Adjust Arrears" request modal lives on
+                    each customer's own page; the approve/reject queue has its
+                    own page, /arrears-adjustments, opened on its "Awaiting
+                    approval" filter — both pending stages). Same "pending-count-as-a-nudge" idea as "Pending
+                    Verification" above, for the same maker-checker shape
                     (App\Services\ArrearsAdjustmentService::dashboard()).
                 */}
                 <Link
-                    href="/audit/logs?view=arrears_adjustments"
+                    href="/arrears-adjustments?status=awaiting_approval"
                     className="animate-fade-up rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600"
                     style={{ animationDelay: '360ms' }}
                 >
