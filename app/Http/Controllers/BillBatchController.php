@@ -62,7 +62,7 @@ class BillBatchController extends Controller
 
         return redirect()
             ->route('manuscripts.index', ['period' => $period])
-            ->with('success', "Bill generation for {$period} started — it runs in the background. Download links appear below once it's ready (keep the queue worker running).");
+            ->with('success', "Bill generation for {$period} started — it runs in the background. Download links appear below once it's ready.");
     }
 
     /**

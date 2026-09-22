@@ -471,7 +471,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                             {billBatchesWorking && (
                                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600">
                                     <LoadingSpinner className="h-3.5 w-3.5" />
-                                    Generating… (runs in the background — keep the queue worker running)
+                                    Generating… (runs in the background)
                                 </span>
                             )}
                         </div>
