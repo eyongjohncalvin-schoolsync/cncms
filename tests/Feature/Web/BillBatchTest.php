@@ -10,6 +10,7 @@ use App\Models\BillBatch;
 use App\Models\BillBatchFile;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Models\Zone;
 use App\Services\BillBatchService;
 use App\Services\ManuscriptService;
 use Database\Factories\CompanyFactory;
@@ -60,7 +61,7 @@ class BillBatchTest extends TestCase
     }
 
     /**
-     * @return array{0: \App\Models\Zone, 1: string}
+     * @return array{0: Zone, 1: string}
      */
     private function seedZoneWithRecipients(array $names): array
     {
@@ -384,5 +385,26 @@ class BillBatchTest extends TestCase
 
         $this->actingAsRole('worker');
         $this->get(route('manuscripts.bills.download', [$batch->uuid, $file->uuid]))->assertForbidden();
+    }
+
+    public function test_download_is_not_capped_by_the_exports_rate_limit(): void
+    {
+        Storage::fake('local');
+        [$zone, $period] = $this->seedZoneWithRecipients(['Ada']);
+        $customerIds = $zone->customers()->pluck('id')->all();
+
+        $batch = BillBatch::create([
+            'period' => $period, 'status' => 'completed', 'density' => 1, 'template' => 'classic',
+            'total_bills' => 1, 'total_zones' => 1,
+        ]);
+        app(BillBatchService::class)->renderZoneFile($batch->id, $period, $zone->id, $zone->name, $customerIds);
+        $file = BillBatchFile::query()->where('bill_batch_id', $batch->id)->firstOrFail();
+
+        $this->actingAsRole('manager');
+        $downloadUrl = route('manuscripts.bills.download', [$batch->uuid, $file->uuid]);
+
+        for ($attempt = 0; $attempt <= config('rate-limits.exports.max_attempts'); $attempt++) {
+            $this->get($downloadUrl)->assertOk();
+        }
     }
 }

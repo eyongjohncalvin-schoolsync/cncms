@@ -16,8 +16,10 @@ use Illuminate\Support\Facades\Route;
 | props (ManuscriptController::index()'s `billBatches`), so there is no list
 | route here — only "start a run" and "download one artifact".
 |
-| Both layer 'throttle:exports' (10/min/user) on top of the group-level
-| 'throttle:web', matching the register export and the old bills download.
+| generate/cancel/destroy layer 'throttle:exports' (10/min/user) on top of
+| the group-level 'throttle:web'. download does NOT: it only streams a
+| PDF/ZIP the queue already rendered, and a run yields one file per zone
+| plus bulk + ZIP — clicking through them tripped the 10/min ceiling (429).
 |
 */
 Route::post('manuscripts/bills/generate', [BillBatchController::class, 'generate'])
@@ -26,8 +28,7 @@ Route::post('manuscripts/bills/generate', [BillBatchController::class, 'generate
 
 // {billBatch} / {billBatchFile} route-model-bind by uuid (#[RouteKey('uuid')]).
 Route::get('manuscripts/bills/batches/{billBatch}/files/{billBatchFile}', [BillBatchController::class, 'download'])
-    ->name('manuscripts.bills.download')
-    ->middleware('throttle:exports');
+    ->name('manuscripts.bills.download');
 
 // Cancel an in-flight run; clear (delete) a run's artifacts to regenerate.
 Route::post('manuscripts/bills/batches/{billBatch}/cancel', [BillBatchController::class, 'cancel'])

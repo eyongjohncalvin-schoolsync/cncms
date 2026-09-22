@@ -2,12 +2,15 @@
 
 use App\Models\Agent;
 use App\Models\AuditLog;
+use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Expenditure;
 use App\Models\ExpenseCategory;
 use App\Models\Manuscript;
+use App\Models\NotificationSetting;
 use App\Models\Payment;
+use App\Models\PaymentVerification;
 use App\Models\User;
 use App\Models\Zone;
 use Illuminate\Database\Eloquent\Collection;
@@ -170,17 +173,25 @@ return [
     | anywhere in app/Services must be added here too, or it will fail the
     | same way on its first cache hit.
     |
+    | The same applies to every EAGER-LOADED relation of a cached model:
+    | Zone->branch (Branch) and Payment->verification (PaymentVerification)
+    | were missing as well, as was NotificationSetting::cached() itself.
+    | tests/Feature/CacheSerializableClassesTest.php guards all of these.
+    |
     */
 
     'serializable_classes' => [
         Agent::class,
         AuditLog::class,
+        Branch::class,
         Company::class,
         Customer::class,
         Expenditure::class,
         ExpenseCategory::class,
         Manuscript::class,
+        NotificationSetting::class,
         Payment::class,
+        PaymentVerification::class,
         User::class,
         Zone::class,
         Collection::class,
