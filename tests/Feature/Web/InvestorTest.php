@@ -328,17 +328,14 @@ class InvestorTest extends TestCase
         TenantUser::query()->where('user_id', $user->id)->update(['role' => 'super']);
         $this->actingAs($user);
 
-        $tenantUser = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
+        // Targets ANOTHER member (the seeded demo manager): changing your own
+        // role is now refused (UpdateTenantUserRequest's self-demotion
+        // guard), and this test is about is_investor on a non-worker row.
+        $manager = User::query()->where('email', 'terence@shalomtech.dev')->firstOrFail();
+        $tenantUser = TenantUser::query()->where('user_id', $manager->id)->firstOrFail();
+        $tenantUser->update(['role' => 'manager', 'is_investor' => false]);
 
-        // role and is_investor are set together in ONE request (rather than
-        // pre-flipping the row's role via Eloquent first) so the acting
-        // super user's own authorize() check — evaluated against this same
-        // row's role as it stands at the START of this request — still
-        // passes; this tenant fixture has only the one seeded owner row
-        // (see InteractsWithTenantRoles's doc comment), so pre-flipping
-        // their own role to 'manager' before the request would make them
-        // unable to authorize the request at all.
-        $response = $this->patch("/users/{$tenantUser->id}", ['role' => 'manager', 'is_investor' => true]);
+        $response = $this->patch("/users/{$tenantUser->id}", ['is_investor' => true]);
 
         $response->assertSessionDoesntHaveErrors();
 

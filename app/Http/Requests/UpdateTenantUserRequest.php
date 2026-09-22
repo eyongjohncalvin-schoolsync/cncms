@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Role;
 use App\Models\TenantUser;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
@@ -29,7 +30,34 @@ class UpdateTenantUserRequest extends FormRequest
             // RBAC v2 Wave 3: configurable roles — the name must exist in
             // this tenant's `roles` table (system or custom). See
             // StoreTenantUserRequest's identical rule.
-            'role' => ['sometimes', 'required', 'string', Rule::exists('roles', 'name')],
+            //
+            // The role <select> saves on change, so one mis-click on your
+            // own row used to demote you — on 2026-09-22 that left swecom
+            // with zero super users. Two guards: nobody changes their own
+            // role, and the last super can't be moved off it.
+            'role' => [
+                'sometimes', 'required', 'string', Rule::exists('roles', 'name'),
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    $tenantUser = $this->route('tenantUser');
+
+                    if (! $tenantUser instanceof TenantUser || $value === $tenantUser->role) {
+                        return;
+                    }
+
+                    if ($tenantUser->user_id === $this->user()->id) {
+                        $fail('You cannot change your own role. Ask another administrator to do it.');
+
+                        return;
+                    }
+
+                    $superRole = Role::query()->where('is_super', true)->value('name');
+
+                    if ($tenantUser->role === $superRole
+                        && TenantUser::query()->where('role', $superRole)->count() <= 1) {
+                        $fail('This is the only super user. Make someone else super first.');
+                    }
+                },
+            ],
             'job_title' => ['sometimes', 'nullable', 'string', 'max:60'],
             // Multi-branch RBAC — the Branch <select> on the Users Control
             // Center Users page patches this alone, same "each control patches its own field"

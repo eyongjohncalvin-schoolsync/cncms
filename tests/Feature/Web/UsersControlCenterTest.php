@@ -10,6 +10,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -104,15 +105,91 @@ class UsersControlCenterTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'shouldnotexist@example.test'], 'pgsql');
     }
 
+    private function anotherTenantUser(User $actingUser, string $role): TenantUser
+    {
+        // A central `users` row must be COMMITTED to be visible to both the
+        // tenant_users and tenant_user_index foreign keys, which live on
+        // other connections — see InteractsWithTenantRoles. So one fixed
+        // fixture member is committed (idempotently) via a side connection
+        // outside the test transaction; only its membership rows below roll
+        // back. Safe: tests only ever run against cncms_testing (TestCase).
+        config(['database.connections.fixtures' => config('database.connections.pgsql')]);
+        $fixtures = DB::connection('fixtures');
+        $email = 'second.member@example.test';
+
+        if (! $fixtures->table('users')->where('email', $email)->exists()) {
+            $fixtures->table('users')->insert([
+                'uuid' => (string) Str::uuid7(),
+                'name' => 'Second Member',
+                'username' => 'secondmember',
+                'email' => $email,
+                'password' => bcrypt('password123'),
+                'status' => 'active',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return TenantUser::query()->create([
+            'user_id' => $fixtures->table('users')->where('email', $email)->value('id'),
+            'tenant_id' => tenant('id'),
+            'role' => $role,
+        ]);
+    }
+
     public function test_super_can_change_an_existing_users_role(): void
     {
         $user = $this->actingAsRole('super');
-        $tenantUser = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
+        $tenantUser = $this->anotherTenantUser($user, 'agent');
 
         $this->patch("/users/{$tenantUser->id}", ['role' => 'manager'])
             ->assertRedirect(route('users.index'));
 
         $this->assertDatabaseHas('tenant_users', ['id' => $tenantUser->id, 'role' => 'manager']);
+    }
+
+    public function test_a_user_cannot_change_their_own_role(): void
+    {
+        $user = $this->actingAsRole('super');
+        $tenantUser = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
+
+        $this->patch("/users/{$tenantUser->id}", ['role' => 'admin'])
+            ->assertSessionHasErrors('role');
+
+        $this->assertDatabaseHas('tenant_users', ['id' => $tenantUser->id, 'role' => 'super']);
+    }
+
+    public function test_resubmitting_your_own_unchanged_role_is_allowed(): void
+    {
+        $user = $this->actingAsRole('super');
+        $tenantUser = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
+
+        $this->patch("/users/{$tenantUser->id}", ['role' => 'super'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('users.index'));
+    }
+
+    public function test_the_last_super_user_cannot_be_demoted(): void
+    {
+        $user = $this->actingAsRole('admin');
+        $onlySuper = $this->anotherTenantUser($user, 'super');
+        TenantUser::query()->where('role', 'super')->whereKeyNot($onlySuper->id)->update(['role' => 'admin']);
+
+        $this->patch("/users/{$onlySuper->id}", ['role' => 'manager'])
+            ->assertSessionHasErrors('role');
+
+        $this->assertDatabaseHas('tenant_users', ['id' => $onlySuper->id, 'role' => 'super']);
+    }
+
+    public function test_a_super_user_can_be_demoted_when_another_super_remains(): void
+    {
+        $user = $this->actingAsRole('super');
+        $otherSuper = $this->anotherTenantUser($user, 'super');
+
+        $this->patch("/users/{$otherSuper->id}", ['role' => 'admin'])
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('tenant_users', ['id' => $otherSuper->id, 'role' => 'admin']);
     }
 
     public function test_role_rule_rejects_a_name_that_is_not_a_real_role(): void
