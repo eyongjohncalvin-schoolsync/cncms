@@ -13,8 +13,10 @@ use App\Services\ManuscriptCalculationResult;
 use App\Services\ManuscriptCalculator;
 use App\Services\ManuscriptService;
 use Database\Factories\CustomerFactory;
+use Database\Factories\ManuscriptFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Carbon;
 use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
@@ -512,6 +514,82 @@ class ManuscriptCalculateTest extends TestCase
         );
         $this->assertFalse($onExpirationDay->isFrozen, 'freeze must have lifted by the exact expiration day, not one day later');
         $this->assertEqualsWithDelta(2500.0, (float) $onExpirationDay->totalBill, 0.001);
+    }
+
+    /**
+     * 2026-10 run incident (2026-09-22): the run for month N happens late in
+     * month N-1. A legacy prepayment expiring between the run date and the
+     * first of month N must NOT cover month N — the month is billed and any
+     * waiting payment is applied to it. Without an explicit $asOf the
+     * cutoff is the period start, regardless of when the run executes.
+     */
+    public function test_a_prepayment_expiring_before_the_billed_month_starts_does_not_cover_it(): void
+    {
+        Carbon::setTestNow('2026-09-22 10:00:00');
+
+        try {
+            $customer = CustomerFactory::new()->create([
+                'zone_id' => $this->zone()->id,
+                'bill' => 3000,
+                'others' => 0,
+                'status' => 'active',
+            ]);
+
+            $september = ManuscriptFactory::new()->forPeriod('2026-09')->create([
+                'customer_id' => $customer->id,
+                'bill' => 3000,
+                'total_arrears' => 0,
+                'credit' => 0,
+                'total_bill' => 0,
+                'payment_expiration' => '2026-09-28',
+            ]);
+
+            $octoberPayment = PaymentFactory::new()->create([
+                'customer_id' => $customer->id,
+                'amount' => 3000,
+                'verification_status' => 'verified',
+            ]);
+
+            $result = $this->calculator->calculate($customer, '2026-10', $september, collect([$octoberPayment]), collect());
+
+            $this->assertFalse($result->isFrozen, 'an expiry of 28 Sep cannot cover October');
+            $this->assertTrue($result->processedPayments->contains('id', $octoberPayment->id), 'the waiting payment must be applied to October');
+            $this->assertEqualsWithDelta(0.0, (float) $result->totalArrears, 0.001);
+            $this->assertEqualsWithDelta(0.0, (float) $result->credit, 0.001);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_a_prepayment_expiring_after_the_billed_month_starts_still_covers_it(): void
+    {
+        Carbon::setTestNow('2026-09-22 10:00:00');
+
+        try {
+            $customer = CustomerFactory::new()->create([
+                'zone_id' => $this->zone()->id,
+                'bill' => 3000,
+                'others' => 0,
+                'status' => 'active',
+            ]);
+
+            $september = ManuscriptFactory::new()->forPeriod('2026-09')->create([
+                'customer_id' => $customer->id,
+                'bill' => 3000,
+                'total_arrears' => 0,
+                'credit' => 0,
+                'total_bill' => 0,
+                'payment_expiration' => '2026-10-15',
+            ]);
+
+            $result = $this->calculator->calculate($customer, '2026-10', $september, collect(), collect());
+
+            $this->assertTrue($result->isFrozen);
+            $this->assertSame('prepaid', $result->frozenReason);
+            $this->assertEqualsWithDelta(0.0, (float) $result->totalBill, 0.001);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_a_disconnected_customer_is_frozen_with_no_new_accrual(): void
@@ -1298,7 +1376,7 @@ class ManuscriptCalculateTest extends TestCase
         // forces the next $this->artisan() call to rebuild the console
         // Application from scratch and re-resolve every command against the
         // container's CURRENT bindings, honoring the override above.
-        $this->app->forgetInstance(\Illuminate\Contracts\Console\Kernel::class);
+        $this->app->forgetInstance(Kernel::class);
 
         $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->getTenantKey()])->assertExitCode(1);
 

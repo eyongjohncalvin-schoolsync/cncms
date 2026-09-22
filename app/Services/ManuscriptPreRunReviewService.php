@@ -70,7 +70,9 @@ final class ManuscriptPreRunReviewService
      */
     public function reviewList(string $period, ?int $zoneId = null, ?Carbon $asOf = null): array
     {
-        $asOf ??= Carbon::now();
+        // Same cutoff as ManuscriptCalculator::calculate(): prepaid coverage
+        // is judged at the start of the period being billed, not today.
+        $asOf ??= Carbon::createFromFormat('!Y-m', $period)->startOfMonth();
 
         $candidates = $this->customers->activeWithLatestManuscript($zoneId);
         $customerIds = $candidates->pluck('id')->all();

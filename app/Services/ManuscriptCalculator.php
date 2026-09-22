@@ -119,15 +119,15 @@ final class ManuscriptCalculator
      *                                           batch-resolves this per chunk instead of one query
      *                                           per customer.
      * @param  Collection<int, Payment>  $eligibleVerifiedPayments  This customer's
-     *                                                               `verification_status = 'verified'` payments eligible
-     *                                                               for period $period — see this class's doc comment for
-     *                                                               exactly what "eligible" means and why — resolved by
-     *                                                               the caller the same way.
+     *                                                              `verification_status = 'verified'` payments eligible
+     *                                                              for period $period — see this class's doc comment for
+     *                                                              exactly what "eligible" means and why — resolved by
+     *                                                              the caller the same way.
      * @param  Collection<int, ArrearsAdjustment>  $eligibleAdjustments  This customer's `status =
-     *                                                               'approved'` arrears adjustments eligible for period
-     *                                                               $period — see this class's doc comment for exactly
-     *                                                               what "eligible" means, resolved by the caller the
-     *                                                               same way as $eligibleVerifiedPayments.
+     *                                                                   'approved'` arrears adjustments eligible for period
+     *                                                                   $period — see this class's doc comment for exactly
+     *                                                                   what "eligible" means, resolved by the caller the
+     *                                                                   same way as $eligibleVerifiedPayments.
      */
     public function calculate(
         Customer $customer,
@@ -137,7 +137,14 @@ final class ManuscriptCalculator
         Collection $eligibleAdjustments,
         ?Carbon $asOf = null,
     ): ManuscriptCalculationResult {
-        $asOf ??= Carbon::now();
+        // Prepaid coverage is judged against the START of the billed period,
+        // not the day the run executes: runs happen late in month N-1, so a
+        // "now" cutoff treated an expiry that lapses before month N even
+        // begins (e.g. 28 Sep, run on 22 Sep for October) as still covering
+        // month N — leaving that month unbilled for good (2026-10 run, owner
+        // confirmed 2026-09-22 that such a month must be billed). '!' zeroes
+        // the time fields; see the !Y-m parse gotcha.
+        $asOf ??= Carbon::createFromFormat('!Y-m', $period)->startOfMonth();
 
         $billDue = $this->normalize((string) $customer->bill);
 
