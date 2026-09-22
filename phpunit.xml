@@ -26,13 +26,18 @@
         <!--
             This app has no sqlite connection defined in config/database.php — it is
             PostgreSQL-only (Stancl schema-per-tenant tenancy requires real Postgres
-            schemas). Point tests at the same local Postgres database as .env; feature
-            tests that touch tenant data use DatabaseTransactions (see
+            schemas). Tests run against a SEPARATE `cncms_testing` database, never
+            the real `cncms` one (whose `tenantswecom` schema is live SWECOM data).
+            Feature tests still use DatabaseTransactions (see
             tests/Feature/ManuscriptCalculateTest.php, tests/Feature/Api/AuthTest.php)
-            to roll back instead of migrating/refreshing, so the shared dev database
-            is never destructively reset.
+            to roll back rather than refresh. One-time setup (PowerShell):
+                CREATE DATABASE cncms_testing;   (psql, as postgres)
+                $env:DB_DATABASE='cncms_testing'; $env:QUEUE_CONNECTION='sync'
+                php artisan migrate (with the seed and force flags)
+            which provisions a throwaway `swecom` tenant inside cncms_testing.
         -->
         <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_DATABASE" value="cncms_testing"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
