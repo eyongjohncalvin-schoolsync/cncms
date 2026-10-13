@@ -11,6 +11,7 @@ use App\Models\User;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -151,6 +152,42 @@ class SettingsServicesTest extends TestCase
         $this->assertSame('6000.00', (string) $customer->fresh()->bill);
     }
 
+    /**
+     * N+1 regression: re-deriving each subscriber's bill reuses the
+     * eager-loaded subscriptions rather than running a SUM query per
+     * customer — and still sums across ALL of a customer's services.
+     */
+    public function test_apply_price_recomputes_multi_service_bills_without_a_sum_query_per_customer(): void
+    {
+        $this->actingAsRole('admin');
+
+        $zone = ZoneFactory::new()->create();
+        $tv = $this->tvService();
+        $addon = Service::query()->create(['name' => 'Sports Add-on', 'price' => 1000]);
+
+        $customers = collect(range(1, 3))->map(function () use ($zone, $tv, $addon) {
+            $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 6000, 'status' => 'active']);
+            $customer->subscriptions()->create(['service_id' => $tv->id, 'price' => 5000]);
+            $customer->subscriptions()->create(['service_id' => $addon->id, 'price' => 1000]);
+
+            return $customer;
+        });
+
+        $addon->update(['price' => 1500]);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->post("/settings/services/{$addon->uuid}/apply-price")->assertRedirect();
+        $queries = array_column(DB::getQueryLog(), 'query');
+        DB::disableQueryLog();
+
+        $this->assertSame([], array_values(array_filter($queries, fn (string $sql): bool => str_contains($sql, 'sum("price")'))));
+
+        foreach ($customers as $customer) {
+            $this->assertSame('6500.00', (string) $customer->fresh()->bill);
+        }
+    }
+
     // -----------------------------------------------------------------
     // Variant ("option") sub-CRUD
     // -----------------------------------------------------------------
@@ -193,5 +230,28 @@ class SettingsServicesTest extends TestCase
 
         $this->delete("/settings/services/{$tv->uuid}/variants/{$channel->uuid}")
             ->assertSessionHasErrors('variant');
+    }
+
+    public function test_catalogue_reports_each_options_subscriber_count(): void
+    {
+        $this->actingAsRole('admin');
+
+        $zone = ZoneFactory::new()->create();
+        $tv = $this->tvService();
+        $held = ServiceVariant::query()->create(['service_id' => $tv->id, 'name' => 'Held Channel', 'price' => 2000]);
+        $unheld = ServiceVariant::query()->create(['service_id' => $tv->id, 'name' => 'Unheld Channel', 'price' => 2000]);
+
+        foreach (range(1, 2) as $ignored) {
+            $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 7000, 'status' => 'active']);
+            $customer->subscriptions()->create(['service_id' => $tv->id, 'price' => 5000]);
+            $customer->subscriptions()->create(['service_id' => $tv->id, 'service_variant_id' => $held->id, 'price' => 2000]);
+        }
+
+        $response = $this->get('/settings/services')->assertOk();
+        $variants = collect($response->viewData('page')['props']['services'])
+            ->firstWhere('uuid', $tv->uuid)['variants'];
+
+        $this->assertSame(2, collect($variants)->firstWhere('uuid', $held->uuid)['subscriber_count']);
+        $this->assertSame(0, collect($variants)->firstWhere('uuid', $unheld->uuid)['subscriber_count']);
     }
 }

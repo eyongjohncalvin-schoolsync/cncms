@@ -75,16 +75,29 @@ class ComplaintEscalationService
         // render with the red "Escalated" badge at age zero, which directly
         // contradicts the visual-language design in complaint-desk.md
         // section 6).
-        if ($complaint->assigned_to !== null && ! $this->alreadyFired($complaint, 0)) {
+        $firedLevels = $this->firedLevels($complaint);
+        $firedAny = false;
+
+        if ($complaint->assigned_to !== null && ! in_array(0, $firedLevels, true)) {
             $this->fireLevel0($complaint);
+            $firedAny = true;
         }
 
-        if ($elapsedHours >= self::LEVEL_1_HOURS && ! $this->alreadyFired($complaint, 1)) {
+        if ($elapsedHours >= self::LEVEL_1_HOURS && ! in_array(1, $firedLevels, true)) {
             $this->fireLevel1($complaint);
+            $firedAny = true;
         }
 
-        if ($elapsedHours >= self::LEVEL_2_HOURS && ! $this->alreadyFired($complaint, 2)) {
+        if ($elapsedHours >= self::LEVEL_2_HOURS && ! in_array(2, $firedLevels, true)) {
             $this->fireLevel2($complaint);
+            $firedAny = true;
+        }
+
+        if ($firedAny) {
+            // The preloaded escalations no longer reflect what was just
+            // logged — drop them so a later sweep of this same instance
+            // re-reads instead of firing a level twice.
+            $complaint->unsetRelation('escalations');
         }
     }
 
@@ -198,6 +211,23 @@ class ComplaintEscalationService
                 fn (User $user) => $this->notifications->broadcastToUser($user, 'complaint.resolved', 'info', $title, $body, $link)
             );
         }
+    }
+
+    /**
+     * The escalation levels already logged for this complaint — read from
+     * the preloaded `escalations` relation when the sweep eager-loaded it
+     * (ComplaintRepositoryInterface::openForEscalationSweep()), so a tick
+     * costs no per-complaint query; otherwise one query for all levels.
+     *
+     * @return array<int, int>
+     */
+    private function firedLevels(Complaint $complaint): array
+    {
+        $levels = $complaint->relationLoaded('escalations')
+            ? $complaint->escalations->pluck('level')
+            : ComplaintEscalation::query()->where('complaint_id', $complaint->id)->pluck('level');
+
+        return $levels->map(fn (mixed $level): int => (int) $level)->unique()->values()->all();
     }
 
     private function alreadyFired(Complaint $complaint, int $level): bool

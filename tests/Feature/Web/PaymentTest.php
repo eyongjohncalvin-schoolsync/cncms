@@ -6,6 +6,7 @@ namespace Tests\Feature\Web;
 
 use App\Models\Branch;
 use App\Models\Customer;
+use App\Models\Payment;
 use App\Models\TenantUser;
 use App\Models\User;
 use Database\Factories\AgentFactory;
@@ -14,6 +15,7 @@ use Database\Factories\CustomerFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -692,7 +694,7 @@ class PaymentTest extends TestCase
 
         $this->assertSame(
             2,
-            \App\Models\Payment::query()->where('customer_id', $customer->id)->count(),
+            Payment::query()->where('customer_id', $customer->id)->count(),
             'AUDIT: the web payment-entry route has no idempotency protection — a double-submit/retry creates two payment rows.'
         );
     }
@@ -1313,5 +1315,66 @@ class PaymentTest extends TestCase
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('payments', ['id' => $payment->id]);
         $this->assertDatabaseMissing('payment_verifications', ['payment_id' => $payment->id]);
+    }
+
+    /**
+     * N+1 regression: bulk-verify loads the whole selection (with customer,
+     * zone, branch, verification and receipt) up front, so the number of
+     * reads against those tables doesn't grow with the selection size.
+     */
+    public function test_bulk_verify_reads_payments_and_their_relations_once_for_the_whole_selection(): void
+    {
+        $this->actingAsRole('manager');
+
+        $countLookups = function (int $paymentCount): int {
+            $uuids = collect(range(1, $paymentCount))->map(function () {
+                $customer = $this->customer();
+
+                return PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'amount' => 2500])->uuid;
+            })->all();
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->post('/payments/bulk-verify', ['payment_uuids' => $uuids])->assertSessionHas('success');
+            $queries = array_column(DB::getQueryLog(), 'query');
+            DB::disableQueryLog();
+
+            foreach ($uuids as $uuid) {
+                $this->assertDatabaseHas('payments', ['uuid' => $uuid, 'verification_status' => 'verified']);
+                $this->assertDatabaseHas('payment_receipts', ['payment_id' => Payment::query()->where('uuid', $uuid)->value('id')]);
+            }
+
+            return count(array_filter($queries, fn (string $sql): bool => (bool) preg_match(
+                '/^select .* from "(payments|customers|zones|branches|payment_receipts)"/',
+                $sql,
+            )));
+        };
+
+        $this->assertSame($countLookups(2), $countLookups(4));
+    }
+
+    /**
+     * N+1 regression: bulk payment entry resolves every selected customer
+     * in one query instead of re-reading each customer per payment.
+     */
+    public function test_bulk_store_reads_customers_once_for_the_whole_selection(): void
+    {
+        $this->actingAsRole('manager');
+
+        $countCustomerReads = function (int $customerCount): int {
+            $uuids = collect(range(1, $customerCount))->map(fn () => $this->customer()->uuid)->all();
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->post('/payments/bulk', ['customer_uuids' => $uuids, 'frequency' => 'monthly'])->assertSessionHas('success');
+            $queries = array_column(DB::getQueryLog(), 'query');
+            DB::disableQueryLog();
+
+            $this->assertSame($customerCount, Payment::query()->whereIn('customer_id', Customer::query()->whereIn('uuid', $uuids)->select('id'))->count());
+
+            return count(array_filter($queries, fn (string $sql): bool => (bool) preg_match('/^select .* from "customers"/', $sql)));
+        };
+
+        $this->assertSame($countCustomerReads(2), $countCustomerReads(4));
     }
 }

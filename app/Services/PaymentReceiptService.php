@@ -45,7 +45,9 @@ class PaymentReceiptService
     {
         $payment->loadMissing(['customer.zone.branch', 'verification']);
 
-        $existing = PaymentReceipt::query()->where('payment_id', $payment->id)->first();
+        $existing = $payment->relationLoaded('receipt')
+            ? $payment->receipt
+            : PaymentReceipt::query()->where('payment_id', $payment->id)->first();
 
         if ($existing && ! $existing->isVoid()) {
             return $existing;
@@ -69,7 +71,7 @@ class PaymentReceiptService
             return $existing->refresh();
         }
 
-        return DB::transaction(function () use ($payment, $actor, $snapshot): PaymentReceipt {
+        $receipt = DB::transaction(function () use ($payment, $actor, $snapshot): PaymentReceipt {
             $number = $this->allocateNumber();
 
             return PaymentReceipt::create([
@@ -83,6 +85,10 @@ class PaymentReceiptService
                 'status' => PaymentReceipt::STATUS_ISSUED,
             ]);
         });
+
+        $payment->setRelation('receipt', $receipt);
+
+        return $receipt;
     }
 
     /**

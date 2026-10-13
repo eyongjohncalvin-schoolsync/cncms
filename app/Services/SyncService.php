@@ -15,9 +15,11 @@ use App\Models\Expenditure;
 use App\Models\Payment;
 use App\Models\SyncQueue;
 use App\Models\User;
+use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -36,6 +38,7 @@ class SyncService
         private readonly ComplaintService $complaints,
         private readonly NotificationService $notifications,
         private readonly TenantContext $context,
+        private readonly CustomerRepositoryInterface $customers,
     ) {}
 
     /**
@@ -56,8 +59,10 @@ class SyncService
         $results = ['payments' => [], 'expenditures' => [], 'complaints' => []];
         $errors = [];
 
+        $paymentLookups = $this->paymentPushLookups($changes['payments'] ?? []);
+
         foreach ($changes['payments'] ?? [] as $item) {
-            [$entry, $error] = $this->pushPayment($item, $deviceId);
+            [$entry, $error] = $this->pushPayment($item, $deviceId, $paymentLookups);
             $results['payments'][] = $entry;
 
             if ($error !== null) {
@@ -220,6 +225,37 @@ class SyncService
     }
 
     /**
+     * Everything pushPayment() would otherwise look up once per item,
+     * resolved in three queries for the whole batch:
+     * - synced: local_uuid => server uuid of already-synced payments (the
+     *   idempotency check), kept current as the batch creates payments;
+     * - customers: every referenced customer, unscoped, for the
+     *   disconnected/suspended check (as before);
+     * - payable: the same customers through the branch-scoped repository,
+     *   which is what PaymentService::create() would resolve.
+     *
+     * @param  array<int, mixed>  $items
+     * @return array{synced: array<string, string>, customers: Collection<string, Customer>, payable: Collection<string, Customer>}
+     */
+    private function paymentPushLookups(array $items): array
+    {
+        $localUuids = collect($items)->pluck('local_uuid')->filter(fn (mixed $uuid): bool => is_string($uuid))->unique()->values()->all();
+        $customerUuids = collect($items)->pluck('customer_uuid')->filter(fn (mixed $uuid): bool => is_string($uuid))->unique()->values()->all();
+
+        return [
+            'synced' => $localUuids === []
+                ? []
+                : Payment::query()->whereIn('local_uuid', $localUuids)->pluck('uuid', 'local_uuid')->all(),
+            'customers' => $customerUuids === []
+                ? collect()
+                : Customer::query()->whereIn('uuid', $customerUuids)->get()->keyBy('uuid'),
+            'payable' => $customerUuids === []
+                ? collect()
+                : $this->customers->findManyByUuids($customerUuids)->keyBy('uuid'),
+        ];
+    }
+
+    /**
      * `$item['created_at']` -> `PaymentData::$collectedAt` -> `payments.collected_at`:
      * the mobile client names this field `created_at` in the wire payload
      * (mobile/src/sync/SyncManager.ts:281 sends it per queued payment, and
@@ -236,9 +272,10 @@ class SyncService
      * doesn't already have a conflicting meaning.
      *
      * @param  array<string, mixed>  $item
+     * @param  array{synced: array<string, string>, customers: Collection<string, Customer>, payable: Collection<string, Customer>}  $lookups  See paymentPushLookups().
      * @return array{0: array<string, mixed>, 1: ?array<string, mixed>}
      */
-    private function pushPayment(array $item, string $deviceId): array
+    private function pushPayment(array $item, string $deviceId, array &$lookups): array
     {
         $localUuid = $item['local_uuid'] ?? null;
 
@@ -251,7 +288,7 @@ class SyncService
         // synced" — short-circuit straight to the existing server_uuid
         // rather than re-creating.
         if ($localUuid !== null) {
-            $existingUuid = Payment::query()->where('local_uuid', $localUuid)->value('uuid');
+            $existingUuid = $lookups['synced'][$localUuid] ?? null;
 
             if ($existingUuid !== null) {
                 return [
@@ -275,7 +312,7 @@ class SyncService
         // while the customer is still `disconnected`) keeps working exactly
         // as it does today.
         $customerUuid = $item['customer_uuid'] ?? null;
-        $customer = is_string($customerUuid) ? Customer::query()->where('uuid', $customerUuid)->first() : null;
+        $customer = is_string($customerUuid) ? $lookups['customers']->get($customerUuid) : null;
 
         if ($customer && in_array($customer->status, ['disconnected', 'suspended'], true)) {
             $message = "{$customer->name} is currently {$customer->status} and cannot be paid until reconnected.";
@@ -306,7 +343,19 @@ class SyncService
                 'collected_at' => $item['created_at'] ?? null,
             ]);
 
-            $payment = $this->payments->create($data);
+            // The branch-scoped customer resolved up front, when there is
+            // one; otherwise create() resolves (and rejects) it itself.
+            $payableCustomer = is_string($customerUuid) ? $lookups['payable']->get($customerUuid) : null;
+
+            $payment = $payableCustomer !== null
+                ? $this->payments->createForCustomer($payableCustomer, $data)
+                : $this->payments->create($data);
+
+            if ($localUuid !== null) {
+                // A retry of this same local_uuid later in the batch must
+                // resolve to this payment, not create a second one.
+                $lookups['synced'][$localUuid] = $payment->uuid;
+            }
 
             $this->recordSyncQueue($deviceId, 'payment', $payment->uuid, $localUuid, $item, 'synced');
 

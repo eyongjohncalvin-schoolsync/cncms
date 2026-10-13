@@ -116,8 +116,16 @@ class PaymentService
      */
     public function create(PaymentData $data): Payment
     {
-        $customer = $this->resolveCustomer($data->customerUuid);
+        return $this->createForCustomer($this->resolveCustomer($data->customerUuid), $data);
+    }
 
+    /**
+     * create() for a caller that has already resolved the customer (bulk
+     * entry, offline sync, reconnection fines) — skips re-looking it up by
+     * uuid. $customer must be the customer $data->customerUuid names.
+     */
+    public function createForCustomer(Customer $customer, PaymentData $data): Payment
+    {
         // RBAC v2: mirrors PaymentPolicy::verify() exactly — the office gate
         // is now the `payments.verify` catalog permission; the agent
         // zone-scoped branch stays an additive OR (agent is NOT seeded
@@ -140,7 +148,7 @@ class PaymentService
 
         $payment = $this->payments->create($customer->id, $attributes);
 
-        return $payment->load('customer');
+        return $payment->setRelation('customer', $customer);
     }
 
     /**
@@ -171,8 +179,11 @@ class PaymentService
         $created = [];
         $failed = [];
 
+        // One query for the whole selection rather than a lookup per uuid.
+        $customersByUuid = $this->customers->findManyByUuids($customerUuids)->keyBy('uuid');
+
         foreach ($customerUuids as $customerUuid) {
-            $customer = $this->customers->findByUuid($customerUuid);
+            $customer = $customersByUuid->get($customerUuid);
 
             if (! $customer) {
                 $failed[$customerUuid] = 'Customer not found.';
@@ -187,7 +198,7 @@ class PaymentService
             }
 
             try {
-                $created[] = $this->create(new PaymentData(
+                $created[] = $this->createForCustomer($customer, new PaymentData(
                     customerUuid: $customerUuid,
                     amount: (string) $customer->bill,
                     frequency: $frequency,

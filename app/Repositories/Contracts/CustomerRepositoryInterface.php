@@ -87,9 +87,10 @@ interface CustomerRepositoryInterface
      * actions elsewhere in the app do.
      *
      * @param  string[]  $uuids
+     * @param  array<int, string>  $with
      * @return Collection<int, Customer>
      */
-    public function findManyByUuids(array $uuids): Collection;
+    public function findManyByUuids(array $uuids, array $with = []): Collection;
 
     /**
      * Every customer matching $filters (same supported keys as paginate():

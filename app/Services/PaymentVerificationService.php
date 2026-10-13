@@ -35,8 +35,35 @@ class PaymentVerificationService
 
     public function verify(Payment $payment, VerifyPaymentData $data, User $actor): Payment
     {
+        $this->applyDecision($payment, $data, $actor);
+
+        // Extends the same forget-on-write to /reports: an approve/reject
+        // flip changes the Daily tier's "verifications actioned today" and
+        // "pending queue" figures, and the Weekly tier's verification-SLA
+        // block, immediately — see ReportService::forgetCache()'s doc
+        // comment for the "own key + 'all' key" tradeoff this follows.
+        // verified_at is effectively "now", so today's WAT calendar day is
+        // always the right period to invalidate.
+        ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());
+
+        return $payment->fresh(['customer', 'verification.verifier']);
+    }
+
+    /**
+     * verify()'s write path without its per-call report-cache flush and
+     * fresh() reload, so verifyMany() can run it per payment and flush the
+     * report cache once for the whole batch.
+     */
+    private function applyDecision(Payment $payment, VerifyPaymentData $data, User $actor): void
+    {
         DB::transaction(function () use ($payment, $data, $actor): void {
-            $verification = $this->verifications->firstOrCreateForPayment($payment->id);
+            $verification = $payment->relationLoaded('verification') && $payment->verification !== null
+                ? $payment->verification
+                : $this->verifications->firstOrCreateForPayment($payment->id);
+
+            // Lets PaymentReceiptService::issueFor() reuse this row instead
+            // of lazy-loading it again.
+            $payment->setRelation('verification', $verification);
 
             if ($data->action === 'approve') {
                 $this->verifications->update($verification, [
@@ -75,17 +102,6 @@ class PaymentVerificationService
         });
 
         $this->forgetShowCache($payment->uuid);
-
-        // Extends the same forget-on-write to /reports: an approve/reject
-        // flip changes the Daily tier's "verifications actioned today" and
-        // "pending queue" figures, and the Weekly tier's verification-SLA
-        // block, immediately — see ReportService::forgetCache()'s doc
-        // comment for the "own key + 'all' key" tradeoff this follows.
-        // verified_at is effectively "now", so today's WAT calendar day is
-        // always the right period to invalidate.
-        ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());
-
-        return $payment->fresh(['customer', 'verification.verifier']);
     }
 
     /**
@@ -126,8 +142,12 @@ class PaymentVerificationService
         $isAgent = $this->context->role === 'agent';
         $zoneId = $this->context->zoneId;
 
+        // One query for the whole selection (with everything verify() and
+        // receipt issuing read) rather than a lookup per payment.
+        $paymentsByUuid = $this->payments->findManyByUuids($paymentUuids, ['customer.zone.branch', 'verification', 'receipt']);
+
         foreach ($paymentUuids as $uuid) {
-            $payment = $this->payments->findByUuid($uuid, ['customer']);
+            $payment = $paymentsByUuid->get($uuid);
 
             if (! $payment) {
                 $skipped[$uuid] = 'Payment not found.';
@@ -153,12 +173,17 @@ class PaymentVerificationService
                 continue;
             }
 
-            $this->verify($payment, new VerifyPaymentData(
+            $this->applyDecision($payment, new VerifyPaymentData(
                 action: 'approve',
                 notes: "Bulk-verified — amount matches {$payment->customer->name}'s standard monthly bill.",
             ), $actor);
 
             $verified[] = $uuid;
+        }
+
+        if ($verified !== []) {
+            // See verify()'s matching comment — flushed once per batch.
+            ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());
         }
 
         return ['verified' => $verified, 'skipped' => $skipped];

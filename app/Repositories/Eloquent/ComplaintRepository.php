@@ -93,6 +93,7 @@ class ComplaintRepository implements ComplaintRepositoryInterface
     public function openForEscalationSweep(): Collection
     {
         return Complaint::query()
+            ->with(['escalations:id,complaint_id,level', 'assignedTo'])
             ->where('status', '!=', 'resolved')
             ->whereNull('duplicate_of_id')
             ->orderBy('created_at')

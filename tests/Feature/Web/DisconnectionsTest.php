@@ -11,6 +11,7 @@ use App\Models\User;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -320,5 +321,41 @@ class DisconnectionsTest extends TestCase
             'customer_uuids' => [$customer->uuid],
             'reason' => 'tv_problem',
         ])->assertForbidden();
+    }
+
+    /**
+     * N+1 regression: a bulk reconnect (with fine) resolves the whole
+     * selection — and each customer's latest manuscript — up front, so
+     * reads of customers/manuscripts don't grow with the selection.
+     */
+    public function test_bulk_reconnect_reads_customers_and_manuscripts_once_for_the_whole_selection(): void
+    {
+        $this->actingAsRole('manager');
+        $zone = ZoneFactory::new()->create();
+
+        $countLookups = function (int $customerCount) use ($zone): int {
+            $uuids = collect(range(1, $customerCount))
+                ->map(fn () => CustomerFactory::new()->create([
+                    'zone_id' => $zone->id,
+                    'status' => 'disconnected',
+                    'status_changed_at' => now()->subDays(10),
+                ])->uuid)
+                ->all();
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->post('/disconnections/bulk-reconnect', ['customer_uuids' => $uuids, 'include_fine' => true])
+                ->assertSessionHas('success');
+            $queries = array_column(DB::getQueryLog(), 'query');
+            DB::disableQueryLog();
+
+            foreach ($uuids as $uuid) {
+                $this->assertDatabaseHas('customers', ['uuid' => $uuid, 'status' => 'active']);
+            }
+
+            return count(array_filter($queries, fn (string $sql): bool => (bool) preg_match('/^select .* from "(customers|manuscripts)"/', $sql)));
+        };
+
+        $this->assertSame($countLookups(2), $countLookups(4));
     }
 }

@@ -187,6 +187,14 @@ class SettingsServiceController extends Controller
      */
     private function shapeServices(): array
     {
+        // Every option's subscriber count in one grouped query, rather than
+        // a COUNT per option.
+        $variantSubscriberCounts = DB::table('customer_service')
+            ->whereNotNull('service_variant_id')
+            ->groupBy('service_variant_id')
+            ->selectRaw('service_variant_id, count(*) as subscriber_count')
+            ->pluck('subscriber_count', 'service_variant_id');
+
         return Service::query()
             ->ordered()
             ->withCount('customers')
@@ -205,7 +213,7 @@ class SettingsServiceController extends Controller
                     'name' => $variant->name,
                     'price' => $variant->price,
                     'active' => $variant->active,
-                    'subscriber_count' => DB::table('customer_service')->where('service_variant_id', $variant->id)->count(),
+                    'subscriber_count' => (int) ($variantSubscriberCounts[$variant->id] ?? 0),
                 ])->values()->all(),
             ])
             ->values()

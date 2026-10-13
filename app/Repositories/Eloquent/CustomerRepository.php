@@ -124,9 +124,10 @@ class CustomerRepository implements CustomerRepositoryInterface
             ->get();
     }
 
-    public function findManyByUuids(array $uuids): Collection
+    public function findManyByUuids(array $uuids, array $with = []): Collection
     {
         return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->with($with)
             ->whereIn('uuid', $uuids)
             ->get();
     }
