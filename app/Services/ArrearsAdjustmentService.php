@@ -62,6 +62,19 @@ class ArrearsAdjustmentService
         return $this->adjustments->paginate($filters, $perPage);
     }
 
+    /**
+     * Bare rows (no relations) for a bulk selection, keyed by uuid — enough
+     * for the approve policy, which reads only scalar columns; approve()
+     * itself re-fetches each row under a lock.
+     *
+     * @param  string[]  $uuids
+     * @return Collection<string, ArrearsAdjustment>
+     */
+    public function findManyByUuids(array $uuids): Collection
+    {
+        return $this->adjustments->findManyByUuids($uuids);
+    }
+
     public function findOrFail(string $uuid): ArrearsAdjustment
     {
         $adjustment = $this->adjustments->findByUuid($uuid, ['customer.zone', 'requestedBy', 'approvedBy', 'secondApprovedBy', 'complaint']);

@@ -81,6 +81,10 @@ final class CustomerImportService
         $failed = [];
         $rules = (new StoreCustomerRequest)->rules();
 
+        // zone uuid => id, resolved through CustomerService's branch-scoped
+        // lookup once per distinct zone rather than once per row.
+        $resolvedZoneIds = [];
+
         foreach ($rows as $index => $row) {
             // Heading row is row 1, so the first data row is row 2.
             $rowNumber = $index + 2;
@@ -133,7 +137,9 @@ final class CustomerImportService
             }
 
             try {
-                $customer = $this->customers->create(CustomerData::fromArray($validator->validated()));
+                $customerData = CustomerData::fromArray($validator->validated());
+                $zoneId = $resolvedZoneIds[$customerData->zoneUuid] ??= $this->customers->resolveZoneId($customerData->zoneUuid);
+                $customer = $this->customers->createInZone($zoneId, $customerData);
                 $succeeded[] = ['row' => $rowNumber, 'uuid' => $customer->uuid, 'name' => $customer->name];
             } catch (Throwable $e) {
                 $failed[$rowNumber] = $e->getMessage();

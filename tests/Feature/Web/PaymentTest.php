@@ -1377,4 +1377,24 @@ class PaymentTest extends TestCase
 
         $this->assertSame($countCustomerReads(2), $countCustomerReads(4));
     }
+
+    /**
+     * The list's repository already eager-loads customer and
+     * verification.verifier — the controller only adds what's missing
+     * rather than reloading them.
+     */
+    public function test_index_does_not_reload_relations_the_repository_already_loaded(): void
+    {
+        $this->actingAsRole('manager');
+        PaymentFactory::new()->create(['customer_id' => $this->customer()->id, 'amount' => 2500]);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->get('/payments')->assertOk();
+        $queries = array_column(DB::getQueryLog(), 'query');
+        DB::disableQueryLog();
+
+        $customerLoads = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'select * from "customers" where "customers"."id" in'));
+        $this->assertCount(1, $customerLoads);
+    }
 }

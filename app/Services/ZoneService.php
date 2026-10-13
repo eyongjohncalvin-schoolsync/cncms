@@ -52,13 +52,21 @@ class ZoneService
 
     public function create(ZoneData $data): Zone
     {
-        $branchId = $this->resolveBranchId($data->branchUuid);
+        return $this->createInBranch($this->resolveBranchId($data->branchUuid), $data)->load('branch');
+    }
 
+    /**
+     * create()'s write path for a caller that has already resolved the
+     * branch through resolveBranchId() (the spreadsheet import, which
+     * resolves it once per file) — and that doesn't need `branch` loaded.
+     */
+    public function createInBranch(int $branchId, ZoneData $data): Zone
+    {
         $zone = $this->zones->create($branchId, $data);
 
         Cache::forget('zones:all');
 
-        return $zone->load('branch');
+        return $zone;
     }
 
     public function update(Zone $zone, ZoneData $data): Zone
@@ -116,7 +124,10 @@ class ZoneService
      * exists, an explicit branch_uuid becomes required (zones.branch_id is
      * NOT NULL, so there is no other safe default at that point).
      */
-    private function resolveBranchId(?string $branchUuid): int
+    /**
+     * @throws ValidationException
+     */
+    public function resolveBranchId(?string $branchUuid): int
     {
         if ($branchUuid !== null) {
             $branch = $this->branches->findByUuid($branchUuid);

@@ -10,6 +10,8 @@ use App\Models\User;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -202,5 +204,43 @@ class CustomerImportTest extends TestCase
 
         $this->post('/customers/import', ['file' => $file])->assertForbidden();
         $this->assertDatabaseMissing('customers', ['name' => 'CIMP Forbidden Worker']);
+    }
+
+    /**
+     * N+1 regression: each distinct zone is resolved once per file, and the
+     * relations create() eager-loads for its HTTP callers aren't reloaded
+     * per imported row — so zone/service reads don't grow with row count.
+     */
+    public function test_import_does_not_look_the_zone_up_or_reload_relations_per_row(): void
+    {
+        $this->actingAsRole('manager');
+        Cache::forget('zones:all');
+
+        $zone = ZoneFactory::new()->create(['name' => 'CIMP-NPLUS1-ZONE']);
+
+        $countLookups = function (int $rowCount) use ($zone): int {
+            $file = $this->spreadsheet(collect(range(1, $rowCount))->map(fn (int $i): array => [
+                'name' => 'CIMP N+1 Row '.$i.'-'.$rowCount,
+                'zone' => $zone->name,
+                'phone' => '6770000'.$rowCount.$i,
+                'bill' => 2500,
+                'others' => 0,
+                'status' => 'active',
+            ])->all());
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->post('/customers/import', ['file' => $file])
+                ->assertSessionHas('import', fn (array $import): bool => $import['succeeded_count'] === $rowCount);
+            $queries = array_column(DB::getQueryLog(), 'query');
+            DB::disableQueryLog();
+
+            return count(array_filter($queries, fn (string $sql): bool => (bool) preg_match('/^select .* from "(zones|branches|service_variants)"/', $sql)));
+        };
+
+        // Warm the (hour-long) zones:all cache so it doesn't skew the first count.
+        $countLookups(1);
+
+        $this->assertSame($countLookups(2), $countLookups(4));
     }
 }

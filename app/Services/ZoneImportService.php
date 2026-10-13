@@ -64,6 +64,10 @@ final class ZoneImportService
         $failed = [];
         $rules = (new StoreZoneRequest)->rules();
 
+        // branch uuid ('' = the default) => id, resolved once per distinct
+        // branch rather than once per row.
+        $resolvedBranchIds = [];
+
         foreach ($rows as $index => $row) {
             // Heading row is row 1, so the first data row is row 2.
             $rowNumber = $index + 2;
@@ -86,7 +90,9 @@ final class ZoneImportService
             }
 
             try {
-                $zone = $this->zones->create(ZoneData::fromArray($validator->validated()));
+                $zoneData = ZoneData::fromArray($validator->validated());
+                $branchId = $resolvedBranchIds[$zoneData->branchUuid ?? ''] ??= $this->zones->resolveBranchId($zoneData->branchUuid);
+                $zone = $this->zones->createInBranch($branchId, $zoneData);
                 $succeeded[] = ['row' => $rowNumber, 'uuid' => $zone->uuid, 'name' => $zone->name];
             } catch (Throwable $e) {
                 $failed[$rowNumber] = $e->getMessage();

@@ -20,6 +20,7 @@ use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
@@ -406,5 +407,39 @@ class BillBatchTest extends TestCase
         for ($attempt = 0; $attempt <= config('rate-limits.exports.max_attempts'); $attempt++) {
             $this->get($downloadUrl)->assertOk();
         }
+    }
+
+    /**
+     * N+1 regression: files loaded through the relation carry their parent
+     * batch, so BillBatchFile::downloadName() (called once per zone file
+     * while building the zip) doesn't re-fetch the batch for each file.
+     */
+    public function test_loaded_files_share_their_parent_batch_instead_of_refetching_it(): void
+    {
+        $batch = BillBatch::create([
+            'period' => '2026-09', 'status' => 'completed', 'density' => 1, 'template' => 'classic',
+            'total_bills' => 2, 'total_zones' => 2,
+        ]);
+
+        foreach (['North', 'South'] as $zoneName) {
+            BillBatchFile::query()->create([
+                'bill_batch_id' => $batch->id,
+                'kind' => 'zone',
+                'zone_name' => $zoneName,
+                'disk' => 'local',
+                'path' => "bills/{$zoneName}.pdf",
+                'bill_count' => 1,
+            ]);
+        }
+
+        $loaded = BillBatch::with('files')->findOrFail($batch->id);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $names = $loaded->files->map(fn (BillBatchFile $file): string => $file->downloadName())->all();
+        DB::disableQueryLog();
+
+        $this->assertCount(2, $names);
+        $this->assertSame([], DB::getQueryLog());
     }
 }

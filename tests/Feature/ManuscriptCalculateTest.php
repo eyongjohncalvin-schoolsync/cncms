@@ -17,7 +17,9 @@ use Database\Factories\ManuscriptFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
 
@@ -1390,5 +1392,44 @@ class ManuscriptCalculateTest extends TestCase
         // simulated failure point) is real and unaffected — only the
         // command_runs row's final status reflects the failure.
         $this->assertTrue(Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->exists());
+    }
+
+    /**
+     * N+1 regression: the command looks up this period's existing
+     * manuscripts once per chunk (not once per customer) and still
+     * updates a re-run's existing row rather than inserting a duplicate.
+     */
+    public function test_the_command_reads_manuscripts_once_per_chunk_and_updates_existing_rows(): void
+    {
+        $zone = $this->zone();
+        $period = '2031-03';
+        $customers = collect(range(1, 4))->map(fn () => CustomerFactory::new()->create([
+            'zone_id' => $zone->id,
+            'bill' => 2500,
+            'others' => 0,
+            'status' => 'active',
+        ]));
+        $existing = ManuscriptFactory::new()->forPeriod($period)->create([
+            'customer_id' => $customers->first()->id,
+            'bill' => 1,
+            'total_bill' => 1,
+        ]);
+        tenancy()->end();
+
+        $manuscriptSelects = 0;
+        DB::listen(function (QueryExecuted $query) use (&$manuscriptSelects): void {
+            if (str_starts_with($query->sql, 'select') && str_contains($query->sql, 'from "manuscripts"')) {
+                $manuscriptSelects++;
+            }
+        });
+
+        $this->artisan('manuscript:calculate', ['period' => $period, '--tenant' => $this->tenant->id])->assertExitCode(0);
+
+        tenancy()->initialize($this->tenant);
+
+        // One chunk: the previous-period lookup plus this period's rows.
+        $this->assertSame(2, $manuscriptSelects);
+        $this->assertSame(4, Manuscript::query()->where('period', $period)->count());
+        $this->assertSame('2500.00', (string) $existing->fresh()->bill);
     }
 }

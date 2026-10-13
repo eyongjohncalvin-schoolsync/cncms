@@ -80,7 +80,7 @@ class PaymentController extends Controller
         }
 
         $payments = $this->payments->list($filters, $perPage);
-        $payments->getCollection()->load(['customer.zone', 'verification.verifier', 'receipt']);
+        $payments->getCollection()->loadMissing(['customer.zone', 'verification.verifier', 'receipt']);
 
         $raw = $payments->toArray();
 

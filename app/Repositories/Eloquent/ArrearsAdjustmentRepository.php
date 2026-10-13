@@ -26,6 +26,11 @@ class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterfac
         return ArrearsAdjustment::query()->with($with)->where('uuid', $uuid)->first();
     }
 
+    public function findManyByUuids(array $uuids): Collection
+    {
+        return ArrearsAdjustment::query()->whereIn('uuid', $uuids)->get()->keyBy('uuid');
+    }
+
     /**
      * `requested_by` is deliberately absent from ArrearsAdjustment's
      * #[Fillable] list (see the model's class doc) — mass-assigning it

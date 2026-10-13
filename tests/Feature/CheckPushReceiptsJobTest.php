@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Support\ScheduledTasks\PushReceiptCheckTaskType;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -145,5 +146,38 @@ class CheckPushReceiptsJobTest extends TestCase
         $taskType = app(PushReceiptCheckTaskType::class);
         $this->assertSame('push_receipt_check', $taskType->taskType());
         $this->assertTrue($taskType->isDue($task, Carbon::now()), 'must run on every tick, not a configurable schedule.');
+    }
+
+    /**
+     * N+1 regression: a tick marks every checked ticket with one UPDATE and
+     * reads tokens in one eager load, rather than per ticket.
+     */
+    public function test_a_tick_checks_many_tickets_with_one_update(): void
+    {
+        $tickets = collect(['bulk-a', 'bulk-b', 'bulk-c'])->map(fn (string $id): PushTicket => $this->pendingTicket($id));
+
+        Http::fake([
+            'https://exp.host/--/api/v2/push/getReceipts' => Http::response([
+                'data' => [
+                    'bulk-a' => ['status' => 'ok'],
+                    'bulk-b' => ['status' => 'ok'],
+                    'bulk-c' => ['status' => 'error', 'message' => 'x', 'details' => ['error' => 'DeviceNotRegistered']],
+                ],
+            ]),
+        ]);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        CheckPushReceiptsJob::dispatchSync();
+        $queries = array_column(DB::getQueryLog(), 'query');
+        DB::disableQueryLog();
+
+        $ticketUpdates = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'update "push_tickets"'));
+        $tokenReads = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'select * from "device_push_tokens"'));
+
+        $this->assertCount(1, $ticketUpdates);
+        $this->assertCount(1, $tokenReads);
+        $tickets->each(fn (PushTicket $ticket) => $this->assertSame('checked', $ticket->fresh()->status));
+        $this->assertFalse((bool) $tickets->last()->devicePushToken->fresh()->is_valid);
     }
 }

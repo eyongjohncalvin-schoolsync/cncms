@@ -146,15 +146,25 @@ class CustomerService
      */
     public function create(CustomerData $data): Customer
     {
-        $zoneId = $this->resolveZoneId($data->zoneUuid);
+        return $this->createInZone($this->resolveZoneId($data->zoneUuid), $data)
+            ->load(['zone', 'subscriptions.service', 'subscriptions.serviceVariant']);
+    }
 
+    /**
+     * create()'s write path for a caller that has already resolved
+     * $data->zoneUuid through resolveZoneId() (the spreadsheet import,
+     * which resolves each distinct zone once) — and that doesn't need the
+     * relations create() eager-loads on the way out.
+     */
+    public function createInZone(int $zoneId, CustomerData $data): Customer
+    {
         return DB::transaction(function () use ($zoneId, $data): Customer {
             $customer = $this->customers->create($zoneId, $data);
 
             $selections = $data->services ?? [$this->subscriptions->defaultSelection($data->bill)];
             $this->subscriptions->sync($customer, $selections);
 
-            return $customer->load(['zone', 'subscriptions.service', 'subscriptions.serviceVariant']);
+            return $customer;
         });
     }
 
@@ -310,7 +320,13 @@ class CustomerService
         }
     }
 
-    private function resolveZoneId(?string $zoneUuid): int
+    /**
+     * The zone's id, looked up through the branch-scoped repository — so a
+     * zone outside the actor's branch fence is rejected as not existing.
+     *
+     * @throws ValidationException
+     */
+    public function resolveZoneId(?string $zoneUuid): int
     {
         if (! $zoneUuid) {
             throw ValidationException::withMessages(['zone_uuid' => ['The zone_uuid field is required.']]);
