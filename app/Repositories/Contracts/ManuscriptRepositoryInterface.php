@@ -52,4 +52,14 @@ interface ManuscriptRepositoryInterface
      * rather than always the latest.
      */
     public function forCustomerAndPeriod(int $customerId, string $period): ?Manuscript;
+
+    /**
+     * Every manuscript for the given customers in one period, keyed by
+     * customer_id — the batched form of forCustomerAndPeriod() for bulk
+     * bill rendering, so it costs one query instead of one per customer.
+     *
+     * @param  array<int, int>  $customerIds
+     * @return Collection<int, Manuscript>
+     */
+    public function forCustomersAndPeriod(array $customerIds, string $period): Collection;
 }

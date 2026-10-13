@@ -679,4 +679,47 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
         $this->assertNotNull($manuscript);
         $this->assertNotNull($payment->fresh()->processed_at);
     }
+
+    /**
+     * N+1 regression: publish() must not look each customer's manuscript up
+     * individually, nor stamp payments with one UPDATE per customer — both
+     * are batched, so those query counts stay flat as the run grows.
+     */
+    public function test_publish_batches_manuscript_lookups_and_payment_stamping_across_customers(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $period = '2026-06';
+        $customers = collect(range(1, 4))->map(fn (): Customer => $this->activeCustomer($zone));
+        $payments = $customers->map(fn (Customer $customer) => PaymentFactory::new()->create([
+            'customer_id' => $customer->id,
+            'amount' => 1000,
+            'verification_status' => 'verified',
+        ]));
+
+        // One customer already has a (pre-run) manuscript for the period,
+        // so publish() must update that row rather than insert a duplicate.
+        $commandRun = $this->batches->dispatch($period, scheduledTask: null, autoPublish: false, customerIds: $customers->pluck('id')->all());
+        $preExisting = Manuscript::query()->create([
+            ...$commandRun->computed_result['customers'][(string) $customers->first()->id]['attributes'],
+            'customer_id' => $customers->first()->id,
+            'period' => $period,
+        ]);
+        $preExisting->forceFill(['updated_at' => $commandRun->ran_at->copy()->subMinute()])->saveQuietly();
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->batches->publish($commandRun->fresh(), User::query()->first()?->id);
+        $queries = array_column(DB::getQueryLog(), 'query');
+        DB::disableQueryLog();
+
+        $manuscriptSelects = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'select') && str_contains($sql, 'from "manuscripts"'));
+        $paymentUpdates = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'update "payments"'));
+
+        $this->assertCount(1, $manuscriptSelects);
+        $this->assertCount(1, $paymentUpdates);
+
+        $this->assertSame(4, Manuscript::query()->where('period', $period)->whereIn('customer_id', $customers->pluck('id'))->count());
+        $this->assertSame($commandRun->id, $preExisting->fresh()->command_run_id);
+        $payments->each(fn ($payment) => $this->assertSame($period, $payment->fresh()->processed_period));
+    }
 }

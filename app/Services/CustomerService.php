@@ -442,10 +442,12 @@ class CustomerService
         // single bulk figure applied — their bill is a sum across services,
         // each priced independently. Skipped with a reason (never silently
         // touched), same partial-success shape as an out-of-range bill.
-        $customers->loadCount('subscriptions');
+        // The rows themselves (not just a count) are loaded so the commit
+        // path can reuse them instead of re-querying per customer.
+        $customers->load('subscriptions');
 
         return $customers->map(function (Customer $customer) use ($mode, $value): array {
-            if ((int) ($customer->subscriptions_count ?? 0) >= 2) {
+            if ($customer->subscriptions->count() >= 2) {
                 return [
                     'customer' => $customer,
                     'new_bill' => null,

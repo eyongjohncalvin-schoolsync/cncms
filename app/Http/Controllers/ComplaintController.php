@@ -53,6 +53,7 @@ class ComplaintController extends Controller
         $filters = $request->only(['status', 'category', 'urgent', 'sort', 'direction']);
 
         $complaints = $this->complaints->list($filters, $perPage);
+        $complaints->getCollection()->loadMissing(['resolvedBy', 'duplicateOf']);
         $raw = $complaints->toArray();
 
         // super/admin/manager land on the dashboard view (StatCard row +

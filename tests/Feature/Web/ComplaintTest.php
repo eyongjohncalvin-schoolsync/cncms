@@ -12,6 +12,7 @@ use Database\Factories\ComplaintFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -334,5 +335,42 @@ class ComplaintTest extends TestCase
         $this->assertNull($reopened->resolved_by);
         $this->assertNull($reopened->resolution_notes);
         $this->assertTrue($reopened->created_at->equalTo($complaint->created_at));
+    }
+
+    /**
+     * N+1 regression: the list shows who resolved each complaint and which
+     * complaint it duplicates, so those relations must be eager-loaded —
+     * adding more resolved/duplicate complaints must not add queries.
+     */
+    public function test_index_query_count_does_not_grow_with_resolved_or_duplicate_complaints(): void
+    {
+        $this->actingAsRole('manager');
+
+        $createResolvedDuplicate = function (): void {
+            $original = ComplaintFactory::new()->submittedBy($this->seededUserId())->create();
+            ComplaintFactory::new()->submittedBy($this->seededUserId())->resolved()->create([
+                'resolved_by' => $this->seededUserId(),
+                'duplicate_of_id' => $original->id,
+            ]);
+        };
+
+        $countQueries = function (): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->get('/complaints?status=resolved&per_page=50')->assertOk();
+            DB::disableQueryLog();
+
+            return count(DB::getQueryLog());
+        };
+
+        $createResolvedDuplicate();
+        $countQueries();
+        $baseline = $countQueries();
+
+        $createResolvedDuplicate();
+        $createResolvedDuplicate();
+        $createResolvedDuplicate();
+
+        $this->assertSame($baseline, $countQueries());
     }
 }

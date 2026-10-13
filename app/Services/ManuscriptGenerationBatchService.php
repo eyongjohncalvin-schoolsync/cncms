@@ -15,6 +15,7 @@ use App\Support\DetectsUniqueViolation;
 use Illuminate\Bus\Batch;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -324,11 +325,15 @@ class ManuscriptGenerationBatchService
         $skippedStaleCustomers = [];
 
         DB::transaction(function () use ($commandRun, $customers, $actingUserId, &$skippedStaleCustomers): void {
+            // Loaded once up front (keyed by customer_id) rather than with a
+            // query per customer — publish() walks every customer in the
+            // tenant, so a per-row lookup is thousands of queries.
+            $existingByCustomer = $this->existingManuscriptsFor(array_keys($customers), $commandRun->period);
+            $processedPaymentIds = [];
+            $processedAdjustmentIds = [];
+
             foreach ($customers as $customerId => $entry) {
-                $existing = Manuscript::query()
-                    ->where('customer_id', (int) $customerId)
-                    ->where('period', $commandRun->period)
-                    ->first();
+                $existing = $existingByCustomer->get((int) $customerId);
 
                 // >=, not >: command_runs.ran_at and manuscripts.updated_at
                 // are both second-precision (timestamp(0)) columns, so a
@@ -354,43 +359,43 @@ class ManuscriptGenerationBatchService
                 // including a republish of an already-existing row, so the link
                 // always reflects whichever run most recently committed this row's
                 // numbers.
-                Manuscript::query()
-                    ->firstOrNew(['customer_id' => (int) $customerId, 'period' => $commandRun->period])
+                ($existing ?? new Manuscript(['customer_id' => (int) $customerId, 'period' => $commandRun->period]))
                     ->fill([...($entry['attributes'] ?? []), 'command_run_id' => $commandRun->id])
                     ->save();
 
-                $paymentIds = $entry['processed_payment_ids'] ?? [];
+                array_push($processedPaymentIds, ...($entry['processed_payment_ids'] ?? []));
+                array_push($processedAdjustmentIds, ...($entry['processed_adjustment_ids'] ?? []));
+            }
 
-                if ($paymentIds !== []) {
-                    // Stamps both processed_at (display/audit timestamp) and
-                    // processed_period (the period-eligibility marker — see
-                    // App\Services\ManuscriptCalculator's class doc). The
-                    // guard is now "not already attributed to a DIFFERENT
-                    // period" rather than whereNull('processed_at'): a
-                    // republish of this exact commandRun/period (see
-                    // publish()'s already-published no-op guard above) or a
-                    // second scheduled/manual run computed for this same
-                    // period must be able to re-stamp its own payments
-                    // without that being mistaken for "already claimed by
-                    // someone else."
-                    Payment::query()
-                        ->whereIn('id', $paymentIds)
-                        ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
-                        ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
-                }
+            // Payments/adjustments are stamped in bulk after the loop (the
+            // SET values and the guard are identical for every customer), so
+            // this is one UPDATE per chunk rather than up to two per customer.
+            foreach (array_chunk($processedPaymentIds, 1000) as $paymentIds) {
+                // Stamps both processed_at (display/audit timestamp) and
+                // processed_period (the period-eligibility marker — see
+                // App\Services\ManuscriptCalculator's class doc). The guard
+                // is "not already attributed to a DIFFERENT period" rather
+                // than whereNull('processed_at'): a republish of this exact
+                // commandRun/period (see publish()'s already-published no-op
+                // guard above) or a second scheduled/manual run computed for
+                // this same period must be able to re-stamp its own payments
+                // without that being mistaken for "already claimed by
+                // someone else."
+                Payment::query()
+                    ->whereIn('id', $paymentIds)
+                    ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
+                    ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
+            }
 
-                // Same re-stampable-on-republish guard, applied to arrears
-                // adjustments consumed by this customer's computed result —
-                // see App\Services\ManuscriptCalculator's class doc for why
-                // an eligible adjustment is consumed even in a frozen branch.
-                $adjustmentIds = $entry['processed_adjustment_ids'] ?? [];
-
-                if ($adjustmentIds !== []) {
-                    ArrearsAdjustment::query()
-                        ->whereIn('id', $adjustmentIds)
-                        ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
-                        ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
-                }
+            // Same re-stampable-on-republish guard, applied to arrears
+            // adjustments consumed by the computed results — see
+            // App\Services\ManuscriptCalculator's class doc for why an
+            // eligible adjustment is consumed even in a frozen branch.
+            foreach (array_chunk($processedAdjustmentIds, 1000) as $adjustmentIds) {
+                ArrearsAdjustment::query()
+                    ->whereIn('id', $adjustmentIds)
+                    ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
+                    ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
             }
 
             $commandRun->update([
@@ -404,6 +409,24 @@ class ManuscriptGenerationBatchService
         $this->manuscripts->forgetSummaryCache($commandRun->period);
 
         return $commandRun->fresh();
+    }
+
+    /**
+     * The period's existing manuscripts for the given customers, keyed by
+     * customer_id — publish()'s stale check and write both reuse these rows
+     * instead of looking each customer up individually.
+     *
+     * @param  array<int, int|string>  $customerIds
+     * @return Collection<int, Manuscript>
+     */
+    private function existingManuscriptsFor(array $customerIds, string $period): Collection
+    {
+        return collect(array_chunk(array_map('intval', $customerIds), 1000))
+            ->flatMap(fn (array $chunk) => Manuscript::query()
+                ->whereIn('customer_id', $chunk)
+                ->where('period', $period)
+                ->get())
+            ->keyBy('customer_id');
     }
 
     /**

@@ -110,6 +110,24 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
     }
 
     /**
+     * @param  array<int, int>  $customerIds
+     * @return Collection<int, Manuscript>
+     */
+    public function forCustomersAndPeriod(array $customerIds, string $period): Collection
+    {
+        if ($customerIds === []) {
+            return collect();
+        }
+
+        return collect(array_chunk($customerIds, 1000))
+            ->flatMap(fn (array $chunk) => Manuscript::query()
+                ->whereIn('customer_id', $chunk)
+                ->where('period', $period)
+                ->get())
+            ->keyBy('customer_id');
+    }
+
+    /**
      * @param  array<string, mixed>  $filters
      */
     private function scoped(array $filters): Builder

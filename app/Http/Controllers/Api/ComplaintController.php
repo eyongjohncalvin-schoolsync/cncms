@@ -40,7 +40,6 @@ class ComplaintController extends Controller
         $filters = $request->only(['status', 'category', 'urgent', 'sort', 'direction']);
 
         $complaints = $this->complaints->list($filters, $perPage);
-        $complaints->getCollection()->load(['submittedBy', 'assignedTo', 'customer.zone', 'zone']);
 
         return ComplaintResource::collection($complaints)->response();
     }

@@ -11,6 +11,7 @@ use App\Models\Zone;
 use App\Repositories\Contracts\ManuscriptRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
 use App\Support\TenantContext;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
@@ -201,12 +202,25 @@ class ManuscriptService
         $company = Company::cached();
         $logoDataUri = $company?->logoDataUri();
 
+        $customers = collect($customers);
+
+        if ($period !== null) {
+            $this->assertValidPeriod($period);
+            $manuscriptsByCustomer = $this->manuscripts->forCustomersAndPeriod($customers->pluck('id')->all(), $period);
+        } else {
+            $customers = new EloquentCollection($customers->all());
+            $customers->loadMissing('latestManuscript');
+            $manuscriptsByCustomer = $customers
+                ->filter(fn (Customer $customer): bool => $customer->latestManuscript !== null)
+                ->mapWithKeys(fn (Customer $customer): array => [$customer->id => $customer->latestManuscript]);
+        }
+
         $bills = [];
 
         foreach ($customers as $customer) {
-            try {
-                $manuscript = $this->resolveManuscript($customer, $period);
-            } catch (ModelNotFoundException) {
+            $manuscript = $manuscriptsByCustomer->get($customer->id);
+
+            if (! $manuscript) {
                 continue;
             }
 
@@ -278,8 +292,8 @@ class ManuscriptService
      */
     private function resolveManuscript(Customer $customer, ?string $period): Manuscript
     {
-        if ($period !== null && ! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
-            throw ValidationException::withMessages(['period' => ['The period must be in YYYY-MM format.']]);
+        if ($period !== null) {
+            $this->assertValidPeriod($period);
         }
 
         $manuscript = $period !== null
@@ -295,6 +309,16 @@ class ManuscriptService
         }
 
         return $manuscript;
+    }
+
+    /**
+     * @throws ValidationException when $period is not in YYYY-MM format
+     */
+    private function assertValidPeriod(string $period): void
+    {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
+            throw ValidationException::withMessages(['period' => ['The period must be in YYYY-MM format.']]);
+        }
     }
 
     /**
