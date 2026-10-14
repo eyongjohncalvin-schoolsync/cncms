@@ -33,4 +33,28 @@ class CompanyFactory extends Factory
             'momo_name' => 'MUNGWAN HANS/KELVIN MEKUME',
         ];
     }
+
+    /**
+     * The tenant's company with $attributes applied. The app always reads
+     * the FIRST company row (Company::cached(), the settings controllers),
+     * so on a database that already holds one — any seeded tenant — a
+     * freshly created second row would never be seen. Update that row
+     * instead; create one only when there is none.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public function current(array $attributes = []): Company
+    {
+        $company = Company::query()->first();
+
+        if ($company === null) {
+            $company = $this->create($attributes);
+        } else {
+            $company->update($attributes);
+        }
+
+        Company::forgetCache();
+
+        return $company;
+    }
 }

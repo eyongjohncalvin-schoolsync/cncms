@@ -55,7 +55,7 @@ class SettingsBillPrintingTest extends TestCase
 
     public function test_page_renders_with_the_companys_current_settings(): void
     {
-        CompanyFactory::new()->create(['bill_template' => 'modern', 'bills_per_page' => 2]);
+        CompanyFactory::new()->current(['bill_template' => 'modern', 'bills_per_page' => 2]);
         Company::forgetCache();
 
         $this->actingAsRole('admin');

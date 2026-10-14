@@ -204,7 +204,7 @@ class BillGridRenderTest extends TestCase
     {
         Storage::fake('public');
 
-        $company = CompanyFactory::new()->create();
+        $company = CompanyFactory::new()->current();
         $company->addMedia(UploadedFile::fake()->image('logo.png', 200, 200))->toMediaCollection('logo');
         Company::forgetCache();
 

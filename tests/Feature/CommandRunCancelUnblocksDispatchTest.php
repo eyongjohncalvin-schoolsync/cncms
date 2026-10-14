@@ -97,9 +97,17 @@ class CommandRunCancelUnblocksDispatchTest extends TestCase
     {
         tenancy()->initialize($this->tenant);
 
+        $period = '2033-05'; // far-future, outside any real seeded manuscript history
+
+        // This test commits for real (no DatabaseTransactions) and relies on
+        // the finally-block below to clean up. A run killed mid-test never
+        // reaches it, leaving its 'queued' row behind — which then trips the
+        // in-flight unique index on every later run (here and in
+        // ManuscriptRunReviewTest). The period is test-owned, so clear it.
+        CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->delete();
+
         $zone = ZoneFactory::new()->create();
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
-        $period = '2033-05'; // far-future, outside any real seeded manuscript history
 
         $orphanedRun = null;
 
