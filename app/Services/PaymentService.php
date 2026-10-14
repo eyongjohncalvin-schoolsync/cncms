@@ -144,6 +144,7 @@ class PaymentService
         // later rate change never shortens the coverage it bought (PD-3).
         if (in_array($data->frequency, ['months', 'yearly'], true)) {
             $attributes['prepaid_rate'] = (string) $customer->bill;
+            $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
         }
 
         $payment = $this->payments->create($customer->id, $attributes);
@@ -216,6 +217,10 @@ class PaymentService
     {
         $attributes = $data->toAttributes();
 
+        if ($data->clearArrearsFirst !== null) {
+            $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
+        }
+
         if ($data->frequency !== null || $data->months !== null) {
             $attributes['expiration_date'] = $this->computeExpirationDate(
                 $data->frequency ?? $payment->frequency,
@@ -267,6 +272,23 @@ class PaymentService
     private function resolveCustomerId(?string $customerUuid): int
     {
         return $this->resolveCustomer($customerUuid)->id;
+    }
+
+    /**
+     * A prepayment pays off what the customer owes first; only the rest buys
+     * prepaid months (owner's rule, 2026-10: "a prepaid customer can't have
+     * arrears"). Leaving the arrears due is an explicit override reserved
+     * for someone who may approve arrears decisions (`arrears.approve`) —
+     * anyone else, including an agent's phone or an older mobile build that
+     * still sends `false`, always clears arrears first.
+     */
+    private function clearsArrearsFirst(PaymentData $data): bool
+    {
+        if ($data->clearArrearsFirst === false && $this->context->can('arrears.approve')) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

@@ -147,6 +147,9 @@ function invalidReason(draft: Draft, maxAmount: number, maxMonths: number): stri
     if (num(draft.advance_months) > maxMonths) {
         return `Months can be at most ${maxMonths}.`;
     }
+    if (num(draft.arrears) > 0 && num(draft.advance_months) > 0) {
+        return "Can't owe and be prepaid for months at once — deduct the arrears from what was paid ahead and enter only what remains.";
+    }
 
     return null;
 }
@@ -158,8 +161,8 @@ function warningsFor(draft: Draft, bill: number): string[] {
     const advance = num(draft.advance_amount);
     const months = num(draft.advance_months);
 
-    if (owed > 0 && (advance > 0 || months > 0)) {
-        warnings.push('Both owed and advance are filled in — check this is really both.');
+    if (owed > 0 && advance > 0) {
+        warnings.push('Both owed and an advance are filled in — the advance will be used to pay off the debt.');
     }
     if (bill > 0 && owed > bill * 24) {
         warnings.push('Owes more than 24 months of bills.');

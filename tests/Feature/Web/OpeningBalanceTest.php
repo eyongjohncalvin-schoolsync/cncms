@@ -336,4 +336,19 @@ class OpeningBalanceTest extends TestCase
         $this->post('/opening-balances', ['go_live_period' => '2020-01'])->assertSessionHasErrors('go_live_period');
         $this->post('/opening-balances', ['go_live_period' => 'next month'])->assertSessionHasErrors('go_live_period');
     }
+
+    public function test_a_customer_cannot_both_owe_and_be_prepaid_for_months(): void
+    {
+        [$customer] = $this->newCustomers(1);
+        $batch = $this->draftWith([['customer_uuid' => $customer->uuid, 'arrears' => '1000']]);
+
+        $this->putJson("/opening-balances/{$batch->uuid}/entries", ['rows' => [
+            ['customer_uuid' => $customer->uuid, 'arrears' => '2500', 'advance_months' => 3],
+        ]])->assertUnprocessable()->assertJsonValidationErrors('rows.0.advance_months');
+
+        // Owing plus an advance in MONEY is allowed — the calculation nets it.
+        $this->putJson("/opening-balances/{$batch->uuid}/entries", ['rows' => [
+            ['customer_uuid' => $customer->uuid, 'arrears' => '2500', 'advance_amount' => '1000'],
+        ]])->assertOk();
+    }
 }
