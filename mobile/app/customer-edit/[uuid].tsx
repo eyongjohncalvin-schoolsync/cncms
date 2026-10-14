@@ -13,9 +13,10 @@ import { Button } from '../../src/components/ui/Button';
 import { TextInput } from '../../src/components/ui/TextInput';
 import { EmptyState } from '../../src/components/ui/EmptyState';
 import { ServicesPicker } from '../../src/components/customers/ServicesPicker';
+import { ReceiptDeliveryFields } from '../../src/components/customers/ReceiptDeliveryFields';
 import { colors } from '../../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../../src/theme/tokens';
-import type { CustomerDetailApi, CustomerServiceSelection, ServiceCatalogueApi } from '../../src/types/api';
+import type { CustomerDetailApi, CustomerServiceSelection, PreferredChannel, ServiceCatalogueApi } from '../../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting';
 
@@ -131,6 +132,8 @@ export default function CustomerEditScreen() {
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const [location, setLocation] = useState('');
+    const [email, setEmail] = useState('');
+    const [preferredChannel, setPreferredChannel] = useState<PreferredChannel>('whatsapp');
     const [level, setLevel] = useState<'normal' | 'Vip' | 'Operator'>('normal');
     const [zoneUuid, setZoneUuid] = useState<string | null>(null);
     const [services, setServices] = useState<CustomerServiceSelection[]>([]);
@@ -159,6 +162,8 @@ export default function CustomerEditScreen() {
                 setName(customer.name);
                 setPhone(customer.phone ?? '');
                 setLocation(customer.location ?? '');
+                setEmail(customer.email ?? '');
+                setPreferredChannel(customer.preferred_channel ?? 'whatsapp');
                 setLevel((customer.level as 'normal' | 'Vip' | 'Operator' | null) ?? 'normal');
                 setZoneUuid(customer.zone_uuid);
                 setServices(
@@ -236,6 +241,9 @@ export default function CustomerEditScreen() {
                 // not an omission.
                 phone: phone.trim(),
                 location: location.trim() || undefined,
+                // Sent unconditionally so clearing it clears it server-side.
+                email: email.trim() || null,
+                preferred_channel: preferredChannel,
                 level,
                 services,
             });
@@ -262,6 +270,7 @@ export default function CustomerEditScreen() {
                     phone: fieldErrors.phone?.[0],
                     zone_uuid: fieldErrors.zone_uuid?.[0],
                     location: fieldErrors.location?.[0],
+                    email: fieldErrors.email?.[0],
                     services: firstServicesError(fieldErrors) ?? prev.services,
                 }));
             }
@@ -368,6 +377,20 @@ export default function CustomerEditScreen() {
                         );
                     })}
                 </View>
+            </Card>
+
+            <Card>
+                <Text style={styles.sectionTitle}>Receipts</Text>
+                <ReceiptDeliveryFields
+                    email={email}
+                    onEmailChange={(text) => {
+                        setEmail(text);
+                        setErrors((prev) => ({ ...prev, email: undefined }));
+                    }}
+                    channel={preferredChannel}
+                    onChannelChange={setPreferredChannel}
+                    emailError={errors.email}
+                />
             </Card>
 
             <Card>

@@ -123,6 +123,12 @@
             <td>{{ $customer['code'] }}</td>
         </tr>
         @endif
+        @if(!empty($r['invoice']['number']))
+        <tr>
+            <td class="label">For bill:</td>
+            <td>{{ $r['invoice']['number'] }}</td>
+        </tr>
+        @endif
         @if(!empty($payment['collected_by']))
         <tr>
             <td class="label">Collected by:</td>

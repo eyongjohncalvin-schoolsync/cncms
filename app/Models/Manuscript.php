@@ -18,6 +18,24 @@ class Manuscript extends Model
 {
     use Auditable, HasUuid;
 
+    /**
+     * The bill's (invoice's) number — "{TENANT}-{YYYYMM}-{customer id}",
+     * e.g. "SWECOM-202611-000042". Derived, never stored: the triple is
+     * already unique per bill (one manuscript per customer per period). See
+     * App\Services\ManuscriptService::billNumber()'s doc comment.
+     */
+    public static function billNumberFor(int $customerId, string $period): string
+    {
+        $tenantCode = strtoupper((string) (tenant()?->id ?? 'TEN'));
+
+        return sprintf('%s-%s-%06d', $tenantCode, str_replace('-', '', $period), $customerId);
+    }
+
+    public function billNumber(): string
+    {
+        return self::billNumberFor($this->customer_id, $this->period);
+    }
+
     protected function casts(): array
     {
         return [

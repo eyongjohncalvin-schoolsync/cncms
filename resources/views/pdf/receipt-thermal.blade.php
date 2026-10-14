@@ -87,6 +87,7 @@
         @if(!empty($customer['code']))<tr><td class="k">Account</td><td class="v">{{ $customer['code'] }}</td></tr>@endif
         @if(!empty($customer['zone']))<tr><td class="k">Zone</td><td class="v">{{ $customer['zone'] }}</td></tr>@endif
         <tr><td class="k">Period</td><td class="v">{{ $periodText }}</td></tr>
+        @if(!empty($r['invoice']['number']))<tr><td class="k">For bill</td><td class="v">{{ $r['invoice']['number'] }}</td></tr>@endif
         @if($isPrepayment)<tr><td class="k">Prepaid</td><td class="v">{{ $months }} month(s)</td></tr>@endif
         @if(!empty($payment['momo_ref']))<tr><td class="k">MOMO ref</td><td class="v">{{ $payment['momo_ref'] }}</td></tr>@endif
         @if(!empty($payment['collected_by']))<tr><td class="k">Collected by</td><td class="v">{{ $payment['collected_by'] }}</td></tr>@endif

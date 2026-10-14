@@ -16,3 +16,7 @@ Route::get('bills/{customer}/print', [BillController::class, 'print'])->middlewa
 // default 'throttle:api' ceiling from routes/api.php rather than the
 // tighter 'throttle:exports' limiter above.
 Route::get('bills/{customer}/whatsapp-message', [BillController::class, 'whatsappMessage']);
+
+// Mobile customer screen: recent bills with paid status + signed statement
+// links (Api\BillController::history()).
+Route::get('bills/{customer}/history', [BillController::class, 'history']);

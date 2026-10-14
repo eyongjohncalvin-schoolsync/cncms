@@ -1,6 +1,6 @@
 import { Linking } from 'react-native';
 import { apiClient } from './client';
-import type { PaymentReceiptResponse, ReceiptWhatsappMessageResponse } from '../types/api';
+import type { PaymentReceiptResponse, ReceiptWhatsappMessageResponse, SendReceiptEmailResponse } from '../types/api';
 
 /**
  * GET /api/v1/payments/{uuid}/receipt — the business-issued receipt for a
@@ -44,6 +44,17 @@ export async function openReceiptPdf(sharedPdfUrl: string): Promise<void> {
  */
 export async function fetchReceiptWhatsappMessage(paymentUuid: string): Promise<ReceiptWhatsappMessageResponse> {
     const { data } = await apiClient.get<ReceiptWhatsappMessageResponse>(`/payments/${paymentUuid}/receipt/whatsapp-message`);
+
+    return data;
+}
+
+/**
+ * POST /api/v1/payments/{uuid}/receipt/send-email — queues the receipt PDF
+ * to the customer's email address. Rejects with 422 (and the reason) when
+ * the customer has no email, email is switched off, or the receipt is void.
+ */
+export async function sendReceiptEmail(paymentUuid: string): Promise<SendReceiptEmailResponse> {
+    const { data } = await apiClient.post<SendReceiptEmailResponse>(`/payments/${paymentUuid}/receipt/send-email`);
 
     return data;
 }

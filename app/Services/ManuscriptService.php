@@ -394,9 +394,7 @@ class ManuscriptService
      */
     private function billNumber(Customer $customer, string $period): string
     {
-        $tenantCode = strtoupper((string) (tenant()?->id ?? 'TEN'));
-
-        return sprintf('%s-%s-%06d', $tenantCode, str_replace('-', '', $period), $customer->id);
+        return Manuscript::billNumberFor($customer->id, $period);
     }
 
     /**

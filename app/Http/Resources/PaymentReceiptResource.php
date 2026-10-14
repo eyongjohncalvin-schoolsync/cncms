@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\PaymentReceipt;
+use App\Services\PaymentReceiptService;
+use App\Services\ReceiptEmailService;
 use App\Support\PaymentReceiptLink;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -30,6 +32,8 @@ class PaymentReceiptResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $emails = app(ReceiptEmailService::class);
+
         return [
             'uuid' => $this->uuid,
             'receipt_number' => $this->receipt_number,
@@ -39,6 +43,16 @@ class PaymentReceiptResource extends JsonResource
             'payment_uuid' => $this->whenLoaded('payment', fn () => $this->payment?->uuid),
             'pdf_url' => route('api.payment-receipts.pdf', ['receipt' => $this->uuid]),
             'shared_pdf_url' => PaymentReceiptLink::shared($this->resource),
+            // One signed link per paper size, for pocket thermal printers.
+            'shared_pdf_urls' => [
+                PaymentReceiptService::FORMAT_A6 => PaymentReceiptLink::shared($this->resource),
+                PaymentReceiptService::FORMAT_THERMAL_58 => PaymentReceiptLink::shared($this->resource, PaymentReceiptService::FORMAT_THERMAL_58),
+                PaymentReceiptService::FORMAT_THERMAL_80 => PaymentReceiptLink::shared($this->resource, PaymentReceiptService::FORMAT_THERMAL_80),
+            ],
+            'invoice_number' => $this->snapshot['invoice']['number'] ?? null,
+            'customer_email' => $emails->recipientEmail($this->resource),
+            // Why "Email receipt" can't be used right now, or null.
+            'email_unavailable_reason' => $emails->unavailableReason($this->resource),
         ];
     }
 }

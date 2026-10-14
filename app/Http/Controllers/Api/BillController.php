@@ -8,10 +8,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Services\BillNotificationService;
+use App\Services\InvoiceService;
 use App\Services\ManuscriptService;
+use App\Support\PaymentReceiptLink;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -20,6 +23,7 @@ class BillController extends Controller
     public function __construct(
         private readonly ManuscriptService $manuscripts,
         private readonly BillNotificationService $billNotifications,
+        private readonly InvoiceService $invoices,
     ) {}
 
     /**
@@ -108,6 +112,35 @@ class BillController extends Controller
                 'phone' => $phone,
                 'message' => $message,
             ],
+        ]);
+    }
+
+    /**
+     * GET /api/v1/bills/{customer}/history — the customer's last 12 bills
+     * (each with its bill number and paid status, App\Services\InvoiceService)
+     * plus signed statement-of-account links for the last 6 / 12 / 24 months
+     * when the caller may print bills (CustomerPolicy::printBill). The
+     * links open in the device browser, which has no Sanctum token.
+     */
+    public function history(Request $request, Customer $customer): JsonResponse
+    {
+        $this->authorize('view', $customer);
+
+        $statementUrls = null;
+
+        if ($request->user()->can('printBill', $customer)) {
+            $to = Carbon::now()->format('Y-m');
+            $statementUrls = [];
+
+            foreach ([6, 12, 24] as $months) {
+                $from = Carbon::now()->startOfMonth()->subMonthsNoOverflow($months - 1)->format('Y-m');
+                $statementUrls[(string) $months] = PaymentReceiptLink::statement($customer, $from, $to);
+            }
+        }
+
+        return response()->json([
+            'data' => $this->invoices->billsFor($customer, 12),
+            'statement_urls' => $statementUrls,
         ]);
     }
 }

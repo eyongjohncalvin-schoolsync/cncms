@@ -47,7 +47,7 @@ class PaymentReceiptService
     private const array THERMAL_WIDTH_MM = [self::FORMAT_THERMAL_58 => 58, self::FORMAT_THERMAL_80 => 80];
 
     /** Bumped whenever the receipt layout changes; see pdf(). */
-    private const int LAYOUT_VERSION = 3;
+    private const int LAYOUT_VERSION = 4;
 
     /**
      * Issue a receipt for $payment, or return the existing one.
@@ -231,6 +231,7 @@ class PaymentReceiptService
         $optionalRows = count(array_filter([
             $snapshot['customer']['code'] ?? null,
             $snapshot['customer']['zone'] ?? null,
+            $snapshot['invoice']['number'] ?? null,
             in_array($payment['method'] ?? '', ['months', 'yearly'], true) ? 'prepaid' : null,
             $payment['momo_ref'] ?? null,
             $payment['collected_by'] ?? null,
@@ -325,6 +326,7 @@ class PaymentReceiptService
                 'collected_by' => $payment->recordedBy?->name,
             ],
             'balance' => $this->balanceAfter($payment),
+            'invoice' => $this->invoiceFor($payment),
             'company' => [
                 'name' => $company?->name,
                 'location' => $company?->location,
@@ -350,13 +352,7 @@ class PaymentReceiptService
      */
     private function balanceAfter(Payment $payment): ?array
     {
-        // Bulk callers (e.g. reconnect-with-fine) already loaded it.
-        $latest = $payment->customer?->relationLoaded('latestManuscript')
-            ? $payment->customer->latestManuscript
-            : Manuscript::query()
-                ->where('customer_id', $payment->customer_id)
-                ->orderByDesc('period')
-                ->first();
+        $latest = $this->latestBill($payment);
 
         if ($latest === null) {
             return null;
@@ -376,6 +372,33 @@ class PaymentReceiptService
             'credit' => $owes ? '0.00' : bcmul($balance, '-1', 2),
             'as_of_period' => $latest->period,
         ];
+    }
+
+    /**
+     * The bill (invoice) this payment goes toward — the customer's latest
+     * bill when the receipt was issued. Null before their first bill.
+     *
+     * @return array{number: string, period: string}|null
+     */
+    private function invoiceFor(Payment $payment): ?array
+    {
+        $latest = $this->latestBill($payment);
+
+        return $latest === null ? null : ['number' => $latest->billNumber(), 'period' => $latest->period];
+    }
+
+    private function latestBill(Payment $payment): ?Manuscript
+    {
+        // Bulk callers (e.g. reconnect-with-fine) already loaded it; it's
+        // cached on the customer so balanceAfter()/invoiceFor() share it.
+        if ($payment->customer !== null && ! $payment->customer->relationLoaded('latestManuscript')) {
+            $payment->customer->setRelation('latestManuscript', Manuscript::query()
+                ->where('customer_id', $payment->customer_id)
+                ->orderByDesc('period')
+                ->first());
+        }
+
+        return $payment->customer?->latestManuscript;
     }
 
     /**

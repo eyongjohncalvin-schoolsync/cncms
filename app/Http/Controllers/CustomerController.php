@@ -26,6 +26,7 @@ use App\Services\ArrearsAdjustmentService;
 use App\Services\CustomerImportService;
 use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
+use App\Services\InvoiceService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
 use App\Support\TenantContext;
@@ -189,6 +190,8 @@ class CustomerController extends Controller
 
         return Inertia::render('Customers/Show', [
             'customer' => $this->shapeCustomerDetail($customer),
+            // Monthly bills (invoices) with their paid status — newest first.
+            'bills' => app(InvoiceService::class)->billsFor($customer, 12),
         ]);
     }
 

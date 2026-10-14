@@ -51,10 +51,34 @@ function initials(name: string): string {
         .join('');
 }
 
-export default function CustomersShow({ customer }: { customer: CustomerDetail }) {
+interface CustomerBill {
+    period: string;
+    number: string;
+    monthly_charge: string;
+    amount_due: string;
+    paid: string;
+    status: 'paid' | 'partly_paid' | 'unpaid' | 'nothing_due';
+    balance: string;
+    prepaid_months_remaining: number;
+}
+
+const billStatus: Record<CustomerBill['status'], { label: string; className: string }> = {
+    paid: { label: 'Paid', className: 'bg-green-100 text-green-800' },
+    partly_paid: { label: 'Part paid', className: 'bg-amber-100 text-amber-800' },
+    unpaid: { label: 'Unpaid', className: 'bg-red-100 text-red-800' },
+    nothing_due: { label: 'Nothing due', className: 'bg-slate-100 text-slate-600' },
+};
+
+function monthLabel(period: string): string {
+    const [year, month] = period.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+}
+
+export default function CustomersShow({ customer, bills = [] }: { customer: CustomerDetail; bills?: CustomerBill[] }) {
     const { auth } = usePage<PageProps>().props;
     // RBAC v2 Wave 4: CustomerPolicy::archive/restore/delete → `customers.archive`.
     const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
+    const canPrintBill = hasPermission(auth.user?.permissions, 'customers.print_bill');
     // "Export full record" — a full unredacted data dump gated
     // `customers.export_record` (super/admin only). Prefer the shared
     // permissions list; the `can_export_record` prop resolves the same
@@ -356,6 +380,77 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                             </div>
                         ) : (
                             <EmptyState title="No manuscript calculated yet" />
+                        )}
+                    </CardBody>
+                </Card>
+            </div>
+
+            {/* Bills (each month's bill is the invoice) + statement of account. */}
+            <div className="animate-fade-up mt-6" style={{ animationDelay: '0.12s' }}>
+                <Card>
+                    <CardHeader className="border-b border-slate-100">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+                                    <IconFileDescription size={18} stroke={1.75} />
+                                </span>
+                                <div>
+                                    <h3 className="text-base font-semibold text-slate-900">Bills &amp; statement</h3>
+                                    <p className="mt-0.5 text-xs text-slate-500">Each month's bill and whether it has been paid</p>
+                                </div>
+                            </div>
+                            {canPrintBill && (
+                                <div className="flex flex-wrap gap-2">
+                                    {[6, 12, 24].map((months) => (
+                                        <a
+                                            key={months}
+                                            href={`/customers/${customer.uuid}/statement?months=${months}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
+                                        >
+                                            <IconPrinter size={15} stroke={2} /> Statement · {months} months
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </CardHeader>
+                    <CardBody className="p-0">
+                        {bills.length === 0 ? (
+                            <div className="p-6">
+                                <EmptyState title="No bills yet" description="Bills appear after this customer's first billing run." />
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                    <thead className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                                        <tr>
+                                            <th className="px-4 py-2">Month</th>
+                                            <th className="px-4 py-2">Bill no.</th>
+                                            <th className="px-4 py-2 text-right">Amount due</th>
+                                            <th className="px-4 py-2 text-right">Paid toward it</th>
+                                            <th className="px-4 py-2">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {bills.map((bill) => (
+                                            <tr key={bill.period}>
+                                                <td className="px-4 py-2 whitespace-nowrap text-slate-700">{monthLabel(bill.period)}</td>
+                                                <td className="px-4 py-2 font-mono text-xs whitespace-nowrap text-slate-600">{bill.number}</td>
+                                                <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{formatCurrency(bill.amount_due)}</td>
+                                                <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums">{formatCurrency(bill.paid)}</td>
+                                                <td className="px-4 py-2 whitespace-nowrap">
+                                                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${billStatus[bill.status].className}`}>{billStatus[bill.status].label}</span>
+                                                    {bill.prepaid_months_remaining > 0 && (
+                                                        <span className="ml-2 text-xs text-slate-500">{bill.prepaid_months_remaining} prepaid month(s) left</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         )}
                     </CardBody>
                 </Card>

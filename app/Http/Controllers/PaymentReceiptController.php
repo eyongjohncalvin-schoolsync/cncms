@@ -168,7 +168,12 @@ class PaymentReceiptController extends Controller
         // receipt ever existed to an unauthenticated caller.
         abort_if($receipt === null || $receipt->isVoid(), 404);
 
-        $path = $this->receipts->pdf($receipt);
+        // ?format= is part of the signed URL, so it can't be swapped.
+        $format = in_array($request->query('format'), PaymentReceiptService::FORMATS, true)
+            ? (string) $request->query('format')
+            : PaymentReceiptService::FORMAT_A6;
+
+        $path = $this->receipts->pdf($receipt, $format);
 
         return Storage::disk($this->receipts->disk())->download(
             $path,

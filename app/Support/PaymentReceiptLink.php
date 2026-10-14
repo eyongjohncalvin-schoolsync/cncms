@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\Customer;
 use App\Models\PaymentReceipt;
 use Illuminate\Support\Facades\URL;
 
@@ -46,14 +47,36 @@ final class PaymentReceiptLink
         ]);
     }
 
-    public static function shared(PaymentReceipt $receipt): string
+    /**
+     * @param  ?string  $format  a PaymentReceiptService::FORMATS value; null = the A6 sheet
+     */
+    public static function shared(PaymentReceipt $receipt, ?string $format = null): string
     {
         return URL::temporarySignedRoute(
             'payment-receipts.pdf.shared',
             now()->addDays(self::EXPIRY_DAYS),
-            [
+            array_filter([
                 'receiptUuid' => $receipt->uuid,
                 'tenant' => (string) (tenant()?->getTenantKey() ?? ''),
+                'format' => $format,
+            ], fn (?string $value): bool => $value !== null),
+        );
+    }
+
+    /**
+     * Signed, public, ~7-day link to a customer's statement of account for
+     * $from..$to — what the mobile app opens in the device browser.
+     */
+    public static function statement(Customer $customer, string $from, string $to): string
+    {
+        return URL::temporarySignedRoute(
+            'customers.statement.shared',
+            now()->addDays(self::EXPIRY_DAYS),
+            [
+                'customerUuid' => $customer->uuid,
+                'tenant' => (string) (tenant()?->getTenantKey() ?? ''),
+                'from' => $from,
+                'to' => $to,
             ],
         );
     }
