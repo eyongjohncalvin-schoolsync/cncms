@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { IconArrowLeft, IconBrandWhatsapp, IconCash, IconDownload, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
+import { IconArrowLeft, IconBrandWhatsapp, IconCash, IconDownload, IconPrinter, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
@@ -329,6 +329,18 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                                         <IconDownload size={16} stroke={2} />
                                         Download PDF
                                     </a>
+                                    {/* Roll formats for pocket Bluetooth printers. Every print after the
+                                        first is stamped DUPLICATE on the receipt itself. */}
+                                    {(['thermal58', 'thermal80'] as const).map((format) => (
+                                        <a
+                                            key={format}
+                                            href={`${receipt.download_url}?format=${format}`}
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                                        >
+                                            <IconPrinter size={16} stroke={2} />
+                                            {format === 'thermal58' ? '58 mm roll' : '80 mm roll'}
+                                        </a>
+                                    ))}
                                     {canIssueNow && (
                                         <Button
                                             type="button"

@@ -30,3 +30,9 @@ use Illuminate\Support\Facades\Route;
 Route::get('payment-receipts/{receiptUuid}/pdf/shared', [PaymentReceiptController::class, 'sharedPdf'])
     ->middleware(['signed', 'throttle:receipt-share'])
     ->name('payment-receipts.pdf.shared');
+
+// The page a receipt's QR code opens — "is this receipt genuine?". Signed,
+// never expiring (see App\Support\PaymentReceiptLink::verify()).
+Route::get('payment-receipts/{receiptUuid}/verify', [PaymentReceiptController::class, 'verify'])
+    ->middleware(['signed', 'throttle:receipt-share'])
+    ->name('payment-receipts.verify');

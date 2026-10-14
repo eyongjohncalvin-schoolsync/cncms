@@ -90,6 +90,19 @@ class Customer extends Model
      * from anything that reads this relation (e.g.
      * CustomerEligibilityService's disconnection-eligibility scan).
      */
+    /**
+     * The readable account code printed on bills and receipts —
+     * {zone prefix}-{zero-padded id}, e.g. "THR01-0042". See
+     * App\Services\ManuscriptService::accountCode()'s doc comment for why
+     * it is shaped this way. Reads `zone`, so eager-load it for lists.
+     */
+    public function accountCode(): string
+    {
+        $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $this->zone?->name ?? ''), 0, 6));
+
+        return sprintf('%s-%04d', $prefix !== '' ? $prefix : 'ACCT', $this->id);
+    }
+
     public function latestManuscript(): HasOne
     {
         return $this->hasOne(Manuscript::class)->latestOfMany('period');

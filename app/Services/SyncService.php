@@ -251,7 +251,7 @@ class SyncService
                 : Customer::query()->whereIn('uuid', $customerUuids)->get()->keyBy('uuid'),
             'payable' => $customerUuids === []
                 ? collect()
-                : $this->customers->findManyByUuids($customerUuids)->keyBy('uuid'),
+                : $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid'),
         ];
     }
 

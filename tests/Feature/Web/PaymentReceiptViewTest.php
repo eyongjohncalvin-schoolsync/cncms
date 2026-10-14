@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\PaymentReceiptService;
 use App\Support\PaymentReceiptLink;
 use Database\Factories\CustomerFactory;
+use Database\Factories\ManuscriptFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -242,5 +243,97 @@ class PaymentReceiptViewTest extends TestCase
         app(PaymentReceiptService::class)->void($receipt);
 
         $this->get(PaymentReceiptLink::shared($receipt->fresh()))->assertStatus(404);
+    }
+
+    public function test_roll_printer_formats_download_as_pdfs_and_an_unknown_format_falls_back_to_a6(): void
+    {
+        [, , $receipt] = $this->verifiedPaymentWithReceipt();
+        $this->actingAsRole('manager');
+
+        foreach (['thermal58', 'thermal80', 'a6', 'banana'] as $format) {
+            $response = $this->get(route('payment-receipts.pdf', $receipt).'?format='.$format);
+
+            $response->assertOk();
+            $this->assertStringStartsWith('%PDF-', $response->streamedContent());
+        }
+
+        $files = collect(Storage::disk('local')->allFiles())->map(fn (string $path): string => basename($path));
+        $this->assertTrue($files->contains(fn (string $name): bool => str_contains($name, '-thermal58')));
+        $this->assertTrue($files->contains(fn (string $name): bool => str_contains($name, '-thermal80')));
+    }
+
+    public function test_every_print_after_the_first_is_a_duplicate(): void
+    {
+        [, , $receipt] = $this->verifiedPaymentWithReceipt();
+        $this->actingAsRole('manager');
+
+        $this->get(route('payment-receipts.pdf', $receipt))->assertOk();
+        $this->assertSame(1, $receipt->fresh()->print_count);
+        $this->assertFalse(collect(Storage::disk('local')->allFiles())->contains(fn (string $path): bool => str_contains($path, '-copy')));
+
+        $this->get(route('payment-receipts.pdf', $receipt))->assertOk();
+        $this->assertSame(2, $receipt->fresh()->print_count);
+        $this->assertTrue(collect(Storage::disk('local')->allFiles())->contains(fn (string $path): bool => str_contains($path, '-a6-copy')));
+    }
+
+    public function test_the_customers_shared_link_never_counts_as_a_reprint(): void
+    {
+        [, , $receipt] = $this->verifiedPaymentWithReceipt();
+
+        $this->get(PaymentReceiptLink::shared($receipt))->assertOk();
+        $this->get(PaymentReceiptLink::shared($receipt))->assertOk();
+
+        $this->assertSame(0, $receipt->fresh()->print_count);
+    }
+
+    public function test_the_receipt_records_who_collected_it_the_account_code_and_the_balance_left(): void
+    {
+        $user = $this->actingAsRole('manager');
+        $customer = $this->customer();
+        ManuscriptFactory::new()->forPeriod(now()->format('Y-m'))->create([
+            'customer_id' => $customer->id, 'bill' => 2500, 'total_arrears' => 5000, 'credit' => 0, 'total_bill' => 7500,
+        ]);
+
+        $this->post('/payments', ['customer_uuid' => $customer->uuid, 'amount' => 3000, 'frequency' => 'monthly'])->assertRedirect();
+
+        $payment = Payment::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame($user->id, $payment->recorded_by);
+
+        $snapshot = $payment->receipt->snapshot;
+        $this->assertSame($user->name, $snapshot['payment']['collected_by']);
+        $this->assertSame($customer->fresh('zone')->accountCode(), $snapshot['customer']['code']);
+        $this->assertSame('4500.00', $snapshot['balance']['remaining']);
+        $this->assertSame('0.00', $snapshot['balance']['credit']);
+    }
+
+    public function test_the_qr_verify_page_confirms_a_genuine_receipt_without_logging_in(): void
+    {
+        [$customer, , $receipt] = $this->verifiedPaymentWithReceipt();
+
+        $this->get(PaymentReceiptLink::verify($receipt))
+            ->assertOk()
+            ->assertSee('Genuine receipt')
+            ->assertSee($receipt->receipt_number)
+            ->assertSee($customer->name);
+    }
+
+    public function test_the_qr_verify_page_shows_a_voided_receipt_as_void(): void
+    {
+        [, , $receipt] = $this->verifiedPaymentWithReceipt();
+        $receipt->update(['status' => PaymentReceipt::STATUS_VOID]);
+
+        $this->get(PaymentReceiptLink::verify($receipt))
+            ->assertOk()
+            ->assertSee('VOID')
+            ->assertDontSee('Genuine receipt');
+    }
+
+    public function test_the_qr_verify_page_refuses_a_tampered_or_unsigned_link(): void
+    {
+        [, , $receipt] = $this->verifiedPaymentWithReceipt();
+        $url = PaymentReceiptLink::verify($receipt);
+
+        $this->get(str_replace('tenant=swecom', 'tenant=other', $url))->assertForbidden();
+        $this->get(strtok($url, '?').'?tenant=swecom')->assertForbidden();
     }
 }

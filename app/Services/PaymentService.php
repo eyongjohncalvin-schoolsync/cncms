@@ -23,6 +23,7 @@ class PaymentService
         private readonly CustomerRepositoryInterface $customers,
         private readonly ZoneRepositoryInterface $zones,
         private readonly TenantContext $context,
+        private readonly PaymentReceiptService $receipts,
     ) {}
 
     /**
@@ -137,6 +138,7 @@ class PaymentService
 
         $attributes = $data->toAttributes();
         $attributes['verification_status'] = $canAutoVerify ? 'verified' : 'pending';
+        $attributes['recorded_by'] = auth()->id();
         $attributes['expiration_date'] = $this->computeExpirationDate($data->frequency, $data->months);
 
         // Draw-down credit (references/prepayment-drawdown.md): a months/yearly
@@ -148,8 +150,16 @@ class PaymentService
         }
 
         $payment = $this->payments->create($customer->id, $attributes);
+        $payment->setRelation('customer', $customer);
 
-        return $payment->setRelation('customer', $customer);
+        // A payment verified on the spot (office roles, an agent in their own
+        // zone) gets its receipt now — the same thing approving a pending
+        // payment does in PaymentVerificationService::verify().
+        if ($payment->verification_status === 'verified') {
+            $this->receipts->issueFor($payment, auth()->user());
+        }
+
+        return $payment;
     }
 
     /**
@@ -181,7 +191,9 @@ class PaymentService
         $failed = [];
 
         // One query for the whole selection rather than a lookup per uuid.
-        $customersByUuid = $this->customers->findManyByUuids($customerUuids)->keyBy('uuid');
+        // Zone/branch and latest manuscript are what each payment's receipt
+        // reads when it's issued on the spot.
+        $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid');
 
         foreach ($customerUuids as $customerUuid) {
             $customer = $customersByUuid->get($customerUuid);

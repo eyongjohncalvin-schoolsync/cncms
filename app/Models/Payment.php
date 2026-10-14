@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
     'customer_id', 'amount', 'credit', 'frequency', 'expiration_date', 'months', 'prepaid_rate', 'clear_arrears_first',
-    'verification_status', 'processed_at', 'processed_period', 'recorded_offline', 'recorded_by_device', 'local_uuid',
+    'verification_status', 'processed_at', 'processed_period', 'recorded_offline', 'recorded_by_device', 'local_uuid', 'recorded_by',
     // The field agent's actual offline-collection timestamp — see the
     // add_collected_at_to_payments_table migration and
     // App\Services\SyncService::pushPayment()'s doc comment. Deliberately
@@ -55,6 +55,16 @@ class Payment extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * The staff member who recorded the payment (null on payments recorded
+     * before this was captured). Cross-schema — User is pinned to the
+     * central connection.
+     */
+    public function recordedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'recorded_by');
     }
 
     public function verification(): HasOne

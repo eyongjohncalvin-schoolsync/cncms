@@ -92,13 +92,23 @@ class PaymentReceiptController extends Controller
         ]);
     }
 
-    public function downloadPdf(PaymentReceipt $receipt): StreamedResponse
+    /**
+     * Staff print/download. ?format= picks the A6 sheet (default) or a 58 /
+     * 80 mm roll for pocket printers; every print after the first is
+     * stamped DUPLICATE.
+     */
+    public function downloadPdf(Request $request, PaymentReceipt $receipt): StreamedResponse
     {
         $this->authorize('view', $receipt);
 
-        $path = $this->receipts->pdf($receipt);
+        $format = in_array($request->query('format'), PaymentReceiptService::FORMATS, true)
+            ? (string) $request->query('format')
+            : PaymentReceiptService::FORMAT_A6;
+        $isReprint = $this->receipts->recordPrint($receipt);
 
-        return Storage::disk($receipt->pdf_disk)->download(
+        $path = $this->receipts->pdf($receipt, $format, $isReprint);
+
+        return Storage::disk($this->receipts->disk())->download(
             $path,
             "receipt-{$receipt->receipt_number}.pdf",
         );

@@ -32,6 +32,20 @@ final class PaymentReceiptLink
 {
     public const int EXPIRY_DAYS = 7;
 
+    /**
+     * The link printed as a QR code on every receipt: a public page that
+     * says whether this receipt is genuine and still valid (or void).
+     * Signed but NEVER expiring — a paper receipt is kept for years — and
+     * it reveals nothing beyond what is printed on the receipt itself.
+     */
+    public static function verify(PaymentReceipt $receipt): string
+    {
+        return URL::signedRoute('payment-receipts.verify', [
+            'receiptUuid' => $receipt->uuid,
+            'tenant' => (string) (tenant()?->getTenantKey() ?? ''),
+        ]);
+    }
+
     public static function shared(PaymentReceipt $receipt): string
     {
         return URL::temporarySignedRoute(

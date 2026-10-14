@@ -129,7 +129,7 @@ class CustomerStatusService
 
         // One query for the whole selection, with the latest manuscript the
         // suspend/reconnect paths read, rather than a lookup per uuid.
-        $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['latestManuscript'])->keyBy('uuid');
+        $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid');
 
         foreach ($customerUuids as $uuid) {
             $customer = $customersByUuid->get($uuid);

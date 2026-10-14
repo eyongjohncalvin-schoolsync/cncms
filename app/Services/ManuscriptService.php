@@ -380,9 +380,7 @@ class ManuscriptService
      */
     private function accountCode(Customer $customer): string
     {
-        $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $customer->zone?->name ?? ''), 0, 6));
-
-        return sprintf('%s-%04d', $prefix !== '' ? $prefix : 'ACCT', $customer->id);
+        return $customer->accountCode();
     }
 
     /**
