@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\Cache;
  * The Twilio fields are genuinely sensitive API credentials, never stored
  * plaintext — see casts() below.
  */
-#[Fillable(['whatsapp_enabled', 'email_enabled', 'sms_enabled', 'twilio_account_sid', 'twilio_auth_token', 'twilio_whatsapp_number'])]
+#[Fillable(['whatsapp_enabled', 'email_enabled', 'sms_enabled', 'auto_send_receipts', 'twilio_account_sid', 'twilio_auth_token', 'twilio_whatsapp_number'])]
 #[RouteKey('uuid')]
 class NotificationSetting extends Model
 {
@@ -34,6 +34,7 @@ class NotificationSetting extends Model
             'whatsapp_enabled' => 'boolean',
             'email_enabled' => 'boolean',
             'sms_enabled' => 'boolean',
+            'auto_send_receipts' => 'boolean',
             // Laravel's built-in 'encrypted' cast: encrypted on write,
             // transparently decrypted on read via the model attribute
             // accessor. The raw database column never holds plaintext —
@@ -80,6 +81,7 @@ class NotificationSetting extends Model
                 'whatsapp_enabled' => false,
                 'email_enabled' => false,
                 'sms_enabled' => false,
+                'auto_send_receipts' => false,
             ])
         );
     }

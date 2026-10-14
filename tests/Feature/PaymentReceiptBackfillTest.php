@@ -9,6 +9,8 @@ use App\Models\Tenant;
 use Database\Factories\CustomerFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Tests\Feature\Concerns\UsesDisposableTenant;
 use Tests\TestCase;
 
@@ -84,5 +86,40 @@ class PaymentReceiptBackfillTest extends TestCase
             ->assertSuccessful();
 
         $this->assertSame(2, PaymentReceipt::query()->count());
+    }
+
+    /**
+     * N+1 regression: each chunk eager-loads what issueFor() reads, so the
+     * number of customer/zone/verification/receipt lookups doesn't grow with
+     * the number of payments backfilled.
+     */
+    public function test_backfill_eager_loads_receipt_inputs_per_chunk(): void
+    {
+        $zone = ZoneFactory::new()->create();
+
+        $lookups = 0;
+        DB::listen(function (QueryExecuted $query) use (&$lookups): void {
+            if (preg_match('/^select .* from "(customers|zones|payment_verifications|payment_receipts)"/', $query->sql)) {
+                $lookups++;
+            }
+        });
+
+        $countLookupsForBackfillOf = function (int $paymentCount) use ($zone, &$lookups): int {
+            tenancy()->initialize($this->tenant);
+
+            foreach (range(1, $paymentCount) as $ignored) {
+                $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'active', 'bill' => 2500]);
+                PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 2500]);
+            }
+
+            $lookups = 0;
+            $this->artisan('cncms:backfill-payment-receipts', ['tenant' => $this->tenant->id, '--no-dry-run' => true])
+                ->assertSuccessful();
+
+            return $lookups;
+        };
+
+        $this->assertSame($countLookupsForBackfillOf(2), $countLookupsForBackfillOf(4));
+        $this->assertSame(6, PaymentReceipt::query()->count());
     }
 }

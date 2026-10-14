@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Models\Service;
 use App\Models\TenantUser;
 use App\Models\User;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -282,5 +284,61 @@ class CustomerBulkBillUpdateTest extends TestCase
             'mode' => 'set',
             'value' => '5000',
         ])->assertForbidden();
+    }
+
+    /**
+     * N+1 regression: committing a bulk bill update must not re-read each
+     * customer's subscription or re-sum its prices — the rows loaded while
+     * planning are reused, so those query counts stay flat as the selection
+     * grows.
+     */
+    public function test_bulk_update_does_not_requery_subscriptions_per_customer(): void
+    {
+        $this->actingAsRole('manager');
+
+        $zone = ZoneFactory::new()->create();
+        $tv = Service::query()->where('slug', 'tv')->firstOrFail();
+        $customers = collect(range(1, 4))->map(function () use ($zone, $tv) {
+            $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+            $customer->subscriptions()->create(['service_id' => $tv->id, 'price' => 2500]);
+
+            return $customer;
+        });
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $response = $this->post('/customers/bulk-update-bill', [
+            'zone_uuid' => $zone->uuid,
+            'mode' => 'increase_fixed',
+            'value' => '500',
+        ]);
+        $queries = array_column(DB::getQueryLog(), 'query');
+        DB::disableQueryLog();
+
+        $response->assertRedirect();
+        $subscriptionReads = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'select') && str_contains($sql, 'from "customer_service"'));
+        $this->assertCount(1, $subscriptionReads);
+
+        foreach ($customers as $customer) {
+            $this->assertDatabaseHas('customers', ['id' => $customer->id, 'bill' => 3000]);
+            $this->assertDatabaseHas('customer_service', ['customer_id' => $customer->id, 'price' => 3000]);
+        }
+    }
+
+    public function test_bulk_update_attaches_the_default_service_to_a_customer_with_no_subscription(): void
+    {
+        $this->actingAsRole('manager');
+
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500]);
+
+        $this->post('/customers/bulk-update-bill', [
+            'customer_uuids' => [$customer->uuid],
+            'mode' => 'set',
+            'value' => '4000',
+        ])->assertRedirect();
+
+        $this->assertDatabaseHas('customers', ['id' => $customer->id, 'bill' => 4000]);
+        $this->assertDatabaseHas('customer_service', ['customer_id' => $customer->id, 'service_id' => Service::default()->id, 'price' => 4000]);
     }
 }

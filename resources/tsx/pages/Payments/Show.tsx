@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { IconArrowLeft, IconBrandWhatsapp, IconCash, IconDownload, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
+import { IconArrowLeft, IconBrandWhatsapp, IconCash, IconDownload, IconMail, IconPrinter, IconReceipt, IconUpload, IconWallet } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
@@ -49,6 +49,7 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
     const [destroying, setDestroying] = useState(false);
     const [issuingReceipt, setIssuingReceipt] = useState(false);
     const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+    const [sendingEmail, setSendingEmail] = useState(false);
 
     // A receipt is only a record of a verified payment. Auto-issued on
     // verify(); this manual action covers payments recorded before receipts
@@ -77,6 +78,18 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                         window.open(url, '_blank', 'noopener,noreferrer');
                     }
                 },
+            },
+        );
+    }
+
+    function sendEmail() {
+        router.post(
+            `/payments/${payment.uuid}/receipt/send-email`,
+            {},
+            {
+                preserveScroll: true,
+                onStart: () => setSendingEmail(true),
+                onFinish: () => setSendingEmail(false),
             },
         );
     }
@@ -329,6 +342,18 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                                         <IconDownload size={16} stroke={2} />
                                         Download PDF
                                     </a>
+                                    {/* Roll formats for pocket Bluetooth printers. Every print after the
+                                        first is stamped DUPLICATE on the receipt itself. */}
+                                    {(['thermal58', 'thermal80'] as const).map((format) => (
+                                        <a
+                                            key={format}
+                                            href={`${receipt.download_url}?format=${format}`}
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                                        >
+                                            <IconPrinter size={16} stroke={2} />
+                                            {format === 'thermal58' ? '58 mm roll' : '80 mm roll'}
+                                        </a>
+                                    ))}
                                     {canIssueNow && (
                                         <Button
                                             type="button"
@@ -360,13 +385,29 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                                         )}
                                         Send via WhatsApp
                                     </Button>
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={sendEmail}
+                                        disabled={receipt.email_unavailable_reason !== null || sendingEmail}
+                                        title={receipt.email_unavailable_reason ?? `Email the PDF to ${receipt.email_to}`}
+                                        className="rounded-lg px-4 py-2 text-sm font-semibold"
+                                    >
+                                        {sendingEmail ? <LoadingSpinner className="h-4 w-4" /> : <IconMail size={16} stroke={2} />}
+                                        Email receipt
+                                    </Button>
                                 </div>
 
                                 {receipt.last_sent_at && (
                                     <p className="text-xs text-slate-500">
                                         Last sent {formatRelative(receipt.last_sent_at)}
-                                        {receipt.sent_count > 1 ? ` (${receipt.sent_count} times)` : ''}.
+                                        {receipt.last_sent_channel === 'email' ? ' by email' : receipt.last_sent_channel ? ' by WhatsApp' : ''}
+                                        {receipt.sent_count > 1 ? ` (${receipt.sent_count} times in all)` : ''}.
                                     </p>
+                                )}
+
+                                {receipt.email_unavailable_reason && receipt.status !== 'void' && (
+                                    <p className="text-xs text-slate-500">Email: {receipt.email_unavailable_reason}</p>
                                 )}
 
                                 {!payment.customer_phone && (

@@ -10,6 +10,7 @@ use App\Models\User;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -140,5 +141,32 @@ class ZoneImportTest extends TestCase
 
         $this->post('/zones/import', ['file' => $file])->assertForbidden();
         $this->assertDatabaseMissing('zones', ['name' => 'ZIMP-FORBIDDEN2']);
+    }
+
+    /**
+     * N+1 regression: the default branch is resolved once per file and the
+     * created zone's branch isn't reloaded per row.
+     */
+    public function test_import_resolves_the_branch_once_per_file(): void
+    {
+        $this->actingAsRole('manager');
+
+        $countBranchReads = function (int $rowCount): int {
+            $file = $this->spreadsheet(collect(range(1, $rowCount))->map(fn (int $i): array => [
+                'name' => "ZIMP-NPLUS1-{$rowCount}-{$i}",
+                'town' => 'KUMBA 3',
+            ])->all());
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->post('/zones/import', ['file' => $file])
+                ->assertSessionHas('import', fn (array $import): bool => $import['succeeded_count'] === $rowCount);
+            $queries = array_column(DB::getQueryLog(), 'query');
+            DB::disableQueryLog();
+
+            return count(array_filter($queries, fn (string $sql): bool => (bool) preg_match('/^select .* from "branches"/', $sql)));
+        };
+
+        $this->assertSame($countBranchReads(2), $countBranchReads(4));
     }
 }

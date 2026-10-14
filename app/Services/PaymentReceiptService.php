@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Company;
+use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\User;
+use App\Support\PaymentReceiptLink;
+use App\Support\QrCode;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +33,22 @@ use Illuminate\Support\Facades\Storage;
  */
 class PaymentReceiptService
 {
+    /** A6 sheet — the original office receipt. */
+    public const string FORMAT_A6 = 'a6';
+
+    /** Roll receipts for pocket Bluetooth printers carried by field agents. */
+    public const string FORMAT_THERMAL_58 = 'thermal58';
+
+    public const string FORMAT_THERMAL_80 = 'thermal80';
+
+    public const array FORMATS = [self::FORMAT_A6, self::FORMAT_THERMAL_58, self::FORMAT_THERMAL_80];
+
+    /** Paper width per roll format; the printable area is a few mm narrower. */
+    private const array THERMAL_WIDTH_MM = [self::FORMAT_THERMAL_58 => 58, self::FORMAT_THERMAL_80 => 80];
+
+    /** Bumped whenever the receipt layout changes; see pdf(). */
+    private const int LAYOUT_VERSION = 4;
+
     /**
      * Issue a receipt for $payment, or return the existing one.
      *
@@ -41,11 +60,23 @@ class PaymentReceiptService
      * allocated receipt_number (the `payment_id` UNIQUE constraint means
      * there can only ever be one row per payment).
      */
-    public function issueFor(Payment $payment, ?User $actor = null): PaymentReceipt
-    {
-        $payment->loadMissing(['customer.zone.branch', 'verification']);
+    public function __construct(
+        private readonly ReceiptEmailService $email,
+    ) {}
 
-        $existing = PaymentReceipt::query()->where('payment_id', $payment->id)->first();
+    /**
+     * $autoSend: email the new receipt straight away when auto-send is on
+     * and the customer prefers email (ReceiptEmailService::autoSendIfWanted)
+     * — false for the historical backfill, which must never email old
+     * receipts out of the blue.
+     */
+    public function issueFor(Payment $payment, ?User $actor = null, bool $autoSend = true): PaymentReceipt
+    {
+        $payment->loadMissing(['customer.zone.branch', 'verification', 'recordedBy']);
+
+        $existing = $payment->relationLoaded('receipt')
+            ? $payment->receipt
+            : PaymentReceipt::query()->where('payment_id', $payment->id)->first();
 
         if ($existing && ! $existing->isVoid()) {
             return $existing;
@@ -66,10 +97,16 @@ class PaymentReceiptService
                 'pdf_disk' => null,
             ]);
 
-            return $existing->refresh();
+            $existing->refresh();
+
+            if ($autoSend) {
+                $this->email->autoSendIfWanted($existing->setRelation('payment', $payment));
+            }
+
+            return $existing;
         }
 
-        return DB::transaction(function () use ($payment, $actor, $snapshot): PaymentReceipt {
+        $receipt = DB::transaction(function () use ($payment, $actor, $snapshot): PaymentReceipt {
             $number = $this->allocateNumber();
 
             return PaymentReceipt::create([
@@ -83,6 +120,14 @@ class PaymentReceiptService
                 'status' => PaymentReceipt::STATUS_ISSUED,
             ]);
         });
+
+        $payment->setRelation('receipt', $receipt);
+
+        if ($autoSend) {
+            $this->email->autoSendIfWanted($receipt->setRelation('payment', $payment));
+        }
+
+        return $receipt;
     }
 
     /**
@@ -115,34 +160,95 @@ class PaymentReceiptService
      * configured default disk on first call (or if the cached file is gone).
      * Renders strictly from `snapshot`.
      */
-    public function pdf(PaymentReceipt $receipt): string
+    public function pdf(PaymentReceipt $receipt, string $format = self::FORMAT_A6, bool $duplicate = false): string
     {
+        $format = in_array($format, self::FORMATS, true) ? $format : self::FORMAT_A6;
         $disk = $this->disk();
+        $isOriginalA6 = $format === self::FORMAT_A6 && ! $duplicate;
 
-        if (
-            $receipt->pdf_path !== null
-            && $receipt->pdf_disk === $disk
-            && Storage::disk($disk)->exists($receipt->pdf_path)
-        ) {
-            return $receipt->pdf_path;
+        // The layout version is part of the cached file name, so receipts
+        // rendered before a layout change (e.g. before the QR code) are
+        // re-rendered once instead of serving the stale file.
+        $tenantId = (string) (tenant()?->getTenantKey() ?? 'central');
+        $path = "payment-receipts/{$tenantId}/{$receipt->uuid}-v".self::LAYOUT_VERSION."-{$format}".($duplicate ? '-copy' : '').'.pdf';
+
+        if (Storage::disk($disk)->exists($path) && (! $isOriginalA6 || ($receipt->pdf_path === $path && $receipt->pdf_disk === $disk))) {
+            return $path;
         }
 
-        $tenantId = (string) (tenant()?->getTenantKey() ?? 'central');
-        $path = "payment-receipts/{$tenantId}/{$receipt->uuid}.pdf";
-
-        $pdf = Pdf::loadView('pdf.receipt', [
+        $verifyUrl = PaymentReceiptLink::verify($receipt);
+        $data = [
             'r' => $receipt->snapshot ?? [],
             // Branding only — matched to bill.blade.php, fetched live (not
             // frozen in the snapshot, which would bloat every row with a
             // base64 image). A logo change is cosmetic, not receipt data.
             'logo' => Company::cached()?->logoDataUri(),
-        ])->setPaper('a6', 'portrait');
+            'qr' => QrCode::pngDataUri($verifyUrl),
+            'duplicate' => $duplicate,
+        ];
+
+        $pdf = $format === self::FORMAT_A6
+            ? Pdf::loadView('pdf.receipt', $data)->setPaper('a6', 'portrait')
+            : Pdf::loadView('pdf.receipt-thermal', [...$data, 'widthMm' => self::THERMAL_WIDTH_MM[$format]])
+                ->setPaper([0, 0, self::mmToPoints(self::THERMAL_WIDTH_MM[$format]), self::mmToPoints($this->thermalLengthMm($receipt, $format, $duplicate))], 'portrait');
 
         Storage::disk($disk)->put($path, $pdf->output());
 
-        $receipt->forceFill(['pdf_path' => $path, 'pdf_disk' => $disk])->save();
+        if ($isOriginalA6) {
+            $receipt->forceFill(['pdf_path' => $path, 'pdf_disk' => $disk])->save();
+        }
 
         return $path;
+    }
+
+    /**
+     * Counts a staff print/download and says whether it is a reprint —
+     * every print after the first carries a "DUPLICATE" stamp, so a second
+     * paper copy can't pass as a second payment.
+     */
+    public function recordPrint(PaymentReceipt $receipt): bool
+    {
+        $isReprint = $receipt->print_count > 0;
+
+        $receipt->newQuery()->whereKey($receipt->id)->increment('print_count');
+        $receipt->print_count++;
+
+        return $isReprint;
+    }
+
+    /**
+     * How much roll a receipt needs — the page is cut to the content so a
+     * pocket printer doesn't feed blank paper: a fixed body plus one line
+     * per optional row, the logo and the duplicate stamp. Slightly generous
+     * so nothing spills onto a second page.
+     */
+    private function thermalLengthMm(PaymentReceipt $receipt, string $format, bool $duplicate): int
+    {
+        $narrow = self::THERMAL_WIDTH_MM[$format] <= 58;
+        $snapshot = $receipt->snapshot ?? [];
+        $payment = $snapshot['payment'] ?? [];
+
+        $optionalRows = count(array_filter([
+            $snapshot['customer']['code'] ?? null,
+            $snapshot['customer']['zone'] ?? null,
+            $snapshot['invoice']['number'] ?? null,
+            in_array($payment['method'] ?? '', ['months', 'yearly'], true) ? 'prepaid' : null,
+            $payment['momo_ref'] ?? null,
+            $payment['collected_by'] ?? null,
+            $snapshot['balance'] ?? null,
+            $snapshot['company']['rccm_number'] ?? null,
+            $snapshot['company']['niu'] ?? null,
+        ]));
+
+        return ($narrow ? 82 : 98)
+            + $optionalRows * ($narrow ? 4 : 5)
+            + (Company::cached()?->logoDataUri() !== null ? ($narrow ? 12 : 15) : 0)
+            + ($duplicate ? 7 : 0);
+    }
+
+    private static function mmToPoints(float $millimetres): float
+    {
+        return round($millimetres * 72 / 25.4, 2);
     }
 
     /**
@@ -150,7 +256,7 @@ class PaymentReceiptService
      * App\Services\BillBatchService::disk() — `local` (private) on the VPS,
      * an object-storage disk on an ephemeral host (set FILESYSTEM_DISK).
      */
-    private function disk(): string
+    public function disk(): string
     {
         return (string) config('filesystems.default', 'local');
     }
@@ -203,7 +309,7 @@ class PaymentReceiptService
                 'phone' => $customer?->phone,
                 'zone' => $customer?->zone?->name,
                 'branch' => $customer?->zone?->branch?->name,
-                'code' => $customer?->uuid ? substr((string) $customer->uuid, 0, 8) : null,
+                'code' => $customer?->accountCode(),
             ],
             'payment' => [
                 'uuid' => $payment->uuid,
@@ -217,7 +323,10 @@ class PaymentReceiptService
                 'recorded_offline' => (bool) $payment->recorded_offline,
                 'collected_at' => $payment->collected_at?->toIso8601String(),
                 'recorded_at' => $payment->created_at?->toIso8601String(),
+                'collected_by' => $payment->recordedBy?->name,
             ],
+            'balance' => $this->balanceAfter($payment),
+            'invoice' => $this->invoiceFor($payment),
             'company' => [
                 'name' => $company?->name,
                 'location' => $company?->location,
@@ -230,6 +339,66 @@ class PaymentReceiptService
             ],
             'amount' => number_format((float) $payment->amount, 2, '.', ''),
         ];
+    }
+
+    /**
+     * What the customer still owes (or has in credit) once this payment is
+     * counted: the amount due on their latest bill, minus every verified
+     * payment received since that bill was calculated (this one included).
+     * Null when the customer has never been billed. Frozen into the
+     * snapshot like everything else on the receipt.
+     *
+     * @return array{remaining: string, credit: string, as_of_period: string}|null
+     */
+    private function balanceAfter(Payment $payment): ?array
+    {
+        $latest = $this->latestBill($payment);
+
+        if ($latest === null) {
+            return null;
+        }
+
+        $paidSince = (string) Payment::query()
+            ->where('customer_id', $payment->customer_id)
+            ->where('verification_status', 'verified')
+            ->whereNull('processed_period')
+            ->sum('amount');
+
+        $balance = bcsub((string) $latest->total_bill, $paidSince === '' ? '0' : $paidSince, 2);
+        $owes = bccomp($balance, '0', 2) > 0;
+
+        return [
+            'remaining' => $owes ? $balance : '0.00',
+            'credit' => $owes ? '0.00' : bcmul($balance, '-1', 2),
+            'as_of_period' => $latest->period,
+        ];
+    }
+
+    /**
+     * The bill (invoice) this payment goes toward — the customer's latest
+     * bill when the receipt was issued. Null before their first bill.
+     *
+     * @return array{number: string, period: string}|null
+     */
+    private function invoiceFor(Payment $payment): ?array
+    {
+        $latest = $this->latestBill($payment);
+
+        return $latest === null ? null : ['number' => $latest->billNumber(), 'period' => $latest->period];
+    }
+
+    private function latestBill(Payment $payment): ?Manuscript
+    {
+        // Bulk callers (e.g. reconnect-with-fine) already loaded it; it's
+        // cached on the customer so balanceAfter()/invoiceFor() share it.
+        if ($payment->customer !== null && ! $payment->customer->relationLoaded('latestManuscript')) {
+            $payment->customer->setRelation('latestManuscript', Manuscript::query()
+                ->where('customer_id', $payment->customer_id)
+                ->orderByDesc('period')
+                ->first());
+        }
+
+        return $payment->customer?->latestManuscript;
     }
 
     /**

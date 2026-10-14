@@ -80,9 +80,12 @@ class BackfillPaymentReceipts extends Command
             }
 
             $issued = 0;
-            $base()->orderBy('id')->chunkById(200, function ($payments) use ($receipts, &$issued): void {
+            // Eager-loads what PaymentReceiptService::issueFor() reads, so
+            // each chunk costs a fixed number of lookups, not several per
+            // payment.
+            $base()->with(['customer.zone.branch', 'verification', 'receipt'])->orderBy('id')->chunkById(200, function ($payments) use ($receipts, &$issued): void {
                 foreach ($payments as $payment) {
-                    $receipts->issueFor($payment);
+                    $receipts->issueFor($payment, autoSend: false);
                     $issued++;
                 }
             });

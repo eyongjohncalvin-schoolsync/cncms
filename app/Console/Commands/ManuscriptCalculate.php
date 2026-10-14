@@ -254,12 +254,21 @@ class ManuscriptCalculate extends Command
                 ->get()
                 ->groupBy('customer_id');
 
+            // This period's existing rows (a re-run), so the write below
+            // updates them without a per-customer lookup.
+            $currentManuscriptsByCustomer = Manuscript::query()
+                ->whereIn('customer_id', $customerIds)
+                ->where('period', $period)
+                ->get()
+                ->keyBy('customer_id');
+
             foreach ($customers as $customer) {
                 try {
                     DB::transaction(function () use (
                         $customer,
                         $period,
                         $commandRun,
+                        $currentManuscriptsByCustomer,
                         $previousManuscriptsByCustomer,
                         $eligibleVerifiedPaymentsByCustomer,
                         $eligibleAdjustmentsByCustomer,
@@ -280,8 +289,7 @@ class ManuscriptCalculate extends Command
                         // publish()'s matching comment; this is the CLI's own
                         // direct write path (no publish() involved), so it must
                         // set the same linkage itself.
-                        Manuscript::query()
-                            ->firstOrNew(['customer_id' => $customer->id, 'period' => $period])
+                        ($currentManuscriptsByCustomer->get($customer->id) ?? new Manuscript(['customer_id' => $customer->id, 'period' => $period]))
                             ->fill([...$result->toManuscriptAttributes(), 'command_run_id' => $commandRun->id])
                             ->save();
 

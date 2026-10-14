@@ -14,6 +14,7 @@ use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
@@ -896,4 +897,26 @@ class ArrearsAdjustmentTest extends TestCase
     // `arrears_adjustments.target` / `credit_snapshot` columns, exactly like
     // CommandRunRollbackTest needed `manuscripts.command_run_id` (the real
     // swecom schema is deliberately not altered while building this feature).
+
+    /**
+     * N+1 regression: bulk approve resolves the selection in one query
+     * instead of loading each row (plus five relations) by uuid.
+     */
+    public function test_bulk_approve_resolves_the_selection_in_one_query(): void
+    {
+        $requesterId = $this->seededUserId('divine@shalomtech.dev');
+        $adjustments = collect(range(1, 3))->map(fn () => $this->pendingAdjustmentFor($requesterId));
+
+        $this->actingAsSeededUser('terence@shalomtech.dev');
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->post('/arrears-adjustments/bulk-approve', ['adjustment_uuids' => $adjustments->pluck('uuid')->all()])
+            ->assertSessionHas('success', '3 adjustments approved and applied.');
+        $queries = array_column(DB::getQueryLog(), 'query');
+        DB::disableQueryLog();
+
+        $uuidLookups = array_filter($queries, fn (string $sql): bool => str_contains($sql, 'from "arrears_adjustments" where "uuid"'));
+        $this->assertCount(1, $uuidLookups);
+    }
 }

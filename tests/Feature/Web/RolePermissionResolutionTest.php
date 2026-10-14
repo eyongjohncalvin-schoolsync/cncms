@@ -101,11 +101,11 @@ class RolePermissionResolutionTest extends TestCase
         );
     }
 
-    public function test_admin_resolves_to_the_entire_catalog(): void
+    public function test_admin_resolves_to_the_entire_catalog_except_approving_opening_balances(): void
     {
         $context = $this->contextFor('admin');
 
-        $expected = Permission::values();
+        $expected = array_values(array_diff(Permission::values(), [Permission::OpeningBalancesApprove->value]));
         $actual = $context->permissions();
         sort($expected);
         sort($actual);

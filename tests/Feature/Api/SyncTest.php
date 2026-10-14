@@ -17,6 +17,7 @@ use Database\Factories\ExpenseCategoryFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -613,6 +614,55 @@ class SyncTest extends TestCase
      * Same idempotency guarantee as the payments test above, for
      * pushExpenditure().
      */
+    public function test_push_dedupes_a_local_uuid_repeated_within_one_batch(): void
+    {
+        $customer = $this->customer();
+        $localUuid = (string) Str::uuid();
+        $item = ['local_uuid' => $localUuid, 'customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly'];
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$this->tokenForRole('agent'))
+            ->postJson('/api/v1/sync/push', ['device_id' => 'device-dup-1', 'changes' => ['payments' => [$item, $item]]]);
+
+        $response->assertOk();
+        $entries = $response->json('results.payments');
+        $this->assertSame(['synced', 'synced'], array_column($entries, 'status'));
+        $this->assertSame($entries[0]['server_uuid'], $entries[1]['server_uuid']);
+        $this->assertSame(1, Payment::query()->where('local_uuid', $localUuid)->count());
+    }
+
+    /**
+     * N+1 regression: the idempotency check and customer lookups are
+     * resolved once per push, so reads of payments/customers don't grow
+     * with the number of queued payments.
+     */
+    public function test_push_resolves_payment_lookups_once_per_batch(): void
+    {
+        $token = $this->tokenForRole('agent');
+
+        $countLookups = function (int $itemCount) use ($token): int {
+            $items = collect(range(1, $itemCount))->map(fn (): array => [
+                'local_uuid' => (string) Str::uuid(),
+                'customer_uuid' => $this->customer()->uuid,
+                'amount' => 2500,
+                'frequency' => 'monthly',
+            ])->all();
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $response = $this->withHeader('Authorization', "Bearer {$token}")
+                ->postJson('/api/v1/sync/push', ['device_id' => 'device-batch-1', 'changes' => ['payments' => $items]]);
+            $queries = array_column(DB::getQueryLog(), 'query');
+            DB::disableQueryLog();
+
+            $response->assertOk();
+            $this->assertSame(array_fill(0, $itemCount, 'synced'), array_column($response->json('results.payments'), 'status'));
+
+            return count(array_filter($queries, fn (string $sql): bool => (bool) preg_match('/^select .* from "(payments|customers)"/', $sql)));
+        };
+
+        $this->assertSame($countLookups(2), $countLookups(4));
+    }
+
     public function test_push_expenditure_is_idempotent_when_the_same_local_uuid_is_retried(): void
     {
         $category = ExpenseCategoryFactory::new()->create();

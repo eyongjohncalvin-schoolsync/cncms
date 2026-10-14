@@ -7,6 +7,7 @@ namespace App\Repositories\Eloquent;
 use App\Models\Payment;
 use App\Repositories\Concerns\ScopesByBranch;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 class PaymentRepository implements PaymentRepositoryInterface
@@ -50,6 +51,19 @@ class PaymentRepository implements PaymentRepositoryInterface
             ->with($with)
             ->where('uuid', $uuid)
             ->first();
+    }
+
+    public function findManyByUuids(array $uuids, array $with = []): Collection
+    {
+        if ($uuids === []) {
+            return new Collection;
+        }
+
+        return $this->scopeToBranch(Payment::query(), $this->currentBranchId(), 'customer.zone')
+            ->with($with)
+            ->whereIn('uuid', $uuids)
+            ->get()
+            ->keyBy('uuid');
     }
 
     public function create(int $customerId, array $attributes): Payment

@@ -18,6 +18,14 @@ interface ArrearsAdjustmentRepositoryInterface
     public function findByUuid(string $uuid, array $with = []): ?ArrearsAdjustment;
 
     /**
+     * The batched form of findByUuid() for bulk actions, keyed by uuid.
+     *
+     * @param  string[]  $uuids
+     * @return Collection<string, ArrearsAdjustment>
+     */
+    public function findManyByUuids(array $uuids): Collection;
+
+    /**
      * @param  array<string, mixed>  $attributes  Everything from
      *                                            ArrearsAdjustmentData::toAttributes()
      *                                            plus the service-resolved

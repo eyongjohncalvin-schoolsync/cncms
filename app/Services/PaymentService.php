@@ -23,6 +23,7 @@ class PaymentService
         private readonly CustomerRepositoryInterface $customers,
         private readonly ZoneRepositoryInterface $zones,
         private readonly TenantContext $context,
+        private readonly PaymentReceiptService $receipts,
     ) {}
 
     /**
@@ -116,8 +117,16 @@ class PaymentService
      */
     public function create(PaymentData $data): Payment
     {
-        $customer = $this->resolveCustomer($data->customerUuid);
+        return $this->createForCustomer($this->resolveCustomer($data->customerUuid), $data);
+    }
 
+    /**
+     * create() for a caller that has already resolved the customer (bulk
+     * entry, offline sync, reconnection fines) — skips re-looking it up by
+     * uuid. $customer must be the customer $data->customerUuid names.
+     */
+    public function createForCustomer(Customer $customer, PaymentData $data): Payment
+    {
         // RBAC v2: mirrors PaymentPolicy::verify() exactly — the office gate
         // is now the `payments.verify` catalog permission; the agent
         // zone-scoped branch stays an additive OR (agent is NOT seeded
@@ -129,6 +138,7 @@ class PaymentService
 
         $attributes = $data->toAttributes();
         $attributes['verification_status'] = $canAutoVerify ? 'verified' : 'pending';
+        $attributes['recorded_by'] = auth()->id();
         $attributes['expiration_date'] = $this->computeExpirationDate($data->frequency, $data->months);
 
         // Draw-down credit (references/prepayment-drawdown.md): a months/yearly
@@ -136,11 +146,20 @@ class PaymentService
         // later rate change never shortens the coverage it bought (PD-3).
         if (in_array($data->frequency, ['months', 'yearly'], true)) {
             $attributes['prepaid_rate'] = (string) $customer->bill;
+            $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
         }
 
         $payment = $this->payments->create($customer->id, $attributes);
+        $payment->setRelation('customer', $customer);
 
-        return $payment->load('customer');
+        // A payment verified on the spot (office roles, an agent in their own
+        // zone) gets its receipt now — the same thing approving a pending
+        // payment does in PaymentVerificationService::verify().
+        if ($payment->verification_status === 'verified') {
+            $this->receipts->issueFor($payment, auth()->user());
+        }
+
+        return $payment;
     }
 
     /**
@@ -171,8 +190,13 @@ class PaymentService
         $created = [];
         $failed = [];
 
+        // One query for the whole selection rather than a lookup per uuid.
+        // Zone/branch and latest manuscript are what each payment's receipt
+        // reads when it's issued on the spot.
+        $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid');
+
         foreach ($customerUuids as $customerUuid) {
-            $customer = $this->customers->findByUuid($customerUuid);
+            $customer = $customersByUuid->get($customerUuid);
 
             if (! $customer) {
                 $failed[$customerUuid] = 'Customer not found.';
@@ -187,7 +211,7 @@ class PaymentService
             }
 
             try {
-                $created[] = $this->create(new PaymentData(
+                $created[] = $this->createForCustomer($customer, new PaymentData(
                     customerUuid: $customerUuid,
                     amount: (string) $customer->bill,
                     frequency: $frequency,
@@ -204,6 +228,10 @@ class PaymentService
     public function update(Payment $payment, PaymentData $data): Payment
     {
         $attributes = $data->toAttributes();
+
+        if ($data->clearArrearsFirst !== null) {
+            $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
+        }
 
         if ($data->frequency !== null || $data->months !== null) {
             $attributes['expiration_date'] = $this->computeExpirationDate(
@@ -256,6 +284,23 @@ class PaymentService
     private function resolveCustomerId(?string $customerUuid): int
     {
         return $this->resolveCustomer($customerUuid)->id;
+    }
+
+    /**
+     * A prepayment pays off what the customer owes first; only the rest buys
+     * prepaid months (owner's rule, 2026-10: "a prepaid customer can't have
+     * arrears"). Leaving the arrears due is an explicit override reserved
+     * for someone who may approve arrears decisions (`arrears.approve`) —
+     * anyone else, including an agent's phone or an older mobile build that
+     * still sends `false`, always clears arrears first.
+     */
+    private function clearsArrearsFirst(PaymentData $data): bool
+    {
+        if ($data->clearArrearsFirst === false && $this->context->can('arrears.approve')) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

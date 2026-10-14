@@ -181,13 +181,18 @@ class CustomerSubscriptionService
      * subscription at all (a pre-feature row that slipped past the
      * backfill), fall back to attaching the default service at $price so
      * the operation still lands and the invariant is restored.
+     *
+     * Reuses an already-loaded `subscriptions` relation (the bulk tool
+     * loads it for every customer up front) so a bulk run doesn't re-query
+     * each customer's subscription and re-sum its prices.
      */
     public function setSingleServicePrice(Customer $customer, string $price): void
     {
         $price = $this->normalizePrice($price);
 
         DB::transaction(function () use ($customer, $price): void {
-            $row = $customer->subscriptions()->first();
+            $subscriptionsLoaded = $customer->relationLoaded('subscriptions');
+            $row = $subscriptionsLoaded ? $customer->subscriptions->first() : $customer->subscriptions()->first();
 
             if ($row === null) {
                 $default = Service::default();
@@ -198,12 +203,25 @@ class CustomerSubscriptionService
                     ]);
                 }
 
-                $customer->subscriptions()->create([
+                $created = $customer->subscriptions()->create([
                     'service_id' => $default->id,
                     'price' => $price,
                 ]);
+
+                if ($subscriptionsLoaded) {
+                    $customer->subscriptions->push($created);
+                }
             } elseif ($this->normalizePrice((string) $row->price) !== $price) {
                 $row->update(['price' => $price]);
+            }
+
+            if ($subscriptionsLoaded && $customer->subscriptions->count() === 1) {
+                // A single subscription: the bill is exactly its price, so
+                // there's nothing to re-sum.
+                $customer->bill = $price;
+                $customer->save();
+
+                return;
             }
 
             $this->recomputeBill($customer);
@@ -276,7 +294,10 @@ class CustomerSubscriptionService
         $price = $this->normalizePrice($price);
 
         return DB::transaction(function () use ($query, $price): int {
-            $rows = $query->with('customer')->get();
+            // Each customer's full subscription set is eager-loaded so the
+            // bill can be re-summed in memory instead of with a SUM query
+            // per subscriber.
+            $rows = $query->with('customer.subscriptions')->get();
 
             $affected = 0;
 
@@ -287,12 +308,31 @@ class CustomerSubscriptionService
                 }
 
                 if ($row->customer !== null) {
-                    $this->recomputeBill($row->customer);
+                    $this->recomputeBillFromLoadedSubscriptions($row->customer, $row);
                 }
             }
 
             return $affected;
         });
+    }
+
+    /**
+     * recomputeBill() for a customer whose `subscriptions` were eager-loaded
+     * before $changedRow (a separate instance of one of them) was repriced
+     * — syncs that row's new price into the loaded set, then sums in
+     * memory.
+     */
+    private function recomputeBillFromLoadedSubscriptions(Customer $customer, CustomerSubscription $changedRow): void
+    {
+        $customer->subscriptions->firstWhere('id', $changedRow->id)?->setAttribute('price', $changedRow->price);
+
+        $sum = $customer->subscriptions->reduce(
+            fn (string $total, CustomerSubscription $subscription): string => bcadd($total, (string) $subscription->price, 2),
+            '0',
+        );
+
+        $customer->bill = $this->normalizePrice($sum);
+        $customer->save();
     }
 
     private function normalizePrice(string $value): string

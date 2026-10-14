@@ -127,8 +127,12 @@ class CustomerStatusService
         $succeeded = [];
         $skipped = [];
 
+        // One query for the whole selection, with the latest manuscript the
+        // suspend/reconnect paths read, rather than a lookup per uuid.
+        $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid');
+
         foreach ($customerUuids as $uuid) {
-            $customer = $this->customers->findByUuid($uuid);
+            $customer = $customersByUuid->get($uuid);
 
             if (! $customer) {
                 $skipped[$uuid] = 'Customer not found.';
@@ -279,7 +283,7 @@ class CustomerStatusService
 
         return DB::transaction(function () use ($customer, $note, $includeFine, $fine, $hasArrearsPayment, $arrearsPayment, $shouldExtendPrepaid, $frozenSince): Customer {
             if ($includeFine) {
-                $this->payments->create(new PaymentData(
+                $this->payments->createForCustomer($customer, new PaymentData(
                     customerUuid: $customer->uuid,
                     amount: $fine,
                     frequency: 'monthly',
@@ -287,7 +291,7 @@ class CustomerStatusService
             }
 
             if ($hasArrearsPayment) {
-                $this->payments->create(new PaymentData(
+                $this->payments->createForCustomer($customer, new PaymentData(
                     customerUuid: $customer->uuid,
                     amount: $arrearsPayment,
                     frequency: 'monthly',

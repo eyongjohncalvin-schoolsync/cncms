@@ -65,8 +65,8 @@ class DefaultRolesSeeder extends Seeder
             ],
             'admin' => [
                 'label' => 'Administrator',
-                'description' => 'Every permission in the catalog. Office administration, including user and role management.',
-                'permissions' => Permission::values(),
+                'description' => 'Every permission in the catalog except approving opening balances (owner-only by default). Office administration, including user and role management.',
+                'permissions' => self::adminPermissions(),
             ],
             'manager' => [
                 'label' => 'Manager',
@@ -93,6 +93,19 @@ class DefaultRolesSeeder extends Seeder
      *
      * @return list<string>
      */
+    /**
+     * The whole catalog minus `opening_balances.approve`: opening balances
+     * are entered by admins/managers and approved by the owner (super
+     * bypasses every check), so no system role is seeded with the approval
+     * step — it is granted deliberately through Roles & permissions.
+     *
+     * @return list<string>
+     */
+    private static function adminPermissions(): array
+    {
+        return array_values(array_diff(Permission::values(), [Permission::OpeningBalancesApprove->value]));
+    }
+
     private static function managerPermissions(): array
     {
         return [
@@ -139,6 +152,9 @@ class DefaultRolesSeeder extends Seeder
             Permission::ArrearsView->value,
             Permission::ArrearsRequest->value,
             Permission::ArrearsApprove->value,
+
+            Permission::OpeningBalancesView->value,
+            Permission::OpeningBalancesEnter->value,
 
             Permission::AuditView->value,
 

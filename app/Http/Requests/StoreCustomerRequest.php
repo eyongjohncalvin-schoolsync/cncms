@@ -6,6 +6,7 @@ namespace App\Http\Requests;
 
 use App\Models\Customer;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreCustomerRequest extends FormRequest
 {
@@ -44,6 +45,8 @@ class StoreCustomerRequest extends FormRequest
             'others' => ['nullable', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'],
             'phone' => ['required', 'string', 'max:20'],
             'description' => ['nullable', 'string'],
+            'email' => ['nullable', 'email:rfc', 'max:150'],
+            'preferred_channel' => ['nullable', 'string', Rule::in(Customer::PREFERRED_CHANNELS)],
             'level' => ['nullable', 'string', 'in:normal,Vip,Operator'],
             'status' => ['nullable', 'string', 'in:active,passive,disconnected,suspended'],
             'services' => ['required_without:bill', 'array', 'min:1'],

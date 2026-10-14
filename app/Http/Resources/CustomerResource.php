@@ -22,6 +22,8 @@ class CustomerResource extends JsonResource
             'uuid' => $this->uuid,
             'name' => $this->name,
             'phone' => $this->phone,
+            'email' => $this->email,
+            'preferred_channel' => $this->preferred_channel ?? 'whatsapp',
             'zone_uuid' => $this->whenLoaded('zone', fn () => $this->zone->uuid),
             'zone_name' => $this->whenLoaded('zone', fn () => $this->zone->name),
             'bill' => $this->bill,

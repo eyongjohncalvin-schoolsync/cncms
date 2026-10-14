@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Customer;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateCustomerRequest extends FormRequest
 {
@@ -39,6 +41,8 @@ class UpdateCustomerRequest extends FormRequest
             'others' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:20'],
             'description' => ['sometimes', 'nullable', 'string'],
+            'email' => ['sometimes', 'nullable', 'email:rfc', 'max:150'],
+            'preferred_channel' => ['sometimes', 'nullable', 'string', Rule::in(Customer::PREFERRED_CHANNELS)],
             'level' => ['sometimes', 'nullable', 'string', 'in:normal,Vip,Operator'],
             'status' => ['sometimes', 'nullable', 'string', 'in:active,passive,disconnected,suspended'],
             'services' => ['sometimes', 'array', 'min:1'],

@@ -39,9 +39,14 @@ class BillBatch extends Model
         ];
     }
 
+    /**
+     * Chaperoned so each loaded file's `billBatch` is this instance —
+     * BillBatchFile::downloadName() reads it, and the zip build calls that
+     * once per zone file.
+     */
     public function files(): HasMany
     {
-        return $this->hasMany(BillBatchFile::class);
+        return $this->hasMany(BillBatchFile::class)->chaperone();
     }
 
     public function isTerminal(): bool

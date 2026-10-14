@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { BillWhatsappMessageResponse } from '../types/api';
+import type { BillHistoryResponse, BillWhatsappMessageResponse } from '../types/api';
 
 /**
  * GET /api/v1/bills/{uuid}/whatsapp-message — the pre-formatted bill
@@ -16,6 +16,19 @@ import type { BillWhatsappMessageResponse } from '../types/api';
  */
 export async function fetchBillWhatsappMessage(uuid: string): Promise<BillWhatsappMessageResponse> {
     const { data } = await apiClient.get<BillWhatsappMessageResponse>(`/bills/${uuid}/whatsapp-message`);
+
+    return data;
+}
+
+/**
+ * GET /api/v1/bills/{uuid}/history — the customer's last 12 monthly bills
+ * with their bill number and paid status, plus signed statement-of-account
+ * links (opened in the device browser, like receipt PDFs). Online-only.
+ * Gated by `customers.view`; the statement links only for
+ * `customers.print_bill`.
+ */
+export async function fetchBillHistory(uuid: string): Promise<BillHistoryResponse> {
+    const { data } = await apiClient.get<BillHistoryResponse>(`/bills/${uuid}/history`);
 
     return data;
 }

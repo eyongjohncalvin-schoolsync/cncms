@@ -14,6 +14,7 @@ use App\Services\ComplaintService;
 use App\Support\ScheduledTasks\ComplaintEscalationCheckTaskType;
 use Database\Factories\ComplaintFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -258,5 +259,43 @@ class ComplaintEscalationTest extends TestCase
         );
 
         $this->assertSame('resolved', $resolved->status);
+    }
+
+    /**
+     * N+1 regression: a tick where nothing is due must not query
+     * complaint_escalations once per open complaint — the sweep preloads
+     * every complaint's logged levels, so the count stays flat as the
+     * number of open complaints grows.
+     */
+    public function test_an_idle_sweep_does_not_query_escalations_per_complaint(): void
+    {
+        $manager = $this->actingAsRole('manager');
+        $openComplaint = fn () => ComplaintFactory::new()->submittedBy($this->anotherUserId())->create([
+            'assigned_to' => $manager->id,
+            'created_at' => now()->subHours(30),
+        ]);
+
+        $countEscalationQueries = function (): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->runSweep();
+            DB::disableQueryLog();
+
+            return count(array_filter(
+                array_column(DB::getQueryLog(), 'query'),
+                fn (string $sql): bool => str_contains($sql, 'from "complaint_escalations"'),
+            ));
+        };
+
+        $openComplaint();
+        $this->runSweep();
+        $baseline = $countEscalationQueries();
+
+        $openComplaint();
+        $openComplaint();
+        $this->runSweep();
+
+        $this->assertSame($baseline, $countEscalationQueries());
+        $this->assertSame(1, $baseline);
     }
 }

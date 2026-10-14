@@ -9,6 +9,7 @@ use App\Http\Resources\PaymentReceiptResource;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Services\PaymentReceiptService;
+use App\Services\ReceiptEmailService;
 use App\Services\ReceiptWhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +33,7 @@ class PaymentReceiptController extends Controller
     public function __construct(
         private readonly PaymentReceiptService $receipts,
         private readonly ReceiptWhatsAppService $whatsapp,
+        private readonly ReceiptEmailService $email,
     ) {}
 
     public function show(Payment $payment): JsonResponse
@@ -92,13 +94,49 @@ class PaymentReceiptController extends Controller
         ]);
     }
 
-    public function downloadPdf(PaymentReceipt $receipt): StreamedResponse
+    /**
+     * POST /api/v1/payments/{payment}/receipt/send-email — mobile twin of
+     * the web "Email receipt" action: queues the PDF to the customer's
+     * address, or 422s with the reason it can't.
+     */
+    public function sendEmail(Request $request, Payment $payment): JsonResponse
+    {
+        $this->authorize('view', $payment);
+
+        $receipt = $payment->receipt;
+
+        abort_if($receipt === null, 404, 'No receipt has been issued for this payment.');
+
+        $reason = $this->email->unavailableReason($receipt);
+
+        if ($reason !== null) {
+            throw ValidationException::withMessages(['receipt' => [$reason]]);
+        }
+
+        $this->email->queue($receipt, $request->user());
+
+        return response()->json([
+            'message' => "Receipt {$receipt->receipt_number} is being emailed to {$this->email->recipientEmail($receipt)}.",
+        ]);
+    }
+
+    /**
+     * Staff print/download. ?format= picks the A6 sheet (default) or a 58 /
+     * 80 mm roll for pocket printers; every print after the first is
+     * stamped DUPLICATE.
+     */
+    public function downloadPdf(Request $request, PaymentReceipt $receipt): StreamedResponse
     {
         $this->authorize('view', $receipt);
 
-        $path = $this->receipts->pdf($receipt);
+        $format = in_array($request->query('format'), PaymentReceiptService::FORMATS, true)
+            ? (string) $request->query('format')
+            : PaymentReceiptService::FORMAT_A6;
+        $isReprint = $this->receipts->recordPrint($receipt);
 
-        return Storage::disk($receipt->pdf_disk)->download(
+        $path = $this->receipts->pdf($receipt, $format, $isReprint);
+
+        return Storage::disk($this->receipts->disk())->download(
             $path,
             "receipt-{$receipt->receipt_number}.pdf",
         );

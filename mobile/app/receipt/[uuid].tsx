@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
-import { fetchPaymentReceipt, fetchReceiptWhatsappMessage, openReceiptPdf } from '../../src/api/paymentReceipts';
+import { fetchPaymentReceipt, fetchReceiptWhatsappMessage, openReceiptPdf, sendReceiptEmail } from '../../src/api/paymentReceipts';
 import { buildWhatsAppBillLink } from '../../src/utils/whatsapp';
 import { extractErrorMessage, isNetworkError } from '../../src/api/client';
 import { getSyncState, subscribeSyncState } from '../../src/sync/syncStore';
@@ -11,9 +11,15 @@ import { Button } from '../../src/components/ui/Button';
 import { Badge } from '../../src/components/ui/Badge';
 import { EmptyState } from '../../src/components/ui/EmptyState';
 import { colors } from '../../src/theme/colors';
-import { fontSize, spacing } from '../../src/theme/tokens';
+import { fontSize, radius, spacing, touchTarget } from '../../src/theme/tokens';
 import { formatFcfa } from '../../src/utils/format';
-import type { PaymentReceiptApi } from '../../src/types/api';
+import type { PaymentReceiptApi, ReceiptFormat } from '../../src/types/api';
+
+const FORMATS: Array<{ value: ReceiptFormat; label: string }> = [
+    { value: 'a6', label: 'A6 sheet' },
+    { value: 'thermal58', label: '58 mm roll' },
+    { value: 'thermal80', label: '80 mm roll' },
+];
 
 type Phase = 'loading' | 'offline' | 'error' | 'missing' | 'ready';
 
@@ -57,6 +63,8 @@ export default function ReceiptScreen() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [receipt, setReceipt] = useState<PaymentReceiptApi | null>(null);
     const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
+    const [sendingEmail, setSendingEmail] = useState(false);
+    const [format, setFormat] = useState<ReceiptFormat>('a6');
     const phaseRef = useRef<Phase>('loading');
 
     // RBAC v2: PaymentReceiptPolicy::view → `payments.view`.
@@ -147,6 +155,28 @@ export default function ReceiptScreen() {
         }
     }
 
+    /**
+     * "Email receipt" — queues the PDF to the customer's email address
+     * server-side. Disabled (with the reason shown) when the customer has
+     * no email or email is switched off for the company.
+     */
+    async function handleSendEmail() {
+        if (!uuid || sendingEmail) {
+            return;
+        }
+
+        setSendingEmail(true);
+
+        try {
+            const { message } = await sendReceiptEmail(uuid);
+            Alert.alert('Receipt emailed', message);
+        } catch (error) {
+            Alert.alert('Could not email receipt', extractErrorMessage(error, "Couldn't reach the server."));
+        } finally {
+            setSendingEmail(false);
+        }
+    }
+
     if (authStatus === 'loading') {
         return (
             <View style={styles.center}>
@@ -227,6 +257,7 @@ export default function ReceiptScreen() {
                 </View>
                 <Text style={styles.amount}>{formatFcfa(Number(receipt.amount))}</Text>
                 <Text style={styles.issued}>Issued {formatDateTime(receipt.issued_at)}</Text>
+                {receipt.invoice_number ? <Text style={styles.issued}>For bill {receipt.invoice_number}</Text> : null}
             </Card>
 
             {isVoid ? (
@@ -237,7 +268,30 @@ export default function ReceiptScreen() {
                 </Card>
             ) : (
                 <>
-                    <Button title="View PDF" size="large" onPress={() => void openReceiptPdf(receipt.shared_pdf_url)} />
+                    {/* A6 for a normal printer / sharing; 58 or 80 mm for a
+                        Bluetooth pocket printer (the PDF is sized to the roll). */}
+                    <View style={styles.formatRow}>
+                        {FORMATS.map((option) => {
+                            const selected = option.value === format;
+
+                            return (
+                                <Pressable
+                                    key={option.value}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected }}
+                                    onPress={() => setFormat(option.value)}
+                                    style={[styles.formatChip, selected && styles.formatChipSelected]}
+                                >
+                                    <Text style={[styles.formatChipLabel, selected && styles.formatChipLabelSelected]}>{option.label}</Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+                    <Button
+                        title={format === 'a6' ? 'View / Print PDF' : 'Print on pocket printer'}
+                        size="large"
+                        onPress={() => void openReceiptPdf(receipt.shared_pdf_urls?.[format] ?? receipt.shared_pdf_url)}
+                    />
                     <Button
                         title={sendingWhatsapp ? 'Preparing…' : 'Send via WhatsApp'}
                         loading={sendingWhatsapp}
@@ -245,6 +299,14 @@ export default function ReceiptScreen() {
                         onPress={() => void handleSendWhatsapp()}
                         style={styles.whatsappButton}
                     />
+                    <Button
+                        title={sendingEmail ? 'Sending…' : receipt.customer_email ? `Email to ${receipt.customer_email}` : 'Email receipt'}
+                        variant="secondary"
+                        loading={sendingEmail}
+                        disabled={sendingEmail || receipt.email_unavailable_reason !== null}
+                        onPress={() => void handleSendEmail()}
+                    />
+                    {receipt.email_unavailable_reason ? <Text style={styles.hint}>{receipt.email_unavailable_reason}</Text> : null}
                 </>
             )}
         </ScrollView>
@@ -260,6 +322,21 @@ const styles = StyleSheet.create({
     amount: { fontSize: fontSize.xxl, fontWeight: '800', color: colors.textPrimary, marginTop: spacing.sm },
     issued: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: spacing.xs },
     voidNote: { fontSize: fontSize.sm, color: colors.textSecondary },
+    hint: { fontSize: fontSize.xs, color: colors.textSecondary, textAlign: 'center' },
+    formatRow: { flexDirection: 'row', gap: spacing.sm },
+    formatChip: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: touchTarget.floor,
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.surface,
+    },
+    formatChipSelected: { backgroundColor: colors.accent.payment, borderColor: colors.accent.payment },
+    formatChipLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+    formatChipLabelSelected: { color: colors.textInverse },
     // WhatsApp-brand treatment, same darker AAA-safe teal as Customer
     // Detail's "Send Bill via WhatsApp" — see colors.whatsapp's doc comment.
     whatsappButton: { backgroundColor: colors.whatsapp },

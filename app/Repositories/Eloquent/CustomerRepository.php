@@ -6,6 +6,7 @@ namespace App\Repositories\Eloquent;
 
 use App\DataTransferObjects\CustomerData;
 use App\Models\Customer;
+use App\Models\Zone;
 use App\Repositories\Concerns\ScopesByBranch;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -124,10 +125,22 @@ class CustomerRepository implements CustomerRepositoryInterface
             ->get();
     }
 
-    public function findManyByUuids(array $uuids): Collection
+    public function findManyByUuids(array $uuids, array $with = []): Collection
     {
         return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->with($with)
             ->whereIn('uuid', $uuids)
+            ->get();
+    }
+
+    public function withoutManuscripts(?array $uuids = null): Collection
+    {
+        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+            ->with('zone')
+            ->when($uuids !== null, fn ($query) => $query->whereIn('uuid', $uuids))
+            ->whereDoesntHave('manuscripts')
+            ->orderBy(Zone::query()->select('name')->whereColumn('zones.id', 'customers.zone_id'))
+            ->orderBy('name')
             ->get();
     }
 

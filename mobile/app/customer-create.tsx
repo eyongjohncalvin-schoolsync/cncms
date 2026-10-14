@@ -13,9 +13,10 @@ import { Button } from '../src/components/ui/Button';
 import { TextInput } from '../src/components/ui/TextInput';
 import { EmptyState } from '../src/components/ui/EmptyState';
 import { ServicesPicker } from '../src/components/customers/ServicesPicker';
+import { ReceiptDeliveryFields } from '../src/components/customers/ReceiptDeliveryFields';
 import { colors } from '../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../src/theme/tokens';
-import type { CustomerServiceSelection, ServiceCatalogueApi } from '../src/types/api';
+import type { CustomerServiceSelection, PreferredChannel, ServiceCatalogueApi } from '../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting';
 
@@ -76,6 +77,8 @@ export default function CustomerCreateScreen() {
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const [location, setLocation] = useState('');
+    const [email, setEmail] = useState('');
+    const [preferredChannel, setPreferredChannel] = useState<PreferredChannel>('whatsapp');
     const [level, setLevel] = useState<'normal' | 'Vip' | 'Operator'>('normal');
     const [zoneUuid, setZoneUuid] = useState<string | null>(null);
     const [services, setServices] = useState<CustomerServiceSelection[]>([]);
@@ -165,6 +168,8 @@ export default function CustomerCreateScreen() {
                 name: name.trim(),
                 phone: phone.trim(),
                 location: location.trim() || undefined,
+                email: email.trim() || undefined,
+                preferred_channel: preferredChannel,
                 level,
                 services,
             });
@@ -193,6 +198,7 @@ export default function CustomerCreateScreen() {
                     phone: fieldErrors.phone?.[0],
                     zone_uuid: fieldErrors.zone_uuid?.[0],
                     location: fieldErrors.location?.[0],
+                    email: fieldErrors.email?.[0],
                     services: firstServicesError(fieldErrors) ?? prev.services,
                 }));
             }
@@ -300,6 +306,20 @@ export default function CustomerCreateScreen() {
                         );
                     })}
                 </View>
+            </Card>
+
+            <Card>
+                <Text style={styles.sectionTitle}>Receipts</Text>
+                <ReceiptDeliveryFields
+                    email={email}
+                    onEmailChange={(text) => {
+                        setEmail(text);
+                        setErrors((prev) => ({ ...prev, email: undefined }));
+                    }}
+                    channel={preferredChannel}
+                    onChannelChange={setPreferredChannel}
+                    emailError={errors.email}
+                />
             </Card>
 
             <Card>

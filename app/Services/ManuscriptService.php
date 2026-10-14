@@ -11,6 +11,7 @@ use App\Models\Zone;
 use App\Repositories\Contracts\ManuscriptRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
 use App\Support\TenantContext;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
@@ -118,6 +119,13 @@ class ManuscriptService
      * trusts its caller to have filtered (see its doc comment), so the filter
      * lives here.
      *
+     * SOMETHING TO PAY ONLY (owner's ask, 2026-10 — saves paper): an active
+     * customer whose manuscript total_bill is 0 gets no slip either. The
+     * calculator already folds every "nothing due" case into that one
+     * figure — credit covering the bill, a prepaid draw-down month, a
+     * legacy payment_expiration still ahead — so a prepaid customer who
+     * still owes old arrears (total_bill = that debt) is still billed.
+     *
      * ORDER (owner's ask, 2026-08-30): grouped by zone, zones alphabetical,
      * customers alphabetical within each zone, so an agent walking a zone
      * gets that zone's bills as one contiguous run. Case-insensitive; a
@@ -131,7 +139,8 @@ class ManuscriptService
         $scoped = $this->scopedFilters($filters);
 
         $customers = $this->manuscripts->all($scoped)
-            ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active')
+            ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active'
+                && bccomp((string) $manuscript->total_bill, '0', 2) > 0)
             ->sortBy(fn (Manuscript $manuscript): string => mb_strtolower(
                 ($manuscript->customer?->zone?->name ?? '')."\0".($manuscript->customer?->name ?? '')
             ))
@@ -201,12 +210,25 @@ class ManuscriptService
         $company = Company::cached();
         $logoDataUri = $company?->logoDataUri();
 
+        $customers = collect($customers);
+
+        if ($period !== null) {
+            $this->assertValidPeriod($period);
+            $manuscriptsByCustomer = $this->manuscripts->forCustomersAndPeriod($customers->pluck('id')->all(), $period);
+        } else {
+            $customers = new EloquentCollection($customers->all());
+            $customers->loadMissing('latestManuscript');
+            $manuscriptsByCustomer = $customers
+                ->filter(fn (Customer $customer): bool => $customer->latestManuscript !== null)
+                ->mapWithKeys(fn (Customer $customer): array => [$customer->id => $customer->latestManuscript]);
+        }
+
         $bills = [];
 
         foreach ($customers as $customer) {
-            try {
-                $manuscript = $this->resolveManuscript($customer, $period);
-            } catch (ModelNotFoundException) {
+            $manuscript = $manuscriptsByCustomer->get($customer->id);
+
+            if (! $manuscript) {
                 continue;
             }
 
@@ -278,8 +300,8 @@ class ManuscriptService
      */
     private function resolveManuscript(Customer $customer, ?string $period): Manuscript
     {
-        if ($period !== null && ! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
-            throw ValidationException::withMessages(['period' => ['The period must be in YYYY-MM format.']]);
+        if ($period !== null) {
+            $this->assertValidPeriod($period);
         }
 
         $manuscript = $period !== null
@@ -295,6 +317,16 @@ class ManuscriptService
         }
 
         return $manuscript;
+    }
+
+    /**
+     * @throws ValidationException when $period is not in YYYY-MM format
+     */
+    private function assertValidPeriod(string $period): void
+    {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
+            throw ValidationException::withMessages(['period' => ['The period must be in YYYY-MM format.']]);
+        }
     }
 
     /**
@@ -348,9 +380,7 @@ class ManuscriptService
      */
     private function accountCode(Customer $customer): string
     {
-        $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $customer->zone?->name ?? ''), 0, 6));
-
-        return sprintf('%s-%04d', $prefix !== '' ? $prefix : 'ACCT', $customer->id);
+        return $customer->accountCode();
     }
 
     /**
@@ -364,9 +394,7 @@ class ManuscriptService
      */
     private function billNumber(Customer $customer, string $period): string
     {
-        $tenantCode = strtoupper((string) (tenant()?->id ?? 'TEN'));
-
-        return sprintf('%s-%s-%06d', $tenantCode, str_replace('-', '', $period), $customer->id);
+        return Manuscript::billNumberFor($customer->id, $period);
     }
 
     /**

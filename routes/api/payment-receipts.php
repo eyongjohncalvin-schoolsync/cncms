@@ -14,3 +14,4 @@ Route::get('payment-receipts/{receipt}/pdf', [PaymentReceiptController::class, '
 // Wave 3 — manual "Send via WhatsApp" ingredients ({phone, message}) for the
 // mobile receipt screen; also logs the send to sent_log.
 Route::get('payments/{payment}/receipt/whatsapp-message', [PaymentReceiptController::class, 'whatsappMessage'])->name('api.payments.receipt.whatsapp-message');
+Route::post('payments/{payment}/receipt/send-email', [PaymentReceiptController::class, 'sendEmail'])->name('api.payments.receipt.send-email');

@@ -342,6 +342,10 @@ export interface CustomerDetailApi {
     status_reason: string | null;
     status_note: string | null;
     location: string | null;
+    /** Where emailed receipts go (optional). */
+    email: string | null;
+    /** How the customer wants their receipts — drives the server's "To send" list. */
+    preferred_channel: PreferredChannel;
     created_at: string;
     manuscript: CustomerManuscriptSummary | null;
     recent_payments: CustomerRecentPaymentApi[];
@@ -382,11 +386,15 @@ export interface CustomerServiceSelection {
     price: string;
 }
 
+export type PreferredChannel = 'whatsapp' | 'email' | 'print';
+
 export interface CreateCustomerRequestBody {
     zone_uuid: string;
     name: string;
     phone: string;
     location?: string;
+    email?: string | null;
+    preferred_channel?: PreferredChannel;
     level?: 'normal' | 'Vip' | 'Operator';
     description?: string;
     services: CustomerServiceSelection[];
@@ -719,6 +727,41 @@ export interface PaymentReceiptApi {
     pdf_url: string;
     /** Signed ~7-day public link — opened in the device browser / WhatsApp. */
     shared_pdf_url: string;
+    /** Same link per paper size: A6 sheet, or a 58 / 80 mm pocket-printer roll. */
+    shared_pdf_urls: Record<ReceiptFormat, string>;
+    /** The bill (invoice) this payment went toward, e.g. "SWECOM-202610-000123". */
+    invoice_number: string | null;
+    customer_email: string | null;
+    /** Why "Email receipt" can't be used right now, or null when it can. */
+    email_unavailable_reason: string | null;
+}
+
+export type ReceiptFormat = 'a6' | 'thermal58' | 'thermal80';
+
+/** POST /api/v1/payments/{uuid}/receipt/send-email */
+export interface SendReceiptEmailResponse {
+    message: string;
+}
+
+export type BillStatus = 'paid' | 'partly_paid' | 'unpaid' | 'nothing_due';
+
+/** One monthly bill (invoice) — GET /api/v1/bills/{uuid}/history. */
+export interface BillHistoryRowApi {
+    period: string;
+    number: string;
+    monthly_charge: string;
+    amount_due: string;
+    paid: string;
+    status: BillStatus;
+    /** Positive = owes after this bill, negative = in credit. */
+    balance: string;
+    prepaid_months_remaining: number;
+}
+
+export interface BillHistoryResponse {
+    data: BillHistoryRowApi[];
+    /** Signed statement-of-account links keyed by months ("6" / "12" / "24"); null without `customers.print_bill`. */
+    statement_urls: Record<'6' | '12' | '24', string> | null;
 }
 
 export interface PaymentReceiptResponse {

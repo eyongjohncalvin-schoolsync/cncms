@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CustomerRecordExportController;
+use App\Http\Controllers\CustomerStatementController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('customers', [CustomerController::class, 'index'])->name('customers.index');
@@ -44,6 +45,12 @@ Route::patch('customers/{customer}/reconnect', [CustomerController::class, 'reco
 Route::get('customers/{customer}/bill/print', [CustomerController::class, 'printBill'])
     ->name('customers.bill.print')
     ->middleware('throttle:exports');
+// Statement of account (CustomerStatementController) — same gate and
+// limiter as printing a bill; an archived customer's statement still works.
+Route::get('customers/{customer}/statement', [CustomerStatementController::class, 'pdf'])
+    ->name('customers.statement')
+    ->middleware('throttle:exports')
+    ->withTrashed();
 // "Export full record" (docs/plans/customer-record-export.md) — one
 // downloadable PDF / multi-sheet XLSX bundling everything CNCMS holds about
 // one customer, for an auditor or a billing dispute. Gated

@@ -87,9 +87,22 @@ interface CustomerRepositoryInterface
      * actions elsewhere in the app do.
      *
      * @param  string[]  $uuids
+     * @param  array<int, string>  $with
      * @return Collection<int, Customer>
      */
-    public function findManyByUuids(array $uuids): Collection;
+    public function findManyByUuids(array $uuids, array $with = []): Collection;
+
+    /**
+     * Customers with no manuscript at all yet — the ones whose starting
+     * balance an opening-balances batch can still set — with their zone,
+     * ordered zone-then-name like a paper ledger. Branch-fenced like every
+     * other listing. $uuids narrows it to those customers (an autosave
+     * checking just the rows it was sent).
+     *
+     * @param  string[]|null  $uuids
+     * @return Collection<int, Customer>
+     */
+    public function withoutManuscripts(?array $uuids = null): Collection;
 
     /**
      * Every customer matching $filters (same supported keys as paginate():

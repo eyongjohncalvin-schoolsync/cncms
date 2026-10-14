@@ -87,14 +87,18 @@ final class ReceiptWhatsAppService
      * Append a send record to the receipt's `sent_log` jsonb array — the
      * audit trail of "we sent this receipt to the customer".
      */
-    public function recordSent(PaymentReceipt $receipt, string $channel, User $actor, string $to): void
+    /**
+     * Appends one delivery to the receipt's sent_log. $actor is null for an
+     * automatic send (auto-email on verification).
+     */
+    public function recordSent(PaymentReceipt $receipt, string $channel, ?User $actor, string $to): void
     {
         $log = $receipt->sent_log ?? [];
 
         $log[] = [
             'channel' => $channel,
             'at' => now()->toIso8601String(),
-            'by' => $actor->id,
+            'by' => $actor?->id,
             'to' => $to,
         ];
 

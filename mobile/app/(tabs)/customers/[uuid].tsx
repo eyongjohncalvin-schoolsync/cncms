@@ -5,6 +5,7 @@ import { Card } from '../../../src/components/ui/Card';
 import { Button } from '../../../src/components/ui/Button';
 import { Badge, type BadgeTone } from '../../../src/components/ui/Badge';
 import { EmptyState } from '../../../src/components/ui/EmptyState';
+import { BillHistoryCard } from '../../../src/components/customers/BillHistoryCard';
 import { getCustomerByUuid, parseLocalCustomerServices } from '../../../src/db/customers';
 import { getLastPaymentForCustomer } from '../../../src/db/payments';
 import { fetchBillWhatsappMessage } from '../../../src/api/bills';
@@ -289,6 +290,8 @@ export default function CustomerDetailScreen() {
                     <Text style={styles.noPayment}>No payment recorded from this device yet.</Text>
                 )}
             </Card>
+
+            {uuid && can('customers.view') ? <BillHistoryCard customerUuid={uuid} /> : null}
 
             <Button
                 title={needsReconnect ? 'Reconnect & Pay' : 'Record Payment'}

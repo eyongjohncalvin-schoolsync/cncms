@@ -52,7 +52,7 @@ class CheckPushReceiptsJob implements ShouldQueue
 
     public function handle(ExpoPushService $expo, PushTokenRepositoryInterface $pushTokens): void
     {
-        $pending = PushTicket::query()->where('status', 'pending')->get();
+        $pending = PushTicket::query()->with('devicePushToken')->where('status', 'pending')->get();
 
         if ($pending->isEmpty()) {
             return;
@@ -78,6 +78,7 @@ class CheckPushReceiptsJob implements ShouldQueue
 
         $now = Carbon::now();
         $giveUpBefore = $now->clone()->subHours(self::GIVE_UP_AFTER_HOURS);
+        $checkedIds = [];
 
         foreach ($chunk as $ticket) {
             $receipt = $receipts[$ticket->ticket_id] ?? null;
@@ -86,7 +87,7 @@ class CheckPushReceiptsJob implements ShouldQueue
                 // Not ready yet — leave pending, unless it's old enough
                 // that we give up waiting (see GIVE_UP_AFTER_HOURS above).
                 if ($ticket->created_at?->lessThan($giveUpBefore)) {
-                    $ticket->update(['status' => 'checked', 'checked_at' => $now]);
+                    $checkedIds[] = $ticket->id;
                 }
 
                 continue;
@@ -100,7 +101,12 @@ class CheckPushReceiptsJob implements ShouldQueue
                 }
             }
 
-            $ticket->update(['status' => 'checked', 'checked_at' => $now]);
+            $checkedIds[] = $ticket->id;
+        }
+
+        // One UPDATE for the whole chunk rather than one per ticket.
+        if ($checkedIds !== []) {
+            PushTicket::query()->whereIn('id', $checkedIds)->update(['status' => 'checked', 'checked_at' => $now]);
         }
     }
 }

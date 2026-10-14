@@ -174,10 +174,16 @@ export interface Branch {
     zone_count?: number;
 }
 
+export type PreferredChannel = 'whatsapp' | 'email' | 'print';
+
 export interface Customer {
     uuid: string;
     name: string;
     phone: string | null;
+    /** Present where CustomerController::shapeCustomer() supplies it. */
+    email?: string | null;
+    /** Where receipts go — WhatsApp (default), email, or handed over printed. */
+    preferred_channel?: PreferredChannel;
     zone_uuid: string;
     zone_name: string;
     bill: string;
@@ -313,6 +319,12 @@ export interface PaymentReceipt {
     sent_count: number;
     /** ISO timestamp of the most recent send, or null if never sent. */
     last_sent_at: string | null;
+    /** 'whatsapp_manual' | 'email' — how it was last sent. */
+    last_sent_channel?: string | null;
+    /** The customer's email the receipt would be emailed to, if any. */
+    email_to?: string | null;
+    /** Why "Email receipt" is unavailable (no email, email switched off, void), or null. */
+    email_unavailable_reason?: string | null;
 }
 
 /** The trimmed receipt indicator carried on Payments/Index.tsx list rows. */
@@ -553,6 +565,7 @@ export interface NotificationSettings {
     whatsapp_enabled: boolean;
     email_enabled: boolean;
     sms_enabled: boolean;
+    auto_send_receipts: boolean;
     twilio_account_sid: string | null;
     twilio_auth_token: string | null;
     twilio_whatsapp_number: string | null;

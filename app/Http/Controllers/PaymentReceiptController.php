@@ -8,10 +8,12 @@ use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\Tenant;
 use App\Services\PaymentReceiptService;
+use App\Services\ReceiptEmailService;
 use App\Services\ReceiptWhatsAppService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -29,19 +31,30 @@ class PaymentReceiptController extends Controller
     public function __construct(
         private readonly PaymentReceiptService $receipts,
         private readonly ReceiptWhatsAppService $whatsapp,
+        private readonly ReceiptEmailService $email,
     ) {}
 
     /**
      * Streams the receipt PDF to an authenticated staff member. Renders +
      * caches it on first call via PaymentReceiptService::pdf().
      */
-    public function downloadPdf(PaymentReceipt $receipt): StreamedResponse
+    /**
+     * Staff print/download. ?format= picks the A6 sheet (default) or a 58 /
+     * 80 mm roll for pocket printers; every print after the first is
+     * stamped DUPLICATE.
+     */
+    public function downloadPdf(Request $request, PaymentReceipt $receipt): StreamedResponse
     {
         $this->authorize('view', $receipt);
 
-        $path = $this->receipts->pdf($receipt);
+        $format = in_array($request->query('format'), PaymentReceiptService::FORMATS, true)
+            ? (string) $request->query('format')
+            : PaymentReceiptService::FORMAT_A6;
+        $isReprint = $this->receipts->recordPrint($receipt);
 
-        return Storage::disk($receipt->pdf_disk)->download(
+        $path = $this->receipts->pdf($receipt, $format, $isReprint);
+
+        return Storage::disk($this->receipts->disk())->download(
             $path,
             "receipt-{$receipt->receipt_number}.pdf",
         );
@@ -116,6 +129,28 @@ class PaymentReceiptController extends Controller
      * bound by a plain string uuid, NOT route-model binding, precisely
      * because binding would query the central connection before this runs.
      */
+    /**
+     * Queues the receipt by email (PDF attached) to the customer's address.
+     */
+    public function sendEmail(Request $request, Payment $payment): RedirectResponse
+    {
+        $receipt = $payment->receipt;
+
+        abort_if($receipt === null, 422, 'No receipt has been issued for this payment.');
+
+        $this->authorize('view', $receipt);
+
+        $reason = $this->email->unavailableReason($receipt);
+
+        if ($reason !== null) {
+            return back()->with('error', $reason);
+        }
+
+        $this->email->queue($receipt, $request->user());
+
+        return back()->with('success', "Receipt {$receipt->receipt_number} is being emailed to {$this->email->recipientEmail($receipt)}.");
+    }
+
     public function sharedPdf(Request $request, string $receiptUuid): StreamedResponse
     {
         $tenantKey = (string) $request->query('tenant', '');
@@ -133,11 +168,44 @@ class PaymentReceiptController extends Controller
         // receipt ever existed to an unauthenticated caller.
         abort_if($receipt === null || $receipt->isVoid(), 404);
 
-        $path = $this->receipts->pdf($receipt);
+        // ?format= is part of the signed URL, so it can't be swapped.
+        $format = in_array($request->query('format'), PaymentReceiptService::FORMATS, true)
+            ? (string) $request->query('format')
+            : PaymentReceiptService::FORMAT_A6;
 
-        return Storage::disk($receipt->pdf_disk)->download(
+        $path = $this->receipts->pdf($receipt, $format);
+
+        return Storage::disk($this->receipts->disk())->download(
             $path,
             "receipt-{$receipt->receipt_number}.pdf",
         );
+    }
+
+    /**
+     * The public page a receipt's QR code opens (signed, never expiring —
+     * App\Support\PaymentReceiptLink::verify()): confirms the receipt is
+     * genuine, or that it was voided. Shows only what is printed on the
+     * receipt itself.
+     */
+    public function verify(Request $request, string $receiptUuid): View
+    {
+        $tenant = Tenant::find((string) $request->query('tenant', ''));
+        abort_if($tenant === null, 404);
+
+        tenancy()->initialize($tenant);
+
+        $receipt = PaymentReceipt::query()->where('uuid', $receiptUuid)->first();
+        abort_if($receipt === null, 404);
+
+        $snapshot = $receipt->snapshot ?? [];
+
+        return view('receipts.verify', [
+            'isVoid' => $receipt->isVoid(),
+            'receiptNumber' => $receipt->receipt_number,
+            'amount' => (string) $receipt->amount,
+            'issuedAt' => $receipt->issued_at,
+            'customerName' => $snapshot['customer']['name'] ?? null,
+            'companyName' => $snapshot['company']['name'] ?? null,
+        ]);
     }
 }

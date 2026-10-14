@@ -12,7 +12,6 @@ use App\Http\Requests\RejectArrearsAdjustmentRequest;
 use App\Http\Requests\StoreArrearsAdjustmentRequest;
 use App\Models\ArrearsAdjustment;
 use App\Services\ArrearsAdjustmentService;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -129,10 +128,13 @@ class ArrearsAdjustmentController extends Controller
         $secondApprovalCount = 0;
         $skippedCount = 0;
 
-        foreach ($request->validated('adjustment_uuids') as $uuid) {
-            try {
-                $adjustment = $this->adjustments->findOrFail($uuid);
-            } catch (ModelNotFoundException) {
+        $uuids = $request->validated('adjustment_uuids');
+        $adjustmentsByUuid = $this->adjustments->findManyByUuids($uuids);
+
+        foreach ($uuids as $uuid) {
+            $adjustment = $adjustmentsByUuid->get($uuid);
+
+            if (! $adjustment) {
                 $skippedCount++;
 
                 continue;

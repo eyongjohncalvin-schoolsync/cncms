@@ -15,7 +15,9 @@ use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -213,5 +215,64 @@ class BillGridRenderTest extends TestCase
 
         $this->assertNotNull($logoValues[0]);
         $this->assertCount(1, array_unique($logoValues), 'Every bill in the batch should share the same resolved logo data URI.');
+    }
+
+    /**
+     * N+1 regression: resolving each customer's manuscript must be batched,
+     * so the query count stays flat as the batch grows — both for an
+     * explicit period and for the latest-manuscript (null period) path.
+     */
+    public function test_bill_data_for_customers_does_not_query_once_per_customer(): void
+    {
+        CompanyFactory::new()->create();
+        Company::forgetCache();
+        Company::cached()?->logoDataUri();
+
+        $service = app(ManuscriptService::class);
+        $period = now()->format('Y-m');
+
+        $countQueries = function (Collection $customers, ?string $period) use ($service): int {
+            $customers = $customers->map(fn (Customer $customer): Customer => $customer->fresh('zone'));
+
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $bills = $service->billDataForCustomers($customers, $period);
+            DB::disableQueryLog();
+
+            $this->assertCount($customers->count(), $bills);
+
+            return count(DB::getQueryLog());
+        };
+
+        $small = $this->customersWithManuscripts(2);
+        $large = $this->customersWithManuscripts(6);
+
+        $this->assertSame($countQueries($small, $period), $countQueries($large, $period));
+        $this->assertSame($countQueries($small, null), $countQueries($large, null));
+    }
+
+    public function test_bill_data_for_customers_skips_customers_without_a_manuscript_for_the_period(): void
+    {
+        CompanyFactory::new()->create();
+
+        $withManuscript = $this->customersWithManuscripts(2);
+        $without = CustomerFactory::new()->create(['zone_id' => $withManuscript->first()->zone_id]);
+
+        $bills = app(ManuscriptService::class)->billDataForCustomers(
+            $withManuscript->push($without),
+            now()->format('Y-m'),
+        );
+
+        $this->assertSame(
+            $withManuscript->take(2)->pluck('id')->all(),
+            array_map(fn (array $bill): int => $bill['customer']->id, $bills),
+        );
+    }
+
+    public function test_bill_data_for_customers_rejects_a_malformed_period(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        app(ManuscriptService::class)->billDataForCustomers($this->customersWithManuscripts(1), '2026-13');
     }
 }

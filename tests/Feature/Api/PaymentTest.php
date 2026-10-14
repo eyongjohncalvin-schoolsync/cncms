@@ -187,4 +187,56 @@ class PaymentTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+    /**
+     * Owner's rule (2026-10): a prepayment pays off arrears first by
+     * default; only someone who may approve arrears can leave them due.
+     */
+    public function test_a_prepayment_clears_arrears_first_by_default(): void
+    {
+        $customer = $this->customer();
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$this->tokenForRole('manager'))
+            ->postJson('/api/v1/payments', ['customer_uuid' => $customer->uuid, 'amount' => 7500, 'frequency' => 'months', 'months' => 3]);
+
+        $response->assertCreated();
+        $this->assertTrue($response->json('data.clear_arrears_first'));
+    }
+
+    public function test_an_arrears_approver_can_leave_arrears_due_on_a_prepayment(): void
+    {
+        $customer = $this->customer();
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$this->tokenForRole('manager'))
+            ->postJson('/api/v1/payments', [
+                'customer_uuid' => $customer->uuid, 'amount' => 7500, 'frequency' => 'months', 'months' => 3, 'clear_arrears_first' => false,
+            ]);
+
+        $response->assertCreated();
+        $this->assertFalse($response->json('data.clear_arrears_first'));
+    }
+
+    public function test_an_agent_cannot_leave_arrears_due_on_a_prepayment(): void
+    {
+        $customer = $this->customer();
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$this->tokenForRole('agent'))
+            ->postJson('/api/v1/payments', [
+                'customer_uuid' => $customer->uuid, 'amount' => 7500, 'frequency' => 'yearly', 'clear_arrears_first' => false,
+            ]);
+
+        $response->assertCreated();
+        $this->assertTrue($response->json('data.clear_arrears_first'));
+    }
+
+    public function test_a_monthly_payment_is_not_marked_as_clearing_arrears_first(): void
+    {
+        $customer = $this->customer();
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$this->tokenForRole('manager'))
+            ->postJson('/api/v1/payments', ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly']);
+
+        $response->assertCreated();
+        $this->assertFalse($response->json('data.clear_arrears_first'));
+    }
 }
