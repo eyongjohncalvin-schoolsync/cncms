@@ -18,6 +18,7 @@ import {
     IconShieldLock,
     IconScale,
     IconBook2,
+    IconSend,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -137,6 +138,10 @@ const arrearsAdjustmentsNavItem = { href: '/arrears-adjustments', labelKey: 'com
 // `opening_balances.*` permissions.
 const openingBalancesNavItem = { href: '/opening-balances', labelKey: 'common.opening_balances', icon: IconBook2, accent: 'emerald' as const };
 
+// "To send" — receipts (`payments.view`) and this month's bills
+// (`manuscripts.send_bill`) still waiting to reach the customer.
+const sendQueueNavItem = { href: '/to-send', labelKey: 'common.to_send', icon: IconSend, accent: 'green' as const };
+
 // Disconnections (bulk customer status workboard) — CustomerPolicy::
 // viewStatusBoard → `customers.status_board`.
 const disconnectionsNavItem = { href: '/disconnections', labelKey: 'common.disconnections', icon: IconUserOff, accent: 'red' as const };
@@ -188,6 +193,7 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         // The agent variant — only when the user has the eligibility board
         // but NOT the full status board (which supersedes it).
         ...(can('customers.eligibility_board') && !can('customers.status_board') ? [eligibilityNavItem] : []),
+        ...(canAny('payments.view', 'manuscripts.send_bill') ? [sendQueueNavItem] : []),
         ...(can('reports.view') ? [reportsNavItem] : []),
         ...(can('manuscripts.view') ? [agentAppNavItem] : []),
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),

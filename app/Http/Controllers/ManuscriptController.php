@@ -15,6 +15,7 @@ use App\Services\BillNotificationService;
 use App\Services\ManuscriptGenerationBatchService;
 use App\Services\ManuscriptPreRunReviewService;
 use App\Services\ManuscriptService;
+use App\Services\SendQueueService;
 use App\Services\ZoneService;
 use App\Support\ResolvesCommandRunBatchProgress;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -515,6 +516,16 @@ class ManuscriptController extends Controller
             'status' => 'link_opened',
             'type' => 'bill_reminder',
         ]);
+
+        // The month's bill leaves the "To send" list once it's been sent.
+        if ($customer->latestManuscript !== null) {
+            app(SendQueueService::class)->recordBillSent(
+                $customer->latestManuscript,
+                request()->user(),
+                'whatsapp_manual',
+                $this->billNotifications->normalizedPhone($customer),
+            );
+        }
 
         return redirect()->back()->with('success', "Bill reminder logged for {$customer->name}.");
     }
