@@ -80,7 +80,7 @@ class BillBatchService
 
         if ($customers->isEmpty()) {
             throw ValidationException::withMessages([
-                'period' => ["No active customers have a bill for {$resolvedPeriod} — nothing to generate."],
+                'period' => ["No active customer has anything to pay for {$resolvedPeriod} — nothing to generate."],
             ]);
         }
 

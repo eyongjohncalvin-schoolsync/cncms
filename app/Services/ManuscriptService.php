@@ -119,6 +119,13 @@ class ManuscriptService
      * trusts its caller to have filtered (see its doc comment), so the filter
      * lives here.
      *
+     * SOMETHING TO PAY ONLY (owner's ask, 2026-10 — saves paper): an active
+     * customer whose manuscript total_bill is 0 gets no slip either. The
+     * calculator already folds every "nothing due" case into that one
+     * figure — credit covering the bill, a prepaid draw-down month, a
+     * legacy payment_expiration still ahead — so a prepaid customer who
+     * still owes old arrears (total_bill = that debt) is still billed.
+     *
      * ORDER (owner's ask, 2026-08-30): grouped by zone, zones alphabetical,
      * customers alphabetical within each zone, so an agent walking a zone
      * gets that zone's bills as one contiguous run. Case-insensitive; a
@@ -132,7 +139,8 @@ class ManuscriptService
         $scoped = $this->scopedFilters($filters);
 
         $customers = $this->manuscripts->all($scoped)
-            ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active')
+            ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active'
+                && bccomp((string) $manuscript->total_bill, '0', 2) > 0)
             ->sortBy(fn (Manuscript $manuscript): string => mb_strtolower(
                 ($manuscript->customer?->zone?->name ?? '')."\0".($manuscript->customer?->name ?? '')
             ))

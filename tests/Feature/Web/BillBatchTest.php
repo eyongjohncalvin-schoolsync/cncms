@@ -131,6 +131,58 @@ class BillBatchTest extends TestCase
         $this->assertSame($before, BillBatch::query()->count());
     }
 
+    /**
+     * Paper saving (owner's ask): only active customers with something to
+     * pay get a slip — not one whose credit covers the bill, whose prepaid
+     * months cover it, or whose legacy expiry date is still ahead (all of
+     * which the calculator records as total_bill = 0). A prepaid customer
+     * still owing old arrears does get one.
+     */
+    public function test_generate_skips_customers_with_nothing_to_pay(): void
+    {
+        Bus::fake();
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+        $zone = ZoneFactory::new()->create(['name' => 'ZZ '.Str::random(6)]);
+
+        $customerWith = function (string $name, array $manuscript, string $status = 'active') use ($zone, $period): void {
+            $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'name' => $name, 'bill' => 2500, 'status' => $status]);
+            ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id, 'bill' => 2500, ...$manuscript]);
+        };
+
+        $customerWith('Owes', ['total_arrears' => 2500, 'credit' => 0, 'total_bill' => 5000]);
+        $customerWith('Prepaid but owes old debt', ['total_arrears' => 1500, 'prepaid_months_remaining' => 2, 'prepaid_rate' => 2500, 'total_bill' => 1500]);
+        $customerWith('Credit covers it', ['total_arrears' => 0, 'credit' => 4000, 'total_bill' => 0]);
+        $customerWith('Prepaid months', ['total_arrears' => 0, 'credit' => 0, 'prepaid_months_remaining' => 3, 'prepaid_rate' => 2500, 'total_bill' => 0]);
+        $customerWith('Expiry ahead', ['total_arrears' => 0, 'credit' => 0, 'payment_expiration' => now()->addMonths(2), 'total_bill' => 0]);
+        $customerWith('Disconnected debtor', ['total_arrears' => 9000, 'total_bill' => 0], 'disconnected');
+
+        $this->actingAsRole('manager');
+        $this->post('/manuscripts/bills/generate', ['period' => $period, 'zone_uuid' => $zone->uuid])->assertSessionHas('success');
+
+        $this->assertSame(2, BillBatch::query()->where('period', $period)->latest('id')->firstOrFail()->total_bills);
+
+        $recipients = app(ManuscriptService::class)->billRecipients(['period' => $period, 'zone_uuid' => $zone->uuid])['customers'];
+        $this->assertSame(['Owes', 'Prepaid but owes old debt'], $recipients->pluck('name')->all());
+    }
+
+    public function test_generate_explains_when_nobody_has_anything_to_pay(): void
+    {
+        Bus::fake();
+        CompanyFactory::new()->create();
+        $period = Carbon::now()->format('Y-m');
+        $zone = ZoneFactory::new()->create(['name' => 'ZZ '.Str::random(6)]);
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id, 'credit' => 9000, 'total_bill' => 0]);
+
+        $this->actingAsRole('manager');
+
+        $this->post('/manuscripts/bills/generate', ['period' => $period, 'zone_uuid' => $zone->uuid])
+            ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'anything to pay'));
+
+        Bus::assertNothingBatched();
+    }
+
     public function test_zone_job_writes_a_real_pdf_artifact(): void
     {
         Storage::fake('local');
