@@ -23,7 +23,6 @@ use Illuminate\Validation\ValidationException;
  */
 class ResourcesDashboardService
 {
-
     /**
      * @return array{
      *     period: string,
@@ -56,7 +55,7 @@ class ResourcesDashboardService
                 [$start, $end] = $this->periodBounds($period);
 
                 $income = $this->incomeFor($start, $end, $branchId);
-                $expenses = $this->expensesFor($period);
+                $expenses = $this->expensesFor($period, $branchId);
                 $pnl = $this->pnlFor($income['verified'], $expenses['total']);
                 $budgets = $this->budgetsFor($period, $expenses['by_category']);
 
@@ -151,18 +150,16 @@ class ResourcesDashboardService
      * Expenses are derived from `expenditures.spent_at` (the date the money
      * was actually spent), not `created_at` (when it was recorded) — the
      * field that exists precisely so offline/backdated entries land in the
-     * right period.
+     * right period. Only APPROVED expenses count: pending ones may still be
+     * rejected, voided ones never happened.
      *
-     * Not branch-scoped: `expenditures` has no zone/branch association in the
-     * schema today (it belongs to an ExpenseCategory and a recording User,
-     * neither of which reliably maps to a branch — a user can move branches,
-     * and an expense category is tenant-wide). Adding branch attribution to
-     * expenses is a schema change, not a query fix, so it's left as a known
-     * gap rather than bolted on here.
+     * Branch-scoped the same way as income: a branch-fenced viewer sees the
+     * expenses recorded in their branch (expenditures.branch_id, stamped at
+     * recording time).
      *
      * @return array{total: string, by_category: list<array{name: string, amount: string, count: int}>}
      */
-    private function expensesFor(string $period): array
+    private function expensesFor(string $period, ?int $branchId = null): array
     {
         // spent_at is a plain DATE column (no time-of-day/timezone
         // component), so its calendar-month bounds are just the period's
@@ -175,6 +172,8 @@ class ResourcesDashboardService
         $rows = Expenditure::query()
             ->join('expense_categories', 'expense_categories.id', '=', 'expenditures.category_id')
             ->whereBetween('expenditures.spent_at', [$start, $end])
+            ->where('expenditures.status', Expenditure::STATUS_APPROVED)
+            ->when($branchId !== null, fn ($query) => $query->where('expenditures.branch_id', $branchId))
             ->groupBy('expense_categories.id', 'expense_categories.name', 'expense_categories.sort_order')
             ->orderBy('expense_categories.sort_order')
             ->selectRaw('expense_categories.name as name, coalesce(sum(expenditures.amount), 0) as amount, count(expenditures.id) as count')

@@ -186,27 +186,34 @@ class ExpenditureTest extends TestCase
         $deleteResponse->assertStatus(403);
     }
 
-    public function test_super_can_update_and_delete_an_expenditure(): void
+    /**
+     * Anti-fraud: an approved expense is frozen even for the owner — it can
+     * only be voided (the record stays). A still-pending one can be edited.
+     * DELETE (older app builds) now voids instead of deleting.
+     */
+    public function test_super_can_edit_a_pending_expense_but_an_approved_one_is_only_voided_never_deleted(): void
     {
         $category = ExpenseCategoryFactory::new()->create();
-        $expenditure = ExpenditureFactory::new()->create([
-            'category_id' => $category->id,
-            'user_id' => $this->seededUserId(),
-            'amount' => 1000,
-        ]);
+        $approved = ExpenditureFactory::new()->create(['category_id' => $category->id, 'user_id' => $this->seededUserId(), 'amount' => 1000]);
+        $pending = ExpenditureFactory::new()->pending()->create(['category_id' => $category->id, 'user_id' => $this->seededUserId(), 'amount' => 6000]);
 
         $token = $this->tokenForRole('super');
 
-        $updateResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->patchJson("/api/v1/resources/expenditures/{$expenditure->uuid}", ['amount' => 2500]);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/resources/expenditures/{$approved->uuid}", ['amount' => 2500])
+            ->assertForbidden();
 
-        $updateResponse->assertOk()->assertJsonPath('data.amount', '2500.00');
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/resources/expenditures/{$pending->uuid}", ['amount' => 7000])
+            ->assertOk()
+            ->assertJsonPath('data.amount', '7000.00');
 
-        $deleteResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->deleteJson("/api/v1/resources/expenditures/{$expenditure->uuid}");
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->deleteJson("/api/v1/resources/expenditures/{$approved->uuid}")
+            ->assertOk()
+            ->assertJson(['message' => 'Expenditure voided']);
 
-        $deleteResponse->assertOk()->assertJson(['message' => 'Expenditure deleted']);
-        $this->assertDatabaseMissing('expenditures', ['id' => $expenditure->id]);
+        $this->assertDatabaseHas('expenditures', ['id' => $approved->id, 'status' => 'void']);
     }
 
     public function test_dashboard_requires_super_admin_or_manager_role(): void

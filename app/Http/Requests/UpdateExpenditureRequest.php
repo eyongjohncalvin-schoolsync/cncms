@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Expenditure;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateExpenditureRequest extends FormRequest
 {
@@ -22,10 +24,15 @@ class UpdateExpenditureRequest extends FormRequest
             'category_uuid' => ['sometimes', 'required', 'uuid'],
             'amount' => ['sometimes', 'required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'description' => ['sometimes', 'nullable', 'string'],
-            'spent_at' => ['sometimes', 'required', 'date'],
+            'spent_at' => ['sometimes', 'required', 'date', 'before_or_equal:today'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'recorded_offline' => ['sometimes', 'nullable', 'boolean'],
             'recorded_by_device' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'payment_method' => ['sometimes', 'nullable', 'string', Rule::in(Expenditure::PAYMENT_METHODS)],
+            'payment_ref' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'supplier_uuid' => ['sometimes', 'nullable', 'uuid'],
+            'service_uuid' => ['sometimes', 'nullable', 'uuid'],
+            'reference_no' => ['sometimes', 'nullable', 'string', 'max:60'],
         ];
     }
 }

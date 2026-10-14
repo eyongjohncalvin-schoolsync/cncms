@@ -31,6 +31,7 @@ class PaymentVerificationService
         private readonly PaymentRepositoryInterface $payments,
         private readonly TenantContext $context,
         private readonly PaymentReceiptService $receipts,
+        private readonly CashPostingService $cash,
     ) {}
 
     public function verify(Payment $payment, VerifyPaymentData $data, User $actor): Payment
@@ -98,6 +99,10 @@ class PaymentVerificationService
                 // and is now being rejected: void the receipt, keep the row
                 // for audit. No-op when there is no receipt.
                 $this->receipts->voidForPayment($payment);
+
+                // The money never counted: take it back out of the till /
+                // MoMo account it was posted to.
+                $this->cash->paymentReversed($payment, $actor, 'Payment rejected');
             }
         });
 

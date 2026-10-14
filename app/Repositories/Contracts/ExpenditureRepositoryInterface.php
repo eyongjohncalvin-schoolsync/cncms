@@ -29,6 +29,4 @@ interface ExpenditureRepositoryInterface
     public function create(int $categoryId, int $userId, array $attributes): Expenditure;
 
     public function update(Expenditure $expenditure, array $attributes): Expenditure;
-
-    public function delete(Expenditure $expenditure): bool;
 }

@@ -7,6 +7,7 @@ namespace App\Services;
 use App\DataTransferObjects\PaymentData;
 use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\User;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
@@ -24,6 +25,7 @@ class PaymentService
         private readonly ZoneRepositoryInterface $zones,
         private readonly TenantContext $context,
         private readonly PaymentReceiptService $receipts,
+        private readonly CashPostingService $cash,
     ) {}
 
     /**
@@ -152,6 +154,10 @@ class PaymentService
         $payment = $this->payments->create($customer->id, $attributes);
         $payment->setRelation('customer', $customer);
 
+        // Cash goes into the collector's till, MoMo / bank into those
+        // accounts (cash desk).
+        $this->cash->paymentRecorded($payment, auth()->user());
+
         // A payment verified on the spot (office roles, an agent in their own
         // zone) gets its receipt now — the same thing approving a pending
         // payment does in PaymentVerificationService::verify().
@@ -241,7 +247,17 @@ class PaymentService
             );
         }
 
+        $before = ['amount' => (string) $payment->amount, 'method' => $payment->method];
+
         $payment = $this->payments->update($payment, $attributes);
+
+        // A corrected amount or method moves the money in the ledger too:
+        // reverse what was posted and post the corrected figure for the
+        // same collector.
+        if ($before['amount'] !== (string) $payment->amount || $before['method'] !== $payment->method) {
+            $this->cash->paymentReversed($payment, auth()->user(), 'Payment corrected');
+            $this->cash->paymentRecorded($payment, $payment->recorded_by !== null ? User::query()->find($payment->recorded_by) : null);
+        }
 
         $this->forgetShowCache($payment->uuid);
 
@@ -250,6 +266,7 @@ class PaymentService
 
     public function delete(Payment $payment): void
     {
+        $this->cash->paymentReversed($payment, auth()->user(), 'Payment deleted before verification');
         $this->payments->delete($payment);
 
         $this->forgetShowCache($payment->uuid);

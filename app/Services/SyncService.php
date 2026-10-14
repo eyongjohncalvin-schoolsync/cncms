@@ -148,7 +148,7 @@ class SyncService
     /**
      * @return array{message: string, receipt_url: string}
      */
-    public function uploadReceipt(string $entityType, string $entityUuid, UploadedFile $file): array
+    public function uploadReceipt(string $entityType, string $entityUuid, UploadedFile $file, array $meta = []): array
     {
         if ($entityType === 'payment') {
             $payment = Payment::query()->where('uuid', $entityUuid)->firstOrFail();
@@ -166,16 +166,14 @@ class SyncService
         if ($entityType === 'expenditure') {
             $expenditure = Expenditure::query()->where('uuid', $entityUuid)->firstOrFail();
 
-            $storedPath = $file->store('receipts/expenditures', 'public');
-
-            // No verification workflow exists for expenditures (unlike
-            // payments), so there is no service indirection to go through —
-            // updating the column directly is the whole operation.
-            $expenditure->update(['receipt_path' => $storedPath]);
+            // Private disk + duplicate-photo check + moves an expense that
+            // was waiting for its receipt on to approval.
+            $this->expenditures->attachReceipt($expenditure, $file, $meta);
 
             return [
                 'message' => 'Receipt uploaded',
-                'receipt_url' => Storage::disk('public')->url($storedPath),
+                'receipt_url' => null,
+                'status' => $expenditure->status,
             ];
         }
 
@@ -424,6 +422,13 @@ class SyncService
                 'recorded_offline' => true,
                 'recorded_by_device' => $deviceId,
                 'local_uuid' => $localUuid,
+                'payment_method' => $item['payment_method'] ?? null,
+                'payment_ref' => $item['payment_ref'] ?? null,
+                'supplier_uuid' => $item['supplier_uuid'] ?? null,
+                'service_uuid' => $item['service_uuid'] ?? null,
+                'reference_no' => $item['reference_no'] ?? null,
+                // When the phone recorded it — anomaly checks (late night).
+                'device_recorded_at' => $item['created_at'] ?? null,
             ]);
 
             $expenditure = $this->expenditures->create($data, $actor->id);

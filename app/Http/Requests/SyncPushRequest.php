@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Expenditure;
 use App\Models\Payment;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -62,6 +63,12 @@ class SyncPushRequest extends FormRequest
             'changes.expenditures.*.description' => ['nullable', 'string'],
             'changes.expenditures.*.spent_at' => ['required', 'date'],
             'changes.expenditures.*.notes' => ['nullable', 'string'],
+            'changes.expenditures.*.payment_method' => ['nullable', 'string', Rule::in(Expenditure::PAYMENT_METHODS)],
+            'changes.expenditures.*.payment_ref' => ['nullable', 'string', 'max:60'],
+            'changes.expenditures.*.supplier_uuid' => ['nullable', 'uuid'],
+            'changes.expenditures.*.service_uuid' => ['nullable', 'uuid'],
+            'changes.expenditures.*.reference_no' => ['nullable', 'string', 'max:60'],
+            'changes.expenditures.*.created_at' => ['nullable', 'date'],
 
             // Complaint Desk mobile submission (complaint-desk.md section 7)
             // — business-level validation (does customer_uuid resolve, is it

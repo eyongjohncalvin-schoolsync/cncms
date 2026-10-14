@@ -59,13 +59,23 @@ class SyncController extends Controller
         $validated = $request->validate([
             'entity_type' => ['required', 'string', 'in:payment,expenditure'],
             'entity_uuid' => ['required', 'uuid'],
-            'receipt' => ['required', 'image', 'max:2048'],
+            'receipt' => ['required', 'image', 'max:6144'],
+            'captured_at' => ['nullable', 'date'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'source' => ['nullable', 'string', 'in:camera,gallery'],
         ]);
 
         $result = $this->sync->uploadReceipt(
             $validated['entity_type'],
             $validated['entity_uuid'],
             $request->file('receipt'),
+            [
+                'captured_at' => $validated['captured_at'] ?? null,
+                'latitude' => $validated['latitude'] ?? null,
+                'longitude' => $validated['longitude'] ?? null,
+                'source' => $validated['source'] ?? 'camera',
+            ],
         );
 
         return response()->json($result);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Models\Expenditure;
 use App\Models\TenantUser;
 use App\Models\User;
 use Database\Factories\ExpenditureFactory;
@@ -121,11 +122,11 @@ class ResourceTest extends TestCase
             'description' => 'Fuel',
         ]);
 
-        $response->assertRedirect('/resources/expenditures');
-        $this->assertDatabaseHas('expenditures', [
-            'category_id' => $category->id,
-            'amount' => 1500,
-        ]);
+        $expenditure = Expenditure::query()->where('category_id', $category->id)->firstOrFail();
+        $response->assertRedirect("/resources/expenditures/{$expenditure->uuid}");
+        // Small and clean → approved automatically.
+        $this->assertSame('approved', $expenditure->status);
+        $this->assertSame('1500.00', (string) $expenditure->amount);
     }
 
     public function test_a_worker_cannot_record_an_expenditure(): void
@@ -143,19 +144,19 @@ class ResourceTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function test_a_manager_cannot_delete_an_expenditure_but_super_can(): void
+    public function test_a_manager_cannot_void_an_expenditure_but_super_can_and_the_record_stays(): void
     {
         $category = ExpenseCategoryFactory::new()->create();
-        $expenditure = ExpenditureFactory::new()->create(['category_id' => $category->id, 'user_id' => $this->seededUserId()]);
+        $expenditure = ExpenditureFactory::new()->create(['category_id' => $category->id, 'user_id' => $this->secondStaffUser()->id]);
 
         $this->actingAsRole('manager');
-        $this->delete("/resources/expenditures/{$expenditure->uuid}")->assertStatus(403);
+        $this->post("/resources/expenditures/{$expenditure->uuid}/void", ['reason' => 'Entered twice'])->assertStatus(403);
 
         $this->actingAsRole('super');
-        $response = $this->delete("/resources/expenditures/{$expenditure->uuid}");
+        $this->post("/resources/expenditures/{$expenditure->uuid}/void", ['reason' => 'Entered twice'])->assertSessionHas('success');
 
-        $response->assertRedirect('/resources/expenditures');
-        $this->assertDatabaseMissing('expenditures', ['id' => $expenditure->id]);
+        $this->assertDatabaseHas('expenditures', ['id' => $expenditure->id, 'status' => 'void', 'void_reason' => 'Entered twice']);
+        $this->assertDatabaseHas('expenditures', ['id' => $expenditure->id]);
     }
 
     public function test_categories_page_renders_and_only_admin_can_create_one(): void

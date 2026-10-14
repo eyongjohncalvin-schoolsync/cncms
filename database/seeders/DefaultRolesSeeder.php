@@ -103,7 +103,12 @@ class DefaultRolesSeeder extends Seeder
      */
     private static function adminPermissions(): array
     {
-        return array_values(array_diff(Permission::values(), [Permission::OpeningBalancesApprove->value]));
+        return array_values(array_diff(Permission::values(), [
+            Permission::OpeningBalancesApprove->value,
+            Permission::ExpendituresApproveLarge->value,
+            Permission::CashApproveLarge->value,
+            Permission::PeriodsLock->value,
+        ]));
     }
 
     private static function managerPermissions(): array
@@ -140,6 +145,10 @@ class DefaultRolesSeeder extends Seeder
             Permission::ExpendituresView->value,
             Permission::ExpendituresCreate->value,
             Permission::ExpendituresDashboard->value,
+            Permission::ExpendituresApprove->value,
+            Permission::SuppliersManage->value,
+            Permission::CashView->value,
+            Permission::CashManage->value,
 
             Permission::ReportsView->value,
             Permission::ReportsExport->value,

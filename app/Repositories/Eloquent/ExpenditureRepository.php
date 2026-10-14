@@ -15,8 +15,9 @@ class ExpenditureRepository implements ExpenditureRepositoryInterface
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->scoped($filters)
-            ->with(['category', 'user'])
+            ->with(['category', 'user', 'supplier', 'service'])
             ->latest('spent_at')
+            ->latest('id')
             ->paginate($perPage);
     }
 
@@ -45,11 +46,6 @@ class ExpenditureRepository implements ExpenditureRepositoryInterface
         return $expenditure;
     }
 
-    public function delete(Expenditure $expenditure): bool
-    {
-        return (bool) $expenditure->delete();
-    }
-
     /**
      * @param  array<string, mixed>  $filters
      */
@@ -59,6 +55,14 @@ class ExpenditureRepository implements ExpenditureRepositoryInterface
             ->when($filters['category_id'] ?? null, fn (Builder $query, $categoryId) => $query->where('category_id', $categoryId))
             ->when($filters['user_id'] ?? null, fn (Builder $query, $userId) => $query->where('user_id', $userId))
             ->when($filters['from'] ?? null, fn (Builder $query, $from) => $query->whereDate('spent_at', '>=', $from))
-            ->when($filters['to'] ?? null, fn (Builder $query, $to) => $query->whereDate('spent_at', '<=', $to));
+            ->when($filters['to'] ?? null, fn (Builder $query, $to) => $query->whereDate('spent_at', '<=', $to))
+            ->when($filters['supplier_id'] ?? null, fn (Builder $query, $supplierId) => $query->where('supplier_id', $supplierId))
+            ->when($filters['service_id'] ?? null, fn (Builder $query, $serviceId) => $query->where('service_id', $serviceId))
+            ->when($filters['status'] ?? null, function (Builder $query, string $status): void {
+                // 'pending' = any of the waiting states.
+                $status === 'pending'
+                    ? $query->whereIn('status', Expenditure::PENDING_STATUSES)
+                    : $query->where('status', $status);
+            });
     }
 }

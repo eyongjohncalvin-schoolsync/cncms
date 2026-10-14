@@ -57,6 +57,7 @@ Route::prefix('v1')->group(function () {
             require __DIR__.'/api/sync.php';
             require __DIR__.'/api/audit.php';
             require __DIR__.'/api/resources.php';
+            require __DIR__.'/api/cash.php';
             require __DIR__.'/api/complaints.php';
             require __DIR__.'/api/arrears-adjustments.php';
             require __DIR__.'/api/notifications.php';

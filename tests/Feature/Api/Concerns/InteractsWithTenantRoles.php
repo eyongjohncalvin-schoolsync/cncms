@@ -70,4 +70,25 @@ trait InteractsWithTenantRoles
 
         return $user->createToken('api')->plainTextToken;
     }
+
+    /**
+     * A second committed staff member (the seeded demo manager), with the
+     * given role, for maker-checker tests that need two different people:
+     * the owner row above records, this one approves — or the other way
+     * round. Same cross-connection-visibility reason as above: a user made
+     * by a factory inside the test transaction is invisible to the tenant
+     * connection's foreign keys.
+     */
+    protected function secondStaffUser(string $role = 'manager'): User
+    {
+        $user = User::query()->where('email', 'terence@shalomtech.dev')->first();
+
+        if ($user === null) {
+            $this->markTestSkipped('The seeded demo staff (terence@shalomtech.dev) is not in this database.');
+        }
+
+        TenantUser::query()->where('user_id', $user->id)->update(['role' => $role, 'branch_id' => null]);
+
+        return $user;
+    }
 }

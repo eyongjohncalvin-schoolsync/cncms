@@ -32,3 +32,7 @@ Artisan::command('inspire', function () {
 // independently-dispatched manuscript_generation runs for the same period
 // regardless of what triggered them.
 Schedule::command('tasks:run-due')->everyFifteenMinutes()->withoutOverlapping();
+
+// Nightly seal check of the cash ledger (CashVerifyLedger): any row or
+// balance changed outside the app alerts the owner.
+Schedule::command('cash:verify-ledger')->dailyAt('02:15')->withoutOverlapping();

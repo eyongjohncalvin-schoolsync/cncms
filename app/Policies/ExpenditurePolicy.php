@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Expenditure;
 use App\Models\User;
 use App\Support\TenantContext;
 
@@ -39,14 +40,74 @@ class ExpenditurePolicy
         return $this->context->can('expenditures.create');
     }
 
-    public function update(User $user): bool
+    /**
+     * Editing is only possible while the expense still waits for its
+     * receipt or first approval — by whoever recorded it, or anyone with
+     * `expenditures.update`. Approved expenses are frozen (a database
+     * trigger enforces it too); they are voided and recorded again.
+     */
+    public function update(User $user, ?Expenditure $expenditure = null): bool
     {
-        return $this->context->can('expenditures.update');
+        if ($expenditure === null) {
+            return $this->context->can('expenditures.update');
+        }
+
+        if (! in_array($expenditure->status, [Expenditure::STATUS_PENDING_EVIDENCE, Expenditure::STATUS_PENDING_APPROVAL], true)) {
+            return false;
+        }
+
+        return $expenditure->user_id === $user->id || $this->context->can('expenditures.update');
     }
 
-    public function delete(User $user): bool
+    /** Adding the receipt photo: the recorder, or anyone who can edit. */
+    public function attachReceipt(User $user, Expenditure $expenditure): bool
     {
-        return $this->context->can('expenditures.delete');
+        return $expenditure->user_id === $user->id || $this->context->can('expenditures.update');
+    }
+
+    /**
+     * First approval (or rejection) needs `expenditures.approve`; the
+     * second approval on a large expense needs `expenditures.approve_large`.
+     * Approving your own expense is refused in ExpenseControlService.
+     */
+    public function approve(User $user, Expenditure $expenditure): bool
+    {
+        return $expenditure->status === Expenditure::STATUS_PENDING_SECOND_APPROVAL
+            ? $this->context->can('expenditures.approve_large')
+            : $this->context->can('expenditures.approve');
+    }
+
+    public function reject(User $user, Expenditure $expenditure): bool
+    {
+        return $this->context->can('expenditures.approve') || $this->context->can('expenditures.approve_large');
+    }
+
+    /**
+     * Voiding keeps the record and stops it counting. Anyone with
+     * `expenditures.void`; the recorder may also withdraw their own
+     * expense while nobody has approved it yet.
+     */
+    public function void(User $user, Expenditure $expenditure): bool
+    {
+        if ($this->context->can('expenditures.void')) {
+            return true;
+        }
+
+        return $expenditure->user_id === $user->id
+            && $expenditure->isPending()
+            && $expenditure->first_approved_by === null;
+    }
+
+    /** Kept for older clients: "delete" now means void. */
+    public function delete(User $user, ?Expenditure $expenditure = null): bool
+    {
+        return $expenditure !== null ? $this->void($user, $expenditure) : $this->context->can('expenditures.void');
+    }
+
+    /** Budgets, regular expense templates and the approval limits. */
+    public function manageResourcesSettings(User $user): bool
+    {
+        return $this->context->can('resources.settings');
     }
 
     public function viewDashboard(User $user): bool

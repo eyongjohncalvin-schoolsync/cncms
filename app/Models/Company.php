@@ -16,7 +16,7 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page'])]
+#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page', 'expense_auto_approve_below', 'expense_second_approval_above', 'expense_receipt_required_from', 'expense_supplier_required_from', 'expense_backdate_days'])]
 #[RouteKey('uuid')]
 class Company extends Model implements HasMedia
 {
@@ -45,6 +45,11 @@ class Company extends Model implements HasMedia
         return [
             'reconnection_fine' => 'decimal:2',
             'arrears_second_approval_threshold' => 'decimal:2',
+            'expense_auto_approve_below' => 'decimal:2',
+            'expense_second_approval_above' => 'decimal:2',
+            'expense_receipt_required_from' => 'decimal:2',
+            'expense_supplier_required_from' => 'decimal:2',
+            'expense_backdate_days' => 'integer',
             'bills_per_page' => 'integer',
         ];
     }

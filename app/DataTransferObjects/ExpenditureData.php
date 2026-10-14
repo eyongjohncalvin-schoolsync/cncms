@@ -31,6 +31,15 @@ final readonly class ExpenditureData
         public ?bool $recordedOffline = null,
         public ?string $recordedByDevice = null,
         public ?string $localUuid = null,
+        // Resources phase 1: where the money came from, who was paid.
+        public ?string $paymentMethod = null,
+        public ?string $paymentRef = null,
+        public ?string $supplierUuid = null,
+        /** The service the cost belongs to; null = shared. */
+        public ?string $serviceUuid = null,
+        public ?string $referenceNo = null,
+        /** When the phone recorded it (offline entries) — for anomaly checks. */
+        public ?string $deviceRecordedAt = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -44,6 +53,12 @@ final readonly class ExpenditureData
             recordedOffline: array_key_exists('recorded_offline', $data) ? (bool) $data['recorded_offline'] : null,
             recordedByDevice: $data['recorded_by_device'] ?? null,
             localUuid: $data['local_uuid'] ?? null,
+            paymentMethod: $data['payment_method'] ?? null,
+            paymentRef: isset($data['payment_ref']) && trim((string) $data['payment_ref']) !== '' ? trim((string) $data['payment_ref']) : null,
+            supplierUuid: $data['supplier_uuid'] ?? null,
+            serviceUuid: $data['service_uuid'] ?? null,
+            referenceNo: isset($data['reference_no']) && trim((string) $data['reference_no']) !== '' ? trim((string) $data['reference_no']) : null,
+            deviceRecordedAt: $data['device_recorded_at'] ?? null,
         );
     }
 
@@ -61,6 +76,10 @@ final readonly class ExpenditureData
             'recorded_offline' => $this->recordedOffline,
             'recorded_by_device' => $this->recordedByDevice,
             'local_uuid' => $this->localUuid,
+            'payment_method' => $this->paymentMethod,
+            'payment_ref' => $this->paymentRef,
+            'reference_no' => $this->referenceNo,
+            'device_recorded_at' => $this->deviceRecordedAt,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

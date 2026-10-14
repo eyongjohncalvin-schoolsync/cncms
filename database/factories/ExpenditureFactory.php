@@ -29,7 +29,18 @@ class ExpenditureFactory extends Factory
             'notes' => null,
             'recorded_offline' => false,
             'recorded_by_device' => null,
+            // A settled, counted expense; use pending() for one in review.
+            'status' => Expenditure::STATUS_APPROVED,
+            'approved_at' => now(),
         ];
+    }
+
+    public function pending(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'status' => Expenditure::STATUS_PENDING_APPROVAL,
+            'approved_at' => null,
+        ]);
     }
 
     public function offline(): static

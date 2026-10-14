@@ -105,6 +105,26 @@ enum Permission: string
     case ExpendituresDashboard = 'expenditures.dashboard';
     /** Expense category create / update / deactivate (ExpenseCategoryPolicy). */
     case ExpenseCategoriesManage = 'expense_categories.manage';
+    /** Approve / reject expenses above the automatic limit (never one's own). */
+    case ExpendituresApprove = 'expenditures.approve';
+    /** The second approval on large / over-budget expenses (owner by default). */
+    case ExpendituresApproveLarge = 'expenditures.approve_large';
+    /** Void an expense with a reason — expenses are never deleted. */
+    case ExpendituresVoid = 'expenditures.void';
+    /** Add / edit suppliers; a new supplier needs a second person to approve it. */
+    case SuppliersManage = 'suppliers.manage';
+    /** Budgets, recurring expense templates and the approval limits. */
+    case ResourcesSettings = 'resources.settings';
+
+    // ---- Cash desk ---------------------------------------------
+    /** See every till, the safe, bank / MoMo balances, closes, handovers and deposits. */
+    case CashView = 'cash.view';
+    /** Set up accounts; approve close differences and confirm deposits (never one's own). */
+    case CashManage = 'cash.manage';
+    /** Owner-level approval: large close differences, repeated shortages. */
+    case CashApproveLarge = 'cash.approve_large';
+    /** Lock a finished month so nothing can be dated inside it any more. */
+    case PeriodsLock = 'periods.lock';
 
     // ---- Reports -------------------------------------------------
     case ReportsView = 'reports.view';
