@@ -24,11 +24,26 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     // null for a web-recorded payment; only pushPayment() ever populates
     // it.
     'collected_at',
+    // How the money came in, and the mobile-money reference (unique).
+    'method', 'momo_ref',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model
 {
     use Auditable, HasUuid, ScopesRouteBindingToBranch;
+
+    public const string METHOD_CASH = 'cash';
+
+    public const string METHOD_MTN_MOMO = 'mtn_momo';
+
+    public const string METHOD_ORANGE_MONEY = 'orange_money';
+
+    public const string METHOD_BANK = 'bank';
+
+    public const array METHODS = [self::METHOD_CASH, self::METHOD_MTN_MOMO, self::METHOD_ORANGE_MONEY, self::METHOD_BANK];
+
+    /** Methods that carry a mobile-money transaction reference. */
+    public const array MOMO_METHODS = [self::METHOD_MTN_MOMO, self::METHOD_ORANGE_MONEY];
 
     /**
      * Payment has no direct zone — branch is reached through its Customer.
@@ -50,6 +65,15 @@ class Payment extends Model
             'collected_at' => 'datetime',
             'recorded_offline' => 'boolean',
         ];
+    }
+
+    /**
+     * Whether a MoMo reference is already on another payment (references
+     * are unique, case-insensitively — payments_momo_ref_unique).
+     */
+    public static function momoRefTaken(string $momoRef): bool
+    {
+        return static::query()->whereRaw('lower(momo_ref) = ?', [mb_strtolower(trim($momoRef))])->exists();
     }
 
     public function customer(): BelongsTo

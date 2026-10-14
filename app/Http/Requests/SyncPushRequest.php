@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Payment;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Validates the shape of a POST /sync/push body (offline-sync-strategy.md
@@ -47,6 +49,11 @@ class SyncPushRequest extends FormRequest
             'changes.payments.*.months' => ['nullable', 'integer', 'min:1'],
             'changes.payments.*.clear_arrears_first' => ['nullable', 'boolean'],
             'changes.payments.*.created_at' => ['nullable', 'date'],
+            // Duplicate MoMo references are refused per item in
+            // SyncService::pushPayment(), not here — one bad item must not
+            // fail the whole batch.
+            'changes.payments.*.method' => ['nullable', 'string', Rule::in(Payment::METHODS)],
+            'changes.payments.*.momo_ref' => ['nullable', 'string', 'max:50'],
 
             'changes.expenditures' => ['nullable', 'array'],
             'changes.expenditures.*.local_uuid' => ['required', 'uuid'],

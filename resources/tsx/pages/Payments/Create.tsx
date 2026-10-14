@@ -71,6 +71,75 @@ function FrequencySelector({
     );
 }
 
+type PaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+
+const methodOptions: { value: PaymentMethod; label: string }[] = [
+    { value: 'cash', label: 'Cash' },
+    { value: 'mtn_momo', label: 'MTN MoMo' },
+    { value: 'orange_money', label: 'Orange Money' },
+    { value: 'bank', label: 'Bank' },
+];
+
+/**
+ * How the money came in. Cash feeds the collector's cash wallet; a MoMo
+ * payment needs its transaction reference, which can only be used once.
+ */
+function MethodSelector({
+    method,
+    momoRef,
+    onMethodChange,
+    onMomoRefChange,
+    errors,
+}: {
+    method: PaymentMethod;
+    momoRef: string;
+    onMethodChange: (value: PaymentMethod) => void;
+    onMomoRefChange: (value: string) => void;
+    errors: { method?: string; momo_ref?: string };
+}) {
+    const needsRef = method === 'mtn_momo' || method === 'orange_money';
+
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-slate-700">
+                    Paid by
+                    <span className="ml-0.5 text-red-500" aria-hidden="true">
+                        *
+                    </span>
+                </span>
+                <div className="inline-flex w-fit flex-wrap rounded-lg bg-slate-100 p-1">
+                    {methodOptions.map((option) => (
+                        <button
+                            key={option.value}
+                            type="button"
+                            aria-pressed={method === option.value}
+                            onClick={() => onMethodChange(option.value)}
+                            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                method === option.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            {option.label}
+                        </button>
+                    ))}
+                </div>
+                {errors.method && <p className="text-xs text-red-600">{errors.method}</p>}
+            </div>
+            {needsRef && (
+                <TextInput
+                    id="momo_ref"
+                    label="MoMo transaction ID"
+                    value={momoRef}
+                    onChange={(e) => onMomoRefChange(e.target.value)}
+                    error={errors.momo_ref}
+                    placeholder="e.g. 7834561290"
+                    required
+                />
+            )}
+        </div>
+    );
+}
+
 // A `disconnected` or `suspended` customer must be reconnected
 // (Customers/Show.tsx's reconnect action) before a new payment can be
 // recorded against them — see App\Http\Requests\StorePaymentRequest and
@@ -154,6 +223,8 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
         credit: '',
         frequency: 'monthly' as PaymentFrequency,
         months: '',
+        method: 'cash' as PaymentMethod,
+        momo_ref: '',
         // Owner's rule: a prepayment clears arrears first unless an
         // arrears approver deliberately unticks it (enforced server-side too).
         clear_arrears_first: true,
@@ -382,6 +453,14 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
                             </p>
                         )}
 
+                        <MethodSelector
+                            method={data.method}
+                            momoRef={data.momo_ref}
+                            onMethodChange={(method) => setData('method', method)}
+                            onMomoRefChange={(value) => setData('momo_ref', value)}
+                            errors={errors}
+                        />
+
                         <FrequencySelector
                             label="Frequency"
                             value={data.frequency}
@@ -562,6 +641,7 @@ function BulkPaymentForm({ customers }: { customers: Customer[] }) {
         customer_uuids: [] as string[],
         frequency: 'monthly' as PaymentFrequency,
         months: '',
+        method: 'cash' as 'cash' | 'bank',
     });
 
     const zones = useMemo(() => {
@@ -693,6 +773,26 @@ function BulkPaymentForm({ customers }: { customers: Customer[] }) {
                                 ))}
                             </ul>
                         )}
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                        <span className="text-sm font-medium text-slate-700">Paid by (applies to all selected)</span>
+                        <div className="inline-flex w-fit rounded-lg bg-slate-100 p-1">
+                            {(['cash', 'bank'] as const).map((method) => (
+                                <button
+                                    key={method}
+                                    type="button"
+                                    aria-pressed={data.method === method}
+                                    onClick={() => setData('method', method)}
+                                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                        data.method === method ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    {method === 'cash' ? 'Cash' : 'Bank'}
+                                </button>
+                            ))}
+                        </div>
+                        <p className="text-xs text-slate-500">MoMo payments carry their own reference, so record those one at a time.</p>
                     </div>
 
                     <FrequencySelector

@@ -23,6 +23,8 @@ class PaymentResource extends JsonResource
             'amount' => $this->amount,
             'credit' => $this->credit,
             'frequency' => $this->frequency,
+            'method' => $this->method,
+            'momo_ref' => $this->momo_ref,
             'months' => $this->months,
             'expiration_date' => $this->expiration_date?->toDateString(),
             // Draw-down (references/prepayment-drawdown.md): rate locked at

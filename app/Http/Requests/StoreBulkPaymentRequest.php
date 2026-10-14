@@ -31,6 +31,9 @@ class StoreBulkPaymentRequest extends FormRequest
             'customer_uuids.*' => ['required', 'uuid', 'distinct'],
             'frequency' => ['required', 'string', 'in:monthly,yearly,months'],
             'months' => ['required_if:frequency,months', 'nullable', 'integer', 'min:1'],
+            // Cash or bank only: a MoMo payment carries its own reference,
+            // so those are recorded one at a time.
+            'method' => ['nullable', 'string', 'in:cash,bank'],
         ];
     }
 }

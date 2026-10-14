@@ -1218,7 +1218,7 @@ class PaymentTest extends TestCase
     public function test_super_can_delete_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
 
         $this->actingAsRole('super');
 
@@ -1232,7 +1232,7 @@ class PaymentTest extends TestCase
     public function test_admin_can_delete_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
 
         $this->actingAsRole('admin');
 
@@ -1288,13 +1288,11 @@ class PaymentTest extends TestCase
     }
 
     /**
-     * Audit scenario: payment_verifications.payment_id is defined with
-     * ->cascadeOnDelete() (see that table's migration), so deleting a
-     * payment that already has a verification record attached must not
-     * raise an FK-constraint violation — the verification row is expected
-     * to cascade-delete alongside it at the DB level.
+     * Anti-fraud: once a payment is verified it is money on the books — it
+     * can only be rejected (keeping the record), never deleted, even by
+     * the owner. The same goes for a payment already consumed by billing.
      */
-    public function test_deleting_a_verified_payment_cascades_its_verification_record_without_error(): void
+    public function test_a_verified_or_billed_payment_cannot_be_deleted_even_by_super(): void
     {
         $customer = $this->customer();
         $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
@@ -1305,16 +1303,14 @@ class PaymentTest extends TestCase
             'momo_ref' => 'MOMO-DELETE-001',
         ])->assertRedirect();
 
-        $this->assertDatabaseHas('payment_verifications', ['payment_id' => $payment->id]);
-
         $this->actingAsRole('super');
 
-        $response = $this->delete("/payments/{$payment->uuid}");
+        $this->delete("/payments/{$payment->uuid}")->assertForbidden();
+        $this->assertDatabaseHas('payments', ['id' => $payment->id]);
+        $this->assertDatabaseHas('payment_verifications', ['payment_id' => $payment->id]);
 
-        $response->assertRedirect('/payments');
-        $response->assertSessionHas('success');
-        $this->assertDatabaseMissing('payments', ['id' => $payment->id]);
-        $this->assertDatabaseMissing('payment_verifications', ['payment_id' => $payment->id]);
+        $billed = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'processed_period' => now()->format('Y-m')]);
+        $this->delete("/payments/{$billed->uuid}")->assertForbidden();
     }
 
     /**

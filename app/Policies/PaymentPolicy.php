@@ -76,9 +76,20 @@ class PaymentPolicy
         return $this->context->can('payments.update');
     }
 
-    public function delete(User $user): bool
+    /**
+     * Only a payment still waiting for verification (and not yet billed)
+     * can be deleted — e.g. a typo caught straight away. Once verified or
+     * consumed by a billing run it is money on the books: it can only be
+     * rejected, which keeps the record (and its voided receipt) for audit.
+     */
+    public function delete(User $user, ?Payment $payment = null): bool
     {
-        return $this->context->can('payments.delete');
+        if (! $this->context->can('payments.delete')) {
+            return false;
+        }
+
+        return $payment === null
+            || ($payment->verification_status === 'pending' && $payment->processed_at === null && $payment->processed_period === null);
     }
 
     /**

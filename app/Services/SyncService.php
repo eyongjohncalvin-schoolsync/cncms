@@ -341,7 +341,19 @@ class SyncService
                 // `collected_at`, never as the payment's actual
                 // `created_at` column.
                 'collected_at' => $item['created_at'] ?? null,
+                'method' => $item['method'] ?? null,
+                'momo_ref' => $item['momo_ref'] ?? null,
             ]);
+
+            if ($data->momoRef !== null && Payment::momoRefTaken($data->momoRef)) {
+                $message = "MoMo reference {$data->momoRef} has already been used on another payment.";
+                $this->recordSyncQueue($deviceId, 'payment', null, $localUuid, $item, 'failed', $message);
+
+                return [
+                    ['local_uuid' => $localUuid, 'status' => 'failed', 'error' => $message],
+                    ['entity_type' => 'payment', 'local_uuid' => $localUuid, 'message' => $message],
+                ];
+            }
 
             // The branch-scoped customer resolved up front, when there is
             // one; otherwise create() resolves (and rejects) it itself.

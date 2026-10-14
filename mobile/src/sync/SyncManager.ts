@@ -314,6 +314,8 @@ class SyncManagerImpl {
             months: payment.months,
             // SQLite stores this as 0/1; coerce for the JSON payload.
             clear_arrears_first: !!payment.clear_arrears_first,
+            method: payment.method ?? null,
+            momo_ref: payment.momo_ref ?? null,
             created_at: payment.created_at,
         }));
 

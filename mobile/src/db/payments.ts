@@ -1,5 +1,5 @@
 import { getDatabase } from './database';
-import type { LocalPayment, SyncStatus } from '../types/db';
+import type { LocalPayment, PaymentMethod, SyncStatus } from '../types/db';
 import type { SyncPullChangedPayment } from '../types/api';
 import { generateUuid } from '../utils/uuid';
 import { nowIso, startOfTodayIso } from '../utils/format';
@@ -13,6 +13,8 @@ export interface NewLocalPaymentInput {
     /** Draw-down Q1 — the agent's "pay down arrears first" toggle. Only
      * meaningful for months/yearly. */
     clear_arrears_first?: boolean;
+    method?: PaymentMethod | null;
+    momo_ref?: string | null;
     /** Local camera file URI, if a receipt photo was captured at submit
      * time — see mobile-app-react-native.md §4's Record Payment section. */
     receipt_local_uri?: string | null;
@@ -34,6 +36,8 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
         frequency: input.frequency,
         months: input.months ?? null,
         clear_arrears_first: input.clear_arrears_first ?? false,
+        method: input.method ?? null,
+        momo_ref: input.momo_ref?.trim() || null,
         verification_status: 'pending',
         rejection_reason: null,
         receipt_local_uri: input.receipt_local_uri ?? null,
@@ -48,10 +52,10 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
     await db.runAsync(
         `INSERT INTO payments
             (local_uuid, server_uuid, customer_uuid, amount, credit, frequency, months, clear_arrears_first,
-             verification_status, rejection_reason, receipt_local_uri, receipt_server_path,
+             method, momo_ref, verification_status, rejection_reason, receipt_local_uri, receipt_server_path,
              sync_status, sync_error, sync_attempts, created_at, updated_at)
          VALUES ($local_uuid, $server_uuid, $customer_uuid, $amount, $credit, $frequency, $months, $clear_arrears_first,
-             $verification_status, $rejection_reason, $receipt_local_uri, $receipt_server_path,
+             $method, $momo_ref, $verification_status, $rejection_reason, $receipt_local_uri, $receipt_server_path,
              $sync_status, $sync_error, $sync_attempts, $created_at, $updated_at)`,
         {
             $local_uuid: row.local_uuid,
@@ -62,6 +66,8 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
             $frequency: row.frequency,
             $months: row.months,
             $clear_arrears_first: row.clear_arrears_first ? 1 : 0,
+            $method: row.method,
+            $momo_ref: row.momo_ref,
             $verification_status: row.verification_status,
             $rejection_reason: row.rejection_reason,
             $receipt_local_uri: row.receipt_local_uri,

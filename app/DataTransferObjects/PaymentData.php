@@ -44,6 +44,9 @@ final readonly class PaymentData
         // toggle — a months/yearly payment pays down outstanding arrears
         // before buying prepaid months. Ignored for `monthly`.
         public ?bool $clearArrearsFirst = null,
+        // How it was paid (Payment::METHODS) and the MoMo reference.
+        public ?string $method = null,
+        public ?string $momoRef = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -59,6 +62,8 @@ final readonly class PaymentData
             localUuid: $data['local_uuid'] ?? null,
             collectedAt: $data['collected_at'] ?? null,
             clearArrearsFirst: array_key_exists('clear_arrears_first', $data) ? (bool) $data['clear_arrears_first'] : null,
+            method: $data['method'] ?? null,
+            momoRef: isset($data['momo_ref']) && trim((string) $data['momo_ref']) !== '' ? trim((string) $data['momo_ref']) : null,
         );
     }
 
@@ -79,6 +84,8 @@ final readonly class PaymentData
             'recorded_by_device' => $this->recordedByDevice,
             'local_uuid' => $this->localUuid,
             'collected_at' => $this->collectedAt,
+            'method' => $this->method,
+            'momo_ref' => $this->momoRef,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

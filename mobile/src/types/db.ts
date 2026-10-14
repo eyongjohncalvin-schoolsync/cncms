@@ -32,6 +32,8 @@ export interface LocalCustomer {
     services: string | null;
 }
 
+export type PaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+
 export interface LocalPayment {
     local_uuid: string;
     server_uuid: string | null;
@@ -42,6 +44,10 @@ export interface LocalPayment {
     months: number | null;
     /** Draw-down Q1 — stored 0/1 in SQLite. Only meaningful for months/yearly. */
     clear_arrears_first: boolean;
+    /** How the money came in; null on rows recorded before this existed. */
+    method: PaymentMethod | null;
+    /** MoMo transaction ID for mtn_momo / orange_money. */
+    momo_ref: string | null;
     verification_status: VerificationStatus;
     rejection_reason: string | null;
     /** Local file URI captured via the camera at submit time; uploaded

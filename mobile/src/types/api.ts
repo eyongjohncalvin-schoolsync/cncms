@@ -94,6 +94,10 @@ export interface SyncPushPaymentItem {
     /** Draw-down Q1 — agent's "pay down arrears first" toggle for a
      * months/yearly prepayment (references/prepayment-drawdown.md). */
     clear_arrears_first?: boolean | null;
+    /** cash | mtn_momo | orange_money | bank */
+    method?: string | null;
+    /** MoMo transaction ID — unique server-side; a reused one fails that item. */
+    momo_ref?: string | null;
     created_at?: string | null;
 }
 

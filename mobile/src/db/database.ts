@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS payments (
     frequency               TEXT NOT NULL,
     months                  INTEGER,
     clear_arrears_first     INTEGER NOT NULL DEFAULT 0,
+    method                  TEXT,
+    momo_ref                TEXT,
     verification_status     TEXT NOT NULL DEFAULT 'pending',
     rejection_reason        TEXT,
     receipt_local_uri       TEXT,
@@ -174,6 +176,9 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     // per customer, the only way Customer Detail (which never makes a live
     // call) can show services at all.
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN services TEXT' },
+    // Resources (2026-10): how a payment was made + its MoMo reference.
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN method TEXT' },
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN momo_ref TEXT' },
 ];
 
 /**

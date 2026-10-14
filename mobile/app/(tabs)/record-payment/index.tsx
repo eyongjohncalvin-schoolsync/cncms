@@ -23,7 +23,13 @@ import { formatFcfa } from '../../../src/utils/format';
 import { calculateGuideAmount, validatePaymentForm, type PaymentFrequency } from '../../../src/utils/paymentCalc';
 import { getAllCustomers, getCustomerByUuid } from '../../../src/db/customers';
 import { getLastPaymentForCustomer, getPaymentByLocalUuid, insertLocalPayment } from '../../../src/db/payments';
-import type { LocalCustomer, LocalPayment } from '../../../src/types/db';
+import type { LocalCustomer, LocalPayment, PaymentMethod } from '../../../src/types/db';
+
+const METHODS: Array<{ value: PaymentMethod; label: string }> = [
+    { value: 'cash', label: 'Cash' },
+    { value: 'mtn_momo', label: 'MTN' },
+    { value: 'orange_money', label: 'Orange' },
+];
 import { syncManager } from '../../../src/sync/SyncManager';
 
 const FREQUENCIES: Array<{ value: PaymentFrequency; label: string }> = [
@@ -102,6 +108,8 @@ export default function RecordPaymentScreen() {
 
     const [amount, setAmount] = useState('');
     const [frequency, setFrequency] = useState<PaymentFrequency>('monthly');
+    const [method, setMethod] = useState<PaymentMethod>('cash');
+    const [momoRef, setMomoRef] = useState('');
     const [months, setMonths] = useState('');
     const [creditExpanded, setCreditExpanded] = useState(false);
     const [credit, setCredit] = useState('');
@@ -234,6 +242,8 @@ export default function RecordPaymentScreen() {
     function resetForm() {
         setAmount('');
         setFrequency('monthly');
+        setMethod('cash');
+        setMomoRef('');
         setMonths('');
         setCredit('');
         setCreditExpanded(false);
@@ -259,6 +269,10 @@ export default function RecordPaymentScreen() {
         [customer?.uuid, amount, frequency, months],
     );
 
+    // A MoMo payment needs its transaction ID (it can only be used once).
+    const isMomo = method === 'mtn_momo' || method === 'orange_money';
+    const momoRefMissing = isMomo && momoRef.trim() === '';
+
     async function handleAddPhoto() {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
 
@@ -280,7 +294,7 @@ export default function RecordPaymentScreen() {
     }
 
     async function handleSubmit() {
-        if (!validation.valid || !customer || validation.amountValue === null || submitting) {
+        if (!validation.valid || !customer || validation.amountValue === null || submitting || momoRefMissing) {
             return;
         }
 
@@ -297,6 +311,8 @@ export default function RecordPaymentScreen() {
                 // A prepayment always pays off arrears first (owner's rule,
                 // 2026-10); only an admin can override that, on the web.
                 clear_arrears_first: frequency === 'months' || frequency === 'yearly',
+                method,
+                momo_ref: isMomo ? momoRef : null,
                 receipt_local_uri: receiptUri,
             });
 
@@ -449,7 +465,7 @@ export default function RecordPaymentScreen() {
     }
 
     const arrears = customer.total_arrears ?? 0;
-    const submitDisabled = !validation.valid || submitting;
+    const submitDisabled = !validation.valid || submitting || momoRefMissing;
 
     return (
         <View style={styles.flex}>
@@ -567,6 +583,40 @@ export default function RecordPaymentScreen() {
                         error={validation.errors.amount}
                     />
                 </View>
+
+                {/* 3b. Paid by — cash lands in this agent's cash wallet. */}
+                <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>Paid by</Text>
+                    <View style={styles.segmented}>
+                        {METHODS.map((option) => {
+                            const active = method === option.value;
+
+                            return (
+                                <Pressable
+                                    key={option.value}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: active }}
+                                    onPress={() => setMethod(option.value)}
+                                    style={[styles.segmentedOption, active && styles.segmentedOptionActive]}
+                                >
+                                    <Text style={[styles.segmentedLabel, active && styles.segmentedLabelActive]}>{option.label}</Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+                </View>
+
+                {isMomo ? (
+                    <UiTextInput
+                        label="MoMo transaction ID"
+                        value={momoRef}
+                        onChangeText={setMomoRef}
+                        autoCapitalize="characters"
+                        autoCorrect={false}
+                        placeholder="From the customer's SMS"
+                        error={momoRefMissing ? 'Enter the transaction ID from the MoMo SMS.' : undefined}
+                    />
+                ) : null}
 
                 {/* 4. Frequency — segmented control */}
                 <View style={styles.fieldGroup}>

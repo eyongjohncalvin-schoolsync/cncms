@@ -319,7 +319,8 @@ class PaymentReceiptService
                 'months' => $payment->months,
                 'periods' => $this->coveredPeriods($payment),
                 'expiration_date' => $payment->expiration_date?->toDateString(),
-                'momo_ref' => $payment->verification?->momo_ref,
+                'momo_ref' => $payment->momo_ref ?? $payment->verification?->momo_ref,
+                'method' => $payment->method,
                 'recorded_offline' => (bool) $payment->recorded_offline,
                 'collected_at' => $payment->collected_at?->toIso8601String(),
                 'recorded_at' => $payment->created_at?->toIso8601String(),
@@ -407,7 +408,7 @@ class PaymentReceiptService
      * collected/recorded in); a `months`/`yearly` prepayment covers that many
      * consecutive months from the collection month.
      *
-     * @return list<string>  YYYY-MM, chronological
+     * @return list<string> YYYY-MM, chronological
      */
     private function coveredPeriods(Payment $payment): array
     {

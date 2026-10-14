@@ -185,7 +185,7 @@ class PaymentService
      * @param  string[]  $customerUuids
      * @return array{created: Payment[], failed: array<string, string>}
      */
-    public function createBulk(array $customerUuids, string $frequency, ?int $months): array
+    public function createBulk(array $customerUuids, string $frequency, ?int $months, ?string $method = null): array
     {
         $created = [];
         $failed = [];
@@ -216,6 +216,7 @@ class PaymentService
                     amount: (string) $customer->bill,
                     frequency: $frequency,
                     months: $months,
+                    method: $method,
                 ));
             } catch (ValidationException $e) {
                 $failed[$customerUuid] = collect($e->errors())->flatten()->implode(' ');

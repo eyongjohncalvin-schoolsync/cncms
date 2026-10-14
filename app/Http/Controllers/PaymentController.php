@@ -23,6 +23,7 @@ use App\Support\PaymentReceiptLink;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -200,6 +201,7 @@ class PaymentController extends Controller
             $request->validated('customer_uuids'),
             $request->validated('frequency'),
             $request->validated('months'),
+            $request->validated('method'),
         );
 
         $createdCount = count($result['created']);
@@ -268,7 +270,7 @@ class PaymentController extends Controller
             // Same idiom as can_manage above, but mirroring PaymentPolicy::
             // delete()'s stricter super/admin-only role check instead of
             // update()'s super/admin/manager.
-            'can_delete' => $this->context->can('payments.delete'),
+            'can_delete' => Gate::allows('delete', $payment),
         ]);
     }
 
@@ -373,6 +375,8 @@ class PaymentController extends Controller
             'amount' => (string) $payment->amount,
             'credit' => (string) $payment->credit,
             'frequency' => $payment->frequency,
+            'method' => $payment->method,
+            'momo_ref' => $payment->momo_ref,
             'months' => $payment->months,
             'expiration_date' => $payment->expiration_date?->toDateString(),
             'verification_status' => $payment->verification_status,

@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Payment;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * POST /payments. A `disconnected` or `suspended` customer must be
@@ -64,6 +65,18 @@ class StorePaymentRequest extends FormRequest
             'clear_arrears_first' => ['nullable', 'boolean'],
             'recorded_offline' => ['nullable', 'boolean'],
             'recorded_by_device' => ['nullable', 'string', 'max:255'],
+            // How the money came in. Nullable only so older mobile builds
+            // keep working; the web form and current app always send it.
+            'method' => ['nullable', 'string', Rule::in(Payment::METHODS)],
+            'momo_ref' => [
+                'nullable', 'string', 'max:50',
+                Rule::requiredIf(fn (): bool => in_array($this->input('method'), Payment::MOMO_METHODS, true)),
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    if (is_string($value) && Payment::momoRefTaken($value)) {
+                        $fail('This MoMo reference has already been used on another payment.');
+                    }
+                },
+            ],
         ];
     }
 }
