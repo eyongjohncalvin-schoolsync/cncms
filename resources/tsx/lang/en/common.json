@@ -15,6 +15,7 @@
         "resources": "Resources",
         "audit_log": "Audit Log",
         "arrears_adjustments": "Arrears Adjustments",
+        "opening_balances": "Opening Balances",
         "users_control_center": "Users Control Center",
         "settings": "Settings",
         "landlord": "Landlord",

@@ -17,6 +17,7 @@ import {
     IconDeviceMobile,
     IconShieldLock,
     IconScale,
+    IconBook2,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -65,6 +66,10 @@ const NAV_ACCENTS: Record<string, NavAccent> = {
     // blue-family hue not used by Dashboard (blue) / Customers (indigo) /
     // Audit (cyan), fitting for an access-control surface without colliding.
     sky: { active: 'bg-sky-100 text-sky-800', hover: 'hover:bg-sky-50 hover:text-sky-700', border: 'border-sky-600', icon: 'text-sky-400' },
+    // "Opening balances" (onboarding from paper records) — every hue above
+    // is claimed; emerald stays distinct from green (Payments) and teal
+    // (Zones) at the muted icon tint.
+    emerald: { active: 'bg-emerald-100 text-emerald-800', hover: 'hover:bg-emerald-50 hover:text-emerald-700', border: 'border-emerald-600', icon: 'text-emerald-500' },
 };
 
 // `labelKey` is an i18next key (resources/tsx/lang/{en,fr}/common.json)
@@ -128,6 +133,10 @@ const auditNavItem = { href: '/audit/logs', labelKey: 'common.audit_log', icon: 
 // `arrears.approve` OR `audit.view` (it used to be an Audit Log sub-tab).
 const arrearsAdjustmentsNavItem = { href: '/arrears-adjustments', labelKey: 'common.arrears_adjustments', icon: IconScale, accent: 'purple' as const };
 
+// Opening balances — OpeningBalanceBatchPolicy::viewAny → any of the three
+// `opening_balances.*` permissions.
+const openingBalancesNavItem = { href: '/opening-balances', labelKey: 'common.opening_balances', icon: IconBook2, accent: 'emerald' as const };
+
 // Disconnections (bulk customer status workboard) — CustomerPolicy::
 // viewStatusBoard → `customers.status_board`.
 const disconnectionsNavItem = { href: '/disconnections', labelKey: 'common.disconnections', icon: IconUserOff, accent: 'red' as const };
@@ -183,6 +192,7 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(can('manuscripts.view') ? [agentAppNavItem] : []),
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
         ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
+        ...(canAny('opening_balances.view', 'opening_balances.enter', 'opening_balances.approve') ? [openingBalancesNavItem] : []),
         ...(can('audit.view') ? [auditNavItem] : []),
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),

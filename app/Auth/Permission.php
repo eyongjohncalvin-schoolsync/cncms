@@ -124,6 +124,18 @@ enum Permission: string
     /** approve + reject (the stage machine + maker≠checker identity rules stay in the policy). */
     case ArrearsApprove = 'arrears.approve';
 
+    // ---- Opening balances (onboarding) -----------------------
+    /** See the opening-balances screen and its batches. */
+    case OpeningBalancesView = 'opening_balances.view';
+    /** Enter / edit a draft of starting balances and submit it for approval. */
+    case OpeningBalancesEnter = 'opening_balances.enter';
+    /**
+     * Approve / reject a submitted batch, or reopen an approved one before
+     * the first bill run locks it. Seeded to no role but the owner (super
+     * bypasses) — assign it to extra hands via Roles & permissions.
+     */
+    case OpeningBalancesApprove = 'opening_balances.approve';
+
     // ---- Audit -------------------------------------------------
     case AuditView = 'audit.view';
 
@@ -200,6 +212,7 @@ enum Permission: string
             'reports' => 'Reports',
             'complaints' => 'Complaints',
             'arrears' => 'Arrears adjustments',
+            'opening_balances' => 'Opening balances',
             'audit' => 'Audit',
             'company', 'services' => 'Company & settings',
             'command_runs' => 'Task scheduler',

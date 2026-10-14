@@ -93,6 +93,18 @@ interface CustomerRepositoryInterface
     public function findManyByUuids(array $uuids, array $with = []): Collection;
 
     /**
+     * Customers with no manuscript at all yet — the ones whose starting
+     * balance an opening-balances batch can still set — with their zone,
+     * ordered zone-then-name like a paper ledger. Branch-fenced like every
+     * other listing. $uuids narrows it to those customers (an autosave
+     * checking just the rows it was sent).
+     *
+     * @param  string[]|null  $uuids
+     * @return Collection<int, Customer>
+     */
+    public function withoutManuscripts(?array $uuids = null): Collection;
+
+    /**
      * Every customer matching $filters (same supported keys as paginate():
      * 'zone_id', 'status', 'level', 'search'), with NO pagination — backs
      * the bulk bill-update tool's "select by filter, not by uuid list"
