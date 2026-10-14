@@ -80,7 +80,7 @@ class BillTemplatesTest extends TestCase
 
     public function test_reconnection_fine_shown_on_bill_matches_configured_value_not_hardcoded(): void
     {
-        CompanyFactory::new()->create(['reconnection_fine' => '13750.00']);
+        CompanyFactory::new()->current(['reconnection_fine' => '13750.00']);
         $customer = $this->customerWithManuscript();
 
         Company::forgetCache();
@@ -102,7 +102,7 @@ class BillTemplatesTest extends TestCase
 
     public function test_reconnection_fine_regression_also_holds_for_the_old_bill_view(): void
     {
-        CompanyFactory::new()->create(['reconnection_fine' => '9999.00']);
+        CompanyFactory::new()->current(['reconnection_fine' => '9999.00']);
         $customer = $this->customerWithManuscript();
 
         Company::forgetCache();

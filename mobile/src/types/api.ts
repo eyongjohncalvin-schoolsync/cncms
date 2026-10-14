@@ -788,6 +788,22 @@ export interface ReceiptWhatsappMessageResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Push token registration — POST /api/v1/devices/push-token
+// (App\Http\Controllers\Api\PushTokenController, StorePushTokenRequest)
+// ---------------------------------------------------------------------------
+
+export interface RegisterPushTokenRequestBody {
+    device_id: string;
+    expo_push_token: string;
+    platform: 'ios' | 'android';
+}
+
+export interface RegisterPushTokenResponse {
+    uuid: string;
+    registered_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Generic API error envelope (401/403/422/500 all share this shape)
 // ---------------------------------------------------------------------------
 

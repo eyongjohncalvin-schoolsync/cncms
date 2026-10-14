@@ -80,6 +80,10 @@ final class CustomerImportService
         $succeeded = [];
         $failed = [];
         $rules = (new StoreCustomerRequest)->rules();
+        // The on-screen form insists on a phone, but legacy spreadsheets
+        // mostly have none (most paper records carry no number) — a missing
+        // phone must not reject the whole row on import.
+        $rules['phone'] = ['nullable', 'string', 'max:20'];
 
         // zone uuid => id, resolved through CustomerService's branch-scoped
         // lookup once per distinct zone rather than once per row.
