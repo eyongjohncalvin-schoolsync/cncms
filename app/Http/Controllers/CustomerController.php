@@ -494,6 +494,8 @@ class CustomerController extends Controller
             'uuid' => $customer->uuid,
             'name' => $customer->name,
             'phone' => $customer->phone,
+            'email' => $customer->email,
+            'preferred_channel' => $customer->preferred_channel ?? 'whatsapp',
             'zone_uuid' => $customer->zone?->uuid,
             'zone_name' => $customer->zone?->name,
             'bill' => $customer->bill,

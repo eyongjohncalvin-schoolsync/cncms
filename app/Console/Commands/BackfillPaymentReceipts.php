@@ -85,7 +85,7 @@ class BackfillPaymentReceipts extends Command
             // payment.
             $base()->with(['customer.zone.branch', 'verification', 'receipt'])->orderBy('id')->chunkById(200, function ($payments) use ($receipts, &$issued): void {
                 foreach ($payments as $payment) {
-                    $receipts->issueFor($payment);
+                    $receipts->issueFor($payment, autoSend: false);
                     $issued++;
                 }
             });

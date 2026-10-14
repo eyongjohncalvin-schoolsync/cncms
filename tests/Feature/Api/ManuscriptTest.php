@@ -93,7 +93,9 @@ class ManuscriptTest extends TestCase
     {
         $period = Carbon::now()->format('Y-m');
         $zone = ZoneFactory::new()->create();
-        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
+        // Explicitly active: collections count active customers only, and the
+        // factory's default status is random.
+        $customer = CustomerFactory::new()->active()->create(['zone_id' => $zone->id]);
         ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
 
         PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 2500, 'verification_status' => 'verified']);

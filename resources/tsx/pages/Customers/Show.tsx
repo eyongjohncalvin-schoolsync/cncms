@@ -2,6 +2,8 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useMemo, useState, type ComponentType } from 'react';
 import {
     IconCash,
+    IconMail,
+    IconSend,
     IconFileDescription,
     IconPrinter,
     IconReceipt2,
@@ -316,6 +318,12 @@ export default function CustomersShow({ customer }: { customer: CustomerDetail }
                     </CardHeader>
                     <CardBody className="flex flex-col gap-4 p-6">
                         <Field icon={IconPhone} label="Phone" value={customer.phone ?? '—'} />
+                        <Field icon={IconMail} label="Email" value={customer.email ?? '—'} />
+                        <Field
+                            icon={IconSend}
+                            label="Receipts by"
+                            value={{ whatsapp: 'WhatsApp', email: 'Email', print: 'Printed receipt' }[customer.preferred_channel ?? 'whatsapp']}
+                        />
                         <Field icon={IconMapPin} label="Zone" value={customer.zone_name} />
                         <Field icon={IconMapPin} label="Location" value={customer.location ?? '—'} />
                         <Field icon={IconGauge} label="Level" value={customer.level} />

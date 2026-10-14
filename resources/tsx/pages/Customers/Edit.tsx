@@ -18,8 +18,9 @@ import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ServicesPicker } from '@/components/customers/ServicesPicker';
+import { ReceiptDeliveryFields } from '@/components/customers/ReceiptDeliveryFields';
 import { StatusBadge } from '@/components/shared/StatusBadge';
-import type { Customer, CustomerLevel, CustomerServiceSelectionForm, CustomerStatus, ServiceCatalogueEntry, Zone } from '@/types';
+import type { Customer, CustomerLevel, CustomerServiceSelectionForm, CustomerStatus, ServiceCatalogueEntry, Zone, PreferredChannel } from '@/types';
 
 interface CustomersEditProps {
     customer: Customer;
@@ -35,6 +36,8 @@ export default function CustomersEdit({ customer, zones, service_catalogue }: Cu
         name: string;
         zone_uuid: string;
         phone: string;
+        email: string;
+        preferred_channel: PreferredChannel;
         location: string;
         level: CustomerLevel;
         status: CustomerStatus;
@@ -43,6 +46,8 @@ export default function CustomersEdit({ customer, zones, service_catalogue }: Cu
         name: customer.name,
         zone_uuid: customer.zone_uuid,
         phone: customer.phone ?? '',
+        email: customer.email ?? '',
+        preferred_channel: customer.preferred_channel ?? 'whatsapp',
         location: customer.location ?? '',
         level: customer.level,
         status: customer.status,
@@ -171,6 +176,13 @@ export default function CustomersEdit({ customer, zones, service_catalogue }: Cu
                                         Helps agents find the customer within the zone
                                     </p>
                                 </div>
+                                <ReceiptDeliveryFields
+                                    email={data.email}
+                                    preferredChannel={data.preferred_channel}
+                                    errors={errors}
+                                    onEmailChange={(value) => setData('email', value)}
+                                    onChannelChange={(value) => setData('preferred_channel', value)}
+                                />
                             </div>
                         </CardBody>
                     </Card>

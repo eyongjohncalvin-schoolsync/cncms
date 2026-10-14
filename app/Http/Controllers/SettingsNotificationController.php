@@ -30,6 +30,7 @@ class SettingsNotificationController extends Controller
                 'whatsapp_enabled' => $settings->whatsapp_enabled,
                 'email_enabled' => $settings->email_enabled,
                 'sms_enabled' => $settings->sms_enabled,
+                'auto_send_receipts' => (bool) $settings->auto_send_receipts,
                 'twilio_account_sid' => $settings->twilio_account_sid,
                 'twilio_auth_token' => $settings->twilio_auth_token,
                 'twilio_whatsapp_number' => $settings->twilio_whatsapp_number,

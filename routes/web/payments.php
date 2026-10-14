@@ -29,3 +29,4 @@ Route::post('payments/{payment}/receipt/issue', [PaymentReceiptController::class
 // flashes back a wa.me link the browser opens itself. Gated on payments.view
 // inside the controller (a staff member sending a receipt they can see).
 Route::post('payments/{payment}/receipt/send-whatsapp', [PaymentReceiptController::class, 'sendWhatsapp'])->name('payments.receipt.send-whatsapp');
+Route::post('payments/{payment}/receipt/send-email', [PaymentReceiptController::class, 'sendEmail'])->name('payments.receipt.send-email');

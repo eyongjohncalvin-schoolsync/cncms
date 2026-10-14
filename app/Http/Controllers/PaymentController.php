@@ -15,10 +15,11 @@ use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\PaymentVerification;
-use App\Support\PaymentReceiptLink;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
+use App\Services\ReceiptEmailService;
+use App\Support\PaymentReceiptLink;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -417,6 +418,11 @@ class PaymentController extends Controller
             'last_sent_at' => ! empty($receipt->sent_log)
                 ? ($receipt->sent_log[array_key_last($receipt->sent_log)]['at'] ?? null)
                 : null,
+            'last_sent_channel' => ! empty($receipt->sent_log)
+                ? ($receipt->sent_log[array_key_last($receipt->sent_log)]['channel'] ?? null)
+                : null,
+            'email_to' => app(ReceiptEmailService::class)->recipientEmail($receipt),
+            'email_unavailable_reason' => app(ReceiptEmailService::class)->unavailableReason($receipt),
         ];
     }
 

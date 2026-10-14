@@ -60,7 +60,17 @@ class PaymentReceiptService
      * allocated receipt_number (the `payment_id` UNIQUE constraint means
      * there can only ever be one row per payment).
      */
-    public function issueFor(Payment $payment, ?User $actor = null): PaymentReceipt
+    public function __construct(
+        private readonly ReceiptEmailService $email,
+    ) {}
+
+    /**
+     * $autoSend: email the new receipt straight away when auto-send is on
+     * and the customer prefers email (ReceiptEmailService::autoSendIfWanted)
+     * — false for the historical backfill, which must never email old
+     * receipts out of the blue.
+     */
+    public function issueFor(Payment $payment, ?User $actor = null, bool $autoSend = true): PaymentReceipt
     {
         $payment->loadMissing(['customer.zone.branch', 'verification', 'recordedBy']);
 
@@ -87,7 +97,13 @@ class PaymentReceiptService
                 'pdf_disk' => null,
             ]);
 
-            return $existing->refresh();
+            $existing->refresh();
+
+            if ($autoSend) {
+                $this->email->autoSendIfWanted($existing->setRelation('payment', $payment));
+            }
+
+            return $existing;
         }
 
         $receipt = DB::transaction(function () use ($payment, $actor, $snapshot): PaymentReceipt {
@@ -106,6 +122,10 @@ class PaymentReceiptService
         });
 
         $payment->setRelation('receipt', $receipt);
+
+        if ($autoSend) {
+            $this->email->autoSendIfWanted($receipt->setRelation('payment', $payment));
+        }
 
         return $receipt;
     }

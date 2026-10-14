@@ -8,7 +8,8 @@ import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ServicesPicker } from '@/components/customers/ServicesPicker';
-import type { CustomerLevel, CustomerServiceSelectionForm, ServiceCatalogueEntry, Zone } from '@/types';
+import { ReceiptDeliveryFields } from '@/components/customers/ReceiptDeliveryFields';
+import type { CustomerLevel, CustomerServiceSelectionForm, ServiceCatalogueEntry, Zone, PreferredChannel } from '@/types';
 
 interface CustomersCreateProps {
     zones: Zone[];
@@ -24,6 +25,8 @@ export default function CustomersCreate({ zones, service_catalogue }: CustomersC
         name: string;
         zone_uuid: string;
         phone: string;
+        email: string;
+        preferred_channel: PreferredChannel;
         location: string;
         level: CustomerLevel;
         description: string;
@@ -32,6 +35,8 @@ export default function CustomersCreate({ zones, service_catalogue }: CustomersC
         name: '',
         zone_uuid: '',
         phone: '',
+        email: '',
+        preferred_channel: 'whatsapp',
         location: '',
         level: 'normal',
         description: '',
@@ -153,6 +158,13 @@ export default function CustomersCreate({ zones, service_catalogue }: CustomersC
                                         Helps agents find the customer within the zone
                                     </p>
                                 </div>
+                                <ReceiptDeliveryFields
+                                    email={data.email}
+                                    preferredChannel={data.preferred_channel}
+                                    errors={errors}
+                                    onEmailChange={(value) => setData('email', value)}
+                                    onChannelChange={(value) => setData('preferred_channel', value)}
+                                />
                             </div>
                         </CardBody>
                     </Card>

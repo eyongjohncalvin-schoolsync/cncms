@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\Tenant;
 use App\Services\PaymentReceiptService;
+use App\Services\ReceiptEmailService;
 use App\Services\ReceiptWhatsAppService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -30,6 +31,7 @@ class PaymentReceiptController extends Controller
     public function __construct(
         private readonly PaymentReceiptService $receipts,
         private readonly ReceiptWhatsAppService $whatsapp,
+        private readonly ReceiptEmailService $email,
     ) {}
 
     /**
@@ -127,6 +129,28 @@ class PaymentReceiptController extends Controller
      * bound by a plain string uuid, NOT route-model binding, precisely
      * because binding would query the central connection before this runs.
      */
+    /**
+     * Queues the receipt by email (PDF attached) to the customer's address.
+     */
+    public function sendEmail(Request $request, Payment $payment): RedirectResponse
+    {
+        $receipt = $payment->receipt;
+
+        abort_if($receipt === null, 422, 'No receipt has been issued for this payment.');
+
+        $this->authorize('view', $receipt);
+
+        $reason = $this->email->unavailableReason($receipt);
+
+        if ($reason !== null) {
+            return back()->with('error', $reason);
+        }
+
+        $this->email->queue($receipt, $request->user());
+
+        return back()->with('success', "Receipt {$receipt->receipt_number} is being emailed to {$this->email->recipientEmail($receipt)}.");
+    }
+
     public function sharedPdf(Request $request, string $receiptUuid): StreamedResponse
     {
         $tenantKey = (string) $request->query('tenant', '');

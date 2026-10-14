@@ -35,6 +35,10 @@ final readonly class CustomerData
         public ?string $level = null,
         public ?string $status = null,
         public ?array $services = null,
+        public ?string $email = null,
+        public ?string $preferredChannel = null,
+        /** Whether `email` was sent at all — so an edit can clear it to null. */
+        public bool $emailProvided = false,
     ) {}
 
     public static function fromArray(array $data): self
@@ -57,6 +61,9 @@ final readonly class CustomerData
                     $data['services'],
                 ))
                 : null,
+            email: isset($data['email']) && trim((string) $data['email']) !== '' ? strtolower(trim((string) $data['email'])) : null,
+            preferredChannel: $data['preferred_channel'] ?? null,
+            emailProvided: array_key_exists('email', $data),
         );
     }
 
@@ -76,6 +83,7 @@ final readonly class CustomerData
             'description' => $this->description,
             'level' => $this->level,
             'status' => $this->status,
-        ], static fn (mixed $value): bool => $value !== null);
+            'preferred_channel' => $this->preferredChannel,
+        ], static fn (mixed $value): bool => $value !== null) + ($this->emailProvided ? ['email' => $this->email] : []);
     }
 }

@@ -31,7 +31,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * App\Services\CustomerService::archive()/restore() — deliberately NOT in
  * Fillable, so a customer edit form can never touch them.
  */
-#[Fillable(['zone_id', 'name', 'location', 'bill', 'others', 'phone', 'description', 'level', 'status', 'status_reason', 'status_note', 'status_changed_at', 'prepaid_paused'])]
+#[Fillable(['zone_id', 'name', 'location', 'bill', 'others', 'phone', 'email', 'preferred_channel', 'description', 'level', 'status', 'status_reason', 'status_note', 'status_changed_at', 'prepaid_paused'])]
 #[RouteKey('uuid')]
 class Customer extends Model
 {
@@ -90,6 +90,9 @@ class Customer extends Model
      * from anything that reads this relation (e.g.
      * CustomerEligibilityService's disconnection-eligibility scan).
      */
+    /** Where the customer wants receipts: see the add_receipt_delivery_columns migration. */
+    public const array PREFERRED_CHANNELS = ['whatsapp', 'email', 'print'];
+
     /**
      * The readable account code printed on bills and receipts —
      * {zone prefix}-{zero-padded id}, e.g. "THR01-0042". See
