@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { paymentMethodLabel } from '@/components/shared/PaymentMethodFields';
 import type { PageProps, Payment, PaymentReceipt } from '@/types';
 
 function formatRelative(iso: string): string {
@@ -222,6 +223,8 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                         <Row label="Customer" value={payment.customer_name} />
                         <Row label="Zone" value={payment.zone_name ?? '—'} />
                         <Row label="Frequency" value={frequencyLabels[payment.frequency]} />
+                        <Row label="Paid by" value={paymentMethodLabel(payment.method)} />
+                        {payment.method_reference && <Row label="Transaction ID" value={payment.method_reference} />}
                         {payment.months !== null && <Row label="Months" value={String(payment.months)} />}
                         <Row label="Expiration" value={payment.expiration_date ?? '—'} />
                         <Row label="Recorded" value={payment.recorded_offline ? 'Offline (field agent)' : 'Office'} />

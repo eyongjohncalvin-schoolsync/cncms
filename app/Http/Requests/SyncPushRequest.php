@@ -47,6 +47,11 @@ class SyncPushRequest extends FormRequest
             'changes.payments.*.months' => ['nullable', 'integer', 'min:1'],
             'changes.payments.*.clear_arrears_first' => ['nullable', 'boolean'],
             'changes.payments.*.created_at' => ['nullable', 'date'],
+            // Cash controls: shape-checked only — PaymentService rejects an
+            // unknown method or a MoMo payment without its ID per item, so
+            // one bad entry fails alone instead of 422-ing the whole batch.
+            'changes.payments.*.method' => ['nullable', 'string', 'max:20'],
+            'changes.payments.*.method_reference' => ['nullable', 'string', 'max:100'],
 
             'changes.expenditures' => ['nullable', 'array'],
             'changes.expenditures.*.local_uuid' => ['required', 'uuid'],

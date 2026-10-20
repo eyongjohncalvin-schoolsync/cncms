@@ -287,6 +287,9 @@ export interface CustomerServiceSelectionForm {
 export type VerificationStatus = 'pending' | 'verified' | 'rejected';
 export type PaymentFrequency = 'monthly' | 'yearly' | 'months';
 
+/** How the customer paid — Payment::METHODS (docs/plans/cash-controls.md). */
+export type PaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+
 export interface PaymentVerification {
     uuid: string;
     status: 'pending' | 'approved' | 'rejected';
@@ -354,6 +357,8 @@ export interface Payment {
     amount: string;
     credit: string;
     frequency: PaymentFrequency;
+    method: PaymentMethod;
+    method_reference: string | null;
     months: number | null;
     expiration_date: string | null;
     verification_status: VerificationStatus;
@@ -552,6 +557,13 @@ export interface Company {
     reconnection_fine: string;
     /** Two-approver threshold for the Arrears Adjustment feature (App\Services\ArrearsAdjustmentService::requiresSecondApproval()). */
     arrears_second_approval_threshold: string;
+    /** Cash controls (docs/plans/cash-controls.md): a voucher above this — or one taking the day's payouts above the daily limit — needs every investor's approval. Null = no limit. */
+    voucher_approval_limit: string | null;
+    voucher_daily_limit: string | null;
+    /** Hours a collector may hold cash before the "not handed over" alert. */
+    remittance_deadline_hours: number;
+    /** Days a cash advance may stay unjustified before it is flagged. */
+    advance_settlement_days: number;
     /** RCCM — Registre du Commerce et du Crédit Mobilier (OHADA commercial registration number). */
     rccm_number: string | null;
     /** NIU — Numéro d'Identifiant Unique (Cameroon DGI taxpayer ID). */

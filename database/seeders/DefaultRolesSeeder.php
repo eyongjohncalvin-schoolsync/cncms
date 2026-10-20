@@ -78,6 +78,11 @@ class DefaultRolesSeeder extends Seeder
                 'description' => 'Field collections: record payments, view manuscripts and their own zone, submit complaints and arrears requests.',
                 'permissions' => self::agentPermissions(),
             ],
+            'cashier' => [
+                'label' => 'Cashier',
+                'description' => 'Receives collectors\' daily remittances, records walk-in payments, pays out approved vouchers and closes the till each day.',
+                'permissions' => self::cashierPermissions(),
+            ],
             'worker' => [
                 'label' => 'Worker',
                 'description' => 'Minimal read access plus logging complaints and arrears requests. Front-desk payment recording is a separate per-user flag, not this role.',
@@ -156,6 +161,12 @@ class DefaultRolesSeeder extends Seeder
             Permission::OpeningBalancesView->value,
             Permission::OpeningBalancesEnter->value,
 
+            Permission::ReceiptsManageStock->value,
+            Permission::CashView->value,
+            Permission::CashRemit->value,
+            Permission::VouchersRequest->value,
+            Permission::VouchersApprove->value,
+
             Permission::AuditView->value,
 
             Permission::CompanyView->value,
@@ -197,6 +208,39 @@ class DefaultRolesSeeder extends Seeder
 
             Permission::ArrearsView->value,
             Permission::ArrearsRequest->value,
+
+            Permission::CashRemit->value,
+            Permission::VouchersRequest->value,
+
+            Permission::CompanyView->value,
+        ];
+    }
+
+    /**
+     * The cashier (docs/plans/cash-controls.md): receives the collectors'
+     * daily remittances into a till, records walk-in payments, pays out
+     * approved vouchers and closes the till each day. Deliberately NOT
+     * `vouchers.approve` — whoever pays out never approves (maker-checker).
+     *
+     * @return list<string>
+     */
+    private static function cashierPermissions(): array
+    {
+        return [
+            Permission::CustomersView->value,
+
+            Permission::PaymentsView->value,
+            Permission::PaymentsCreate->value,
+            Permission::PaymentsIssueReceipt->value,
+
+            Permission::ExpendituresView->value,
+
+            Permission::CashView->value,
+            Permission::CashRemit->value,
+            Permission::CashReceive->value,
+
+            Permission::VouchersRequest->value,
+            Permission::VouchersPay->value,
 
             Permission::CompanyView->value,
         ];

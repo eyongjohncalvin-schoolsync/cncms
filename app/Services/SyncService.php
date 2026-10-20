@@ -341,6 +341,10 @@ class SyncService
                 // `collected_at`, never as the payment's actual
                 // `created_at` column.
                 'collected_at' => $item['created_at'] ?? null,
+                // Cash controls: older builds send neither — the column
+                // default (`cash`) applies, exactly what they collected.
+                'method' => $item['method'] ?? null,
+                'method_reference' => $item['method_reference'] ?? null,
             ]);
 
             // The branch-scoped customer resolved up front, when there is

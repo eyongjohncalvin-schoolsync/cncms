@@ -64,6 +64,7 @@ class StorePaymentRequest extends FormRequest
             'clear_arrears_first' => ['nullable', 'boolean'],
             'recorded_offline' => ['nullable', 'boolean'],
             'recorded_by_device' => ['nullable', 'string', 'max:255'],
+            ...Payment::methodRules(),
         ];
     }
 }

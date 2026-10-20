@@ -373,6 +373,8 @@ class PaymentController extends Controller
             'amount' => (string) $payment->amount,
             'credit' => (string) $payment->credit,
             'frequency' => $payment->frequency,
+            'method' => $payment->method,
+            'method_reference' => $payment->method_reference,
             'months' => $payment->months,
             'expiration_date' => $payment->expiration_date?->toDateString(),
             'verification_status' => $payment->verification_status,

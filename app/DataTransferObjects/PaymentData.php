@@ -44,6 +44,11 @@ final readonly class PaymentData
         // toggle — a months/yearly payment pays down outstanding arrears
         // before buying prepaid months. Ignored for `monthly`.
         public ?bool $clearArrearsFirst = null,
+        // Cash controls (docs/plans/cash-controls.md): how the money came in
+        // (Payment::METHODS) and the operator transaction ID for MoMo /
+        // Orange Money / bank. Null method = the column default, `cash`.
+        public ?string $method = null,
+        public ?string $methodReference = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -59,6 +64,10 @@ final readonly class PaymentData
             localUuid: $data['local_uuid'] ?? null,
             collectedAt: $data['collected_at'] ?? null,
             clearArrearsFirst: array_key_exists('clear_arrears_first', $data) ? (bool) $data['clear_arrears_first'] : null,
+            method: $data['method'] ?? null,
+            methodReference: isset($data['method_reference']) && trim((string) $data['method_reference']) !== ''
+                ? trim((string) $data['method_reference'])
+                : null,
         );
     }
 
@@ -79,6 +88,8 @@ final readonly class PaymentData
             'recorded_by_device' => $this->recordedByDevice,
             'local_uuid' => $this->localUuid,
             'collected_at' => $this->collectedAt,
+            'method' => $this->method,
+            'method_reference' => $this->methodReference,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

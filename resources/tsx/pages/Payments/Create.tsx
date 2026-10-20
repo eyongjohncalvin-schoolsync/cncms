@@ -7,8 +7,9 @@ import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
+import { PaymentMethodFields } from '@/components/shared/PaymentMethodFields';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Customer, CustomerRecentPayment, PageProps, PaymentFrequency } from '@/types';
+import type { Customer, CustomerRecentPayment, PageProps, PaymentFrequency, PaymentMethod } from '@/types';
 
 function frequencyLabel(freq: PaymentFrequency): string {
     return freq === 'monthly' ? 'Monthly' : freq === 'months' ? 'Multi-month' : 'Yearly';
@@ -157,6 +158,8 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
         // Owner's rule: a prepayment clears arrears first unless an
         // arrears approver deliberately unticks it (enforced server-side too).
         clear_arrears_first: true,
+        method: 'cash' as PaymentMethod,
+        method_reference: '',
     });
 
     const filteredCustomers = useMemo(() => {
@@ -423,6 +426,15 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
                                 {prepaymentSplit && <p className="mt-2 pl-6 text-xs text-slate-500">{prepaymentSplit}</p>}
                             </div>
                         )}
+
+                        <PaymentMethodFields
+                            method={data.method}
+                            reference={data.method_reference}
+                            onMethodChange={(method) => setData('method', method)}
+                            onReferenceChange={(reference) => setData('method_reference', reference)}
+                            methodError={errors.method}
+                            referenceError={errors.method_reference}
+                        />
 
                         <TextInput
                             id="credit"

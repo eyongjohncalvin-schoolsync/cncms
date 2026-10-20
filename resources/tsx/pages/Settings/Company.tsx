@@ -10,7 +10,8 @@ import {
     IconUpload,
     IconCheck,
     IconAlertCircle,
-    IconBuildingBank
+    IconBuildingBank,
+    IconShieldCheck
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { SettingsTabs } from '@/components/settings/SettingsTabs';
@@ -45,6 +46,10 @@ const EMPTY_COMPANY: Company = {
     momo_name: null,
     reconnection_fine: '2000',
     arrears_second_approval_threshold: '20000',
+    voucher_approval_limit: '50000',
+    voucher_daily_limit: null,
+    remittance_deadline_hours: 24,
+    advance_settlement_days: 7,
     rccm_number: null,
     niu: null,
     logo_url: null,
@@ -60,6 +65,7 @@ export default function SettingsCompany({ company }: { company: Company | null }
         { id: 'general', label: 'General', icon: IconBuildingStore },
         { id: 'contact', label: 'Contact & Support', icon: IconHeadset },
         { id: 'payments', label: 'Payments (MOMO)', icon: IconWallet },
+        { id: 'cash', label: 'Cash controls', icon: IconShieldCheck },
         { id: 'legal', label: 'Legal & Tax', icon: IconFileText },
         { id: 'branding', label: 'Branding', icon: IconUpload },
     ];
@@ -363,6 +369,94 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                     />
                                                     <p className="mt-2 text-xs text-slate-500">
                                                         Arrears adjustments above this amount require a second, more senior approval before they take effect
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </CardBody>
+                                    </Card>
+                                </div>
+
+                                <div className={activeSection === 'cash' ? '' : 'hidden'}>
+                                    <Card className="animate-fade-up">
+                                        <CardHeader className="border-b border-slate-100">
+                                            <div className="flex items-center gap-3">
+                                                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                                                    <IconShieldCheck size={18} stroke={1.75} />
+                                                </span>
+                                                <div>
+                                                    <h2 className="text-base font-semibold text-slate-900">Cash controls</h2>
+                                                    <p className="text-xs text-slate-500 mt-0.5">Voucher approval limits and cash handover deadlines</p>
+                                                </div>
+                                            </div>
+                                        </CardHeader>
+                                        <CardBody className="p-6">
+                                            <div className="grid gap-6 md:grid-cols-2">
+                                                <div>
+                                                    <TextInput
+                                                        id="voucher_approval_limit"
+                                                        name="voucher_approval_limit"
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        label="Single voucher limit (FCFA)"
+                                                        defaultValue={values.voucher_approval_limit ?? ''}
+                                                        error={errors.voucher_approval_limit}
+                                                        placeholder="No limit"
+                                                        className="rounded-xl px-4 py-3"
+                                                    />
+                                                    <p className="mt-2 text-xs text-slate-500">
+                                                        A voucher above this amount needs the approval of every investor (the owner when there are none). Leave blank for no limit.
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <TextInput
+                                                        id="voucher_daily_limit"
+                                                        name="voucher_daily_limit"
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        label="Daily payout limit (FCFA)"
+                                                        defaultValue={values.voucher_daily_limit ?? ''}
+                                                        error={errors.voucher_daily_limit}
+                                                        placeholder="No limit"
+                                                        className="rounded-xl px-4 py-3"
+                                                    />
+                                                    <p className="mt-2 text-xs text-slate-500">
+                                                        Once the day&apos;s vouchers reach this total, any further voucher that day needs every investor&apos;s approval.
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <TextInput
+                                                        id="remittance_deadline_hours"
+                                                        name="remittance_deadline_hours"
+                                                        type="number"
+                                                        min="1"
+                                                        max="720"
+                                                        label="Cash handover deadline (hours)"
+                                                        defaultValue={values.remittance_deadline_hours}
+                                                        error={errors.remittance_deadline_hours}
+                                                        required
+                                                        className="rounded-xl px-4 py-3"
+                                                    />
+                                                    <p className="mt-2 text-xs text-slate-500">
+                                                        Cash a collector holds longer than this without handing it over is flagged.
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <TextInput
+                                                        id="advance_settlement_days"
+                                                        name="advance_settlement_days"
+                                                        type="number"
+                                                        min="1"
+                                                        max="365"
+                                                        label="Cash advance justification (days)"
+                                                        defaultValue={values.advance_settlement_days}
+                                                        error={errors.advance_settlement_days}
+                                                        required
+                                                        className="rounded-xl px-4 py-3"
+                                                    />
+                                                    <p className="mt-2 text-xs text-slate-500">
+                                                        A cash advance must be justified with receipts (and any change returned) within this many days.
                                                     </p>
                                                 </div>
                                             </div>

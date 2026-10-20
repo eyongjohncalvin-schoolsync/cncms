@@ -136,6 +136,8 @@ class PaymentService
                 && $this->context->zoneId !== null
                 && $customer->zone_id === $this->context->zoneId);
 
+        $this->assertValidMethod($data);
+
         $attributes = $data->toAttributes();
         $attributes['verification_status'] = $canAutoVerify ? 'verified' : 'pending';
         $attributes['recorded_by'] = auth()->id();
@@ -227,6 +229,8 @@ class PaymentService
 
     public function update(Payment $payment, PaymentData $data): Payment
     {
+        $this->assertValidMethod($data, $payment);
+
         $attributes = $data->toAttributes();
 
         if ($data->clearArrearsFirst !== null) {
@@ -245,6 +249,29 @@ class PaymentService
         $this->forgetShowCache($payment->uuid);
 
         return $payment->load('customer');
+    }
+
+    /**
+     * The Form Requests already apply Payment::methodRules(); this repeats
+     * the check for callers that build PaymentData without one — the
+     * offline sync push, whose items are not validated by a request. A
+     * mobile-money payment without its transaction ID can never be ticked
+     * off the wallet statement, so it is refused rather than stored.
+     */
+    private function assertValidMethod(PaymentData $data, ?Payment $existing = null): void
+    {
+        $method = $data->method ?? $existing?->method ?? 'cash';
+        $reference = $data->methodReference ?? $existing?->method_reference;
+
+        if (! in_array($method, Payment::METHODS, true)) {
+            throw ValidationException::withMessages(['method' => "Unknown payment method [{$method}]."]);
+        }
+
+        if (in_array($method, Payment::METHODS_REQUIRING_REFERENCE, true) && ($reference === null || $reference === '')) {
+            throw ValidationException::withMessages([
+                'method_reference' => 'Enter the '.Payment::METHOD_LABELS[$method].' transaction ID.',
+            ]);
+        }
     }
 
     public function delete(Payment $payment): void
