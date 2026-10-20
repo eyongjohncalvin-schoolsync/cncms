@@ -32,7 +32,7 @@ export interface LoginResponse {
     token: string;
 }
 
-export type TenantRole = 'super' | 'admin' | 'manager' | 'agent' | 'worker';
+export type TenantRole = 'super' | 'admin' | 'manager' | 'agent' | 'cashier' | 'worker';
 
 export interface MeResponse {
     user: {
@@ -95,6 +95,13 @@ export interface SyncPushPaymentItem {
      * months/yearly prepayment (references/prepayment-drawdown.md). */
     clear_arrears_first?: boolean | null;
     created_at?: string | null;
+    /** Cash controls (docs/plans/cash-controls.md) — omitted = cash. */
+    method?: 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+    method_reference?: string | null;
+    /** The receipt this phone printed, checked server-side by FieldReceiptService. */
+    receipt_number?: string | null;
+    security_code?: string | null;
+    receipt_issued_at?: string | null;
 }
 
 export interface SyncPushExpenditureItem {

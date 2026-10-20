@@ -39,6 +39,16 @@ async function readCachedProfile(): Promise<AuthProfile | null> {
     return raw ? (JSON.parse(raw) as AuthProfile) : null;
 }
 
+/**
+ * The signed-in user's uuid from the cached session profile, for non-React
+ * code (SyncManager, src/fieldReceipts) that must key per-user data — a
+ * phone's receipt numbers belong to the collector they were issued to, not
+ * to whoever signs in next. Null when nobody is signed in.
+ */
+export async function getCachedUserUuid(): Promise<string | null> {
+    return (await readCachedProfile())?.user.uuid ?? null;
+}
+
 async function writeCachedProfile(profile: AuthProfile): Promise<void> {
     await SecureStore.setItemAsync(PROFILE_KEY, JSON.stringify(profile), PROFILE_STORE_OPTIONS);
 }

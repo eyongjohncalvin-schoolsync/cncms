@@ -16,6 +16,15 @@ export interface NewLocalPaymentInput {
     /** Local camera file URI, if a receipt photo was captured at submit
      * time — see mobile-app-react-native.md §4's Record Payment section. */
     receipt_local_uri?: string | null;
+    /** Pre-generated so the field receipt can be signed for this payment before it is written. */
+    local_uuid?: string;
+    /** Cash controls — defaults to cash. */
+    method?: LocalPayment['method'];
+    method_reference?: string | null;
+    /** The system-issued receipt printed for it (src/fieldReceipts/receiptStock.ts), if any. */
+    receipt_number?: string | null;
+    security_code?: string | null;
+    receipt_issued_at?: string | null;
 }
 
 /** Writes a new outbox row for a payment recorded offline-first. Screens
@@ -26,7 +35,7 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
     const now = nowIso();
 
     const row: LocalPayment = {
-        local_uuid: generateUuid(),
+        local_uuid: input.local_uuid ?? generateUuid(),
         server_uuid: null,
         customer_uuid: input.customer_uuid,
         amount: input.amount,
@@ -38,6 +47,11 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
         rejection_reason: null,
         receipt_local_uri: input.receipt_local_uri ?? null,
         receipt_server_path: null,
+        method: input.method ?? 'cash',
+        method_reference: input.method_reference?.trim() ? input.method_reference.trim() : null,
+        receipt_number: input.receipt_number ?? null,
+        security_code: input.security_code ?? null,
+        receipt_issued_at: input.receipt_issued_at ?? null,
         sync_status: 'queued',
         sync_error: null,
         sync_attempts: 0,
@@ -49,9 +63,11 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
         `INSERT INTO payments
             (local_uuid, server_uuid, customer_uuid, amount, credit, frequency, months, clear_arrears_first,
              verification_status, rejection_reason, receipt_local_uri, receipt_server_path,
+             method, method_reference, receipt_number, security_code, receipt_issued_at,
              sync_status, sync_error, sync_attempts, created_at, updated_at)
          VALUES ($local_uuid, $server_uuid, $customer_uuid, $amount, $credit, $frequency, $months, $clear_arrears_first,
              $verification_status, $rejection_reason, $receipt_local_uri, $receipt_server_path,
+             $method, $method_reference, $receipt_number, $security_code, $receipt_issued_at,
              $sync_status, $sync_error, $sync_attempts, $created_at, $updated_at)`,
         {
             $local_uuid: row.local_uuid,
@@ -66,6 +82,11 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
             $rejection_reason: row.rejection_reason,
             $receipt_local_uri: row.receipt_local_uri,
             $receipt_server_path: row.receipt_server_path,
+            $method: row.method,
+            $method_reference: row.method_reference,
+            $receipt_number: row.receipt_number,
+            $security_code: row.security_code,
+            $receipt_issued_at: row.receipt_issued_at,
             $sync_status: row.sync_status,
             $sync_error: row.sync_error,
             $sync_attempts: row.sync_attempts,
