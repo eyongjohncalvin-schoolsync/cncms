@@ -14,6 +14,7 @@ use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class PaymentService
@@ -24,6 +25,7 @@ class PaymentService
         private readonly ZoneRepositoryInterface $zones,
         private readonly TenantContext $context,
         private readonly PaymentReceiptService $receipts,
+        private readonly FieldReceiptService $fieldReceipts,
     ) {}
 
     /**
@@ -151,6 +153,10 @@ class PaymentService
             $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
         }
 
+        if ($data->receiptNumber !== null) {
+            return $this->createWithFieldReceipt($customer, $data, $attributes);
+        }
+
         $payment = $this->payments->create($customer->id, $attributes);
         $payment->setRelation('customer', $customer);
 
@@ -160,6 +166,43 @@ class PaymentService
         if ($payment->verification_status === 'verified') {
             $this->receipts->issueFor($payment, auth()->user());
         }
+
+        return $payment;
+    }
+
+    /**
+     * A payment the collector already gave a system-issued receipt for in
+     * the field (docs/plans/cash-controls.md, wave 2). The receipt is checked
+     * first (FieldReceiptService — number held by this collector and unused,
+     * code genuine) and the payment, its receipt and the used number are
+     * written in ONE transaction: a refused receipt stores nothing, and a
+     * number can never end up used without its payment or vice versa.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function createWithFieldReceipt(Customer $customer, PaymentData $data, array $attributes): Payment
+    {
+        $actor = auth()->user();
+
+        $payment = DB::transaction(function () use ($customer, $data, $attributes, $actor): Payment {
+            $claim = $this->fieldReceipts->claim(
+                $actor,
+                $customer,
+                (string) $data->amount,
+                (string) $data->receiptNumber,
+                $data->securityCode,
+                $data->receiptIssuedAt,
+            );
+
+            $payment = $this->payments->create($customer->id, $attributes);
+            $payment->setRelation('customer', $customer);
+
+            $this->receipts->issueField($payment, $claim['leaf'], $claim['issued_at'], $claim['device'], $data->securityCode, $actor);
+
+            return $payment;
+        });
+
+        $this->receipts->autoSend($payment->receipt, $payment);
 
         return $payment;
     }

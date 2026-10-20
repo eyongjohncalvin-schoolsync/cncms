@@ -19,6 +19,7 @@ import {
     IconScale,
     IconBook2,
     IconSend,
+    IconReceipt,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -138,6 +139,10 @@ const arrearsAdjustmentsNavItem = { href: '/arrears-adjustments', labelKey: 'com
 // `opening_balances.*` permissions.
 const openingBalancesNavItem = { href: '/opening-balances', labelKey: 'common.opening_balances', icon: IconBook2, accent: 'emerald' as const };
 
+// Receipt stock (docs/plans/cash-controls.md) — ReceiptBlockPolicy::viewAny
+// → `receipts.manage_stock`.
+const receiptStockNavItem = { href: '/receipt-stock', labelKey: 'common.receipt_stock', icon: IconReceipt, accent: 'green' as const };
+
 // "To send" — receipts (`payments.view`) and this month's bills
 // (`manuscripts.send_bill`) still waiting to reach the customer.
 const sendQueueNavItem = { href: '/to-send', labelKey: 'common.to_send', icon: IconSend, accent: 'green' as const };
@@ -199,6 +204,7 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
         ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
         ...(canAny('opening_balances.view', 'opening_balances.enter', 'opening_balances.approve') ? [openingBalancesNavItem] : []),
+        ...(can('receipts.manage_stock') ? [receiptStockNavItem] : []),
         ...(can('audit.view') ? [auditNavItem] : []),
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),

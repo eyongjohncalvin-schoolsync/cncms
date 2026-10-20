@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
+use App\Support\ReceiptSecurityCode;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -29,6 +30,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'payment_id', 'receipt_number', 'issued_at', 'issued_by', 'amount',
     'pdf_path', 'pdf_disk', 'snapshot', 'sent_log', 'status',
+    // Cash controls wave 2 — see SOURCES.
+    'source', 'security_code', 'receipt_leaf_id', 'field_device_id',
 ])]
 #[RouteKey('uuid')]
 class PaymentReceipt extends Model
@@ -38,6 +41,19 @@ class PaymentReceipt extends Model
     public const string STATUS_ISSUED = 'issued';
 
     public const string STATUS_VOID = 'void';
+
+    /**
+     * Where the receipt was produced (docs/plans/cash-controls.md):
+     * `office` — the server issued it (verify / on-the-spot payment);
+     * `digital` — a collector's registered phone issued it in the field,
+     * signed with that device's secret; `book` — a leaf of a system-printed
+     * receipt book, filled in by hand.
+     */
+    public const string SOURCE_OFFICE = 'office';
+
+    public const string SOURCE_DIGITAL = 'digital';
+
+    public const string SOURCE_BOOK = 'book';
 
     public $timestamps = true;
 
@@ -66,6 +82,22 @@ class PaymentReceipt extends Model
     public function issuedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'issued_by');
+    }
+
+    public function leaf(): BelongsTo
+    {
+        return $this->belongsTo(ReceiptLeaf::class, 'receipt_leaf_id');
+    }
+
+    public function fieldDevice(): BelongsTo
+    {
+        return $this->belongsTo(FieldDevice::class);
+    }
+
+    /** The code as printed — "K7QF-2MXA" — or null for a book leaf. */
+    public function formattedSecurityCode(): ?string
+    {
+        return $this->security_code ? ReceiptSecurityCode::format($this->security_code) : null;
     }
 
     public function isVoid(): bool

@@ -48,6 +48,29 @@ final class PaymentReceiptLink
     }
 
     /**
+     * The short check link printed as the QR on receipts from cash controls
+     * onwards (docs/plans/cash-controls.md): /r/{tenant}/{number}?c={code}.
+     * Unsigned on purpose — a phone in the field builds the same link
+     * offline, and the security code itself is what proves the receipt
+     * genuine (App\Http\Controllers\ReceiptCheckController). Short enough to
+     * scan off a 58 mm roll and to type by hand.
+     */
+    public static function check(PaymentReceipt $receipt): string
+    {
+        return self::checkFor($receipt->receipt_number, $receipt->security_code);
+    }
+
+    public static function checkFor(string $receiptNumber, ?string $securityCode = null): string
+    {
+        $url = route('receipts.check', [
+            'tenant' => (string) (tenant()?->getTenantKey() ?? ''),
+            'number' => $receiptNumber,
+        ]);
+
+        return $securityCode ? $url.'?c='.$securityCode : $url;
+    }
+
+    /**
      * @param  ?string  $format  a PaymentReceiptService::FORMATS value; null = the A6 sheet
      */
     public static function shared(PaymentReceipt $receipt, ?string $format = null): string

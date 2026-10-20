@@ -65,6 +65,10 @@ class StorePaymentRequest extends FormRequest
             'recorded_offline' => ['nullable', 'boolean'],
             'recorded_by_device' => ['nullable', 'string', 'max:255'],
             ...Payment::methodRules(),
+            // Cash controls wave 2 — a system-issued field receipt (FieldReceiptService checks it).
+            'receipt_number' => ['nullable', 'string', 'max:30'],
+            'security_code' => ['nullable', 'string', 'max:12'],
+            'receipt_issued_at' => ['nullable', 'date'],
         ];
     }
 }

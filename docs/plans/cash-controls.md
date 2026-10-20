@@ -144,8 +144,8 @@ voucher_approvals   voucher_id, user_id, decision (approved|rejected), note, dec
 | Wave | Status |
 |---|---|
 | 1 Foundations | ✅ done |
-| 2 Receipt stock | in progress |
-| 3 Mobile | — |
+| 2 Receipt stock | ✅ done |
+| 3 Mobile | in progress |
 | 4 Cash book | — |
 | 5 Vouchers | — |
 | 6 Alerts | — |

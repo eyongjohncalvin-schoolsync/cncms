@@ -49,6 +49,14 @@ final readonly class PaymentData
         // Orange Money / bank. Null method = the column default, `cash`.
         public ?string $method = null,
         public ?string $methodReference = null,
+        // Cash controls wave 2: the system-issued receipt the collector
+        // already handed over (App\Services\FieldReceiptService) — a number
+        // from their digital block or printed book, the code printed on it
+        // (digital only) and when it was printed. Never stored on the
+        // payment row itself; they become its PaymentReceipt.
+        public ?string $receiptNumber = null,
+        public ?string $securityCode = null,
+        public ?string $receiptIssuedAt = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -68,6 +76,11 @@ final readonly class PaymentData
             methodReference: isset($data['method_reference']) && trim((string) $data['method_reference']) !== ''
                 ? trim((string) $data['method_reference'])
                 : null,
+            receiptNumber: isset($data['receipt_number']) && trim((string) $data['receipt_number']) !== ''
+                ? trim((string) $data['receipt_number'])
+                : null,
+            securityCode: $data['security_code'] ?? null,
+            receiptIssuedAt: $data['receipt_issued_at'] ?? null,
         );
     }
 

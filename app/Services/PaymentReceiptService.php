@@ -5,13 +5,19 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Company;
+use App\Models\FieldDevice;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
+use App\Models\ReceiptBlock;
+use App\Models\ReceiptLeaf;
 use App\Models\User;
+use App\Support\AmountInWords;
 use App\Support\PaymentReceiptLink;
 use App\Support\QrCode;
+use App\Support\ReceiptSecurityCode;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -47,7 +53,7 @@ class PaymentReceiptService
     private const array THERMAL_WIDTH_MM = [self::FORMAT_THERMAL_58 => 58, self::FORMAT_THERMAL_80 => 80];
 
     /** Bumped whenever the receipt layout changes; see pdf(). */
-    private const int LAYOUT_VERSION = 4;
+    private const int LAYOUT_VERSION = 5;
 
     /**
      * Issue a receipt for $payment, or return the existing one.
@@ -86,13 +92,22 @@ class PaymentReceiptService
 
         if ($existing) {
             // Re-activate the voided receipt in place — reject → re-approve.
-            // Keeps its already-allocated receipt_number.
+            // Keeps its already-allocated receipt_number; the security code
+            // is re-signed because the issue time (and maybe the amount)
+            // changed. A field receipt keeps its field code: the paper the
+            // customer holds still carries it.
+            $issuedAt = now();
+            $code = $existing->source === PaymentReceipt::SOURCE_OFFICE || $existing->security_code === null
+                ? $this->officeCode($existing->receipt_number, $payment, $issuedAt)
+                : $existing->security_code;
+
             $existing->update([
                 'status' => PaymentReceipt::STATUS_ISSUED,
-                'issued_at' => now(),
+                'issued_at' => $issuedAt,
                 'issued_by' => $actor?->id,
                 'amount' => $payment->amount,
-                'snapshot' => array_merge($snapshot, ['receipt_number' => $existing->receipt_number]),
+                'security_code' => $code,
+                'snapshot' => array_merge($snapshot, ['receipt_number' => $existing->receipt_number, 'security_code' => $code]),
                 'pdf_path' => null,
                 'pdf_disk' => null,
             ]);
@@ -108,14 +123,18 @@ class PaymentReceiptService
 
         $receipt = DB::transaction(function () use ($payment, $actor, $snapshot): PaymentReceipt {
             $number = $this->allocateNumber();
+            $issuedAt = now();
+            $code = $this->officeCode($number, $payment, $issuedAt);
 
             return PaymentReceipt::create([
                 'payment_id' => $payment->id,
                 'receipt_number' => $number,
-                'issued_at' => now(),
+                'issued_at' => $issuedAt,
                 'issued_by' => $actor?->id,
                 'amount' => $payment->amount,
-                'snapshot' => array_merge($snapshot, ['receipt_number' => $number]),
+                'source' => PaymentReceipt::SOURCE_OFFICE,
+                'security_code' => $code,
+                'snapshot' => array_merge($snapshot, ['receipt_number' => $number, 'security_code' => $code]),
                 'sent_log' => [],
                 'status' => PaymentReceipt::STATUS_ISSUED,
             ]);
@@ -128,6 +147,80 @@ class PaymentReceiptService
         }
 
         return $receipt;
+    }
+
+    /**
+     * The receipt a collector already handed over in the field — a number
+     * from their digital block (signed on the phone with the device secret)
+     * or a leaf of their printed book (docs/plans/cash-controls.md). Called
+     * by App\Services\FieldReceiptService once it has checked the leaf and
+     * the code, inside the same transaction that created the payment; the
+     * leaf is marked used here so the two can never disagree.
+     *
+     * The receipt exists from the moment of collection, even while the
+     * payment itself still awaits verification — a later rejection voids it
+     * exactly like an office receipt.
+     */
+    public function issueField(Payment $payment, ReceiptLeaf $leaf, CarbonInterface $issuedAt, ?FieldDevice $device, ?string $deviceCode, ?User $actor = null): PaymentReceipt
+    {
+        $payment->loadMissing(['customer.zone.branch', 'verification', 'recordedBy']);
+
+        $source = $leaf->block->kind === ReceiptBlock::KIND_DIGITAL ? PaymentReceipt::SOURCE_DIGITAL : PaymentReceipt::SOURCE_BOOK;
+
+        // A book leaf carries no printed code (its amount is handwritten);
+        // the server signs one anyway so the email confirmation and the
+        // verify page can quote it.
+        $code = $source === PaymentReceipt::SOURCE_DIGITAL && $deviceCode !== null
+            ? ReceiptSecurityCode::normalize($deviceCode)
+            : $this->officeCode($leaf->number, $payment, $issuedAt);
+
+        $snapshot = array_merge($this->buildSnapshot($payment), [
+            'issued_at' => $issuedAt->toIso8601String(),
+            'receipt_number' => $leaf->number,
+            'security_code' => $code,
+            'source' => $source,
+        ]);
+
+        $receipt = PaymentReceipt::create([
+            'payment_id' => $payment->id,
+            'receipt_number' => $leaf->number,
+            'issued_at' => $issuedAt,
+            'issued_by' => $actor?->id,
+            'amount' => $payment->amount,
+            'source' => $source,
+            'security_code' => $code,
+            'receipt_leaf_id' => $leaf->id,
+            'field_device_id' => $device?->id,
+            'snapshot' => $snapshot,
+            'sent_log' => [],
+            'status' => PaymentReceipt::STATUS_ISSUED,
+        ]);
+
+        $leaf->update(['status' => ReceiptLeaf::STATUS_USED, 'used_at' => $issuedAt]);
+
+        $payment->setRelation('receipt', $receipt);
+
+        return $receipt;
+    }
+
+    /** Email the confirmation for a just-issued receipt when the settings want it. */
+    public function autoSend(PaymentReceipt $receipt, Payment $payment): void
+    {
+        $this->email->autoSendIfWanted($receipt->setRelation('payment', $payment));
+    }
+
+    /**
+     * Signs an office receipt with the tenant's server key — see
+     * App\Support\ReceiptSecurityCode.
+     */
+    private function officeCode(string $receiptNumber, Payment $payment, CarbonInterface $issuedAt): string
+    {
+        $payment->loadMissing('customer');
+
+        return ReceiptSecurityCode::compute(
+            ReceiptSecurityCode::officeKey((string) (tenant()?->getTenantKey() ?? 'central')),
+            ReceiptSecurityCode::canonical($receiptNumber, (string) $payment->customer?->uuid, (string) $payment->amount, $issuedAt->getTimestamp()),
+        );
     }
 
     /**
@@ -176,7 +269,7 @@ class PaymentReceiptService
             return $path;
         }
 
-        $verifyUrl = PaymentReceiptLink::verify($receipt);
+        $verifyUrl = PaymentReceiptLink::check($receipt);
         $data = [
             'r' => $receipt->snapshot ?? [],
             // Branding only — matched to bill.blade.php, fetched live (not
@@ -238,6 +331,15 @@ class PaymentReceiptService
             $snapshot['balance'] ?? null,
             $snapshot['company']['rccm_number'] ?? null,
             $snapshot['company']['niu'] ?? null,
+            // Cash controls: paid-by, txn ID, the code (under the number and
+            // under the QR), two lines of amount in words, the QR notice.
+            $payment['paid_by_label'] ?? null,
+            $payment['method_reference'] ?? null,
+            $snapshot['security_code'] ?? null,
+            $snapshot['security_code'] ?? null,
+            $snapshot['amount_in_words']['en'] ?? null,
+            $snapshot['amount_in_words']['fr'] ?? null,
+            'qr-notice',
         ]));
 
         return ($narrow ? 82 : 98)
@@ -270,6 +372,22 @@ class PaymentReceiptService
      */
     private function allocateNumber(): string
     {
+        ['year' => $year, 'first' => $number] = $this->reserveNumbers(1);
+
+        return ReceiptLeaf::formatNumber($year, $number);
+    }
+
+    /**
+     * Reserve $count consecutive receipt numbers of this year's series and
+     * return where the range starts — one number for an office receipt, a
+     * whole range for a receipt block (ReceiptStockService). Same lock,
+     * same counter, so a number is unique across every kind of receipt.
+     * MUST be called inside a transaction (see allocateNumber()).
+     *
+     * @return array{year: int, first: int}
+     */
+    public function reserveNumbers(int $count): array
+    {
         $year = (int) now()->format('Y');
 
         // Create the year's row if this is the first receipt of the year;
@@ -282,13 +400,13 @@ class PaymentReceiptService
         ]);
 
         $row = DB::table('receipt_counters')->where('year', $year)->lockForUpdate()->first();
-        $number = (int) ($row->next_number ?? 1);
+        $first = (int) ($row->next_number ?? 1);
 
         DB::table('receipt_counters')
             ->where('year', $year)
-            ->update(['next_number' => $number + 1, 'updated_at' => now()]);
+            ->update(['next_number' => $first + $count, 'updated_at' => now()]);
 
-        return sprintf('RCP-%04d-%06d', $year, $number);
+        return ['year' => $year, 'first' => $first];
     }
 
     /**
@@ -324,6 +442,16 @@ class PaymentReceiptService
                 'collected_at' => $payment->collected_at?->toIso8601String(),
                 'recorded_at' => $payment->created_at?->toIso8601String(),
                 'collected_by' => $payment->recordedBy?->name,
+                // Cash controls: how the money came in (`method` above is
+                // historically the frequency, kept for older layouts).
+                'paid_by' => $payment->method ?? 'cash',
+                'paid_by_label' => Payment::METHOD_LABELS[$payment->method ?? 'cash'] ?? 'Cash',
+                'method_reference' => $payment->method_reference,
+            ],
+            // Written by the system, never by hand — see AmountInWords.
+            'amount_in_words' => [
+                'en' => AmountInWords::convert((string) $payment->amount),
+                'fr' => AmountInWords::french((string) $payment->amount),
             ],
             'balance' => $this->balanceAfter($payment),
             'invoice' => $this->invoiceFor($payment),
@@ -407,7 +535,7 @@ class PaymentReceiptService
      * collected/recorded in); a `months`/`yearly` prepayment covers that many
      * consecutive months from the collection month.
      *
-     * @return list<string>  YYYY-MM, chronological
+     * @return list<string> YYYY-MM, chronological
      */
     private function coveredPeriods(Payment $payment): array
     {

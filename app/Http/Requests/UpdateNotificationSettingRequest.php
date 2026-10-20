@@ -24,6 +24,7 @@ class UpdateNotificationSettingRequest extends FormRequest
             'email_enabled' => ['required', 'boolean'],
             'sms_enabled' => ['required', 'boolean'],
             'auto_send_receipts' => ['sometimes', 'boolean'],
+            'email_collection_confirmations' => ['sometimes', 'boolean'],
             // Nullable: a tenant can toggle whatsapp_enabled on without
             // (yet) filling in Twilio credentials, or clear a previously
             // saved credential by submitting an empty string. These fields

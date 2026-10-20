@@ -578,6 +578,8 @@ export interface NotificationSettings {
     email_enabled: boolean;
     sms_enabled: boolean;
     auto_send_receipts: boolean;
+    /** Email every customer with an address when their money is recorded (cash controls). */
+    email_collection_confirmations: boolean;
     twilio_account_sid: string | null;
     twilio_auth_token: string | null;
     twilio_whatsapp_number: string | null;

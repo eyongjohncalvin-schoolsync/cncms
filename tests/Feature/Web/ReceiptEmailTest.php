@@ -54,9 +54,18 @@ class ReceiptEmailTest extends TestCase
         return $user;
     }
 
-    private function settings(bool $emailEnabled, bool $autoSend): void
+    /**
+     * $confirmations — cash controls' "confirm every collection by email"
+     * (on by default for new tenants); off here unless a test is about it,
+     * so the preferred-channel auto-send rule is tested on its own.
+     */
+    private function settings(bool $emailEnabled, bool $autoSend, bool $confirmations = false): void
     {
-        NotificationSetting::cached()->update(['email_enabled' => $emailEnabled, 'auto_send_receipts' => $autoSend]);
+        NotificationSetting::cached()->update([
+            'email_enabled' => $emailEnabled,
+            'auto_send_receipts' => $autoSend,
+            'email_collection_confirmations' => $confirmations,
+        ]);
         Cache::forget(NotificationSetting::CACHE_KEY);
     }
 
@@ -198,6 +207,24 @@ class ReceiptEmailTest extends TestCase
         $emailedReceipt = Payment::query()->where('customer_id', $prefersEmail->id)->sole()->receipt;
         Bus::assertDispatchedTimes(SendReceiptEmailJob::class, 1);
         Bus::assertDispatched(SendReceiptEmailJob::class, fn (SendReceiptEmailJob $job): bool => $job->receiptId === $emailedReceipt->id);
+    }
+
+    public function test_collection_confirmations_email_every_customer_with_an_address_whatever_their_channel(): void
+    {
+        Bus::fake([SendReceiptEmailJob::class]);
+        $this->settings(emailEnabled: true, autoSend: false, confirmations: true);
+        $this->actingAsRole('manager');
+
+        $prefersWhatsapp = $this->customer(['preferred_channel' => 'whatsapp']);
+        $noAddress = $this->customer(['email' => null]);
+
+        foreach ([$prefersWhatsapp, $noAddress] as $customer) {
+            $this->post('/payments', ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly'])->assertRedirect();
+        }
+
+        $confirmed = Payment::query()->where('customer_id', $prefersWhatsapp->id)->sole()->receipt;
+        Bus::assertDispatchedTimes(SendReceiptEmailJob::class, 1);
+        Bus::assertDispatched(SendReceiptEmailJob::class, fn (SendReceiptEmailJob $job): bool => $job->receiptId === $confirmed->id);
     }
 
     public function test_nothing_is_sent_automatically_when_auto_send_is_off(): void

@@ -345,6 +345,10 @@ class SyncService
                 // default (`cash`) applies, exactly what they collected.
                 'method' => $item['method'] ?? null,
                 'method_reference' => $item['method_reference'] ?? null,
+                // The receipt the phone printed at collection, if any.
+                'receipt_number' => $item['receipt_number'] ?? null,
+                'security_code' => $item['security_code'] ?? null,
+                'receipt_issued_at' => $item['receipt_issued_at'] ?? null,
             ]);
 
             // The branch-scoped customer resolved up front, when there is
