@@ -123,6 +123,12 @@ class Payment extends Model
         return $this->hasOne(PaymentReceipt::class);
     }
 
+    /** The daily-income handover this payment's money went through, if any (cash controls). */
+    public function remittanceLine(): HasOne
+    {
+        return $this->hasOne(RemittanceLine::class);
+    }
+
     /**
      * The single, canonical "eligible income for period P" predicate —
      * previously duplicated verbatim in TWO places

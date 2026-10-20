@@ -20,6 +20,8 @@ import {
     IconBook2,
     IconSend,
     IconReceipt,
+    IconBuildingBank,
+    IconCashBanknote,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -143,6 +145,12 @@ const openingBalancesNavItem = { href: '/opening-balances', labelKey: 'common.op
 // → `receipts.manage_stock`.
 const receiptStockNavItem = { href: '/receipt-stock', labelKey: 'common.receipt_stock', icon: IconReceipt, accent: 'green' as const };
 
+// Cash book (docs/plans/cash-controls.md) — CashAccountPolicy::viewAny
+// (`cash.view`) or a cashier's own till (`cash.receive`); and the daily
+// income form for collectors (`cash.remit`).
+const cashBookNavItem = { href: '/cash', labelKey: 'common.cash_book', icon: IconBuildingBank, accent: 'emerald' as const };
+const handOverNavItem = { href: '/cash/hand-over', labelKey: 'common.hand_over', icon: IconCashBanknote, accent: 'green' as const };
+
 // "To send" — receipts (`payments.view`) and this month's bills
 // (`manuscripts.send_bill`) still waiting to reach the customer.
 const sendQueueNavItem = { href: '/to-send', labelKey: 'common.to_send', icon: IconSend, accent: 'green' as const };
@@ -205,6 +213,8 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
         ...(canAny('opening_balances.view', 'opening_balances.enter', 'opening_balances.approve') ? [openingBalancesNavItem] : []),
         ...(can('receipts.manage_stock') ? [receiptStockNavItem] : []),
+        ...(canAny('cash.view', 'cash.receive') ? [cashBookNavItem] : []),
+        ...(can('cash.remit') ? [handOverNavItem] : []),
         ...(can('audit.view') ? [auditNavItem] : []),
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),

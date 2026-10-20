@@ -62,6 +62,7 @@ Route::prefix('v1')->group(function () {
             require __DIR__.'/api/notifications.php';
             require __DIR__.'/api/devices.php';
             require __DIR__.'/api/field-receipts.php';
+            require __DIR__.'/api/remittances.php';
         });
     });
 });

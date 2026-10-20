@@ -17,6 +17,8 @@
         "arrears_adjustments": "Arrears Adjustments",
         "opening_balances": "Opening Balances",
         "receipt_stock": "Receipt Stock",
+        "cash_book": "Cash Book",
+        "hand_over": "Hand Over Cash",
         "to_send": "To Send",
         "users_control_center": "Users Control Center",
         "settings": "Settings",

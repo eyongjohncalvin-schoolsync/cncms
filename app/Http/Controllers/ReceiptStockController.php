@@ -187,7 +187,7 @@ class ReceiptStockController extends Controller
     private function holderOptions(): array
     {
         return TenantUser::query()
-            ->where('tenant_id', $this->context->tenantUser->tenant_id)
+            ->where('tenant_id', $this->context()->tenantUser->tenant_id)
             ->with('user')
             ->get()
             ->filter(fn (TenantUser $tenantUser): bool => $tenantUser->user !== null)
@@ -199,5 +199,14 @@ class ReceiptStockController extends Controller
             ->sortBy('name')
             ->values()
             ->all();
+    }
+
+    /**
+     * Resolved per call, not injected: the router keeps a controller instance
+     * for the life of the app, and the tenant context is per request.
+     */
+    private function context(): TenantContext
+    {
+        return app(TenantContext::class);
     }
 }

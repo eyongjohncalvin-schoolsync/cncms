@@ -273,6 +273,7 @@ class PaymentService
     public function update(Payment $payment, PaymentData $data): Payment
     {
         $this->assertValidMethod($data, $payment);
+        $this->assertNotHandedOver($payment, $data);
 
         $attributes = $data->toAttributes();
 
@@ -317,8 +318,32 @@ class PaymentService
         }
     }
 
+    /**
+     * Cash controls: once a payment's money has gone through a daily
+     * handover (a remittance line), its amount and method are part of the
+     * cash book — changing them would silently unbalance a counted handover.
+     * Other corrections (frequency, months) stay allowed.
+     */
+    private function assertNotHandedOver(Payment $payment, PaymentData $data): void
+    {
+        $changesMoney = ($data->amount !== null && bccomp($data->amount, (string) $payment->amount, 2) !== 0)
+            || ($data->method !== null && $data->method !== $payment->method);
+
+        if ($changesMoney && $payment->remittanceLine()->exists()) {
+            throw ValidationException::withMessages([
+                'amount' => 'This payment\'s money has already been handed over in a daily remittance — its amount and method can no longer change.',
+            ]);
+        }
+    }
+
     public function delete(Payment $payment): void
     {
+        if ($payment->remittanceLine()->exists()) {
+            throw ValidationException::withMessages([
+                'payment' => 'This payment\'s money has already been handed over in a daily remittance and cannot be deleted.',
+            ]);
+        }
+
         $this->payments->delete($payment);
 
         $this->forgetShowCache($payment->uuid);

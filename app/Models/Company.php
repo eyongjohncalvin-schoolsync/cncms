@@ -49,6 +49,7 @@ class Company extends Model implements HasMedia
             'voucher_daily_limit' => 'decimal:2',
             'remittance_deadline_hours' => 'integer',
             'advance_settlement_days' => 'integer',
+            'cash_controls_start_date' => 'date',
             'bills_per_page' => 'integer',
         ];
     }

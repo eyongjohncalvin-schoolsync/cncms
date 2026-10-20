@@ -146,6 +146,6 @@ voucher_approvals   voucher_id, user_id, decision (approved|rejected), note, dec
 | 1 Foundations | ✅ done |
 | 2 Receipt stock | ✅ done |
 | 3 Mobile | ✅ done (printing via Bluetooth later) |
-| 4 Cash book | in progress |
-| 5 Vouchers | — |
+| 4 Cash book | ✅ done |
+| 5 Vouchers | in progress |
 | 6 Alerts | — |
