@@ -32,3 +32,7 @@ Artisan::command('inspire', function () {
 // independently-dispatched manuscript_generation runs for the same period
 // regardless of what triggered them.
 Schedule::command('tasks:run-due')->everyFifteenMinutes()->withoutOverlapping();
+
+// Cash controls (docs/plans/cash-controls.md): the morning digest of open
+// cash alerts to managers, the owner and the investors.
+Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping();

@@ -148,4 +148,4 @@ voucher_approvals   voucher_id, user_id, decision (approved|rejected), note, dec
 | 3 Mobile | ✅ done (printing via Bluetooth later) |
 | 4 Cash book | ✅ done |
 | 5 Vouchers | ✅ done |
-| 6 Alerts | in progress |
+| 6 Alerts | ✅ done |

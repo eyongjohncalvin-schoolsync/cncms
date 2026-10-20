@@ -77,6 +77,11 @@ export default function CashIndex({ today, can, accounts, my_till, transfer_targ
                     <p className="mt-1 text-sm text-slate-500">Where the company&apos;s money is, and every handover — {new Date(today).toLocaleDateString()}.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    {can.view_all && (
+                        <Link href="/cash/alerts">
+                            <Button variant="secondary">Alerts</Button>
+                        </Link>
+                    )}
                     {can.transfer && (
                         <Button variant="secondary" onClick={() => setTransferOpen(true)}>
                             <IconTransfer size={16} stroke={1.75} /> Deposit / transfer

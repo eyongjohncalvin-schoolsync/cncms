@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Customer;
 use App\Services\ArrearsAdjustmentService;
+use App\Services\CashAlertService;
 use App\Services\ManuscriptService;
 use App\Services\PaymentService;
 use App\Support\TenantContext;
@@ -20,6 +21,7 @@ class DashboardController extends Controller
         private readonly ManuscriptService $manuscripts,
         private readonly PaymentService $payments,
         private readonly ArrearsAdjustmentService $arrearsAdjustments,
+        private readonly CashAlertService $cashAlerts,
     ) {}
 
     public function index(Request $request): Response
@@ -68,6 +70,12 @@ class DashboardController extends Controller
                 // dashboard viewer regardless of who can actually act on it.
                 'pending_arrears_adjustments' => $this->arrearsAdjustments->dashboard()['pending_approval'],
             ],
+            // Cash controls (docs/plans/cash-controls.md): how many things
+            // need a look on the Cash alerts page — only for those who can
+            // open it (cash.view), and deferred so the dashboard never waits.
+            'cash_alerts' => app(TenantContext::class)->can('cash.view')
+                ? Inertia::defer(fn (): int => array_sum($this->cashAlerts->counts()))
+                : null,
         ]);
     }
 }
