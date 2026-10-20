@@ -28,7 +28,8 @@
                     @endif
                 </table>
                 <p style="margin:16px 0 0; font-size:13px; color:#64748b;">
-                    You can check this receipt is genuine at any time: <a href="{{ $verifyUrl }}" style="color:#15803d;">verify receipt {{ $receiptNumber }}</a>.
+                    You can check this receipt is genuine at any time: <a href="{{ $verifyUrl }}" style="color:#15803d;">verify receipt {{ $receiptNumber }}</a>@if (! empty($securityCode)) — security code <strong>{{ $securityCode }}</strong>@endif.
+                    <br>The amount above must match the receipt you were given. If it doesn't, or you did not make this payment, contact {{ $companyName }} straight away.
                     @if ($momoNumber)<br>Pay by Mobile Money: {{ $momoNumber }}.@endif
                 </p>
             </td>

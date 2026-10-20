@@ -22,6 +22,7 @@ import {
     IconReceipt,
     IconBuildingBank,
     IconCashBanknote,
+    IconFileInvoice,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -151,6 +152,9 @@ const receiptStockNavItem = { href: '/receipt-stock', labelKey: 'common.receipt_
 const cashBookNavItem = { href: '/cash', labelKey: 'common.cash_book', icon: IconBuildingBank, accent: 'emerald' as const };
 const handOverNavItem = { href: '/cash/hand-over', labelKey: 'common.hand_over', icon: IconCashBanknote, accent: 'green' as const };
 
+// Vouchers / bons de caisse — VoucherPolicy::viewAny.
+const vouchersNavItem = { href: '/vouchers', labelKey: 'common.vouchers', icon: IconFileInvoice, accent: 'emerald' as const };
+
 // "To send" — receipts (`payments.view`) and this month's bills
 // (`manuscripts.send_bill`) still waiting to reach the customer.
 const sendQueueNavItem = { href: '/to-send', labelKey: 'common.to_send', icon: IconSend, accent: 'green' as const };
@@ -215,6 +219,7 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(can('receipts.manage_stock') ? [receiptStockNavItem] : []),
         ...(canAny('cash.view', 'cash.receive') ? [cashBookNavItem] : []),
         ...(can('cash.remit') ? [handOverNavItem] : []),
+        ...(canAny('vouchers.request', 'vouchers.approve', 'vouchers.pay', 'cash.view') ? [vouchersNavItem] : []),
         ...(can('audit.view') ? [auditNavItem] : []),
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),

@@ -54,7 +54,8 @@ class ReceiptMail extends Mailable
                 'amount' => (string) $this->receipt->amount,
                 'issuedAt' => $this->receipt->issued_at,
                 'balance' => $snapshot['balance'] ?? null,
-                'verifyUrl' => PaymentReceiptLink::verify($this->receipt),
+                'verifyUrl' => PaymentReceiptLink::check($this->receipt),
+                'securityCode' => $this->receipt->formattedSecurityCode(),
                 'momoNumber' => $snapshot['company']['momo_number'] ?? null,
             ],
         );
