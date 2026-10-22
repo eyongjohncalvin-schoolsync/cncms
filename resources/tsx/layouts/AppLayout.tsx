@@ -5,7 +5,9 @@ import {
     IconLogout,
     IconBuildingSkyscraper,
     IconMenu2,
+    IconUserCircle,
 } from '@tabler/icons-react';
+import { Dropdown, DropdownDivider, DropdownItem } from '@/components/ui/Dropdown';
 import type { BreadcrumbItem, PageProps } from '@/types';
 import { RoleBadge } from '@/components/shared/StatusBadge';
 import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
@@ -173,20 +175,35 @@ export function AppLayout({
 
                                 <span aria-hidden="true" className="mx-1.5 hidden h-6 w-px bg-slate-200 sm:block" />
 
-                                <div className="flex items-center gap-2 rounded-full py-1 pr-1 pl-1 transition-colors hover:bg-slate-100/70">
-                                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-[11px] font-semibold text-white shadow-sm shadow-blue-600/20 ring-1 ring-white/40">
-                                        {initials(auth.user.name)}
-                                    </span>
-                                    <span className="hidden text-sm font-medium text-slate-700 sm:inline">
-                                        {auth.user.name}
-                                    </span>
-                                    {/* Role badge is noise on a phone where the row
-                                        is already tight — the name is hidden `< sm`
-                                        too, so hide the badge on the same breakpoint. */}
-                                    <span className="hidden sm:inline-flex">
-                                        <RoleBadge role={auth.user.role} />
-                                    </span>
-                                </div>
+                                {/* User menu: "My account" (profile, password,
+                                    two-factor, sessions) and log out. */}
+                                <Dropdown
+                                    align="end"
+                                    trigger={
+                                        <span className="flex items-center gap-2 rounded-full py-1 pr-1 pl-1 transition-colors hover:bg-slate-100/70">
+                                            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-700 text-[11px] font-semibold text-white shadow-sm shadow-blue-600/20 ring-1 ring-white/40">
+                                                {initials(auth.user.name)}
+                                            </span>
+                                            <span className="hidden text-sm font-medium text-slate-700 sm:inline">
+                                                {auth.user.name}
+                                            </span>
+                                            {/* Role badge is noise on a phone where the row
+                                                is already tight — the name is hidden `< sm`
+                                                too, so hide the badge on the same breakpoint. */}
+                                            <span className="hidden sm:inline-flex">
+                                                <RoleBadge role={auth.user.role} />
+                                            </span>
+                                        </span>
+                                    }
+                                >
+                                    <DropdownItem href="/account" icon={<IconUserCircle size={16} stroke={1.75} />}>
+                                        {t('common.my_account')}
+                                    </DropdownItem>
+                                    <DropdownDivider />
+                                    <DropdownItem href="/logout" method="post" icon={<IconLogout size={16} stroke={1.75} />}>
+                                        {t('common.log_out')}
+                                    </DropdownItem>
+                                </Dropdown>
 
                                 <Link
                                     href="/logout"
