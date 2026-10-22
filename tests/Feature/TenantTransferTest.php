@@ -51,6 +51,12 @@ class TenantTransferTest extends TestCase
         CustomerFactory::new()->count(3)->create();
         tenancy()->end();
 
+        // A hand-made table no migration builds — like swecom's
+        // manuscripts_2026_08_snapshot — must come across too.
+        $snapshot = TenantArchive::qualified('tenant'.$this->tenant->id, 'manual_snapshot');
+        DB::connection('pgsql')->statement("CREATE TABLE {$snapshot} (id bigint NOT NULL, amount numeric(12,2), note text, taken_at timestamp with time zone)");
+        DB::connection('pgsql')->statement("INSERT INTO {$snapshot} VALUES (1, 2500.00, 'August', '2026-08-31 23:00:00+00'), (2, NULL, NULL, NULL)");
+
         $this->user->createToken('api');
         File::put($this->filesRoot().'/public/logo.txt', 'swecom logo');
 
@@ -132,6 +138,11 @@ class TenantTransferTest extends TestCase
 
         $this->assertNotNull(Tenant::find($this->tenant->id));
         $this->assertSame($before, $this->fingerprint());
+        $this->assertArrayHasKey('manual_snapshot', $before, 'the hand-made table is part of the comparison');
+        $this->assertSame(
+            ['id' => 'bigint', 'amount' => 'numeric(12,2)', 'note' => 'text', 'taken_at' => 'timestamp with time zone'],
+            array_column(TenantArchive::definition(DB::connection('pgsql'), 'tenant'.$this->tenant->id, 'manual_snapshot'), 'type', 'name'),
+        );
         $this->assertSame($passwordHash, User::query()->findOrFail($this->user->id)->password);
         $this->assertSame(1, PersonalAccessToken::query()->where('tokenable_id', $this->user->id)->count());
         $this->assertTrue(TenantUserIndex::query()->where('tenant_id', $this->tenant->id)->where('user_id', $this->user->id)->exists());

@@ -107,7 +107,10 @@ class TenantExportService
 
             $key = TenantArchive::TENANT_SCHEMA_KEY.".{$table}";
             $rows = TenantArchive::stream($db, 'SELECT * FROM '.TenantArchive::qualified($schema, $table));
-            $tables[$key] = $this->writeTable($rows, TenantArchive::columns($db, $schema, $table), $workDir, $key);
+            $tables[$key] = [
+                ...$this->writeTable($rows, TenantArchive::columns($db, $schema, $table), $workDir, $key),
+                'definition' => TenantArchive::definition($db, $schema, $table),
+            ];
         }
 
         return [

@@ -239,16 +239,28 @@ class TenantImportService
     {
         $prefix = TenantArchive::TENANT_SCHEMA_KEY.'.';
         $tables = array_filter($manifest['tables'], fn (string $key) => str_starts_with($key, $prefix), ARRAY_FILTER_USE_KEY);
-        $targetTables = array_values(array_diff(TenantArchive::tables($db, $schema), ['migrations']));
+        $migratedTables = TenantArchive::tables($db, $schema);
 
         foreach ($tables as $key => $table) {
             $name = substr($key, strlen($prefix));
+
+            // A table no migration builds (a hand-made backup such as
+            // manuscripts_2026_08_snapshot) is recreated from its recorded
+            // column types — no indexes or constraints, data only.
+            if (! in_array($name, $migratedTables, true)) {
+                $this->createFromDefinition($db, $schema, $name, $table['definition']);
+
+                continue;
+            }
+
             $targetColumns = TenantArchive::columns($db, $schema, $name);
 
-            if (! in_array($name, $targetTables, true) || array_diff($table['columns'], $targetColumns) !== [] || array_diff($targetColumns, $table['columns']) !== []) {
+            if (array_diff($table['columns'], $targetColumns) !== [] || array_diff($targetColumns, $table['columns']) !== []) {
                 throw new RuntimeException("Table [{$name}] does not match the archive after migrating — source and target code differ.");
             }
         }
+
+        $targetTables = array_values(array_diff(TenantArchive::tables($db, $schema), ['migrations']));
 
         $relaxed = $this->deferForeignKeys($db, $schema);
 
@@ -283,6 +295,23 @@ class TenantImportService
                 $db->statement("ALTER TABLE {$constraint->table_name} ALTER CONSTRAINT \"{$constraint->conname}\" NOT DEFERRABLE");
             }
         }
+    }
+
+    /**
+     * @param  list<array{name: string, type: string, not_null: bool}>  $definition
+     */
+    private function createFromDefinition(Connection $db, string $schema, string $table, array $definition): void
+    {
+        if ($definition === []) {
+            throw new RuntimeException("Table [{$table}] is not built by any migration and the archive has no definition for it.");
+        }
+
+        $columns = array_map(
+            fn (array $column) => '"'.str_replace('"', '""', $column['name']).'" '.$column['type'].($column['not_null'] ? ' NOT NULL' : ''),
+            $definition,
+        );
+
+        $db->statement('CREATE TABLE '.TenantArchive::qualified($schema, $table).' ('.implode(', ', $columns).')');
     }
 
     /**

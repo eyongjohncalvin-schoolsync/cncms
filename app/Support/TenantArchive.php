@@ -24,7 +24,7 @@ use Illuminate\Database\Connection;
  */
 final class TenantArchive
 {
-    public const int FORMAT = 2;
+    public const int FORMAT = 3;
 
     public const string TENANT_SCHEMA_KEY = 'tenant';
 
@@ -63,6 +63,29 @@ final class TenantArchive
             ->orderBy('ordinal_position')
             ->pluck('column_name')
             ->all();
+    }
+
+    /**
+     * Column names, Postgres types and nullability, in column order — enough
+     * to recreate a table no migration builds (e.g. the hand-made
+     * manuscripts_2026_08_snapshot backup) on the import side.
+     *
+     * @return list<array{name: string, type: string, not_null: bool}>
+     */
+    public static function definition(Connection $db, string $schema, string $table): array
+    {
+        return array_map(fn (object $column) => [
+            'name' => $column->name,
+            'type' => $column->type,
+            'not_null' => (bool) $column->not_null,
+        ], $db->select(<<<'SQL'
+            SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, a.attnotnull AS not_null
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = ? AND c.relname = ? AND a.attnum > 0 AND NOT a.attisdropped
+            ORDER BY a.attnum
+            SQL, [$schema, $table]));
     }
 
     public static function schemaExists(Connection $db, string $schema): bool
