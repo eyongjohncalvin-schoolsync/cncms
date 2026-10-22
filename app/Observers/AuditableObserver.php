@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Observers;
 
 use App\Models\AuditLog;
+use App\Support\Impersonation;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Throwable;
@@ -70,6 +71,11 @@ class AuditableObserver
                 // manuscript:calculate command running via CLI with no
                 // authenticated user) — the column allows it.
                 'user_id' => auth()->id(),
+                // The landlord, when this change was made while they were
+                // impersonating user_id (App\Support\Impersonation). Only
+                // sent when set, so ordinary rows never depend on the
+                // column existing yet.
+                ...(Impersonation::active() ? ['impersonated_by' => Impersonation::impersonatorId()] : []),
                 'ip_address' => request()->ip(),
                 'user_agent' => request()->userAgent(),
                 'device_id' => request()->header('X-Device-ID'),

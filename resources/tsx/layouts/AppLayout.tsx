@@ -12,6 +12,7 @@ import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { NotificationBell } from '@/components/shared/NotificationBell';
 import { EmergencyBanner } from '@/components/shared/EmergencyBanner';
 import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
+import { ImpersonationBanner } from '@/components/shared/ImpersonationBanner';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { AppNav } from '@/components/shared/AppNav';
 import { MobileNavDrawer } from '@/layouts/MobileNavDrawer';
@@ -49,7 +50,7 @@ export function AppLayout({
      */
     breadcrumbs?: BreadcrumbItem[];
 }) {
-    const { auth, flash, notifications, company, maintenance } = usePage<PageProps>().props;
+    const { auth, flash, notifications, company, maintenance, impersonation } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
     const permissions = auth.user?.permissions ?? [];
     const { t } = useTranslation();
@@ -207,6 +208,7 @@ export function AppLayout({
                     </div>
                 )}
 
+                <ImpersonationBanner impersonation={impersonation} />
                 <MaintenanceBanner notice={maintenance} />
 
                 <EmergencyBanner notifications={notifications?.emergency ?? []} />

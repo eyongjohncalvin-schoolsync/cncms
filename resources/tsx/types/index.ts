@@ -122,6 +122,8 @@ export interface PageProps {
     notifications: NotificationsFeed | null;
     /** Running or next scheduled platform maintenance window, else null. */
     maintenance: MaintenanceNotice | null;
+    /** Set while a landlord is logged in as this user (App\Support\Impersonation). */
+    impersonation: { impersonator: string | null; user: string } | null;
     [key: string]: unknown;
 }
 
@@ -1077,6 +1079,8 @@ export interface AuditLogEntry {
     old_values: Record<string, unknown> | null;
     new_values: Record<string, unknown> | null;
     user: AuditLogUser | null;
+    /** Landlord who made this change while impersonating `user`. */
+    impersonated_by: string | null;
     ip_address: string | null;
     device_id: string | null;
     created_at: string;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Landlord\ActivityController;
 use App\Http\Controllers\Landlord\DashboardController;
+use App\Http\Controllers\Landlord\ImpersonationController;
 use App\Http\Controllers\Landlord\LandlordController;
 use App\Http\Controllers\Landlord\MaintenanceWindowController;
 use App\Http\Controllers\Landlord\TenantController;
@@ -27,6 +28,8 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::get('/', DashboardController::class)->name('dashboard');
     Route::get('activity', [ActivityController::class, 'index'])->name('activity.index');
 
+    Route::post('impersonate/{user}', [ImpersonationController::class, 'start'])->name('impersonate');
+
     Route::get('landlords', [LandlordController::class, 'index'])->name('landlords.index');
     Route::post('landlords', [LandlordController::class, 'store'])->name('landlords.store');
     Route::delete('landlords/{user}', [LandlordController::class, 'destroy'])->name('landlords.destroy');
@@ -44,3 +47,9 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::patch('maintenance/{maintenanceWindow}', [MaintenanceWindowController::class, 'update'])->name('maintenance.update');
     Route::post('maintenance/{maintenanceWindow}/end', [MaintenanceWindowController::class, 'end'])->name('maintenance.end');
 });
+
+// Ending an impersonation: only `auth`, not `landlord` — while impersonating,
+// the signed-in user is the workspace user (App\Support\Impersonation).
+Route::post('impersonation/stop', [ImpersonationController::class, 'stop'])
+    ->middleware('auth')
+    ->name('impersonation.stop');

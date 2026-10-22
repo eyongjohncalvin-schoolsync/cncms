@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\TenantUserIndex;
+use App\Support\Impersonation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -98,6 +99,14 @@ class AuthController extends Controller
 
     public function destroy(Request $request): RedirectResponse
     {
+        // "Log out" while impersonating ends the impersonation and returns
+        // the landlord to their own account, rather than signing them out.
+        if (Impersonation::active()) {
+            Impersonation::stop();
+
+            return redirect()->route('landlord.tenants.index')->with('success', 'Back to your own account.');
+        }
+
         Auth::logout();
 
         // Belt-and-suspenders: session()->invalidate() below already

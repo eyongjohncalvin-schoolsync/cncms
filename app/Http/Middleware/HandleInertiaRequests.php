@@ -6,6 +6,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Company;
 use App\Services\NotificationService;
+use App\Support\Impersonation;
 use App\Support\MaintenanceMode;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
@@ -121,6 +122,11 @@ class HandleInertiaRequests extends Middleware
             // about it before they are locked out. Polled with
             // `notifications` by AppLayout.
             'maintenance' => fn () => MaintenanceMode::current()?->toNotice(),
+            // Set while a landlord is logged in as this user
+            // (App\Support\Impersonation) — drives AppLayout's red banner.
+            'impersonation' => fn () => Impersonation::active() && $user
+                ? ['impersonator' => Impersonation::impersonator()?->name, 'user' => $user->name]
+                : null,
         ];
     }
 }

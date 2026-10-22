@@ -7,6 +7,7 @@ namespace App\Http\Middleware;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\TenantUserIndex;
+use App\Support\Impersonation;
 use App\Support\MaintenanceMode;
 use App\Support\TenantContext;
 use Closure;
@@ -31,8 +32,9 @@ class ResolveTenantWeb
         }
 
         // Platform maintenance (App\Support\MaintenanceMode): hold everyone
-        // but landlords on the countdown page until the window ends.
-        if (MaintenanceMode::blocks($user)) {
+        // but landlords on the countdown page until the window ends — a
+        // landlord impersonating a user is still a landlord at the keyboard.
+        if (MaintenanceMode::blocks($user) && ! Impersonation::active()) {
             return redirect()->route('maintenance');
         }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Support\Impersonation;
 use Illuminate\Database\Eloquent\Attributes\Connection;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -41,8 +42,9 @@ class LandlordActivity extends Model
         ?User $user = null,
     ): self {
         // A web action is attributed to the signed-in landlord and their IP;
-        // the CLI has neither.
-        $actor = $user ?? auth()->user();
+        // the CLI has neither. While impersonating, the signed-in user is
+        // the workspace user — the real actor is the impersonating landlord.
+        $actor = $user ?? Impersonation::impersonator() ?? auth()->user();
 
         return self::query()->create([
             'user_id' => $actor?->id,

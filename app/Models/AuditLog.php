@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 // statements, and there is no `updated_at` column — records are write-once.
 #[Fillable([
     'tenant_id', 'table_name', 'record_uuid', 'record_id', 'action',
-    'old_values', 'new_values', 'user_id', 'ip_address', 'user_agent', 'device_id',
+    'old_values', 'new_values', 'user_id', 'impersonated_by', 'ip_address', 'user_agent', 'device_id',
 ])]
 class AuditLog extends Model
 {
@@ -33,5 +33,15 @@ class AuditLog extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * The landlord who made this change while impersonating `user`
+     * (App\Support\Impersonation); null on ordinary rows, which then cost
+     * no query.
+     */
+    public function impersonator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'impersonated_by');
     }
 }
