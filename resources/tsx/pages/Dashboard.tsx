@@ -25,6 +25,8 @@ interface DashboardProps {
         active_customers: number;
         pending_verifications: number;
         monthly_income: string;
+        /** Verified installation fees this month — income, but kept apart from subscriptions. */
+        installation_income?: string;
         total_arrears: string;
         collection_rate: number;
         pending_arrears_adjustments: number;
@@ -106,6 +108,11 @@ export default function Dashboard({ period, stats, cash_alerts }: DashboardProps
                     <StatCard
                         label="Monthly Income"
                         value={formatCurrency(stats.monthly_income)}
+                        hint={
+                            Number(stats.installation_income ?? 0) > 0
+                                ? `Subscriptions · + ${formatCurrency(stats.installation_income ?? '0')} installations`
+                                : 'Subscriptions'
+                        }
                         icon={<IconCash size={20} stroke={1.75} />}
                         tone="green"
                     />

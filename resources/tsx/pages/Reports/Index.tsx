@@ -26,7 +26,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { DailyReport, MonthlyReport, PageProps, ReportData, ReportDelta, ReportTier, WeeklyReport } from '@/types';
+import type { DailyReport, MonthlyReport, PageProps, ReportData, ReportDelta, ReportIncomeByPurpose, ReportTier, WeeklyReport } from '@/types';
 
 interface ReportsIndexProps {
     tier: ReportTier;
@@ -312,6 +312,19 @@ function AgentView({ tier, report }: { tier: ReportTier; report: ReportData }) {
 // -----------------------------------------------------------------
 // Daily — stat cards only + one flat table of today's payments. No charts.
 // -----------------------------------------------------------------
+/**
+ * " · subscriptions X · installations Y" when installation money came in —
+ * the split by purpose (docs/plans/installation-and-promotions.md). Technician
+ * fees are never part of report figures.
+ */
+function purposeHint(byPurpose?: ReportIncomeByPurpose): string {
+    if (!byPurpose || Number(byPurpose.installation) <= 0) {
+        return '';
+    }
+
+    return ` · subscriptions ${formatCurrency(byPurpose.subscription)} · installations ${formatCurrency(byPurpose.installation)}`;
+}
+
 function DailyView({ report }: { report: DailyReport }) {
     return (
         <div className="flex flex-col gap-4">
@@ -319,7 +332,7 @@ function DailyView({ report }: { report: DailyReport }) {
                 <StatCard
                     label="Collected Today"
                     value={formatCurrency(report.payments.verified)}
-                    hint={`${report.payments.count} payments · ${formatCurrency(report.payments.pending)} pending`}
+                    hint={`${report.payments.count} payments · ${formatCurrency(report.payments.pending)} pending${purposeHint(report.payments.by_purpose)}`}
                     icon={<IconCash size={20} stroke={1.75} />}
                     tone="green"
                 />
@@ -571,7 +584,7 @@ function MonthlyView({ report }: { report: MonthlyReport }) {
                 <StatCard
                     label="Collections (cash received)"
                     value={formatCurrency(report.collections_cash_received.verified)}
-                    hint={`${report.collections_cash_received.count} payments, all statuses shown separately`}
+                    hint={`${report.collections_cash_received.count} payments, all statuses shown separately${purposeHint(report.collections_cash_received.by_purpose)}`}
                     icon={<IconCash size={20} stroke={1.75} />}
                     tone="green"
                 />

@@ -9,6 +9,7 @@ use App\Services\ArrearsAdjustmentService;
 use App\Services\CashAlertService;
 use App\Services\ManuscriptService;
 use App\Services\PaymentService;
+use App\Services\ResourcesDashboardService;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -55,7 +56,12 @@ class DashboardController extends Controller
                 // this figure changes far more often than the customer
                 // counts above (new payments, verify/reject actions).
                 'pending_verifications' => $this->payments->pendingVerificationCount(),
+                // Subscription money only (collection rate's numerator);
+                // installation fees are income too but shown separately
+                // (docs/plans/installation-and-promotions.md). Technician
+                // fees are never income.
                 'monthly_income' => $summary['total_collected'],
+                'installation_income' => app(ResourcesDashboardService::class)->installationIncome($period),
                 'total_arrears' => $summary['total_arrears'],
                 'collection_rate' => $summary['collection_rate'],
                 // Same "maker-checker pending count" idea as

@@ -327,7 +327,7 @@ class ReportService
     }
 
     /**
-     * @return array{collections: array{total: string, verified: string, count: int}, new_customers: int, net_disconnections: int}
+     * @return array{collections: array{total: string, verified: string, count: int, by_purpose: array{subscription: string, installation: string}}, new_customers: int, net_disconnections: int}
      */
     private function weeklyRollup(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
     {
@@ -335,6 +335,8 @@ class ReportService
             ->whereBetween('payments.created_at', [$start, $end])
             ->selectRaw("
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified'), 0) as verified,
+                coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'subscription'), 0) as subscription_verified,
+                coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'installation'), 0) as installation_verified,
                 coalesce(sum(payments.amount), 0) as total,
                 count(*) as payment_count
             ")
@@ -354,6 +356,10 @@ class ReportService
                 'total' => (string) $paymentsRow->total,
                 'verified' => (string) $paymentsRow->verified,
                 'count' => (int) $paymentsRow->payment_count,
+                'by_purpose' => [
+                    'subscription' => (string) $paymentsRow->subscription_verified,
+                    'installation' => (string) $paymentsRow->installation_verified,
+                ],
             ],
             'new_customers' => $newCustomers,
             'net_disconnections' => $disconnects - $reconnects,
@@ -388,8 +394,11 @@ class ReportService
             return [];
         }
 
+        // Collected against the monthly bill only — installation fees and
+        // technician fees would distort the collection ratio.
         $collectedByZone = Payment::query()
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
+            ->where('payments.purpose', Payment::PURPOSE_SUBSCRIPTION)
             ->where('payments.verification_status', 'verified')
             ->whereBetween('payments.created_at', [$start, $end])
             ->whereIn('customers.zone_id', $zones->pluck('id'))
@@ -435,6 +444,7 @@ class ReportService
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id')
             ->join('branches', 'branches.id', '=', 'zones.branch_id')
+            ->where('payments.purpose', '!=', Payment::PURPOSE_TECHNICIAN_FEE)
             ->where('payments.verification_status', 'pending')
             ->where('payments.created_at', '<', $cutoff);
 
@@ -648,7 +658,7 @@ class ReportService
     // -----------------------------------------------------------------
 
     /**
-     * @return array{total: string, verified: string, pending: string, rejected: string, count: int}
+     * @return array{total: string, verified: string, pending: string, rejected: string, count: int, by_purpose: array{subscription: string, installation: string}}
      */
     private function paymentsBreakdown(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
     {
@@ -658,6 +668,8 @@ class ReportService
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified'), 0) as verified,
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'pending'), 0) as pending,
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'rejected'), 0) as rejected,
+                coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'subscription'), 0) as subscription_verified,
+                coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'installation'), 0) as installation_verified,
                 count(*) as payment_count
             ")
             ->first();
@@ -672,6 +684,11 @@ class ReportService
             'pending' => $pending,
             'rejected' => $rejected,
             'count' => (int) $row->payment_count,
+            // Verified income by what it was for (installation-and-promotions.md).
+            'by_purpose' => [
+                'subscription' => (string) $row->subscription_verified,
+                'installation' => (string) $row->installation_verified,
+            ],
         ];
     }
 
@@ -766,6 +783,7 @@ class ReportService
             ->join('payments', 'payments.id', '=', 'payment_verifications.payment_id')
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id')
+            ->where('payments.purpose', '!=', Payment::PURPOSE_TECHNICIAN_FEE)
             ->whereNotNull('payment_verifications.verified_at')
             ->whereBetween('payment_verifications.verified_at', [$start, $end]);
 
@@ -824,9 +842,15 @@ class ReportService
             ->all();
     }
 
+    /**
+     * Every payment figure in the reports is company money: technician
+     * motivation fees (D13, docs/plans/installation-and-promotions.md) are
+     * pass-through cash that only shows in the cash book.
+     */
     private function paymentsQuery(?int $branchId, ?int $zoneId): Builder
     {
         $query = Payment::query()
+            ->where('payments.purpose', '!=', Payment::PURPOSE_TECHNICIAN_FEE)
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id');
 

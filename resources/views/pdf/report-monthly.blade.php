@@ -102,6 +102,13 @@
             <td>{{ $collections_cash_received['count'] }}</td>
         </tr>
     </table>
+    @if (! empty($collections_cash_received['by_purpose']))
+        <p class="hint">
+            Verified, by purpose: subscriptions {{ number_format((float) $collections_cash_received['by_purpose']['subscription'], 2) }}
+            &nbsp;|&nbsp; installations {{ number_format((float) $collections_cash_received['by_purpose']['installation'], 2) }}.
+            Technician fees are pass-through cash and are not income — see the cash book.
+        </p>
+    @endif
 
     <div class="section-title">Arrears Adjustments (written off)</div>
     <p class="hint">Approved, decrease-direction ledger corrections targeting this period — not a payment, never counted as cash collected above.</p>
