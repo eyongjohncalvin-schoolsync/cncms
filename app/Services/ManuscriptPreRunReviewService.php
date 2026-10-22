@@ -170,6 +170,7 @@ final class ManuscriptPreRunReviewService
 
         return Payment::query()
             ->whereIn('customer_id', $customerIds)
+            ->subscription()
             ->selectRaw('customer_id, MAX(created_at) as last_payment_at')
             ->groupBy('customer_id')
             ->pluck('last_payment_at', 'customer_id');

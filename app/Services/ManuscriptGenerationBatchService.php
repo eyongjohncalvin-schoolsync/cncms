@@ -68,17 +68,17 @@ class ManuscriptGenerationBatchService
      * @param  int|null  $actingUserId  The user who triggered a manual run (for $autoPublish's
      *                                  publish() call's audit trail). Null for the scheduled path.
      * @param  array<int, int>|null  $customerIds  Internal customer ids to compute for. Null (the
-     *                                              default, and what both real callers —
-     *                                              ManuscriptGenerationTaskType::run() and
-     *                                              ManuscriptController::calculate() — pass) means
-     *                                              every customer in the tenant, matching
-     *                                              manuscript:calculate's existing scope exactly.
-     *                                              Exists as an explicit parameter (rather than
-     *                                              tests reaching for a global scope/filter) so
-     *                                              tests can exercise real multi-chunk/partial-
-     *                                              failure behavior against a small, controlled set
-     *                                              instead of this tenant's full ~549-customer
-     *                                              production-mirroring dev dataset.
+     *                                             default, and what both real callers —
+     *                                             ManuscriptGenerationTaskType::run() and
+     *                                             ManuscriptController::calculate() — pass) means
+     *                                             every customer in the tenant, matching
+     *                                             manuscript:calculate's existing scope exactly.
+     *                                             Exists as an explicit parameter (rather than
+     *                                             tests reaching for a global scope/filter) so
+     *                                             tests can exercise real multi-chunk/partial-
+     *                                             failure behavior against a small, controlled set
+     *                                             instead of this tenant's full ~549-customer
+     *                                             production-mirroring dev dataset.
      * @param  bool  $override  The "already safely runnable" guard's override (task-scheduler.md's
      *                          2026-08-27 addendum — see App\Services\ManuscriptRerunGuard's class
      *                          doc). False (the default) refuses to dispatch when a PUBLISHED
@@ -383,6 +383,9 @@ class ManuscriptGenerationBatchService
                 // someone else."
                 Payment::query()
                     ->whereIn('id', $paymentIds)
+                    // Belt and braces: only subscription money is ever
+                    // consumed by a bill, so only it is ever stamped.
+                    ->subscription()
                     ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
                     ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
             }

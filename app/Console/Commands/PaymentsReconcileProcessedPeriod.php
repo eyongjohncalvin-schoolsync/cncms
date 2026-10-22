@@ -79,6 +79,7 @@ class PaymentsReconcileProcessedPeriod extends Command
 
         try {
             $base = fn () => Payment::query()
+                ->subscription()
                 ->where('verification_status', 'verified')
                 ->whereNull('processed_period')
                 ->where('created_at', '<', $cutoff);

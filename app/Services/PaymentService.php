@@ -139,16 +139,24 @@ class PaymentService
                 && $customer->zone_id === $this->context->zoneId);
 
         $this->assertValidMethod($data);
+        $this->assertValidPurpose($data);
 
         $attributes = $data->toAttributes();
         $attributes['verification_status'] = $canAutoVerify ? 'verified' : 'pending';
         $attributes['recorded_by'] = auth()->id();
         $attributes['expiration_date'] = $this->computeExpirationDate($data->frequency, $data->months);
 
+        // Installation / technician-fee money is a one-off amount, never
+        // prepaid months (docs/plans/installation-and-promotions.md).
+        if (($data->purpose ?? Payment::PURPOSE_SUBSCRIPTION) !== Payment::PURPOSE_SUBSCRIPTION) {
+            $attributes['frequency'] = 'monthly';
+            unset($attributes['months'], $attributes['clear_arrears_first']);
+        }
+
         // Draw-down credit (references/prepayment-drawdown.md): a months/yearly
         // payment locks the customer's current bill as its prepaid_rate, so a
         // later rate change never shortens the coverage it bought (PD-3).
-        if (in_array($data->frequency, ['months', 'yearly'], true)) {
+        if (in_array($attributes['frequency'] ?? null, ['months', 'yearly'], true)) {
             $attributes['prepaid_rate'] = (string) $customer->bill;
             $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
         }
@@ -160,6 +168,11 @@ class PaymentService
         $payment = $this->payments->create($customer->id, $attributes);
         $payment->setRelation('customer', $customer);
 
+        // A verified instalment may settle its installation charge.
+        if ($payment->verification_status === 'verified') {
+            $payment->customerCharge?->refreshStatus();
+        }
+
         // A payment verified on the spot (office roles, an agent in their own
         // zone) gets its receipt now — the same thing approving a pending
         // payment does in PaymentVerificationService::verify().
@@ -168,6 +181,24 @@ class PaymentService
         }
 
         return $payment;
+    }
+
+    /**
+     * Only server-side callers ever set a purpose. An installation payment
+     * must name the open installation charge it pays, and only an
+     * installation payment may name one.
+     */
+    private function assertValidPurpose(PaymentData $data): void
+    {
+        $purpose = $data->purpose ?? Payment::PURPOSE_SUBSCRIPTION;
+
+        if (! in_array($purpose, Payment::PURPOSES, true)) {
+            throw ValidationException::withMessages(['purpose' => "Unknown payment purpose [{$purpose}]."]);
+        }
+
+        if (($purpose === Payment::PURPOSE_INSTALLATION) !== ($data->customerChargeId !== null)) {
+            throw ValidationException::withMessages(['purpose' => 'An installation payment must be recorded against an installation charge.']);
+        }
     }
 
     /**
@@ -275,6 +306,10 @@ class PaymentService
         $this->assertValidMethod($data, $payment);
         $this->assertNotHandedOver($payment, $data);
 
+        if (! $payment->isSubscription() && $data->frequency !== null && $data->frequency !== 'monthly') {
+            throw ValidationException::withMessages(['frequency' => 'Only a subscription payment can buy prepaid months.']);
+        }
+
         $attributes = $data->toAttributes();
 
         if ($data->clearArrearsFirst !== null) {
@@ -289,6 +324,8 @@ class PaymentService
         }
 
         $payment = $this->payments->update($payment, $attributes);
+
+        $payment->customerCharge?->refreshStatus();
 
         $this->forgetShowCache($payment->uuid);
 
@@ -344,7 +381,11 @@ class PaymentService
             ]);
         }
 
+        $charge = $payment->customerCharge;
+
         $this->payments->delete($payment);
+
+        $charge?->refreshStatus();
 
         $this->forgetShowCache($payment->uuid);
     }
