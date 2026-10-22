@@ -43,7 +43,7 @@ class SettingsCompanyController extends Controller
                 'advance_settlement_days' => (int) $company->advance_settlement_days,
                 'rccm_number' => $company->rccm_number,
                 'niu' => $company->niu,
-                'logo_url' => $company->getFirstMediaUrl('logo') ?: null,
+                'logo_url' => $company->logoUrl(),
             ] : null,
         ]);
     }

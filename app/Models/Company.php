@@ -83,6 +83,26 @@ class Company extends Model implements HasMedia
     }
 
     /**
+     * Where the browser / the mobile app can load this tenant's logo, or null
+     * when none is uploaded. Never getFirstMediaUrl(): the `public` disk is
+     * tenant-suffixed (storage/tenant{id}/app/public), but its /storage URL
+     * goes through public/storage, which only reaches the CENTRAL
+     * storage/app/public — so that URL 404s for every tenant. The logo is
+     * streamed by CompanyLogoController instead; `v` (the media id) busts
+     * browser caches when a new logo replaces the old one.
+     */
+    public function logoUrl(bool $forApi = false): ?string
+    {
+        $media = $this->getFirstMedia('logo');
+
+        if (! $media instanceof Media) {
+            return null;
+        }
+
+        return url(($forApi ? '/api/v1/company/logo' : '/company/logo').'?v='.$media->id);
+    }
+
+    /**
      * Base64 `data:` URI for the current logo, or null if none is set.
      * dompdf (used for bill/manuscript PDFs) can't reliably fetch a
      * storage: URL mid-render (no guaranteed network/auth context), so

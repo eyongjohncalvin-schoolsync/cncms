@@ -8,6 +8,7 @@ use App\Http\Controllers\Concerns\IssuesApiTokens;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdatePasswordRequest;
 use App\Http\Requests\UpdateProfileRequest;
+use App\Models\Company;
 use App\Models\LoginChallenge;
 use App\Models\User;
 use App\Services\AccountSecurityService;
@@ -99,6 +100,12 @@ class AuthController extends Controller
             // auth.user.permissions. Wave 1 only exposes it — the mobile
             // guards still key off `role` until Wave 4.
             'permissions' => $context->permissions(),
+            // The tenant's name and logo for the app header; logo_url is
+            // fetched with the Bearer token (GET /company/logo).
+            'company' => [
+                'name' => Company::cached()?->name ?? tenant()?->name,
+                'logo_url' => Company::cached()?->logoUrl(forApi: true),
+            ],
         ]);
     }
 

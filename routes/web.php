@@ -47,6 +47,7 @@ require __DIR__.'/web/payment-receipts-public.php';
 */
 Route::middleware(['auth', 'tenant.web', 'throttle:web'])->group(function () {
     require __DIR__.'/web/dashboard.php';
+    require __DIR__.'/web/company.php';
     require __DIR__.'/web/account.php';
     require __DIR__.'/web/manuscripts.php';
     require __DIR__.'/web/bills.php';

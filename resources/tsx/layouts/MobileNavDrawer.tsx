@@ -25,6 +25,7 @@ export function MobileNavDrawer({
     permissions = [],
     currentPath,
     companyName,
+    companyLogoUrl,
 }: {
     open: boolean;
     onClose: () => void;
@@ -32,6 +33,7 @@ export function MobileNavDrawer({
     permissions?: string[];
     currentPath: string;
     companyName?: string | null;
+    companyLogoUrl?: string | null;
 }) {
     return (
         <Transition show={open} as={Fragment}>
@@ -72,6 +74,7 @@ export function MobileNavDrawer({
                             permissions={permissions}
                             currentPath={currentPath}
                             companyName={companyName}
+                            companyLogoUrl={companyLogoUrl}
                             onNavigate={onClose}
                         />
                     </DialogPanel>

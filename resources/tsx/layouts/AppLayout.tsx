@@ -105,7 +105,7 @@ export function AppLayout({
                     <div className="absolute -top-16 left-1/2 h-52 w-52 -translate-x-1/2 rounded-full bg-blue-200/25 blur-3xl" />
                 </div>
 
-                <AppNav permissions={permissions} currentPath={currentPath} companyName={company?.name} />
+                <AppNav permissions={permissions} currentPath={currentPath} companyName={company?.name} companyLogoUrl={company?.logo_url} />
             </aside>
 
             <MobileNavDrawer
@@ -115,6 +115,7 @@ export function AppLayout({
                 permissions={permissions}
                 currentPath={currentPath}
                 companyName={company?.name}
+                companyLogoUrl={company?.logo_url}
             />
 
             <div className="flex min-w-0 flex-1 flex-col">

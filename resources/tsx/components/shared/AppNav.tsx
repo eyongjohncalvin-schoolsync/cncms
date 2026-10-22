@@ -243,12 +243,15 @@ export function AppNav({
     permissions = [],
     currentPath,
     companyName,
+    companyLogoUrl,
     onNavigate,
 }: {
     /** auth.user.permissions from the Inertia share (`['*']` for super). */
     permissions?: string[];
     currentPath: string;
     companyName?: string | null;
+    /** The tenant's own logo (Company::logoUrl()); the CNCMS mark when null. */
+    companyLogoUrl?: string | null;
     onNavigate?: () => void;
 }) {
     const { t } = useTranslation();
@@ -257,11 +260,19 @@ export function AppNav({
     return (
         <>
             <div className="relative flex h-16 shrink-0 items-center gap-2.5 border-b border-slate-200/70 px-4">
-                <img
-                    src="/onetech-icon.png"
-                    alt=""
-                    className="h-9 w-9 shrink-0 rounded-xl shadow-md shadow-violet-900/25 ring-1 ring-white/10"
-                />
+                {companyLogoUrl ? (
+                    <img
+                        src={companyLogoUrl}
+                        alt={companyName ? `${companyName} logo` : ''}
+                        className="h-9 w-9 shrink-0 rounded-xl bg-white object-contain p-0.5 shadow-sm ring-1 ring-slate-200"
+                    />
+                ) : (
+                    <img
+                        src="/onetech-icon.png"
+                        alt=""
+                        className="h-9 w-9 shrink-0 rounded-xl shadow-md shadow-violet-900/25 ring-1 ring-white/10"
+                    />
+                )}
                 <div className="min-w-0 leading-tight">
                     <p className="font-display text-lg text-slate-900">CNCMS</p>
                     {companyName && (

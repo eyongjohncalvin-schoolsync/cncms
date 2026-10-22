@@ -11,6 +11,7 @@ import { Card } from '../../src/components/ui/Card';
 import { StatCard } from '../../src/components/ui/StatCard';
 import { Button } from '../../src/components/ui/Button';
 import { Badge } from '../../src/components/ui/Badge';
+import { CompanyLogo } from '../../src/components/ui/CompanyLogo';
 import { colors } from '../../src/theme/colors';
 import { fontSize, spacing } from '../../src/theme/tokens';
 import { formatFcfa } from '../../src/utils/format';
@@ -74,9 +75,12 @@ export default function HomeScreen() {
     return (
         <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
             <View style={styles.greetingRow}>
-                <View>
-                    <Text style={styles.greeting}>Hello, {user?.name.split(' ')[0] ?? 'agent'}</Text>
-                    <Text style={styles.role}>{role ?? '—'}</Text>
+                <View style={styles.greetingIdentity}>
+                    <CompanyLogo />
+                    <View>
+                        <Text style={styles.greeting}>Hello, {user?.name.split(' ')[0] ?? 'agent'}</Text>
+                        <Text style={styles.role}>{role ?? '—'}</Text>
+                    </View>
                 </View>
                 <Button title="Sign out" variant="ghost" size="default" fullWidth={false} onPress={handleLogout} />
             </View>
@@ -253,6 +257,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
     },
+    greetingIdentity: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     greeting: { fontSize: fontSize.xl, fontWeight: '800', color: colors.textPrimary },
     role: { fontSize: fontSize.sm, color: colors.textSecondary, textTransform: 'capitalize' },
     // Hero card (see the render-side comment above for why this exists).

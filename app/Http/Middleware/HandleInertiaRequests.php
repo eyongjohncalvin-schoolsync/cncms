@@ -87,7 +87,11 @@ class HandleInertiaRequests extends Middleware
             // resolved (and only queries the tenant `companies` table) when
             // tenancy is actually initialized.
             'company' => $context
-                ? fn () => ['name' => Company::cached()?->name ?? tenant()?->name]
+                ? fn () => [
+                    'name' => Company::cached()?->name ?? tenant()?->name,
+                    // Shown in the sidebar in place of the CNCMS mark.
+                    'logo_url' => Company::cached()?->logoUrl(),
+                ]
                 : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),

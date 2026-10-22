@@ -103,7 +103,7 @@ export interface PageProps {
      * `null` on the public auth pages (which are platform-branded, never
      * tenant-branded). Set by HandleInertiaRequests::share().
      */
-    company: { name: string | null } | null;
+    company: { name: string | null; logo_url: string | null } | null;
     /**
      * Resolved locale for this request ('en' | 'fr'), set by
      * App\Http\Middleware\ResolveLocale and shared by
