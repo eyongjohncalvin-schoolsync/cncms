@@ -17,12 +17,14 @@ use App\Http\Requests\UpdateCustomerRequest;
 use App\Models\ArrearsAdjustment;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerCharge;
 use App\Models\CustomerSubscription;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\ServiceVariant;
 use App\Models\Zone;
 use App\Services\ArrearsAdjustmentService;
+use App\Services\CustomerChargeService;
 use App\Services\CustomerImportService;
 use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
@@ -467,7 +469,7 @@ class CustomerController extends Controller
     {
         $this->authorize('view', $customer);
 
-        $payment = $customer->payments()->latest('created_at')->first();
+        $payment = $customer->payments()->subscription()->latest('created_at')->first();
 
         return response()->json([
             'payment' => $payment ? $this->shapePayment($payment) : null,
@@ -637,6 +639,9 @@ class CustomerController extends Controller
             ] : null,
             'recent_payments' => $customer->payments->map(fn (Payment $payment) => $this->shapePayment($payment))->all(),
             'arrears_adjustments' => $this->shapeArrearsAdjustments($customer),
+            // Installation fees (docs/plans/installation-and-promotions.md):
+            // a separate balance, never part of the bill's total or arrears.
+            'installation' => $this->shapeInstallation($customer),
             // Gates the "Export full record" control in the page header
             // (docs/plans/customer-record-export.md) — a full unredacted
             // data dump, seeded super/admin only. The frontend also has the
@@ -648,7 +653,46 @@ class CustomerController extends Controller
     }
 
     /**
-     * @return array{uuid: string, amount: string, credit: string, frequency: string, verification_status: string, created_at: string|null}
+     * The customer page's installation block: the open balance, every
+     * installation charge with its own balance, and what the viewer may do.
+     *
+     * @return array{balance: string, charges: list<array<string, mixed>>, can_create: bool}
+     */
+    private function shapeInstallation(Customer $customer): array
+    {
+        $user = request()->user();
+        $charges = app(CustomerChargeService::class)->forCustomer($customer);
+
+        return [
+            'balance' => CustomerChargeService::openInstallationBalance($customer),
+            'charges' => $charges->map(fn (CustomerCharge $charge): array => [
+                'uuid' => $charge->uuid,
+                'amount' => (string) $charge->amount,
+                'paid' => $charge->paidAmount(),
+                'balance' => $charge->balance(),
+                'recordable' => $charge->recordableAmount(),
+                'status' => $charge->status,
+                'reason' => $charge->reason,
+                'requested_by_name' => $charge->requestedBy?->name,
+                'created_at' => $charge->created_at?->toIso8601String(),
+                'waiver_status' => $charge->waiver_status,
+                'waiver_reason' => $charge->waiver_reason,
+                'waiver_requested_by_name' => $charge->waiverRequestedBy?->name,
+                'waiver_decided_by_name' => $charge->waiverDecidedBy?->name,
+                'waiver_rejection_reason' => $charge->waiver_rejection_reason,
+                'waived_amount' => $charge->waived_amount !== null ? (string) $charge->waived_amount : null,
+                'can' => [
+                    'record_payment' => $user->can('recordPayment', $charge),
+                    'request_waiver' => $user->can('requestWaiver', $charge),
+                    'decide_waiver' => $user->can('approveWaiver', $charge),
+                ],
+            ])->values()->all(),
+            'can_create' => $user->can('create', CustomerCharge::class) && ! $customer->trashed(),
+        ];
+    }
+
+    /**
+     * @return array{uuid: string, amount: string, credit: string, frequency: string, purpose: string, verification_status: string, created_at: string|null}
      */
     private function shapePayment(Payment $payment): array
     {
@@ -657,6 +701,7 @@ class CustomerController extends Controller
             'amount' => $payment->amount,
             'credit' => $payment->credit,
             'frequency' => $payment->frequency,
+            'purpose' => $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
             'verification_status' => $payment->verification_status,
             'created_at' => $payment->created_at?->toISOString(),
         ];

@@ -227,6 +227,19 @@
         </tbody>
     </table>
 
+    {{-- Installation fee still owed — its own line, never part of the
+         total due (docs/plans/installation-and-promotions.md, D1). --}}
+    @if ((float) ($installation_balance ?? 0) > 0)
+        <table class="mb-breakdown">
+            <tbody>
+                <tr>
+                    <td class="mb-desc">Installation balance (separate — not in the total due)</td>
+                    <td class="mb-num">{{ number_format((float) $installation_balance, 2) }}</td>
+                </tr>
+            </tbody>
+        </table>
+    @endif
+
     <div class="mb-fine-note">
         Late payment triggers disconnection. Reconnection requires the outstanding balance plus a
         {{ number_format((float) ($company?->reconnection_fine ?? 0), 2) }} FCFA reconnection fine.

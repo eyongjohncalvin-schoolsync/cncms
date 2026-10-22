@@ -204,6 +204,7 @@ class CustomerTest extends TestCase
                 'amount' => '5000.00',
                 'credit' => '0.00',
                 'frequency' => 'monthly',
+                'purpose' => 'subscription',
                 'verification_status' => 'pending',
                 'created_at' => $newest->created_at->toISOString(),
             ],

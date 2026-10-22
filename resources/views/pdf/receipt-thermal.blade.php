@@ -31,6 +31,10 @@
     $money = fn ($value): string => number_format((float) $value, 0, '.', ',').' FCFA';
     $code = ! empty($r['security_code']) ? \App\Support\ReceiptSecurityCode::format($r['security_code']) : null;
     $words = $r['amount_in_words'] ?? null;
+    // Older snapshots carry no purpose/title: they are subscription receipts.
+    $purpose = $r['purpose'] ?? 'subscription';
+    $title = $r['title'] ?? 'PAYMENT RECEIPT';
+    $installation = $r['installation'] ?? null;
 @endphp
 <!DOCTYPE html>
 <html>
@@ -79,7 +83,7 @@
             @if(!empty($company['momo_number']))MOMO: {{ $company['momo_number'] }}@endif
         </div>
         <div class="rule"></div>
-        <div class="title">PAYMENT RECEIPT</div>
+        <div class="title">{{ $title }}</div>
         <div>{{ $r['receipt_number'] ?? '' }}</div>
         @if($code)<div class="code">Code {{ $code }}</div>@endif
         <div class="muted">{{ $issuedAt?->format('d M Y, H:i') }}</div>
@@ -91,7 +95,11 @@
         <tr><td class="k">Customer</td><td class="v">{{ $customer['name'] ?? '' }}</td></tr>
         @if(!empty($customer['code']))<tr><td class="k">Account</td><td class="v">{{ $customer['code'] }}</td></tr>@endif
         @if(!empty($customer['zone']))<tr><td class="k">Zone</td><td class="v">{{ $customer['zone'] }}</td></tr>@endif
-        <tr><td class="k">Period</td><td class="v">{{ $periodText }}</td></tr>
+        @if($purpose === 'subscription')
+            <tr><td class="k">Period</td><td class="v">{{ $periodText }}</td></tr>
+        @else
+            <tr><td class="k">For</td><td class="v">{{ $r['description'] ?? ucfirst(str_replace('_', ' ', $purpose)) }}</td></tr>
+        @endif
         @if(!empty($r['invoice']['number']))<tr><td class="k">For bill</td><td class="v">{{ $r['invoice']['number'] }}</td></tr>@endif
         @if($isPrepayment)<tr><td class="k">Prepaid</td><td class="v">{{ $months }} month(s)</td></tr>@endif
         @if(!empty($payment['paid_by_label']))<tr><td class="k">Paid by</td><td class="v">{{ $payment['paid_by_label'] }}</td></tr>@endif
@@ -104,6 +112,11 @@
 
     <table>
         <tr class="total"><td class="k">PAID</td><td class="v">{{ $money($r['amount'] ?? 0) }}</td></tr>
+        @if($installation)
+            <tr><td class="k">Install fee</td><td class="v">{{ $money($installation['fee']) }}</td></tr>
+            <tr><td class="k">Paid so far</td><td class="v">{{ $money($installation['paid']) }}</td></tr>
+            <tr><td class="k">Balance</td><td class="v">{{ (float) $installation['balance'] > 0 ? $money($installation['balance']) : (($installation['status'] ?? '') === 'waived' ? 'Rest waived' : 'Fully paid') }}</td></tr>
+        @endif
         @if($balance)
             @if((float) $balance['remaining'] > 0)
                 <tr><td class="k">Still due</td><td class="v">{{ $money($balance['remaining']) }}</td></tr>

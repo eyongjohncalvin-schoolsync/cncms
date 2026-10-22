@@ -122,6 +122,14 @@ class CustomerService
             $customer->load('subscriptions.service', 'subscriptions.serviceVariant');
         }
 
+        // Installation charges (docs/plans/installation-and-promotions.md):
+        // read fresh every call, like subscriptions — a just-recorded
+        // instalment must show straight away, and the balance is derived
+        // from payments rather than stored.
+        if (! $customer->relationLoaded('charges')) {
+            $customer->load(['charges' => fn ($query) => $query->latest('id')]);
+        }
+
         return $customer;
     }
 
