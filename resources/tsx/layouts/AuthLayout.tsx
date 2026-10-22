@@ -1,3 +1,4 @@
+import { usePage } from '@inertiajs/react';
 import { ReactNode } from 'react';
 import {
     IconAntenna,
@@ -10,6 +11,8 @@ import {
     IconSatellite,
     IconTopologyStar3,
 } from '@tabler/icons-react';
+import type { PageProps } from '@/types';
+import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
 
 /**
  * Public-facing shell for Welcome/Login/Register/RegisterWorkspace/Pending —
@@ -46,6 +49,10 @@ const GLYPHS: { icon: typeof IconSatellite; size: number; top: string; left: str
 ];
 
 export function AuthLayout({ children }: { children: ReactNode }) {
+    // Scheduled maintenance is announced on the login page too. A running
+    // window is not: Maintenance.tsx (also an AuthLayout page) shows it.
+    const { maintenance } = usePage<PageProps>().props;
+
     return (
         <div className="min-h-screen bg-white lg:grid lg:grid-cols-2">
             {/* -------------------------------------------------------------- */}
@@ -128,6 +135,11 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             {/* -------------------------------------------------------------- */}
             <main className="flex flex-col overflow-y-auto bg-white px-6 py-9 sm:px-10 lg:py-12">
                 <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col justify-center">
+                    {maintenance && !maintenance.active && (
+                        <div className="mb-6 overflow-hidden rounded-lg ring-1 ring-amber-300">
+                            <MaintenanceBanner notice={maintenance} />
+                        </div>
+                    )}
                     {children}
                 </div>
             </main>

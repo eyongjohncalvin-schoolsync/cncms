@@ -34,6 +34,16 @@
         "no_notifications": "No notifications yet",
         "acknowledge": "Acknowledge",
         "acknowledged": "Acknowledged",
-        "footer_copyright": "© {{year}} ShalomTech — CNCMS"
+        "footer_copyright": "© {{year}} ShalomTech — CNCMS",
+        "maintenance_scheduled_title": "Planned maintenance starts in {{countdown}}",
+        "maintenance_scheduled_body": "The system will be unavailable from {{start}} until {{end}}. Save your work before then.",
+        "maintenance_active_title": "Maintenance mode is on — tenant users are locked out",
+        "maintenance_active_body": "Ends {{end}} (in {{countdown}}). Only landlords can use the system.",
+        "maintenance_page_title": "Under maintenance",
+        "maintenance_page_heading": "The system is under maintenance",
+        "maintenance_page_back_in": "Back in",
+        "maintenance_page_until": "Expected back at {{end}}.",
+        "maintenance_page_offline_note": "Field agents: keep recording payments in the mobile app — they are saved on the phone and sync automatically when maintenance ends.",
+        "maintenance_page_refreshes": "This page updates itself when the system is back."
     }
 }

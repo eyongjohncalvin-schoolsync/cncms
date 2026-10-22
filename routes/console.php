@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\MaintenanceMode;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -31,8 +32,13 @@ Artisan::command('inspire', function () {
 // (see that migration's doc comment), which guards the narrower case of two
 // independently-dispatched manuscript_generation runs for the same period
 // regardless of what triggered them.
-Schedule::command('tasks:run-due')->everyFifteenMinutes()->withoutOverlapping();
+// Both skip while a platform maintenance window is active
+// (App\Support\MaintenanceMode) so nothing writes to the database
+// mid-cutover.
+Schedule::command('tasks:run-due')->everyFifteenMinutes()->withoutOverlapping()
+    ->skip(fn () => MaintenanceMode::active() !== null);
 
 // Cash controls (docs/plans/cash-controls.md): the morning digest of open
 // cash alerts to managers, the owner and the investors.
-Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping();
+Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping()
+    ->skip(fn () => MaintenanceMode::active() !== null);

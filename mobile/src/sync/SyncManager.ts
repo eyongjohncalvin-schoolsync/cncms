@@ -1,7 +1,7 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { acknowledgeNotification, fetchExpenseCategories, pullChanges, pushChanges, uploadReceipt } from '../api/sync';
-import { isNetworkError, extractErrorMessage } from '../api/client';
+import { isNetworkError, isMaintenanceError, extractErrorMessage } from '../api/client';
 import { upsertExpenseCategories } from '../db/categories';
 import {
     getFailedPaymentsCount,
@@ -200,9 +200,11 @@ class SyncManagerImpl {
 
             patchSyncState({ lastError: null });
         } catch (error) {
-            if (isNetworkError(error)) {
+            if (isNetworkError(error) || isMaintenanceError(error)) {
                 // Expected/normal — no lastError surfaced, this is the
-                // calm "offline, queuing" path, not an error state.
+                // calm "offline, queuing" path, not an error state. A
+                // platform maintenance window is treated the same way: the
+                // maintenance banner explains it.
                 this.scheduleRetry();
             } else {
                 patchSyncState({ lastError: extractErrorMessage(error, `Sync failed (${trigger}).`) });

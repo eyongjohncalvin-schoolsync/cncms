@@ -1,6 +1,8 @@
 import axios, { AxiosError } from 'axios';
 import { API_BASE_URL } from './config';
 import { getCurrentToken } from '../auth/tokenState';
+import { setMaintenanceState } from '../maintenance/maintenanceStore';
+import { isAnnouncingEndpoint } from '../utils/maintenanceState';
 import type { ApiErrorBody } from '../types/api';
 
 /**
@@ -47,10 +49,26 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 }
 
 apiClient.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        // Platform maintenance advance notice (src/utils/maintenanceState.ts).
+        if (isAnnouncingEndpoint(response.config.url)) {
+            const startsAt = response.headers['x-maintenance-starts-at'];
+            const endsAt = response.headers['x-maintenance-ends-at'];
+
+            setMaintenanceState(startsAt && endsAt ? { startsAt: String(startsAt), endsAt: String(endsAt) } : null);
+        }
+
+        return response;
+    },
     (error: AxiosError<ApiErrorBody>) => {
         if (error.response?.status === 401) {
             unauthorizedHandler?.();
+        }
+
+        const maintenance = isMaintenanceError(error) ? error.response?.data?.maintenance : null;
+
+        if (maintenance) {
+            setMaintenanceState({ startsAt: maintenance.starts_at, endsAt: maintenance.ends_at });
         }
 
         // 403 is deliberately NOT handled here — it must reach the caller
@@ -68,6 +86,12 @@ apiClient.interceptors.response.use(
  */
 export function isNetworkError(error: unknown): boolean {
     return axios.isAxiosError(error) && !error.response;
+}
+
+/** The server is in a platform maintenance window (503 MAINTENANCE). Like
+ * being offline, this is expected: work stays queued and syncs afterwards. */
+export function isMaintenanceError(error: unknown): boolean {
+    return axios.isAxiosError<ApiErrorBody>(error) && error.response?.status === 503 && error.response.data?.code === 'MAINTENANCE';
 }
 
 export function extractErrorMessage(error: unknown, fallback = 'Something went wrong.'): string {

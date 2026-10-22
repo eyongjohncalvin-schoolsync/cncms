@@ -7,6 +7,8 @@ namespace App\Http\Middleware;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\TenantUserIndex;
+use App\Support\BusinessTimezone;
+use App\Support\MaintenanceMode;
 use App\Support\TenantContext;
 use Closure;
 use Illuminate\Http\Request;
@@ -36,6 +38,19 @@ class ResolveTenant
                 'message' => 'Unauthenticated.',
                 'code' => 'UNAUTHENTICATED',
             ], 401);
+        }
+
+        // Platform maintenance (App\Support\MaintenanceMode). The mobile app
+        // treats this like being offline: work queues locally and syncs
+        // once the window ends.
+        if ($window = MaintenanceMode::blocks($user)) {
+            return response()->json([
+                'message' => 'The system is under maintenance until '
+                    .$window->ends_at->copy()->setTimezone(BusinessTimezone::WAT)->format('d M H:i')
+                    .' (Cameroon time). Please try again after that.',
+                'code' => 'MAINTENANCE',
+                'maintenance' => $window->toNotice(),
+            ], 503, ['Retry-After' => (string) max(60, (int) now()->diffInSeconds($window->ends_at))]);
         }
 
         // Win 1 (perf): resolution below is three central-DB lookups
@@ -110,6 +125,16 @@ class ResolveTenant
         $request->attributes->set('tenant_role', $context->role);
         $request->attributes->set('tenant_user', $tenantUser);
 
-        return $next($request);
+        $response = $next($request);
+
+        // Advance notice for the mobile app's maintenance banner: every
+        // tenant API response carries the scheduled (or, for a landlord,
+        // running) window.
+        if ($window = MaintenanceMode::current()) {
+            $response->headers->set('X-Maintenance-Starts-At', $window->starts_at->toIso8601String());
+            $response->headers->set('X-Maintenance-Ends-At', $window->ends_at->toIso8601String());
+        }
+
+        return $response;
     }
 }

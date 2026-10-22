@@ -818,4 +818,6 @@ export interface ApiErrorBody {
     message: string;
     code?: string;
     errors?: Record<string, string[]>;
+    /** Present with code MAINTENANCE (503) — App\Models\MaintenanceWindow::toNotice(). */
+    maintenance?: { starts_at: string; ends_at: string; message: string | null };
 }

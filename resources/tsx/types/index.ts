@@ -120,7 +120,26 @@ export interface PageProps {
         whatsapp_url?: string | null;
     };
     notifications: NotificationsFeed | null;
+    /** Running or next scheduled platform maintenance window, else null. */
+    maintenance: MaintenanceNotice | null;
     [key: string]: unknown;
+}
+
+/** App\Models\MaintenanceWindow::toNotice(). Times are ISO-8601. */
+export interface MaintenanceNotice {
+    id: number;
+    starts_at: string;
+    ends_at: string;
+    message: string | null;
+    active: boolean;
+}
+
+/** A row on the landlord maintenance screen. */
+export interface LandlordMaintenanceWindow extends MaintenanceNotice {
+    status: 'scheduled' | 'active' | 'finished' | 'cancelled';
+    created_by: string | null;
+    cancelled_at: string | null;
+    ended_at: string | null;
 }
 
 /**
