@@ -11,13 +11,13 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://cncms.laravel.cloud/api/v1"
+        "EXPO_PUBLIC_API_BASE_URL": "https://cncms.tech/api/v1"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://cncms.laravel.cloud/api/v1"
+        "EXPO_PUBLIC_API_BASE_URL": "https://cncms.tech/api/v1"
       }
     }
   },
