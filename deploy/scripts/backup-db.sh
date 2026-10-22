@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# CNCMS — nightly database dump. Runs as the `cncms` user via /etc/cron.d/cncms.
-# Writes a gzipped pg_dump to /var/backups/cncms and keeps the last 14.
+# CNCMS — nightly database dump. Run by cron as the app user (Ploi: `ploi`;
+# manual kit: `cncms` via /etc/cron.d/cncms). Writes a gzipped pg_dump to
+# $BACKUP_DIR (default ~/backups/cncms) and keeps the last 14.
 #
 # THIS ONLY PROTECTS AGAINST DATA LOSS IF YOU COPY IT OFF THE SERVER.
 # e.g. from your own machine:
-#   rsync -az cncms@YOUR_DOMAIN:/var/backups/cncms/ ~/cncms-backups/
+#   rsync -az ploi@YOUR_DOMAIN:backups/cncms/ ~/cncms-backups/
 set -euo pipefail
 
-DEST=/var/backups/cncms
+DEST="${BACKUP_DIR:-$HOME/backups/cncms}"
+APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 KEEP=14
 STAMP="$(date +%Y-%m-%d-%H%M)"
 FILE="${DEST}/cncms-${STAMP}.sql.gz"
@@ -15,7 +17,7 @@ FILE="${DEST}/cncms-${STAMP}.sql.gz"
 mkdir -p "$DEST"
 
 # Reads DB creds from the app .env so there's one source of truth.
-cd /var/www/cncms
+cd "$APP_DIR"
 export PGPASSWORD="$(php -r '$e=parse_ini_file(".env"); echo $e["DB_PASSWORD"] ?? "";')"
 DB="$(php -r '$e=parse_ini_file(".env"); echo $e["DB_DATABASE"] ?? "cncms";')"
 USER="$(php -r '$e=parse_ini_file(".env"); echo $e["DB_USERNAME"] ?? "cncms";')"

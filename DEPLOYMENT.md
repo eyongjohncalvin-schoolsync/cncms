@@ -1,9 +1,9 @@
 # CNCMS — Production Deployment Runbook
 
-> **Deploying to Laravel Cloud instead?** Ignore this file — see
-> **`deploy/LARAVEL-CLOUD.md`** (Cloud manages the server, TLS, scheduler,
-> and deploys; you just configure env, the worker resource, deploy
-> commands, and — importantly — remote file storage).
+> **Production runs on a Hostinger VPS managed by Ploi** (decided
+> 2026-10-22). Follow **`deploy/PLOI.md`**. This file is the fully manual
+> fallback, but its **swecom cutover** section (under §4) is the data-move
+> procedure for either route. Laravel Cloud is no longer used.
 
 Target: **one bare Ubuntu 24.04 LTS VPS**, everything on it (Nginx + PHP-FPM +
 PostgreSQL + the queue worker + the scheduler). Database on the same box.
