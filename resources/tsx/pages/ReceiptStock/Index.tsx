@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import { IconBook, IconDeviceMobile, IconPrinter, IconSearch } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -23,6 +23,8 @@ interface BlockRow {
     last_number: string;
     size: number;
     counts: { used: number; cancelled: number; unused: number; scanned_unused: number };
+    /** The printed book's PDF: null = never built, pending = the queue is building it. */
+    pdf_status: 'pending' | 'ready' | 'failed' | null;
     created_at: string | null;
 }
 
@@ -77,6 +79,19 @@ export default function ReceiptStockIndex({ filters, lookup, blocks, devices, ho
     const [search, setSearch] = useState(filters.search);
     const [issueOpen, setIssueOpen] = useState(false);
     const [closing, setClosing] = useState<BlockRow | null>(null);
+
+    // While a book PDF is being prepared, refresh the blocks every few
+    // seconds so Print appears by itself when the queue finishes.
+    const anyPreparing = blocks.some((block) => block.pdf_status === 'pending');
+    useEffect(() => {
+        if (!anyPreparing) {
+            return;
+        }
+
+        const timer = setInterval(() => router.reload({ only: ['blocks'] }), 4000);
+
+        return () => clearInterval(timer);
+    }, [anyPreparing]);
 
     function submitSearch(e: FormEvent) {
         e.preventDefault();
@@ -195,13 +210,7 @@ export default function ReceiptStockIndex({ filters, lookup, blocks, devices, ho
                                     </Td>
                                     <Td className="text-right">
                                         <div className="flex justify-end gap-2">
-                                            {block.kind === 'book' && (
-                                                <a href={`/receipt-stock/${block.uuid}/pdf`}>
-                                                    <Button variant="secondary">
-                                                        <IconPrinter size={16} stroke={1.75} /> Print
-                                                    </Button>
-                                                </a>
-                                            )}
+                                            {block.kind === 'book' && <BookPdfButton block={block} />}
                                             {block.status === 'open' && (
                                                 <Button variant="ghost" onClick={() => setClosing(block)}>
                                                     Close
@@ -264,6 +273,36 @@ export default function ReceiptStockIndex({ filters, lookup, blocks, devices, ho
             <IssueBookModal open={issueOpen} onClose={() => setIssueOpen(false)} holders={holders} sizes={book_sizes} />
             <CloseBlockModal block={closing} onClose={() => setClosing(null)} />
         </AppLayout>
+    );
+}
+
+/**
+ * The book PDF is built by a queued job (GenerateReceiptBookPdfJob), not in
+ * the request — a 100-leaf book takes longer than a request may run.
+ */
+function BookPdfButton({ block }: { block: BlockRow }) {
+    if (block.pdf_status === 'ready') {
+        return (
+            <a href={`/receipt-stock/${block.uuid}/pdf`}>
+                <Button variant="secondary">
+                    <IconPrinter size={16} stroke={1.75} /> Print
+                </Button>
+            </a>
+        );
+    }
+
+    if (block.pdf_status === 'pending') {
+        return (
+            <Button variant="secondary" disabled>
+                <IconPrinter size={16} stroke={1.75} /> Preparing…
+            </Button>
+        );
+    }
+
+    return (
+        <Button variant="secondary" onClick={() => router.post(`/receipt-stock/${block.uuid}/pdf`, {}, { preserveScroll: true })}>
+            <IconPrinter size={16} stroke={1.75} /> {block.pdf_status === 'failed' ? 'Retry PDF' : 'Prepare PDF'}
+        </Button>
     );
 }
 

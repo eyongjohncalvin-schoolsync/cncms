@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Jobs\GenerateReceiptBookPdfJob;
 use App\Models\Customer;
 use App\Models\FieldDevice;
 use App\Models\Notification;
@@ -13,6 +14,7 @@ use App\Models\ReceiptBlock;
 use App\Models\ReceiptLeaf;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Services\ReceiptBookService;
 use App\Services\ReceiptStockService;
 use App\Support\AmountInWords;
 use App\Support\ReceiptSecurityCode;
@@ -20,8 +22,11 @@ use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
+use RuntimeException;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -349,14 +354,44 @@ class ReceiptStockTest extends TestCase
         $this->get("/r/swecom/{$book->firstNumber()}")->assertOk()->assertSee('Receipt recorded')->assertSee('5 000 FCFA');
     }
 
-    public function test_the_book_prints_as_a_pdf(): void
+    public function test_the_book_pdf_is_built_by_a_queued_job_and_then_downloads(): void
     {
+        Queue::fake();
+        Storage::fake((string) config('filesystems.default', 'local'));
+        $holder = $this->actingAsRole('manager');
+
+        $this->post('/receipt-stock/books', ['holder_user_id' => $holder->id, 'size' => 25])->assertSessionHasNoErrors();
+        $book = ReceiptBlock::query()->where('holder_user_id', $holder->id)->where('kind', 'book')->latest('id')->firstOrFail();
+
+        // Issuing queues the PDF; nothing is rendered in the request.
+        $this->assertSame('pending', $book->pdf_status);
+        Queue::assertPushedOn('bills', GenerateReceiptBookPdfJob::class, fn (GenerateReceiptBookPdfJob $job): bool => $job->receiptBlockId === $book->id);
+
+        // Print before it's ready: back to the page, not a timeout.
+        $this->get("/receipt-stock/{$book->uuid}/pdf")->assertRedirect('/receipt-stock')->assertSessionHas('success');
+
+        (new GenerateReceiptBookPdfJob($book->id))->handle(app(ReceiptBookService::class));
+        $this->assertSame('ready', $book->refresh()->pdf_status);
+
+        $response = $this->get("/receipt-stock/{$book->uuid}/pdf")->assertOk();
+        $this->assertStringStartsWith('%PDF', (string) $response->streamedContent());
+    }
+
+    public function test_a_book_without_a_pdf_gets_one_queued_and_a_failed_build_is_shown(): void
+    {
+        Queue::fake();
         $holder = $this->actingAsRole('manager');
         $book = app(ReceiptStockService::class)->allocate(ReceiptBlock::KIND_BOOK, $holder, 25, null, $holder);
 
-        $response = $this->get("/receipt-stock/{$book->uuid}/pdf")->assertOk();
+        $this->get("/receipt-stock/{$book->uuid}/pdf")->assertRedirect('/receipt-stock');
+        $this->assertSame('pending', $book->refresh()->pdf_status);
+        Queue::assertPushed(GenerateReceiptBookPdfJob::class, 1);
 
-        $this->assertStringStartsWith('%PDF', (string) $response->getContent());
+        (new GenerateReceiptBookPdfJob($book->id))->failed(new RuntimeException('dompdf ran out of memory'));
+        $this->assertSame('failed', $book->refresh()->pdf_status);
+
+        $this->post("/receipt-stock/{$book->uuid}/pdf")->assertSessionHasNoErrors();
+        $this->assertSame('pending', $book->refresh()->pdf_status);
     }
 
     public function test_scanning_an_unused_leaf_flags_it_on_the_stock_page(): void

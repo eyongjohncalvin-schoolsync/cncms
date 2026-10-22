@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'number', 'kind', 'holder_user_id', 'field_device_id', 'year', 'first_sequence', 'last_sequence',
     'status', 'allocated_by', 'closed_at', 'closed_by',
+    'pdf_status', 'pdf_path', 'pdf_disk', 'pdf_error', 'pdf_generated_at',
 ])]
 #[RouteKey('uuid')]
 class ReceiptBlock extends Model
@@ -40,6 +41,7 @@ class ReceiptBlock extends Model
             'first_sequence' => 'integer',
             'last_sequence' => 'integer',
             'closed_at' => 'datetime',
+            'pdf_generated_at' => 'datetime',
         ];
     }
 

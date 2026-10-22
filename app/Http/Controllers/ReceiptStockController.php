@@ -16,6 +16,7 @@ use App\Services\ReceiptStockService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -64,6 +65,7 @@ class ReceiptStockController extends Controller
                 'first_number' => $block->firstNumber(),
                 'last_number' => $block->lastNumber(),
                 'size' => $block->size(),
+                'pdf_status' => $block->pdf_status,
                 'counts' => $counts[$block->id] ?? ['used' => 0, 'cancelled' => 0, 'unused' => 0, 'scanned_unused' => 0],
                 'created_at' => $block->created_at?->toIso8601String(),
             ])->values()->all(),
@@ -97,16 +99,43 @@ class ReceiptStockController extends Controller
             $request->user(),
         );
 
+        $this->books->queue($block);
+
         return redirect()->route('receipt-stock.index')
-            ->with('success', "Receipt book {$block->number} issued ({$block->firstNumber()} – {$block->lastNumber()}). Print it and hand it over.");
+            ->with('success', "Receipt book {$block->number} issued ({$block->firstNumber()} – {$block->lastNumber()}). Its PDF is being prepared — Print becomes available in a moment.");
     }
 
+    /**
+     * Downloads the stored book PDF. If it isn't built yet (an older book, a
+     * failed build, a deleted file) it is queued, never rendered here — a
+     * 100-leaf book takes longer than a request may run.
+     */
     public function bookPdf(ReceiptBlock $receiptBlock): HttpResponse
     {
         $this->authorize('update', $receiptBlock);
         abort_unless($receiptBlock->kind === ReceiptBlock::KIND_BOOK, 404);
 
-        return $this->books->pdf($receiptBlock)->download("receipt-book-{$receiptBlock->number}.pdf");
+        if ($this->books->isReady($receiptBlock)) {
+            return Storage::disk((string) $receiptBlock->pdf_disk)->download($receiptBlock->pdf_path, "receipt-book-{$receiptBlock->number}.pdf");
+        }
+
+        if ($receiptBlock->pdf_status !== 'pending') {
+            $this->books->queue($receiptBlock);
+        }
+
+        return redirect()->route('receipt-stock.index')
+            ->with('success', "The PDF for {$receiptBlock->number} is being prepared — try Print again in a moment.");
+    }
+
+    /** Build the book PDF again (after a failure, or a logo change). */
+    public function prepareBookPdf(ReceiptBlock $receiptBlock): RedirectResponse
+    {
+        $this->authorize('update', $receiptBlock);
+        abort_unless($receiptBlock->kind === ReceiptBlock::KIND_BOOK, 404);
+
+        $this->books->queue($receiptBlock);
+
+        return back()->with('success', "Preparing the PDF for {$receiptBlock->number}.");
     }
 
     public function close(Request $request, ReceiptBlock $receiptBlock): RedirectResponse
