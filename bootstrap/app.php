@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\BlockDuringImpersonation;
 use App\Http\Middleware\EnsureLandlord;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RecordImpersonatedActions;
@@ -40,6 +41,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'tenant.web' => ResolveTenantWeb::class,
             'landlord' => EnsureLandlord::class,
+            'not-impersonating' => BlockDuringImpersonation::class,
         ]);
 
         // Laravel's built-in middleware priority list runs

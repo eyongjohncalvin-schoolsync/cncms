@@ -189,17 +189,33 @@ class AuthTest extends TestCase
             ->patchJson('/api/v1/auth/profile', [
                 'name' => 'New Name',
                 'username' => 'newusername',
-                'email' => 'new@example.test',
+                'email' => 'old@example.test',
             ]);
 
         $response->assertOk()
             ->assertJsonPath('user.name', 'New Name')
             ->assertJsonPath('user.username', 'newusername')
-            ->assertJsonPath('user.email', 'new@example.test');
+            ->assertJsonPath('user.email', 'old@example.test');
 
         $this->assertSame('New Name', $user->fresh()->name);
         $this->assertSame('newusername', $user->fresh()->username);
-        $this->assertSame('new@example.test', $user->fresh()->email);
+    }
+
+    /**
+     * A new email address must be confirmed with a code sent to it
+     * (POST /auth/email), so the profile endpoint refuses a direct change.
+     */
+    public function test_profile_update_refuses_a_direct_email_change(): void
+    {
+        $user = User::factory()->create(['email' => 'old@example.test']);
+        $token = $user->createToken('api')->plainTextToken;
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson('/api/v1/auth/profile', ['email' => 'new@example.test'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('email');
+
+        $this->assertSame('old@example.test', $user->fresh()->email);
     }
 
     public function test_profile_update_rejects_username_already_taken_by_another_user(): void

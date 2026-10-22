@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\LogsUsersIn;
+use App\Models\LoginChallenge;
 use App\Models\TenantUserIndex;
 use App\Models\User;
 use App\Support\GeneratesUsername;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -36,13 +39,14 @@ use Laravel\Socialite\Facades\Socialite;
 class GoogleAuthController extends Controller
 {
     use GeneratesUsername;
+    use LogsUsersIn;
 
     public function redirect(): RedirectResponse
     {
         return Socialite::driver('google')->redirect();
     }
 
-    public function callback(): RedirectResponse
+    public function callback(Request $request): RedirectResponse
     {
         $googleUser = Socialite::driver('google')->user();
 
@@ -66,6 +70,18 @@ class GoogleAuthController extends Controller
             // Google already verified this email, unlike a classic
             // email/password signup (see RegisterController::store()).
             $user->forceFill(['email_verified_at' => now()])->save();
+        }
+
+        if (! $user->isActive()) {
+            return redirect()->route('login')->withErrors([
+                'username' => 'This account has been deactivated. Contact your administrator.',
+            ]);
+        }
+
+        // Google counts as the first factor only: with two-factor on, the
+        // authenticator step is still required.
+        if ($user->hasTwoFactorEnabled()) {
+            return $this->proceedAfterFirstFactor($request, $user, LoginChallenge::FACTOR_PASSWORD);
         }
 
         Auth::login($user);
