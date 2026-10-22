@@ -106,6 +106,16 @@ export default function SettingsScreen() {
             </Card>
 
             <Card>
+                <Text style={styles.sectionTitle}>Security</Text>
+                <Text style={styles.sectionHint}>Two-factor sign-in, your email address, and where you're signed in.</Text>
+                <View style={styles.profileActions}>
+                    <Button title="Two-factor authentication" variant="secondary" onPress={() => router.push('/two-factor')} />
+                    <Button title="Change email" variant="secondary" onPress={() => router.push('/change-email')} />
+                    <Button title="Signed-in devices" variant="secondary" onPress={() => router.push('/sessions')} />
+                </View>
+            </Card>
+
+            <Card>
                 <Text style={styles.sectionTitle}>About</Text>
                 <View style={styles.fieldList}>
                     <DetailRow label="App version" value={Constants.expoConfig?.version ?? '—'} last />
@@ -134,6 +144,7 @@ const styles = StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
     content: { padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xxl },
     sectionTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
+    sectionHint: { fontSize: fontSize.sm, color: colors.textSecondary },
     fieldList: { gap: spacing.sm },
     // Stacked, not side-by-side — Button's fullWidth (default true) stretches
     // on the CROSS axis only, so two fullWidth buttons in a row wouldn't

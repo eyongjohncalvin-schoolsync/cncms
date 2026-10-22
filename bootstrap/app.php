@@ -1,7 +1,9 @@
 <?php
 
+use App\Http\Middleware\BlockDuringImpersonation;
 use App\Http\Middleware\EnsureLandlord;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RecordImpersonatedActions;
 use App\Http\Middleware\ResolveLocale;
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\ResolveTenantWeb;
@@ -33,11 +35,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             ResolveLocale::class,
             HandleInertiaRequests::class,
+            RecordImpersonatedActions::class,
         ]);
 
         $middleware->alias([
             'tenant.web' => ResolveTenantWeb::class,
             'landlord' => EnsureLandlord::class,
+            'not-impersonating' => BlockDuringImpersonation::class,
         ]);
 
         // Laravel's built-in middleware priority list runs

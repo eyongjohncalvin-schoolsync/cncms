@@ -1,5 +1,6 @@
-import { Head, useForm } from '@inertiajs/react';
+import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEvent } from 'react';
+import { IconMail } from '@tabler/icons-react';
 import { AuthLayout } from '@/layouts/AuthLayout';
 import { TextInput } from '@/components/ui/TextInput';
 import { PasswordInput } from '@/components/ui/PasswordInput';
@@ -56,6 +57,16 @@ export default function Login() {
                     )}
                 </Button>
             </form>
+
+            <div className="mt-5">
+                <Link
+                    href="/login/code"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                >
+                    <IconMail size={16} stroke={1.75} />
+                    Email me a sign-in code instead
+                </Link>
+            </div>
 
             <p className="mt-7 text-sm text-slate-500">
                 New workspace?{' '}

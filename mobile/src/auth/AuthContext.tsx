@@ -1,10 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { login as apiLogin, logout as apiLogout, fetchMe } from '../api/auth';
+import { login as apiLogin, logout as apiLogout, fetchMe, verifyLoginCode, verifyTwoFactor } from '../api/auth';
 import { setUnauthorizedHandler } from '../api/client';
 import { getCurrentToken, setCurrentToken } from './tokenState';
 import { clearStoredToken, getStoredToken, setStoredToken } from './tokenStorage';
-import type { TenantRole } from '../types/api';
+import { isTwoFactorChallenge } from '../utils/twoFactor';
+import type { LoginResponse, LoginResult, TenantRole, TwoFactorChallengeResponse, TwoFactorMethod } from '../types/api';
+
+export type SignInOutcome = { status: 'signed_in' } | { status: 'two_factor'; challenge: TwoFactorChallengeResponse };
 
 export interface AuthUser {
     uuid: string;
@@ -78,7 +81,16 @@ interface AuthContextValue {
     can: (permission: string) => boolean;
     /** True once /auth/me has confirmed the token online at least this session. */
     roleConfirmed: boolean;
-    login: (identifier: string, password: string) => Promise<void>;
+    /**
+     * Password sign-in. Resolves `two_factor` (with the challenge) instead of
+     * signing in when the account has two-factor on — finish with
+     * completeTwoFactor().
+     */
+    login: (identifier: string, password: string) => Promise<SignInOutcome>;
+    /** Passwordless sign-in with an emailed code (same outcome shape). */
+    loginWithCode: (identifier: string, code: string) => Promise<SignInOutcome>;
+    /** The second sign-in step: authenticator, recovery or emailed code. */
+    completeTwoFactor: (challengeToken: string, method: TwoFactorMethod, code: string) => Promise<void>;
     logout: () => Promise<void>;
     /** Merges a patch (e.g. the response of PATCH /auth/profile) into both
      * in-memory state and the cached profile on disk, so the display
@@ -180,11 +192,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const login = useCallback(async (identifier: string, password: string) => {
-        const loginResponse = await apiLogin(identifier, password);
-
-        setCurrentToken(loginResponse.token);
-        await setStoredToken(loginResponse.token);
+    const finishLogin = useCallback(async (token: string) => {
+        setCurrentToken(token);
+        await setStoredToken(token);
 
         // The login response's `role` is display-only — always resolve the
         // authoritative role via /auth/me before treating the user as
@@ -198,6 +208,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await writeCachedProfile({ user: me.user, role: me.role, permissions: me.permissions });
         setStatus('authenticated');
     }, []);
+
+    /** Signs in, or hands back the two-factor challenge still to pass. */
+    const settle = useCallback(
+        async (result: LoginResult): Promise<SignInOutcome> => {
+            if (isTwoFactorChallenge(result)) {
+                return { status: 'two_factor', challenge: result as TwoFactorChallengeResponse };
+            }
+
+            await finishLogin((result as LoginResponse).token);
+
+            return { status: 'signed_in' };
+        },
+        [finishLogin],
+    );
+
+    const login = useCallback(
+        async (identifier: string, password: string) => settle(await apiLogin(identifier, password)),
+        [settle],
+    );
+
+    const loginWithCode = useCallback(
+        async (identifier: string, code: string) => settle(await verifyLoginCode(identifier, code)),
+        [settle],
+    );
+
+    const completeTwoFactor = useCallback(
+        async (challengeToken: string, method: TwoFactorMethod, code: string) => {
+            const response = await verifyTwoFactor(challengeToken, method, code);
+
+            await finishLogin(response.token);
+        },
+        [finishLogin],
+    );
 
     const logout = useCallback(async () => {
         try {
@@ -240,8 +283,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     const value = useMemo<AuthContextValue>(
-        () => ({ status, user, role, permissions, can, roleConfirmed, login, logout, updateCachedUser }),
-        [status, user, role, permissions, can, roleConfirmed, login, logout, updateCachedUser],
+        () => ({ status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser }),
+        [status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser],
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

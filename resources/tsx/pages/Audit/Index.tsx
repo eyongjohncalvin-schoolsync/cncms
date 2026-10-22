@@ -249,7 +249,12 @@ const AuditLogRow = memo(function AuditLogRow({ log }: { log: AuditLogEntry }) {
         <>
             <tr className="transition-colors hover:bg-slate-50/70">
                 <Td className="whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</Td>
-                <Td>{log.user?.name ?? 'System'}</Td>
+                <Td>
+                    {log.user?.name ?? 'System'}
+                    {log.impersonated_by && (
+                        <span className="block text-xs font-medium text-red-700">via landlord {log.impersonated_by}</span>
+                    )}
+                </Td>
                 <Td className="whitespace-nowrap">{log.table_name}</Td>
                 <Td>
                     <Badge tone={actionTone[log.action]}>{log.action}</Badge>

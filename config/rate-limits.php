@@ -93,4 +93,22 @@ return [
         'decay_minutes' => (int) env('RATE_LIMIT_WEB_DECAY_MINUTES', 1),
     ],
 
+    // Sending a one-time email code (sign-in code, two-factor fallback code,
+    // new-email confirmation code), keyed by the target account (identifier,
+    // challenge or signed-in user) plus IP. Stops inbox flooding; the generic
+    // response never says whether an account exists.
+    'security-code-send' => [
+        'max_attempts' => (int) env('RATE_LIMIT_SECURITY_CODE_SEND_MAX_ATTEMPTS', 3),
+        'decay_minutes' => (int) env('RATE_LIMIT_SECURITY_CODE_SEND_DECAY_MINUTES', 10),
+    ],
+
+    // Submitting a one-time code (sign-in code, two-factor challenge,
+    // new-email confirmation), keyed by IP. Each code and challenge also
+    // dies after 5 wrong guesses on its own (SecurityCodeService,
+    // LoginChallengeService), so this is the outer brute-force ceiling.
+    'security-code-verify' => [
+        'max_attempts' => (int) env('RATE_LIMIT_SECURITY_CODE_VERIFY_MAX_ATTEMPTS', 10),
+        'decay_minutes' => (int) env('RATE_LIMIT_SECURITY_CODE_VERIFY_DECAY_MINUTES', 1),
+    ],
+
 ];

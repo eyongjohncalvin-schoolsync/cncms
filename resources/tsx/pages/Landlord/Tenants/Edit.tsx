@@ -1,5 +1,5 @@
-import { Form, Head, Link } from '@inertiajs/react';
-import { IconBrandWhatsapp, IconBuildingSkyscraper } from '@tabler/icons-react';
+import { Form, Head, Link, router } from '@inertiajs/react';
+import { IconBrandWhatsapp, IconBuildingSkyscraper, IconUsers } from '@tabler/icons-react';
 import { LandlordLayout } from '@/layouts/LandlordLayout';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
@@ -7,7 +7,21 @@ import { Badge } from '@/components/ui/Badge';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { LandlordTenant } from '@/types';
 
-export default function LandlordTenantsEdit({ tenant }: { tenant: LandlordTenant }) {
+interface Member {
+    uuid: string;
+    name: string;
+    email: string;
+    role: string;
+    can_impersonate: boolean;
+}
+
+export default function LandlordTenantsEdit({ tenant, members }: { tenant: LandlordTenant; members: Member[] }) {
+    function impersonate(member: Member) {
+        if (confirm(`Log in as ${member.name}? You will see and act exactly as them, and everything you change is recorded under your name.`)) {
+            router.post(`/landlord/impersonate/${member.uuid}`);
+        }
+    }
+
     return (
         <LandlordLayout
             title={`Edit ${tenant.name}`}
@@ -120,6 +134,43 @@ export default function LandlordTenantsEdit({ tenant }: { tenant: LandlordTenant
                         )}
                     </Form>
                 </CardBody>
+            </Card>
+
+            <Card className="animate-fade-up mt-6 max-w-2xl" style={{ animationDelay: '200ms' }}>
+                <CardHeader>
+                    <div className="flex items-center gap-2">
+                        <IconUsers size={18} stroke={1.75} className="text-indigo-600" />
+                        <p className="font-medium text-slate-900">Members</p>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                        To help someone, log in as them. A red banner shows the whole time, and every change is logged under your name.
+                    </p>
+                </CardHeader>
+                {members.length === 0 ? (
+                    <CardBody>
+                        <p className="text-sm text-slate-500">No members yet.</p>
+                    </CardBody>
+                ) : (
+                    <ul className="divide-y divide-slate-100">
+                        {members.map((member) => (
+                            <li key={member.uuid} className="flex items-center justify-between gap-3 px-4 py-3">
+                                <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium text-slate-900">{member.name}</p>
+                                    <p className="truncate text-xs text-slate-500">
+                                        {member.email} · {member.role}
+                                    </p>
+                                </div>
+                                {member.can_impersonate ? (
+                                    <Button type="button" variant="secondary" onClick={() => impersonate(member)}>
+                                        Log in as
+                                    </Button>
+                                ) : (
+                                    <span className="text-xs text-slate-400">Not available</span>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                )}
             </Card>
         </LandlordLayout>
     );

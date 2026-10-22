@@ -9,6 +9,7 @@ use App\Http\Requests\StoreTenantRequest;
 use App\Http\Requests\UpdateTenantRequest;
 use App\Models\LandlordActivity;
 use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -103,8 +104,23 @@ class TenantController extends Controller
 
     public function edit(Tenant $tenant): Response
     {
+        // Members, for support impersonation ("Log in as" — App\Support\
+        // Impersonation). Central data only: the membership index + users.
+        $members = User::query()
+            ->join('tenant_user_index', 'tenant_user_index.user_id', '=', 'users.id')
+            ->where('tenant_user_index.tenant_id', $tenant->id)
+            ->orderBy('users.name')
+            ->get(['users.id', 'users.uuid', 'users.name', 'users.email', 'users.status', 'users.is_landlord', 'tenant_user_index.role']);
+
         return Inertia::render('Landlord/Tenants/Edit', [
             'tenant' => $this->shape($tenant),
+            'members' => $members->map(fn (User $user) => [
+                'uuid' => $user->uuid,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->getAttribute('role'),
+                'can_impersonate' => $user->status === 'active' && ! $user->is_landlord,
+            ])->values(),
         ]);
     }
 

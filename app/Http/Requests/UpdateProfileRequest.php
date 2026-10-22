@@ -52,10 +52,23 @@ class UpdateProfileRequest extends FormRequest
                 'sometimes', 'required', 'string', 'max:50',
                 Rule::unique('pgsql.users', 'username')->ignore($userId),
             ],
+            // Accepted only unchanged (the mobile form always sends it). A
+            // new address goes through the code-confirmed POST /auth/email.
             'email' => [
                 'sometimes', 'required', 'string', 'email', 'max:255',
                 Rule::unique('pgsql.users', 'email')->ignore($userId),
+                Rule::in([$this->user()->email]),
             ],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'email.in' => 'To change your email, confirm the new address with a code (Change email).',
         ];
     }
 }

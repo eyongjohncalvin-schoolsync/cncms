@@ -66,6 +66,7 @@ class AuditLogController extends Controller
             'old_values' => $log->old_values,
             'new_values' => $log->new_values,
             'user' => $log->user ? ['uuid' => $log->user->uuid, 'name' => $log->user->name] : null,
+            'impersonated_by' => $log->impersonator?->name,
             'ip_address' => $log->ip_address,
             'device_id' => $log->device_id,
             'created_at' => $log->created_at,

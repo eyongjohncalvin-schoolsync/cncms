@@ -4,31 +4,35 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\IssuesApiTokens;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdatePasswordRequest;
 use App\Http\Requests\UpdateProfileRequest;
-use App\Models\Tenant;
-use App\Models\TenantUser;
+use App\Models\LoginChallenge;
 use App\Models\User;
+use App\Services\AccountSecurityService;
 use App\Support\TenantContext;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    use IssuesApiTokens;
+
     /**
      * Issue a Sanctum token for a valid email/username + password.
      *
      * The login endpoint runs before tenant resolution (it is excluded
-     * from App\Http\Middleware\ResolveTenant), so it does not initialize
-     * tenancy itself. It best-effort looks up the caller's role for the
-     * single current tenant ("swecom") purely for display purposes in the
-     * response payload — the authoritative role check for every
-     * subsequent request happens in ResolveTenant.
+     * from App\Http\Middleware\ResolveTenant). A passive account gets a 403;
+     * a user with two-factor on gets `{two_factor_required: true,
+     * challenge_token, methods}` and NO token — the token comes from
+     * POST /auth/two-factor (Api\TwoFactorChallengeController). The
+     * optional `device_name` names the token in "Signed-in devices".
      */
     public function login(Request $request): JsonResponse
     {
@@ -36,6 +40,7 @@ class AuthController extends Controller
             'email' => ['required_without:username', 'string'],
             'username' => ['required_without:email', 'string'],
             'password' => ['required', 'string'],
+            'device_name' => ['nullable', 'string', 'max:100'],
         ]);
 
         if ($validator->fails()) {
@@ -55,37 +60,7 @@ class AuthController extends Controller
             throw new AuthenticationException('These credentials do not match our records.');
         }
 
-        $token = $user->createToken('api')->plainTextToken;
-
-        $role = null;
-
-        $tenant = Tenant::find('swecom');
-
-        if ($tenant) {
-            $wasInitialized = tenancy()->initialized;
-
-            tenancy()->initialize($tenant);
-
-            $role = TenantUser::query()
-                ->where('user_id', $user->id)
-                ->where('tenant_id', $tenant->id)
-                ->value('role');
-
-            if (! $wasInitialized) {
-                tenancy()->end();
-            }
-        }
-
-        return response()->json([
-            'user' => [
-                'uuid' => $user->uuid,
-                'name' => $user->name,
-                'username' => $user->username,
-                'email' => $user->email,
-                'role' => $role,
-            ],
-            'token' => $token,
-        ]);
+        return $this->respondAfterFirstFactor($user, LoginChallenge::FACTOR_PASSWORD, $request->input('device_name'));
     }
 
     /**
@@ -137,12 +112,15 @@ class AuthController extends Controller
      * Profile screen. `status`/`password`/anything else can never surface
      * here — UpdateProfileRequest::rules() doesn't define those keys, so
      * $request->validated() only ever contains name/username/email.
+     *
+     * The email may only be sent unchanged: a new address must be confirmed
+     * with a code (POST /auth/email, Api\AccountSecurityController).
      */
     public function updateProfile(UpdateProfileRequest $request): JsonResponse
     {
         $user = $request->user();
 
-        $user->update($request->validated());
+        $user->update(Arr::except($request->validated(), ['email']));
 
         return response()->json([
             'user' => [
@@ -175,7 +153,7 @@ class AuthController extends Controller
      * is rare, and it's exactly the moment an old/unexpected session
      * SHOULD stop working.
      */
-    public function updatePassword(UpdatePasswordRequest $request): JsonResponse
+    public function updatePassword(UpdatePasswordRequest $request, AccountSecurityService $account): JsonResponse
     {
         $user = $request->user();
 
@@ -185,14 +163,13 @@ class AuthController extends Controller
             ]);
         }
 
-        // The 'password' attribute is cast to 'hashed' on the User model,
-        // so Eloquent hashes this automatically on save (same convention as
-        // SettingsUserController::store()).
-        $user->update(['password' => $request->validated('new_password')]);
-
-        $currentTokenId = $request->user()->currentAccessToken()->id;
-
-        $user->tokens()->where('id', '!=', $currentTokenId)->delete();
+        // Also ends every web session and emails the owner a notice.
+        $account->changePassword(
+            $user,
+            $request->validated('new_password'),
+            null,
+            $user->currentAccessToken()->id,
+        );
 
         return response()->json([
             'message' => 'Password updated.',

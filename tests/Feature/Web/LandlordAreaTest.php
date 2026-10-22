@@ -68,14 +68,18 @@ class LandlordAreaTest extends TestCase
 
     public function test_tenant_actions_are_logged(): void
     {
+        // LandlordTest commits real swecom updates (it can't use
+        // transactions), so only look at rows this test creates.
+        $before = (int) LandlordActivity::query()->max('id');
+
         $this->post('/landlord/tenants/swecom/reject', ['reason' => 'Testing'])->assertRedirect();
         $this->post('/landlord/tenants/swecom/approve')->assertRedirect();
         $this->patch('/landlord/tenants/swecom', ['bulk_whatsapp_enabled' => '1'])->assertRedirect();
 
-        $actions = LandlordActivity::query()->where('subject_id', 'swecom')->orderBy('id')->pluck('action')->all();
+        $actions = LandlordActivity::query()->where('id', '>', $before)->where('subject_id', 'swecom')->orderBy('id')->pluck('action')->all();
         $this->assertSame(['tenant.rejected', 'tenant.approved', 'tenant.updated'], $actions);
 
-        $rejected = LandlordActivity::query()->where('action', 'tenant.rejected')->sole();
+        $rejected = LandlordActivity::query()->where('id', '>', $before)->where('action', 'tenant.rejected')->sole();
         $this->assertSame($this->landlord->id, $rejected->user_id);
         $this->assertSame(['reason' => 'Testing'], $rejected->details);
         $this->assertNotNull($rejected->ip_address);
