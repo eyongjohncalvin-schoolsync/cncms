@@ -98,13 +98,26 @@ enum Permission: string
 
     // ---- Expenditures -------------------------------------------
     case ExpendituresView = 'expenditures.view';
+    /**
+     * Retired (docs/plans/expenditures-and-spending-controls.md, E1): every
+     * cash-out goes through a bon, so nothing records an expenditure
+     * directly any more. Kept in the catalog so existing role rows stay
+     * valid; it grants nothing.
+     */
     case ExpendituresCreate = 'expenditures.create';
+    /** Re-categorise / fix the description of an expenditure, with a reason (E7). */
     case ExpendituresUpdate = 'expenditures.update';
+    /** Void a legacy expenditure or correct a paid bon, with a reason (E7). Never a hard delete. */
     case ExpendituresDelete = 'expenditures.delete';
     /** The P&L dashboard (ExpenditurePolicy::viewDashboard / ResourcesDashboardController). */
     case ExpendituresDashboard = 'expenditures.dashboard';
     /** Expense category create / update / deactivate (ExpenseCategoryPolicy). */
     case ExpenseCategoriesManage = 'expense_categories.manage';
+    /**
+     * Per-category monthly budgets — Resources → Budgets (E5). Warnings
+     * only; they never block a bon.
+     */
+    case BudgetsManage = 'budgets.manage';
 
     // ---- Reports -------------------------------------------------
     case ReportsView = 'reports.view';
@@ -246,7 +259,7 @@ enum Permission: string
             'agents' => 'Field agents',
             'branches' => 'Branches',
             'expenditures' => 'Expenditures',
-            'expense_categories' => 'Expenditures',
+            'expense_categories', 'budgets' => 'Expenditures',
             'reports' => 'Reports',
             'complaints' => 'Complaints',
             'arrears' => 'Arrears adjustments',
