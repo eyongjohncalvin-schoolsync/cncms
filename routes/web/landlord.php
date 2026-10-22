@@ -8,6 +8,7 @@ use App\Http\Controllers\Landlord\ImpersonationController;
 use App\Http\Controllers\Landlord\LandlordController;
 use App\Http\Controllers\Landlord\MaintenanceWindowController;
 use App\Http\Controllers\Landlord\TenantController;
+use App\Http\Controllers\Landlord\UserController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -28,6 +29,7 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::get('/', DashboardController::class)->name('dashboard');
     Route::get('activity', [ActivityController::class, 'index'])->name('activity.index');
 
+    Route::get('users', [UserController::class, 'index'])->name('users.index');
     Route::post('impersonate/{user}', [ImpersonationController::class, 'start'])->name('impersonate');
 
     Route::get('landlords', [LandlordController::class, 'index'])->name('landlords.index');

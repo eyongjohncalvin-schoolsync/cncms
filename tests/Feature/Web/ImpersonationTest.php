@@ -177,4 +177,20 @@ class ImpersonationTest extends TestCase
                 ->where('members', fn ($members) => collect($members)->contains(fn ($member) => $member['email'] === 'patience@shalomtech.dev' && $member['can_impersonate'] === true)
                     && collect($members)->contains(fn ($member) => $member['email'] === 'kelvin@shalomtech.dev' && $member['can_impersonate'] === false)));
     }
+
+    public function test_the_landlord_users_page_lists_and_searches_everyone_with_log_in_as(): void
+    {
+        $this->actingAs($this->landlord)
+            ->get('/landlord/users?search=PATIENCE')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Landlord/Users/Index')
+                ->has('users.data', 1)
+                ->where('users.data.0.email', 'patience@shalomtech.dev')
+                ->where('users.data.0.workspace', 'SWECOM PLC')
+                ->where('users.data.0.can_impersonate', true)
+                ->where('filters.search', 'PATIENCE'));
+
+        $this->actingAs($this->patience)->get('/landlord/users')->assertForbidden();
+    }
 }

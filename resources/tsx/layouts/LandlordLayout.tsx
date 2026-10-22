@@ -8,6 +8,7 @@ import {
     IconLogout,
     IconShieldLock,
     IconTool,
+    IconUsers,
 } from '@tabler/icons-react';
 import type { BreadcrumbItem, PageProps } from '@/types';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
@@ -16,6 +17,7 @@ import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
 const navItems = [
     { href: '/landlord', label: 'Dashboard', icon: IconLayoutDashboard, exact: true },
     { href: '/landlord/tenants', label: 'Tenants', icon: IconBuildingSkyscraper },
+    { href: '/landlord/users', label: 'Users', icon: IconUsers },
     { href: '/landlord/maintenance', label: 'Maintenance', icon: IconTool },
     { href: '/landlord/landlords', label: 'Landlords', icon: IconShieldLock },
     { href: '/landlord/activity', label: 'Activity log', icon: IconHistory },
