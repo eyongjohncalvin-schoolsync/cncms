@@ -54,8 +54,8 @@ export interface MeResponse {
 }
 
 /** PATCH /auth/profile — App\Http\Requests\UpdateProfileRequest. Every field
- * is optional on the wire ('sometimes' server-side), but the mobile "Edit
- * profile" form always sends all three. */
+ * is optional on the wire ('sometimes' server-side). `email` is accepted
+ * only unchanged: a new address goes through POST /auth/email + a code. */
 export interface UpdateProfilePayload {
     name?: string;
     username?: string;
@@ -69,6 +69,63 @@ export interface UpdateProfileResponse {
         username: string;
         email: string;
     };
+}
+
+// ---------------------------------------------------------------------------
+// Account security — App\Http\Controllers\Api\{AuthController,
+// TwoFactorChallengeController, LoginCodeController, AccountSecurityController}
+// ---------------------------------------------------------------------------
+
+export type TwoFactorMethod = 'totp' | 'recovery' | 'email';
+
+/**
+ * POST /auth/login (or /auth/login-code/verify) for a user with two-factor
+ * on: NO token yet — send `challenge_token` + a code to POST /auth/two-factor.
+ * `methods` lacks 'email' when the first factor was itself an email code.
+ */
+export interface TwoFactorChallengeResponse {
+    two_factor_required: true;
+    challenge_token: string;
+    methods: TwoFactorMethod[];
+    email_hint: string;
+    expires_in: number;
+}
+
+export type LoginResult = LoginResponse | TwoFactorChallengeResponse;
+
+/** GET /auth/security */
+export interface SecurityOverview {
+    email: string;
+    pending_email: string | null;
+    two_factor: {
+        enabled: boolean;
+        pending_setup: boolean;
+        recovery_codes_remaining: number;
+    };
+}
+
+/** POST /auth/two-factor/setup — `qr_code` is a PNG data URI. */
+export interface TwoFactorSetup {
+    secret: string;
+    otpauth_url: string;
+    qr_code: string;
+}
+
+/** GET /auth/sessions */
+export interface SessionsResponse {
+    sessions: {
+        ip_address: string | null;
+        user_agent: string | null;
+        last_active_at: string;
+        is_current: boolean;
+    }[];
+    devices: {
+        id: number;
+        name: string;
+        last_used_at: string | null;
+        created_at: string | null;
+        is_current: boolean;
+    }[];
 }
 
 /** PATCH /auth/password — App\Http\Requests\UpdatePasswordRequest. */

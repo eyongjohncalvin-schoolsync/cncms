@@ -3,8 +3,8 @@
 namespace App\Providers;
 
 use App\Models\Company;
-use App\Models\PersonalAccessToken;
 use App\Models\PaymentReceipt;
+use App\Models\PersonalAccessToken;
 use App\Models\Report;
 use App\Models\Role;
 use App\Policies\PaymentReceiptPolicy;
@@ -143,5 +143,29 @@ class AppServiceProvider extends ServiceProvider
             config('rate-limits.web.decay_minutes'),
             config('rate-limits.web.max_attempts'),
         )->by($request->user()?->getAuthIdentifier() ?? $request->ip()));
+
+        // Sending a one-time email code. Keyed by the account the code is
+        // for — the signed-in user, the pending login challenge, or the
+        // typed username/email — plus IP and route, so a busy office behind
+        // one IP isn't throttled as a whole.
+        RateLimiter::for('security-code-send', fn (Request $request) => Limit::perMinutes(
+            config('rate-limits.security-code-send.decay_minutes'),
+            config('rate-limits.security-code-send.max_attempts'),
+        )->by(implode('|', [
+            $request->route()?->getName() ?? $request->path(),
+            $request->user()?->getAuthIdentifier()
+                ?? sha1((string) ($request->input('challenge_token')
+                    ?? ($request->hasSession() ? $request->session()->get('login.challenge_token') : null)
+                    ?? '')),
+            mb_strtolower(trim((string) $request->input('identifier'))),
+            $request->ip(),
+        ])));
+
+        // Submitting a one-time code. Keyed by IP (plus the user when signed
+        // in, for the new-email confirmation).
+        RateLimiter::for('security-code-verify', fn (Request $request) => Limit::perMinutes(
+            config('rate-limits.security-code-verify.decay_minutes'),
+            config('rate-limits.security-code-verify.max_attempts'),
+        )->by(($request->user()?->getAuthIdentifier() ?? 'guest').'|'.$request->ip()));
     }
 }

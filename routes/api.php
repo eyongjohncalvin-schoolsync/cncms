@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\AccountSecurityController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\LoginCodeController;
+use App\Http\Controllers\Api\TwoFactorChallengeController;
 use App\Http\Middleware\ResolveTenant;
 use Illuminate\Support\Facades\Route;
 
@@ -13,8 +16,30 @@ Route::prefix('v1')->group(function () {
     // section 11).
     Route::post('auth/login', [AuthController::class, 'login'])->middleware('throttle:login');
 
+    // Second sign-in step for two-factor users (challenge_token from the
+    // login response), and passwordless sign-in with an emailed code. All
+    // before any token exists, so no auth:sanctum.
+    Route::post('auth/two-factor', [TwoFactorChallengeController::class, 'store'])->middleware('throttle:security-code-verify');
+    Route::post('auth/two-factor/email', [TwoFactorChallengeController::class, 'sendEmail'])->middleware('throttle:security-code-send');
+    Route::post('auth/login-code', [LoginCodeController::class, 'send'])->middleware('throttle:security-code-send');
+    Route::post('auth/login-code/verify', [LoginCodeController::class, 'verify'])->middleware('throttle:security-code-verify');
+
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('auth/logout', [AuthController::class, 'logout']);
+
+        // Account security (central `users` row only, so no tenant): email
+        // change with a code, authenticator-app two-factor, sessions.
+        Route::get('auth/security', [AccountSecurityController::class, 'show']);
+        Route::post('auth/email', [AccountSecurityController::class, 'requestEmailChange'])->middleware('throttle:security-code-send');
+        Route::post('auth/email/confirm', [AccountSecurityController::class, 'confirmEmailChange'])->middleware('throttle:security-code-verify');
+        Route::delete('auth/email', [AccountSecurityController::class, 'cancelEmailChange']);
+        Route::post('auth/two-factor/setup', [AccountSecurityController::class, 'setupTwoFactor']);
+        Route::delete('auth/two-factor/setup', [AccountSecurityController::class, 'cancelTwoFactorSetup']);
+        Route::post('auth/two-factor/confirm', [AccountSecurityController::class, 'confirmTwoFactor'])->middleware('throttle:security-code-verify');
+        Route::delete('auth/two-factor', [AccountSecurityController::class, 'disableTwoFactor'])->middleware('throttle:security-code-verify');
+        Route::post('auth/two-factor/recovery-codes', [AccountSecurityController::class, 'regenerateRecoveryCodes']);
+        Route::get('auth/sessions', [AccountSecurityController::class, 'sessions']);
+        Route::delete('auth/sessions', [AccountSecurityController::class, 'signOutOtherSessions']);
         // Self-service profile/password endpoints — gated by auth:sanctum
         // only (no ResolveTenant/tenant membership needed), same placement
         // as logout() above: both only ever touch the central `users`

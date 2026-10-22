@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\Models\TenantUserIndex;
+use App\Http\Controllers\Concerns\LogsUsersIn;
+use App\Models\LoginChallenge;
+use App\Models\User;
 use App\Support\Impersonation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -23,11 +26,19 @@ use Inertia\Response;
  */
 class AuthController extends Controller
 {
+    use LogsUsersIn;
+
     public function create(): Response
     {
         return Inertia::render('Auth/Login');
     }
 
+    /**
+     * Password sign-in. The username field takes a username or an email.
+     * A passive (deactivated) account is refused even with the right
+     * password; with two-factor on, the user goes to the two-factor
+     * challenge instead of being signed in (see LogsUsersIn).
+     */
     public function store(Request $request): RedirectResponse
     {
         $credentials = $request->validate([
@@ -35,66 +46,21 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        $field = str_contains($credentials['username'], '@') ? 'email' : 'username';
+        $user = User::findForLogin($credentials['username']);
 
-        // No "remember me" checkbox exists on Auth/Login.tsx, so there is no
-        // user intent to honor here — attempt() defaults to session-only
-        // auth (no persistent recaller cookie) when the second argument is
-        // omitted. Previously hardcoded to `true`, which silently issued a
-        // ~13-month persistent auth cookie on every login regardless of
-        // whether the user ever asked for that.
-        if (! Auth::attempt([$field => $credentials['username'], 'password' => $credentials['password']])) {
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'username' => 'These credentials do not match our records.',
             ]);
         }
 
-        // Auth::attempt() already rotates the session ID with the old
-        // session's storage row destroyed (SessionGuard::updateSession()
-        // calls $session->regenerate(true) internally) before this line
-        // ever runs. This explicit call is the standard, idiomatic
-        // Laravel pattern (every official starter kit does the same) and
-        // is kept for defense-in-depth/clarity — but note neither this nor
-        // Auth::attempt()'s internal regenerate(true) clears session
-        // *data* (Illuminate\Session\Store::migrate() only rotates the ID
-        // and optionally destroys the old ID's storage row; it never
-        // touches $this->attributes). So session-stored values such as
-        // `url.intended`, however they got there, survive this call
-        // regardless of the $destroy argument — see the guard below for
-        // the part that actually matters for that.
-        $request->session()->regenerate(true);
-
-        // `url.intended` is ambient session state, not something scoped to
-        // "this specific login attempt". Laravel's Authenticate middleware
-        // sets it on ANY unauthenticated request to a protected route,
-        // including one that lands on this browser's session in the gap
-        // between one user logging out and a completely different user
-        // logging in on the same browser (e.g. a stray auto-refresh of a
-        // stale tab still pointed at a landlord-only page). EnsureLandlord
-        // already 403s a non-landlord user who actually reaches a
-        // /landlord/* page, but there's no reason to even compute that as
-        // this user's post-login redirect target in the first place.
-        // Discard it if it points somewhere this specific user isn't
-        // authorized for the one privilege tier that matters here.
-        $intendedPath = parse_url((string) $request->session()->get('url.intended'), PHP_URL_PATH);
-
-        if (is_string($intendedPath) && str_starts_with($intendedPath, '/landlord') && ! $request->user()->is_landlord) {
-            $request->session()->forget('url.intended');
+        if (! $user->isActive()) {
+            throw ValidationException::withMessages([
+                'username' => 'This account has been deactivated. Contact your administrator.',
+            ]);
         }
 
-        // A landlord with no workspace of their own (e.g. the bootstrap
-        // `cncms:grant-landlord --create` user) would otherwise land on
-        // /dashboard and hit ResolveTenantWeb's "no tenant yet" 403. Send
-        // them to the platform area instead — that's where they belong.
-        $user = $request->user();
-
-        if ($user->is_landlord
-            && ! $request->session()->has('url.intended')
-            && ! TenantUserIndex::query()->where('user_id', $user->id)->exists()) {
-            return redirect()->route('landlord.dashboard');
-        }
-
-        return redirect()->intended(route('dashboard'));
+        return $this->proceedAfterFirstFactor($request, $user, LoginChallenge::FACTOR_PASSWORD);
     }
 
     public function destroy(Request $request): RedirectResponse
