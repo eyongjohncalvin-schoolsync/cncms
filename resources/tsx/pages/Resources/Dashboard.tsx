@@ -123,7 +123,11 @@ export default function ResourcesDashboardPage({ period, income, expenses, pnl, 
                     <StatCard
                         label="Verified Income"
                         value={formatCurrency(income.verified)}
-                        hint={`${income.payment_count} payments recorded`}
+                        hint={
+                            income.by_purpose && Number(income.by_purpose.installation) > 0
+                                ? `${income.payment_count} payments · subscriptions ${formatCurrency(income.by_purpose.subscription)} · installations ${formatCurrency(income.by_purpose.installation)}`
+                                : `${income.payment_count} payments recorded`
+                        }
                         icon={<IconCash size={20} stroke={1.75} />}
                         tone="green"
                     />

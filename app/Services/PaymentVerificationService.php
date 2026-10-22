@@ -99,6 +99,10 @@ class PaymentVerificationService
                 // for audit. No-op when there is no receipt.
                 $this->receipts->voidForPayment($payment);
             }
+
+            // An installation instalment approved or rejected may settle or
+            // re-open its charge (docs/plans/installation-and-promotions.md).
+            $payment->customerCharge?->refreshStatus();
         });
 
         $this->forgetShowCache($payment->uuid);

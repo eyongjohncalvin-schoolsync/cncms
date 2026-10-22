@@ -53,7 +53,7 @@ class PaymentReceiptService
     private const array THERMAL_WIDTH_MM = [self::FORMAT_THERMAL_58 => 58, self::FORMAT_THERMAL_80 => 80];
 
     /** Bumped whenever the receipt layout changes; see pdf(). */
-    private const int LAYOUT_VERSION = 5;
+    private const int LAYOUT_VERSION = 6;
 
     /**
      * Issue a receipt for $payment, or return the existing one.
@@ -340,6 +340,8 @@ class PaymentReceiptService
             $snapshot['amount_in_words']['en'] ?? null,
             $snapshot['amount_in_words']['fr'] ?? null,
             'qr-notice',
+            // Installation receipt: fee, paid so far, balance.
+            ...(isset($snapshot['installation']) ? ['fee', 'paid', 'balance'] : []),
         ]));
 
         return ($narrow ? 82 : 98)
@@ -419,9 +421,18 @@ class PaymentReceiptService
     {
         $customer = $payment->customer;
         $company = Company::cached();
+        $purpose = $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION;
+        $isSubscription = $purpose === Payment::PURPOSE_SUBSCRIPTION;
 
         return [
             'issued_at' => now()->toIso8601String(),
+            // What the money was for (docs/plans/installation-and-promotions.md):
+            // drives the receipt heading and which balance it shows. A
+            // snapshot without it is an older subscription receipt.
+            'purpose' => $purpose,
+            'title' => Payment::RECEIPT_TITLES[$purpose] ?? Payment::RECEIPT_TITLES[Payment::PURPOSE_SUBSCRIPTION],
+            'description' => $this->describe($payment),
+            'installation' => $this->installationFor($payment),
             'customer' => [
                 'name' => $customer?->name,
                 'phone' => $customer?->phone,
@@ -435,7 +446,7 @@ class PaymentReceiptService
                 'method' => $payment->frequency,
                 'frequency' => $payment->frequency,
                 'months' => $payment->months,
-                'periods' => $this->coveredPeriods($payment),
+                'periods' => $isSubscription ? $this->coveredPeriods($payment) : [],
                 'expiration_date' => $payment->expiration_date?->toDateString(),
                 'momo_ref' => $payment->verification?->momo_ref,
                 'recorded_offline' => (bool) $payment->recorded_offline,
@@ -453,8 +464,11 @@ class PaymentReceiptService
                 'en' => AmountInWords::convert((string) $payment->amount),
                 'fr' => AmountInWords::french((string) $payment->amount),
             ],
-            'balance' => $this->balanceAfter($payment),
-            'invoice' => $this->invoiceFor($payment),
+            // The subscription balance and "for bill" only mean something on
+            // a subscription receipt; an installation receipt carries its own
+            // fee/paid/balance block instead, a technician fee neither.
+            'balance' => $isSubscription ? $this->balanceAfter($payment) : null,
+            'invoice' => $isSubscription ? $this->invoiceFor($payment) : null,
             'company' => [
                 'name' => $company?->name,
                 'location' => $company?->location,
@@ -470,9 +484,50 @@ class PaymentReceiptService
     }
 
     /**
+     * The line printed under "Description" — the cable subscription, the
+     * installation fee, or the technician's fee.
+     */
+    private function describe(Payment $payment): string
+    {
+        return match ($payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION) {
+            Payment::PURPOSE_INSTALLATION => 'Installation fee',
+            Payment::PURPOSE_TECHNICIAN_FEE => 'Technician motivation fee (reconnection)',
+            default => 'Cable subscription',
+        };
+    }
+
+    /**
+     * An installation receipt's own balance: the fee, what has been paid
+     * toward it so far (verified instalments, this one included) and what is
+     * left. Null on every other receipt.
+     *
+     * @return array{fee: string, paid: string, balance: string, status: string}|null
+     */
+    private function installationFor(Payment $payment): ?array
+    {
+        if (($payment->purpose ?? null) !== Payment::PURPOSE_INSTALLATION || $payment->customer_charge_id === null) {
+            return null;
+        }
+
+        $charge = $payment->customerCharge()->first();
+
+        if ($charge === null) {
+            return null;
+        }
+
+        return [
+            'fee' => bcadd((string) $charge->amount, '0', 2),
+            'paid' => $charge->paidAmount(),
+            'balance' => $charge->balance(),
+            'status' => $charge->status,
+        ];
+    }
+
+    /**
      * What the customer still owes (or has in credit) once this payment is
      * counted: the amount due on their latest bill, minus every verified
-     * payment received since that bill was calculated (this one included).
+     * subscription payment received since that bill was calculated (this
+     * one included). Installation and technician-fee money never counts.
      * Null when the customer has never been billed. Frozen into the
      * snapshot like everything else on the receipt.
      *
@@ -488,6 +543,7 @@ class PaymentReceiptService
 
         $paidSince = (string) Payment::query()
             ->where('customer_id', $payment->customer_id)
+            ->subscription()
             ->where('verification_status', 'verified')
             ->whereNull('processed_period')
             ->sum('amount');
@@ -539,6 +595,11 @@ class PaymentReceiptService
      */
     private function coveredPeriods(Payment $payment): array
     {
+        // Only subscription money pays for billing months.
+        if (! $payment->isSubscription()) {
+            return [];
+        }
+
         $start = $payment->processed_period
             ?? ($payment->collected_at ?? $payment->created_at ?? now())->format('Y-m');
 

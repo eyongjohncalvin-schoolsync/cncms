@@ -124,6 +124,20 @@ enum Permission: string
     /** approve + reject (the stage machine + maker≠checker identity rules stay in the policy). */
     case ArrearsApprove = 'arrears.approve';
 
+    // ---- Installations (docs/plans/installation-and-promotions.md) ----
+    /**
+     * Open an installation charge on a customer (the fee they owe outside
+     * the monthly bill) and ask for what is left of it to be waived.
+     * Recording an instalment against a charge is `payments.create`.
+     */
+    case InstallationsManage = 'installations.manage';
+    /**
+     * Approve / reject an installation waiver. Maker ≠ checker: whoever
+     * asked for the waiver can never approve it (the owner excepted, as for
+     * arrears adjustments). Seeded to admin only (D8: admin/owner approval).
+     */
+    case InstallationsApprove = 'installations.approve';
+
     // ---- Opening balances (onboarding) -----------------------
     /** See the opening-balances screen and its batches. */
     case OpeningBalancesView = 'opening_balances.view';
@@ -236,6 +250,7 @@ enum Permission: string
             'reports' => 'Reports',
             'complaints' => 'Complaints',
             'arrears' => 'Arrears adjustments',
+            'installations' => 'Installations',
             'opening_balances' => 'Opening balances',
             'receipts', 'cash' => 'Cash & receipts',
             'vouchers' => 'Vouchers',

@@ -181,7 +181,7 @@ class ManuscriptService
         $manuscript = $this->resolveManuscript($customer, $period);
         $company = Company::cached();
 
-        return $this->buildBillData($customer, $manuscript, $period, $company, $company?->logoDataUri());
+        return $this->buildBillData($customer, $manuscript, $period, $company, $company?->logoDataUri(), CustomerChargeService::openInstallationBalance($customer));
     }
 
     /**
@@ -223,6 +223,10 @@ class ManuscriptService
                 ->mapWithKeys(fn (Customer $customer): array => [$customer->id => $customer->latestManuscript]);
         }
 
+        // One query for the whole batch — the installation balance printed
+        // as its own line (docs/plans/installation-and-promotions.md).
+        $installationBalances = CustomerChargeService::openInstallationBalances($customers->pluck('id')->all());
+
         $bills = [];
 
         foreach ($customers as $customer) {
@@ -232,7 +236,7 @@ class ManuscriptService
                 continue;
             }
 
-            $bills[] = $this->buildBillData($customer, $manuscript, $period, $company, $logoDataUri);
+            $bills[] = $this->buildBillData($customer, $manuscript, $period, $company, $logoDataUri, $installationBalances[$customer->id] ?? '0.00');
         }
 
         return $bills;
@@ -336,7 +340,7 @@ class ManuscriptService
      * callers (and therefore both the single-print flow and the bulk grid)
      * render identically shaped data.
      */
-    private function buildBillData(Customer $customer, Manuscript $manuscript, ?string $period, ?Company $company, ?string $logoDataUri): array
+    private function buildBillData(Customer $customer, Manuscript $manuscript, ?string $period, ?Company $company, ?string $logoDataUri, string $installationBalance = '0.00'): array
     {
         $customer->loadMissing('zone');
 
@@ -361,6 +365,9 @@ class ManuscriptService
             'account_code' => $this->accountCode($customer),
             'bill_number' => $this->billNumber($customer, $billPeriod),
             'logo_data_uri' => $logoDataUri,
+            // Unpaid installation fee — printed as its own line, NEVER
+            // added to total_bill or arrears (D1). '0.00' = nothing owed.
+            'installation_balance' => $installationBalance,
         ];
     }
 

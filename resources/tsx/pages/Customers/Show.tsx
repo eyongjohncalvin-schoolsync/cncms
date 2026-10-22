@@ -37,6 +37,8 @@ import { StatusBadge, VerificationBadge, ArrearsAdjustmentStatusBadge } from '@/
 import { CustomerStatusActions } from '@/components/customers/CustomerStatusActions';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
+import { InstallationCard } from '@/components/customers/InstallationCard';
+import { paymentPurposeLabel } from '@/lib/paymentPurpose';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { hasPermission } from '@/lib/permissions';
 import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
@@ -496,6 +498,14 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                 </Card>
             </div>
 
+            {/* Installation fees — a separate balance, never in the monthly total
+                or arrears (docs/plans/installation-and-promotions.md, D1). */}
+            {customer.installation && (
+                <div className="animate-fade-up mt-6" style={{ animationDelay: '0.14s' }}>
+                    <InstallationCard customerUuid={customer.uuid} installation={customer.installation} />
+                </div>
+            )}
+
             <div className="animate-fade-up mt-6" style={{ animationDelay: '0.15s' }}>
                 <Card className="p-0">
                     <CardHeader className="border-b border-slate-100">
@@ -520,6 +530,7 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                                 <Th>Amount</Th>
                                 <Th>Credit</Th>
                                 <Th>Frequency</Th>
+                                <Th>For</Th>
                                 <Th>Verification</Th>
                             </TableHead>
                             <TableBody>
@@ -529,6 +540,7 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                                         <Td>{payment.formattedAmount}</Td>
                                         <Td>{payment.formattedCredit}</Td>
                                         <Td className="capitalize">{payment.frequency}</Td>
+                                        <Td>{paymentPurposeLabel(payment.purpose)}</Td>
                                         <Td>
                                             <VerificationBadge status={payment.verification_status} />
                                         </Td>

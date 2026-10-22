@@ -75,8 +75,8 @@ class ManuscriptReconcilePrepaidBaseline extends Command
         try {
             if (Manuscript::query()->where('period', $nextPeriod)->exists()) {
                 $this->error("Manuscript rows already exist for {$nextPeriod} — the calculation has run. "
-                    ."This baseline repair is only valid BEFORE the first post-seed run; use a per-customer "
-                    ."recalculation or an arrears adjustment instead.");
+                    .'This baseline repair is only valid BEFORE the first post-seed run; use a per-customer '
+                    .'recalculation or an arrears adjustment instead.');
 
                 return self::FAILURE;
             }
@@ -94,6 +94,7 @@ class ManuscriptReconcilePrepaidBaseline extends Command
             // window ending 2026-08-29 does NOT cover September and is left to
             // be billed normally.
             $windows = Payment::query()
+                ->subscription()
                 ->where('verification_status', 'verified')
                 ->whereNotNull('expiration_date')
                 ->where('expiration_date', '>=', $nextPeriodStart)
@@ -102,6 +103,7 @@ class ManuscriptReconcilePrepaidBaseline extends Command
                 ->map(fn ($rows) => $rows->max('expiration_date'));
 
             $lapsed = Payment::query()
+                ->subscription()
                 ->where('verification_status', 'verified')
                 ->whereNotNull('expiration_date')
                 ->where('expiration_date', '<', $nextPeriodStart)

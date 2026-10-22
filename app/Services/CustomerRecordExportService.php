@@ -173,6 +173,8 @@ final class CustomerRecordExportService
                 'credit' => $payment->credit,
                 'method' => $payment->frequency,
                 'frequency' => $payment->frequency,
+                // subscription | installation | technician_fee.
+                'purpose' => $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
                 'months' => $payment->months,
                 'prepaid_rate' => $payment->prepaid_rate,
                 'clear_arrears_first' => $payment->clear_arrears_first,

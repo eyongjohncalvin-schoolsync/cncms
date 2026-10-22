@@ -381,6 +381,7 @@ class PaymentController extends Controller
             'amount' => (string) $payment->amount,
             'credit' => (string) $payment->credit,
             'frequency' => $payment->frequency,
+            'purpose' => $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
             'method' => $payment->method,
             'method_reference' => $payment->method_reference,
             'months' => $payment->months,

@@ -217,6 +217,17 @@
         Amount in words: {{ \App\Support\AmountInWords::convert($manuscript->total_bill) }}
     </div>
 
+    {{-- Installation fee still owed — its own line, never part of the
+         amount due above (docs/plans/installation-and-promotions.md, D1). --}}
+    @if ((float) ($installation_balance ?? 0) > 0)
+        <table class="bc-money">
+            <tr>
+                <td>Installation balance (separate — not in the total above)</td>
+                <td class="bc-mval">{{ number_format((float) $installation_balance, 2) }} FCFA</td>
+            </tr>
+        </table>
+    @endif
+
     <div class="bc-warning">
         Pay before the deadline above to avoid disconnection. Reconnection after disconnection
         requires payment of the outstanding balance plus a

@@ -33,11 +33,13 @@ class ReceiptMail extends Mailable
     public function envelope(): Envelope
     {
         $company = $this->receipt->snapshot['company']['name'] ?? config('app.name');
+        // "Payment receipt" / "Installation receipt" / "Technician motivation fee".
+        $title = ucfirst(strtolower((string) ($this->receipt->snapshot['title'] ?? 'Payment receipt')));
 
         return new Envelope(
             from: new Address((string) config('mail.from.address'), (string) $company),
             replyTo: $this->companyEmail ? [new Address($this->companyEmail, (string) $company)] : [],
-            subject: "Payment receipt {$this->receipt->receipt_number} — {$company}",
+            subject: "{$title} {$this->receipt->receipt_number} — {$company}",
         );
     }
 

@@ -389,6 +389,8 @@ export interface CustomerRecentPaymentApi {
     uuid: string;
     amount: string;
     frequency: PaymentFrequency;
+    /** What the payment was for (server-set, read-only). Absent from older servers = subscription. */
+    purpose?: 'subscription' | 'installation' | 'technician_fee';
     verification_status: 'pending' | 'verified' | 'rejected';
     created_at: string;
 }
@@ -423,6 +425,12 @@ export interface CustomerDetailApi {
      * comment.
      */
     reconnection_fine: string | null;
+    /**
+     * Installation fee still owed (docs/plans/installation-and-promotions.md) —
+     * a separate balance, never part of manuscript.total_bill or arrears.
+     * Absent from older servers.
+     */
+    installation_balance?: string;
     /** services.md section 6 — this customer's ticked services/options; `bill` above is their sum. */
     services: CustomerServiceApi[];
 }

@@ -34,8 +34,11 @@ class DocumentNumberService
     /** Transfers between company cash accounts. */
     public const string TRANSFER = 'TR';
 
+    /** Technician motivation fees paid out by the cashier (docs/plans/installation-and-promotions.md, D13). */
+    public const string TECHNICIAN_FEE = 'TF';
+
     /** @var list<string> */
-    public const array SERIES = [self::RECEIPT_BLOCK, self::REMITTANCE, self::VOUCHER, self::DEPOSIT, self::TRANSFER];
+    public const array SERIES = [self::RECEIPT_BLOCK, self::REMITTANCE, self::VOUCHER, self::DEPOSIT, self::TRANSFER, self::TECHNICIAN_FEE];
 
     public function next(string $series): string
     {

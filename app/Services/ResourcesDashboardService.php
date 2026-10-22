@@ -23,7 +23,6 @@ use Illuminate\Validation\ValidationException;
  */
 class ResourcesDashboardService
 {
-
     /**
      * @return array{
      *     period: string,
@@ -113,14 +112,17 @@ class ResourcesDashboardService
      * for "collected" — rather than `processed_at`, since manuscript
      * processing may lag behind the period the payment was actually made in.
      *
-     * @return array{total: string, verified: string, pending_verification: string, rejected: string, payment_count: int}
+     * @return array{total: string, verified: string, pending_verification: string, rejected: string, payment_count: int, by_purpose: array{subscription: string, installation: string}}
      */
     private function incomeFor(Carbon $start, Carbon $end, ?int $branchId): array
     {
         // A single query with FILTER clauses (Postgres-specific) instead of
         // 3 separate sum() queries (one per verification_status) plus a
         // count() — all 4 were scanning the same created_at date range.
+        // Technician motivation fees are the technician's money, never
+        // company income (D13, docs/plans/installation-and-promotions.md).
         $row = Payment::query()
+            ->income()
             ->whereBetween('created_at', [$start, $end])
             ->when($branchId !== null, fn ($query) => $query->whereHas(
                 'customer.zone',
@@ -130,6 +132,8 @@ class ResourcesDashboardService
                 coalesce(sum(amount) filter (where verification_status = 'verified'), 0) as verified,
                 coalesce(sum(amount) filter (where verification_status = 'pending'), 0) as pending,
                 coalesce(sum(amount) filter (where verification_status = 'rejected'), 0) as rejected,
+                coalesce(sum(amount) filter (where verification_status = 'verified' and purpose = 'subscription'), 0) as subscription_verified,
+                coalesce(sum(amount) filter (where verification_status = 'verified' and purpose = 'installation'), 0) as installation_verified,
                 count(*) as payment_count
             ")
             ->first();
@@ -144,7 +148,40 @@ class ResourcesDashboardService
             'pending_verification' => $pending,
             'rejected' => $rejected,
             'payment_count' => (int) $row->payment_count,
+            // Verified income split by what it was for — subscription (the
+            // monthly bill) vs installation fees.
+            'by_purpose' => [
+                'subscription' => (string) $row->subscription_verified,
+                'installation' => (string) $row->installation_verified,
+            ],
         ];
+    }
+
+    /**
+     * Verified installation-fee income for a period, branch-fenced — the
+     * dashboard's "+ installations" figure next to subscription income.
+     * '0.00' for a malformed period rather than an error.
+     */
+    public function installationIncome(string $period): string
+    {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
+            return '0.00';
+        }
+
+        [$start, $end] = $this->periodBounds($period);
+        $branchId = TenantContext::currentBranchId();
+
+        $total = Payment::query()
+            ->where('purpose', Payment::PURPOSE_INSTALLATION)
+            ->where('verification_status', 'verified')
+            ->whereBetween('created_at', [$start, $end])
+            ->when($branchId !== null, fn ($query) => $query->whereHas(
+                'customer.zone',
+                fn ($inner) => $inner->where('branch_id', $branchId),
+            ))
+            ->sum('amount');
+
+        return bcadd((string) ($total ?: '0'), '0', 2);
     }
 
     /**

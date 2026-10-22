@@ -7,6 +7,7 @@ namespace App\Services;
 use App\DataTransferObjects\PaymentData;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Payment;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -264,7 +265,7 @@ class CustomerStatusService
      * before the status flips to 'active' — see extendPrepaidWindow().
      *
      * @throws ValidationException if the customer is not currently
-     *                              disconnected or suspended.
+     *                             disconnected or suspended.
      */
     private function reconnectOne(Customer $customer, ?string $note, bool $includeFine, ?string $arrearsPayment = null): Customer
     {
@@ -282,11 +283,18 @@ class CustomerStatusService
             || ($previousStatus === 'suspended' && $customer->prepaid_paused === true);
 
         return DB::transaction(function () use ($customer, $note, $includeFine, $fine, $hasArrearsPayment, $arrearsPayment, $shouldExtendPrepaid, $frozenSince): Customer {
+            // The reconnection fine is the technician's motivation fee (D13,
+            // docs/plans/installation-and-promotions.md): recorded for the
+            // audit trail, the receipt and the cashier's count, but never
+            // subscription money — it no longer lowers arrears or adds
+            // credit. Fines recorded before this change keep their old
+            // purpose (D14).
             if ($includeFine) {
                 $this->payments->createForCustomer($customer, new PaymentData(
                     customerUuid: $customer->uuid,
                     amount: $fine,
                     frequency: 'monthly',
+                    purpose: Payment::PURPOSE_TECHNICIAN_FEE,
                 ));
             }
 

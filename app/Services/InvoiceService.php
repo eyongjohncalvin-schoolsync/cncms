@@ -83,6 +83,7 @@ class InvoiceService
         $payments = Payment::query()
             ->with('receipt')
             ->where('customer_id', $customer->id)
+            ->subscription()
             ->where('verification_status', 'verified')
             ->whereRaw('coalesce(collected_at, created_at) between ? and ?', [$start, $end])
             ->orderByRaw('coalesce(collected_at, created_at)')
@@ -125,6 +126,7 @@ class InvoiceService
         // = not consumed yet) — one query for the whole list.
         $paidByProcessedPeriod = Payment::query()
             ->where('customer_id', $customer->id)
+            ->subscription()
             ->where('verification_status', 'verified')
             ->selectRaw("coalesce(processed_period, '') as processed_period, sum(amount) as total")
             ->groupByRaw("coalesce(processed_period, '')")

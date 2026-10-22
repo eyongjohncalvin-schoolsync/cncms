@@ -38,6 +38,7 @@ const KIND_LABELS: Record<string, string> = {
     shortage_repayment: 'Shortage repaid',
     close_adjustment: 'Day-close difference',
     opening_balance: 'Opening balance',
+    technician_fee_payout: 'Technician fees paid',
 };
 
 /**

@@ -187,7 +187,11 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
             ->endOfMonth()
             ->setTimezone('UTC');
 
+        // Subscription money only — installation and technician fees are
+        // not what the monthly bill is collected against
+        // (docs/plans/installation-and-promotions.md).
         $total = $this->scopeToBranch(Payment::query(), $this->currentBranchId(), 'customer.zone')
+            ->subscription()
             ->where('verification_status', 'verified')
             ->whereBetween('created_at', [$start, $end])
             ->whereHas('customer', fn (Builder $inner) => $inner->where('status', 'active'))

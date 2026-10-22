@@ -322,6 +322,9 @@ export interface CustomerServiceSelectionForm {
 export type VerificationStatus = 'pending' | 'verified' | 'rejected';
 export type PaymentFrequency = 'monthly' | 'yearly' | 'months';
 
+/** What a payment is for — Payment::PURPOSES (docs/plans/installation-and-promotions.md). Read-only. */
+export type PaymentPurpose = 'subscription' | 'installation' | 'technician_fee';
+
 /** How the customer paid — Payment::METHODS (docs/plans/cash-controls.md). */
 export type PaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
 
@@ -392,6 +395,7 @@ export interface Payment {
     amount: string;
     credit: string;
     frequency: PaymentFrequency;
+    purpose?: PaymentPurpose;
     method: PaymentMethod;
     method_reference: string | null;
     months: number | null;
@@ -496,6 +500,7 @@ export interface CustomerRecentPayment {
     amount: string;
     credit: string;
     frequency: PaymentFrequency;
+    purpose?: PaymentPurpose;
     verification_status: VerificationStatus;
     created_at: string;
 }
@@ -567,12 +572,44 @@ export interface ArrearsAdjustmentAuditRow extends ArrearsAdjustment {
     is_own_request: boolean;
 }
 
+export type CustomerChargeStatus = 'open' | 'paid' | 'waived' | 'refunded';
+
+/** One installation charge on the customer page (AppHttpControllersCustomerController::shapeInstallation). */
+export interface CustomerCharge {
+    uuid: string;
+    amount: string;
+    paid: string;
+    balance: string;
+    /** What may still be recorded: balance less instalments awaiting verification. */
+    recordable: string;
+    status: CustomerChargeStatus;
+    reason: string | null;
+    requested_by_name: string | null;
+    created_at: string | null;
+    waiver_status: 'pending' | 'approved' | 'rejected' | null;
+    waiver_reason: string | null;
+    waiver_requested_by_name: string | null;
+    waiver_decided_by_name: string | null;
+    waiver_rejection_reason: string | null;
+    waived_amount: string | null;
+    can: { record_payment: boolean; request_waiver: boolean; decide_waiver: boolean };
+}
+
+export interface CustomerInstallation {
+    /** Open installation balance across all charges. */
+    balance: string;
+    charges: CustomerCharge[];
+    can_create: boolean;
+}
+
 export interface CustomerDetail extends Customer {
     description: string | null;
     created_at: string | null;
     manuscript: CustomerManuscriptSummary | null;
     recent_payments: CustomerRecentPayment[];
     arrears_adjustments: ArrearsAdjustment[];
+    /** Installation fees — a separate balance, never in the bill's total or arrears. */
+    installation?: CustomerInstallation;
     /** Gates the "Export full record" header control — `customers.export_record`,
      * seeded super/admin only (docs/plans/customer-record-export.md). */
     can_export_record: boolean;
@@ -789,6 +826,7 @@ export interface DashboardIncome {
     pending_verification: string;
     rejected: string;
     payment_count: number;
+    by_purpose?: ReportIncomeByPurpose;
 }
 
 export interface DashboardExpenseCategoryBreakdown {
@@ -830,12 +868,20 @@ export interface ReportDelta {
     direction: 'up' | 'down' | 'flat';
 }
 
+/** Installation fees, phase 1: verified income split by what it was for. */
+export interface ReportIncomeByPurpose {
+    subscription: string;
+    installation: string;
+}
+
 export interface ReportPaymentsBreakdown {
     total: string;
     verified: string;
     pending: string;
     rejected: string;
     count: number;
+    /** Verified income by purpose — technician fees are never in report figures. */
+    by_purpose?: ReportIncomeByPurpose;
 }
 
 export interface ReportPendingQueueItem {
@@ -920,7 +966,7 @@ export interface WeeklyReport {
     week_end: string;
     label: string;
     is_current: boolean;
-    collections: { total: string; verified: string; count: number };
+    collections: { total: string; verified: string; count: number; by_purpose?: ReportIncomeByPurpose };
     daily_breakdown: ReportTrendPoint[];
     new_customers: number;
     net_disconnections: number;

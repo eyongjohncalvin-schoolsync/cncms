@@ -6,7 +6,9 @@ namespace App\Http\Resources;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerCharge;
 use App\Models\CustomerSubscription;
+use App\Models\Payment;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -60,10 +62,19 @@ class CustomerResource extends JsonResource
                 'prepaid_rate' => $this->latestManuscript->prepaid_rate,
                 'period' => $this->latestManuscript->period,
             ] : null),
+            // Installation fee still owed (docs/plans/installation-and-promotions.md):
+            // a separate balance — never part of manuscript.total_bill or
+            // arrears, never a reason to disconnect. Present wherever the
+            // customer was loaded with its charges (every single-customer
+            // read via CustomerService::findOrFail()).
+            'installation_balance' => $this->whenLoaded('charges', fn (): string => $this->charges
+                ->filter(fn (CustomerCharge $charge): bool => $charge->isOpen())
+                ->reduce(fn (string $sum, CustomerCharge $charge): string => bcadd($sum, $charge->balance(), 2), '0.00')),
             'recent_payments' => $this->whenLoaded('payments', fn () => $this->payments->map(fn ($payment) => [
                 'uuid' => $payment->uuid,
                 'amount' => $payment->amount,
                 'frequency' => $payment->frequency,
+                'purpose' => $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
                 'verification_status' => $payment->verification_status,
                 'created_at' => $payment->created_at,
             ])),

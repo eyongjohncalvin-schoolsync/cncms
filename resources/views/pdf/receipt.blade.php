@@ -33,7 +33,16 @@
     $methodLabels = ['monthly' => 'Monthly', 'months' => 'Multi-month prepayment', 'yearly' => 'Yearly prepayment'];
     $methodText = $methodLabels[$payment['method'] ?? ''] ?? ucfirst((string) ($payment['method'] ?? ''));
     $months = (int) ($payment['months'] ?? 0) ?: count($periods);
-    $description = 'Cable subscription' . ($months > 1 ? " ({$months} months)" : '');
+    // Older snapshots carry no purpose/title: they are subscription receipts.
+    $purpose = $r['purpose'] ?? 'subscription';
+    $title = $r['title'] ?? 'PAYMENT RECEIPT';
+    $installation = $r['installation'] ?? null;
+    $description = $purpose === 'subscription'
+        ? 'Cable subscription' . ($months > 1 ? " ({$months} months)" : '')
+        : ($r['description'] ?? ucfirst(str_replace('_', ' ', $purpose)));
+    if ($purpose !== 'subscription') {
+        $methodText = '—';
+    }
     $code = ! empty($r['security_code']) ? \App\Support\ReceiptSecurityCode::format($r['security_code']) : null;
     $words = $r['amount_in_words'] ?? null;
 @endphp
@@ -99,7 +108,7 @@
         @if(!empty($company['momo_number']))MOMO: {{ $company['momo_number'] }}@if(!empty($company['momo_name'])) ({{ $company['momo_name'] }})@endif @endif
     </div>
 
-    <div class="title">PAYMENT RECEIPT</div>
+    <div class="title">{{ $title }}</div>
 
     <table class="meta">
         <tr>
@@ -183,6 +192,25 @@
             <strong>In words:</strong> {{ $words['en'] ?? '' }}<br>
             <strong>En lettres :</strong> {{ $words['fr'] ?? '' }}
         </div>
+    @endif
+
+    @if($installation)
+        <div class="balance">
+            <strong>Installation fee:</strong> {{ number_format((float) $installation['fee'], 2) }} FCFA
+            &middot; <strong>Paid so far:</strong> {{ number_format((float) $installation['paid'], 2) }} FCFA
+            &middot; <strong>Balance:</strong>
+            @if((float) $installation['balance'] > 0)
+                {{ number_format((float) $installation['balance'], 2) }} FCFA
+            @elseif(($installation['status'] ?? '') === 'waived')
+                Rest waived
+            @else
+                Fully paid
+            @endif
+        </div>
+    @endif
+
+    @if($purpose === 'technician_fee')
+        <div class="company-meta">Paid to the technician for the reconnection. Not part of your monthly bill.</div>
     @endif
 
     @if($balance)

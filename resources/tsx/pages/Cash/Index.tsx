@@ -82,6 +82,11 @@ export default function CashIndex({ today, can, accounts, my_till, transfer_targ
                             <Button variant="secondary">Alerts</Button>
                         </Link>
                     )}
+                    {(can.view_all || can.receive) && (
+                        <Link href="/cash/technician-fees">
+                            <Button variant="secondary">Technician fees</Button>
+                        </Link>
+                    )}
                     {can.transfer && (
                         <Button variant="secondary" onClick={() => setTransferOpen(true)}>
                             <IconTransfer size={16} stroke={1.75} /> Deposit / transfer

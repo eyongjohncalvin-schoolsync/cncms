@@ -174,6 +174,17 @@
         </table>
     </div>
 
+    {{-- Installation fee still owed — its own line, never part of the
+         total due (docs/plans/installation-and-promotions.md, D1). --}}
+    @if ((float) ($installation_balance ?? 0) > 0)
+        <table class="kc-money">
+            <tr>
+                <td class="kc-mlabel">Installation balance (not in total)</td>
+                <td class="kc-mval">{{ number_format((float) $installation_balance, 2) }}</td>
+            </tr>
+        </table>
+    @endif
+
     <div class="kc-warning">
         Reconnection fine: {{ number_format((float) ($company?->reconnection_fine ?? 0), 2) }} FCFA.
         MOMO: {{ $company?->momo_number }} ({{ $company?->momo_name }}).

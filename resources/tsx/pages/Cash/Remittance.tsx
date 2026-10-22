@@ -9,7 +9,8 @@ import { Table, TableBody, TableHead, Th, Td } from '@/components/ui/Table';
 import { DenominationCounter, denominationTotal, type DenominationCounts } from '@/components/cash/DenominationCounter';
 import { paymentMethodLabel } from '@/components/shared/PaymentMethodFields';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { PaymentMethod } from '@/types';
+import type { PaymentMethod, PaymentPurpose } from '@/types';
+import { paymentPurposeLabel } from '@/lib/paymentPurpose';
 
 interface Line {
     id: number;
@@ -20,6 +21,7 @@ interface Line {
     amount: string;
     reference: string | null;
     wallet_confirmed: boolean;
+    purpose?: PaymentPurpose;
 }
 
 interface Props {
@@ -43,6 +45,8 @@ interface Props {
         shortage_status: 'open' | 'repaid' | 'written_off' | null;
         shortage_note: string | null;
         lines: Line[];
+        /** Technician fees are counted with the cash but belong to the technician (D13). */
+        purpose_totals?: Record<PaymentPurpose, string>;
     };
     can: { receive: boolean; repay_shortage: boolean; write_off_shortage: boolean };
     denominations: number[];
@@ -106,6 +110,19 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                 />
             </div>
 
+            {remittance.purpose_totals && Number(remittance.purpose_totals.technician_fee) > 0 && (
+                <Card className="mb-6">
+                    <CardBody className="text-sm text-slate-700">
+                        <strong>Technician motivation fees in this handover:</strong> {formatCurrency(remittance.purpose_totals.technician_fee)} — count them
+                        with the cash, then pay the technician from{' '}
+                        <Link href="/cash/technician-fees" className="font-medium text-blue-700 hover:underline">
+                            Technician fees
+                        </Link>
+                        . They are not company income.
+                    </CardBody>
+                </Card>
+            )}
+
             {remittance.collector_note && (
                 <Card className="mb-6">
                     <CardBody className="text-sm text-slate-700">
@@ -136,6 +153,11 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                                         </Link>
                                     ) : (
                                         (line.customer_name ?? '—')
+                                    )}
+                                    {line.purpose && line.purpose !== 'subscription' && (
+                                        <div>
+                                            <Badge tone={line.purpose === 'technician_fee' ? 'yellow' : 'blue'}>{paymentPurposeLabel(line.purpose)}</Badge>
+                                        </div>
                                     )}
                                 </Td>
                                 <Td className="font-mono text-xs">{line.receipt_number ?? '—'}</Td>
