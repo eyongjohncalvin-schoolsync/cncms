@@ -134,6 +134,20 @@ export interface MaintenanceNotice {
     active: boolean;
 }
 
+/** App\Http\Controllers\Landlord\ActivityController::shape(). */
+export interface LandlordActivityEntry {
+    id: number;
+    action: string;
+    summary: string;
+    subject_type: 'tenant' | 'maintenance' | 'user' | null;
+    subject_id: string | null;
+    details: Record<string, unknown> | null;
+    /** null = done from the command line. */
+    user: string | null;
+    ip_address: string | null;
+    created_at: string | null;
+}
+
 /** A row on the landlord maintenance screen. */
 export interface LandlordMaintenanceWindow extends MaintenanceNotice {
     status: 'scheduled' | 'active' | 'finished' | 'cancelled';

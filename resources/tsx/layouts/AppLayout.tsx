@@ -156,7 +156,7 @@ export function AppLayout({
                             <>
                                 {auth.user.is_landlord && (
                                     <Link
-                                        href="/landlord/tenants"
+                                        href="/landlord"
                                         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
                                         title={t('common.landlord')}
                                     >

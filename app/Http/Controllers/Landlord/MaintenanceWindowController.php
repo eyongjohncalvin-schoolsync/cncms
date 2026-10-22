@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreMaintenanceWindowRequest;
 use App\Http\Requests\UpdateMaintenanceWindowRequest;
 use App\Mail\MaintenanceNoticeMail;
+use App\Models\LandlordActivity;
 use App\Models\MaintenanceWindow;
 use App\Models\TenantUserIndex;
 use App\Models\User;
@@ -60,6 +61,14 @@ class MaintenanceWindowController extends Controller
 
         $emailed = $request->boolean('notify_by_email') ? $this->notify($window, 'scheduled') : 0;
 
+        LandlordActivity::record(
+            'maintenance.scheduled',
+            "Scheduled maintenance {$window->starts_at->toDateTimeString()} → {$window->ends_at->toDateTimeString()} UTC",
+            'maintenance',
+            $window->id,
+            ['message' => $window->message, 'emailed' => $emailed],
+        );
+
         return redirect()->route('landlord.maintenance.index')->with(
             'success',
             ($window->isActive() ? 'Maintenance started.' : 'Maintenance scheduled.').$this->emailedSuffix($emailed),
@@ -73,6 +82,8 @@ class MaintenanceWindowController extends Controller
         $maintenanceWindow->update(['ends_at' => $request->validated('ends_at')]);
 
         $emailed = $request->boolean('notify_by_email') ? $this->notify($maintenanceWindow, 'changed') : 0;
+
+        LandlordActivity::record('maintenance.extended', "Moved maintenance end to {$maintenanceWindow->ends_at->toDateTimeString()} UTC", 'maintenance', $maintenanceWindow->id, ['emailed' => $emailed]);
 
         return back()->with('success', 'End time updated.'.$this->emailedSuffix($emailed));
     }
@@ -88,12 +99,14 @@ class MaintenanceWindowController extends Controller
 
         if ($status === 'active') {
             $maintenanceWindow->update(['ended_at' => now()]);
+            LandlordActivity::record('maintenance.ended', 'Ended maintenance early', 'maintenance', $maintenanceWindow->id);
 
             return back()->with('success', 'Maintenance ended — tenants have access again.');
         }
 
         $maintenanceWindow->update(['cancelled_at' => now()]);
         $emailed = $request->boolean('notify_by_email') ? $this->notify($maintenanceWindow, 'cancelled') : 0;
+        LandlordActivity::record('maintenance.cancelled', 'Cancelled scheduled maintenance', 'maintenance', $maintenanceWindow->id, ['emailed' => $emailed]);
 
         return back()->with('success', 'Maintenance cancelled.'.$this->emailedSuffix($emailed));
     }

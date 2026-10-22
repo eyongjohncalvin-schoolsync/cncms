@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Landlord\ActivityController;
+use App\Http\Controllers\Landlord\DashboardController;
+use App\Http\Controllers\Landlord\LandlordController;
 use App\Http\Controllers\Landlord\MaintenanceWindowController;
 use App\Http\Controllers\Landlord\TenantController;
 use Illuminate\Support\Facades\Route;
@@ -21,6 +24,13 @@ use Illuminate\Support\Facades\Route;
 |
 */
 Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->group(function () {
+    Route::get('/', DashboardController::class)->name('dashboard');
+    Route::get('activity', [ActivityController::class, 'index'])->name('activity.index');
+
+    Route::get('landlords', [LandlordController::class, 'index'])->name('landlords.index');
+    Route::post('landlords', [LandlordController::class, 'store'])->name('landlords.store');
+    Route::delete('landlords/{user}', [LandlordController::class, 'destroy'])->name('landlords.destroy');
+
     Route::get('tenants', [TenantController::class, 'index'])->name('tenants.index');
     Route::get('tenants/create', [TenantController::class, 'create'])->name('tenants.create');
     Route::post('tenants', [TenantController::class, 'store'])->name('tenants.store');

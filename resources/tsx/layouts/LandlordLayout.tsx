@@ -1,13 +1,24 @@
 import { Link, usePage } from '@inertiajs/react';
 import { ReactNode } from 'react';
-import { IconBroadcast, IconLogout, IconBuildingSkyscraper, IconTool } from '@tabler/icons-react';
+import {
+    IconBroadcast,
+    IconBuildingSkyscraper,
+    IconHistory,
+    IconLayoutDashboard,
+    IconLogout,
+    IconShieldLock,
+    IconTool,
+} from '@tabler/icons-react';
 import type { BreadcrumbItem, PageProps } from '@/types';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
 
 const navItems = [
+    { href: '/landlord', label: 'Dashboard', icon: IconLayoutDashboard, exact: true },
     { href: '/landlord/tenants', label: 'Tenants', icon: IconBuildingSkyscraper },
     { href: '/landlord/maintenance', label: 'Maintenance', icon: IconTool },
+    { href: '/landlord/landlords', label: 'Landlords', icon: IconShieldLock },
+    { href: '/landlord/activity', label: 'Activity log', icon: IconHistory },
 ];
 
 /**
@@ -52,7 +63,7 @@ export function LandlordLayout({
                 <nav className="flex-1 space-y-0.5 px-2 py-4">
                     {navItems.map((item) => {
                         const Icon = item.icon;
-                        const active = currentPath.startsWith(item.href);
+                        const active = item.exact ? currentPath === item.href : currentPath.startsWith(item.href);
 
                         return (
                             <Link

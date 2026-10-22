@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Models\LandlordActivity;
 use App\Models\User;
 use App\Support\GeneratesUsername;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Hash;
 
 /**
  * Grants (or revokes) platform-level landlord access for a central user —
@@ -86,6 +86,8 @@ class GrantLandlord extends Command
                 'landlord_granted_by' => null,
             ])->save();
 
+            LandlordActivity::record('landlord.revoked', "Revoked landlord access from {$user->name} <{$email}> (command line)", 'user', $user->id);
+
             $this->info("Revoked landlord access from {$user->name} <{$email}>.");
 
             return self::SUCCESS;
@@ -105,7 +107,9 @@ class GrantLandlord extends Command
             'landlord_granted_by' => null,
         ])->save();
 
-        $this->info("Granted landlord access to {$user->name} <{$email}>. Log in and you'll land on /landlord/tenants.");
+        LandlordActivity::record('landlord.granted', "Granted landlord access to {$user->name} <{$email}> (command line)", 'user', $user->id);
+
+        $this->info("Granted landlord access to {$user->name} <{$email}>. Log in and you'll land on /landlord.");
 
         return self::SUCCESS;
     }

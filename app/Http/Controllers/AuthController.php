@@ -90,7 +90,7 @@ class AuthController extends Controller
         if ($user->is_landlord
             && ! $request->session()->has('url.intended')
             && ! TenantUserIndex::query()->where('user_id', $user->id)->exists()) {
-            return redirect()->route('landlord.tenants.index');
+            return redirect()->route('landlord.dashboard');
         }
 
         return redirect()->intended(route('dashboard'));

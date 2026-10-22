@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Models\LandlordActivity;
 use App\Services\TenantImportService;
 use App\Support\TenantArchive;
 use Illuminate\Console\Command;
@@ -43,6 +44,14 @@ class TenantImport extends Command
 
             return self::FAILURE;
         }
+
+        LandlordActivity::record(
+            'tenant.imported',
+            "Imported tenant {$summary['tenant_id']} from an archive (command line)",
+            'tenant',
+            $summary['tenant_id'],
+            ['tables' => $summary['tables'], 'rows' => $summary['rows'], 'files' => $summary['files']],
+        );
 
         $this->info("Imported [{$summary['tenant_id']}] into schema {$summary['schema']}: {$summary['tables']} tables, {$summary['rows']} rows, {$summary['files']} files — every table verified.");
 
