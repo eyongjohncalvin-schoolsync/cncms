@@ -271,7 +271,7 @@ class TenantImportService
                 }
 
                 foreach ($tables as $key => $table) {
-                    $this->verify($table, $db->select('SELECT * FROM '.TenantArchive::qualified($schema, substr($key, strlen($prefix)))), $key);
+                    $this->verify($table, TenantArchive::stream($db, 'SELECT * FROM '.TenantArchive::qualified($schema, substr($key, strlen($prefix)))), $key);
                 }
 
                 $db->statement('SET CONSTRAINTS ALL IMMEDIATE');
@@ -359,13 +359,18 @@ class TenantImportService
      */
     private function verify(array $expected, iterable $actualRows, string $key): void
     {
-        $rows = is_array($actualRows) ? $actualRows : iterator_to_array($actualRows);
+        // Only the 16-byte row hashes are held, never the rows themselves.
+        $hashes = [];
 
-        if (count($rows) !== $expected['rows']) {
-            throw new RuntimeException("Verification failed for [{$key}]: expected {$expected['rows']} rows, found ".count($rows).'.');
+        foreach ($actualRows as $row) {
+            $hashes[] = TenantArchive::rowHash((array) $row, $expected['columns']);
         }
 
-        if (TenantArchive::checksum($rows, $expected['columns']) !== $expected['checksum']) {
+        if (count($hashes) !== $expected['rows']) {
+            throw new RuntimeException("Verification failed for [{$key}]: expected {$expected['rows']} rows, found ".count($hashes).'.');
+        }
+
+        if (TenantArchive::combine($hashes) !== $expected['checksum']) {
             throw new RuntimeException("Verification failed for [{$key}]: the loaded rows differ from the archive.");
         }
     }

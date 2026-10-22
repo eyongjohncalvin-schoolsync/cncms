@@ -31,6 +31,9 @@ class TenantImport extends Command
 
     public function handle(TenantImportService $importer): int
     {
+        // See TenantExport: rows stream, the per-row hashes need headroom.
+        ini_set('memory_limit', '1024M');
+
         $this->line('This server\'s APP_KEY fingerprint: '.TenantArchive::appKeyFingerprint());
 
         try {

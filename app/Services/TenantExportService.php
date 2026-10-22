@@ -106,7 +106,7 @@ class TenantExportService
             }
 
             $key = TenantArchive::TENANT_SCHEMA_KEY.".{$table}";
-            $rows = $db->select('SELECT * FROM '.TenantArchive::qualified($schema, $table));
+            $rows = TenantArchive::stream($db, 'SELECT * FROM '.TenantArchive::qualified($schema, $table));
             $tables[$key] = $this->writeTable($rows, TenantArchive::columns($db, $schema, $table), $workDir, $key);
         }
 
@@ -173,9 +173,8 @@ class TenantExportService
         }
 
         fclose($handle);
-        sort($hashes);
 
-        return ['columns' => $columns, 'rows' => count($hashes), 'checksum' => hash('sha256', implode("\n", $hashes))];
+        return ['columns' => $columns, 'rows' => count($hashes), 'checksum' => TenantArchive::combine($hashes)];
     }
 
     /**

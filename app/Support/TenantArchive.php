@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use Generator;
 use Illuminate\Database\Connection;
 
 /**
@@ -23,7 +24,7 @@ use Illuminate\Database\Connection;
  */
 final class TenantArchive
 {
-    public const int FORMAT = 1;
+    public const int FORMAT = 2;
 
     public const string TENANT_SCHEMA_KEY = 'tenant';
 
@@ -90,12 +91,13 @@ final class TenantArchive
             $hashes[] = self::rowHash((array) $row, $columns);
         }
 
-        sort($hashes);
-
-        return hash('sha256', implode("\n", $hashes));
+        return self::combine($hashes);
     }
 
     /**
+     * Raw 16-byte digest of one row — kept binary so a table with hundreds
+     * of thousands of rows stays a few megabytes of hashes, not hundreds.
+     *
      * @param  array<string, mixed>  $row
      * @param  list<string>  $columns
      */
@@ -103,7 +105,43 @@ final class TenantArchive
     {
         $values = array_map(fn (string $column) => $row[$column] ?? null, $columns);
 
-        return md5(json_encode($values, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return md5(json_encode($values, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), true);
+    }
+
+    /**
+     * @param  list<string>  $rowHashes  rowHash() values, in any order
+     */
+    public static function combine(array $rowHashes): string
+    {
+        sort($rowHashes, SORT_STRING);
+
+        return hash('sha256', implode('', $rowHashes));
+    }
+
+    /**
+     * Streams a query's rows in batches through a server-side cursor, so a
+     * large table (audit_logs) is never loaded whole into PHP memory. Must
+     * run inside a transaction — both the export snapshot and the import's
+     * load/verify transaction are.
+     *
+     * @return Generator<int, object>
+     */
+    public static function stream(Connection $db, string $sql, int $batchSize = 1000): Generator
+    {
+        $cursor = 'cncms_transfer_'.bin2hex(random_bytes(4));
+        $db->statement("DECLARE {$cursor} NO SCROLL CURSOR FOR {$sql}");
+
+        try {
+            do {
+                $batch = $db->select("FETCH FORWARD {$batchSize} FROM {$cursor}");
+
+                foreach ($batch as $row) {
+                    yield $row;
+                }
+            } while (count($batch) === $batchSize);
+        } finally {
+            $db->statement("CLOSE {$cursor}");
+        }
     }
 
     /**

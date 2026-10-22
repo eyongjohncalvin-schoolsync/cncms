@@ -33,6 +33,10 @@ class TenantExport extends Command
 
     public function handle(TenantExportService $exporter): int
     {
+        // Rows are streamed, but per-row hashes and the zip step still need
+        // headroom beyond the 128M CLI default on a large tenant.
+        ini_set('memory_limit', '1024M');
+
         $tenantId = (string) $this->argument('tenant');
 
         // --force first: it must work even on a database that predates the
