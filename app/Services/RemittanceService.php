@@ -55,7 +55,7 @@ class RemittanceService
     }
 
     /**
-     * @return array{payments: Collection<int, Payment>, totals: array{cash: string, mtn_momo: string, orange_money: string, bank: string}, oldest_at: ?string}
+     * @return array{payments: Collection<int, Payment>, totals: array{cash: string, mtn_momo: string, orange_money: string, bank: string}, purpose_totals: array{subscription: string, installation: string, technician_fee: string}, oldest_at: ?string}
      */
     public function preview(User $collector): array
     {
@@ -64,6 +64,10 @@ class RemittanceService
         return [
             'payments' => $payments,
             'totals' => $this->totalsByMethod($payments),
+            // Technician fees ride along with the day's cash but are the
+            // technician's money (D13) — shown as their own subtotal so the
+            // cashier counts them and knows what to pay out.
+            'purpose_totals' => $this->totalsByPurpose($payments),
             'oldest_at' => $payments->first()?->created_at?->toIso8601String(),
         ];
     }
@@ -210,6 +214,25 @@ class RemittanceService
 
             return $remittance;
         });
+    }
+
+    /**
+     * What the handed-over money is for: subscription, installation, and the
+     * technician's pass-through fees (docs/plans/installation-and-promotions.md).
+     *
+     * @param  Collection<int, Payment>  $payments
+     * @return array{subscription: string, installation: string, technician_fee: string}
+     */
+    public function totalsByPurpose(Collection $payments): array
+    {
+        $totals = array_fill_keys(Payment::PURPOSES, '0.00');
+
+        foreach ($payments as $payment) {
+            $purpose = $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION;
+            $totals[$purpose] = bcadd($totals[$purpose] ?? '0.00', (string) $payment->amount, 2);
+        }
+
+        return $totals;
     }
 
     /**

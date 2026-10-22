@@ -10,7 +10,8 @@ import { Table, TableBody, TableHead, Th, Td } from '@/components/ui/Table';
 import { DenominationCounter, denominationTotal, type DenominationCounts } from '@/components/cash/DenominationCounter';
 import { paymentMethodLabel } from '@/components/shared/PaymentMethodFields';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { PaymentMethod } from '@/types';
+import type { PaymentMethod, PaymentPurpose } from '@/types';
+import { paymentPurposeLabel } from '@/lib/paymentPurpose';
 
 interface Props {
     payments: {
@@ -22,8 +23,11 @@ interface Props {
         receipt_number: string | null;
         verification_status: string;
         recorded_at: string | null;
+        purpose?: PaymentPurpose;
     }[];
     totals: Record<PaymentMethod, string>;
+    /** What the money is for — technician fees are the technician's, handed over with the cash. */
+    purpose_totals?: Record<PaymentPurpose, string>;
     oldest_at: string | null;
     history: {
         uuid: string;
@@ -46,7 +50,7 @@ interface Props {
  * cash they hold and submits. The cashier then counts it again and receives
  * it — a difference is recorded against the collector.
  */
-export default function CashHandOver({ payments, totals, oldest_at, history, denominations }: Props) {
+export default function CashHandOver({ payments, totals, purpose_totals, oldest_at, history, denominations }: Props) {
     const [counts, setCounts] = useState<DenominationCounts>({});
     const { data, setData, post, processing, errors, transform } = useForm({ declared_cash: '', note: '' });
 
@@ -77,6 +81,14 @@ export default function CashHandOver({ payments, totals, oldest_at, history, den
                 <Total label="Bank" value={totals.bank} />
             </div>
 
+            {purpose_totals && Number(purpose_totals.technician_fee) > 0 && (
+                <p className="-mt-3 mb-6 text-sm text-slate-600">
+                    Includes <span className="font-semibold">{formatCurrency(purpose_totals.technician_fee)}</span> of technician motivation fees — hand
+                    them over with the cash; the cashier pays the technician.
+                    {Number(purpose_totals.installation) > 0 && <> Installation fees: {formatCurrency(purpose_totals.installation)}.</>}
+                </p>
+            )}
+
             {payments.length === 0 ? (
                 <Card className="mb-8">
                     <EmptyState title="Nothing to hand over" description="Every payment you recorded has already been handed over." />
@@ -104,6 +116,9 @@ export default function CashHandOver({ payments, totals, oldest_at, history, den
                                                 {payment.customer_name ?? '—'}
                                             </Link>
                                             <div className="text-xs text-slate-500">{payment.recorded_at ? new Date(payment.recorded_at).toLocaleString() : ''}</div>
+                                            {payment.purpose && payment.purpose !== 'subscription' && (
+                                                <Badge tone={payment.purpose === 'technician_fee' ? 'yellow' : 'blue'}>{paymentPurposeLabel(payment.purpose)}</Badge>
+                                            )}
                                         </Td>
                                         <Td className="font-mono text-xs">{payment.receipt_number ?? '—'}</Td>
                                         <Td>

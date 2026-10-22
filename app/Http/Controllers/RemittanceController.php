@@ -38,12 +38,14 @@ class RemittanceController extends Controller
                 'customer_name' => $payment->customer?->name,
                 'amount' => (string) $payment->amount,
                 'method' => $payment->method ?? 'cash',
+                'purpose' => $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
                 'method_reference' => $payment->method_reference,
                 'receipt_number' => $payment->receipt?->receipt_number,
                 'verification_status' => $payment->verification_status,
                 'recorded_at' => $payment->created_at?->toIso8601String(),
             ])->values()->all(),
             'totals' => $preview['totals'],
+            'purpose_totals' => $preview['purpose_totals'],
             'oldest_at' => $preview['oldest_at'],
             'history' => Remittance::query()->where('collector_user_id', $request->user()->id)->latest('submitted_at')->limit(10)->get()
                 ->map(fn (Remittance $remittance): array => [
@@ -119,7 +121,11 @@ class RemittanceController extends Controller
                     'amount' => (string) $line->amount,
                     'reference' => $line->reference,
                     'wallet_confirmed' => $line->wallet_confirmed,
+                    'purpose' => $line->payment?->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
                 ])->values()->all(),
+                // Technician fees are counted with the cash but belong to the
+                // technician (D13) — the cashier pays them out from the till.
+                'purpose_totals' => $this->remittances->totalsByPurpose($remittance->lines->map(fn (RemittanceLine $line): ?Payment => $line->payment)->filter()),
             ],
             'can' => [
                 'receive' => $request->user()->can('receive', $remittance),
