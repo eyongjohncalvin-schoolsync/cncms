@@ -35,7 +35,9 @@ class TenantExport extends Command
     {
         $tenantId = (string) $this->argument('tenant');
 
-        if (! MaintenanceMode::active() && ! $this->option('force') && ! $this->confirm('No maintenance window is running, so staff could record work after this snapshot that will not be in it. Export anyway?')) {
+        // --force first: it must work even on a database that predates the
+        // maintenance_windows table (a rehearsal on an unmigrated dev box).
+        if (! $this->option('force') && ! MaintenanceMode::active() && ! $this->confirm('No maintenance window is running, so staff could record work after this snapshot that will not be in it. Export anyway?')) {
             return self::FAILURE;
         }
 
