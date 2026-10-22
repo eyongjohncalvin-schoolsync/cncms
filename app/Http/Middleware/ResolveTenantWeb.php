@@ -7,6 +7,7 @@ namespace App\Http\Middleware;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\TenantUserIndex;
+use App\Support\MaintenanceMode;
 use App\Support\TenantContext;
 use Closure;
 use Illuminate\Http\Request;
@@ -27,6 +28,12 @@ class ResolveTenantWeb
 
         if (! $user) {
             return redirect()->route('login');
+        }
+
+        // Platform maintenance (App\Support\MaintenanceMode): hold everyone
+        // but landlords on the countdown page until the window ends.
+        if (MaintenanceMode::blocks($user)) {
+            return redirect()->route('maintenance');
         }
 
         // Win 1 (perf): see App\Http\Middleware\ResolveTenant for the full

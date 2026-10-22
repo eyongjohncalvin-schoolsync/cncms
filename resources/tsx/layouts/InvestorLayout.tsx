@@ -1,7 +1,28 @@
 import { Link, usePage } from '@inertiajs/react';
 import { ReactNode } from 'react';
-import { IconBroadcast, IconChartBar, IconLogout } from '@tabler/icons-react';
+import { IconBroadcast, IconChartBar, IconChecklist, IconLogout } from '@tabler/icons-react';
 import type { PageProps } from '@/types';
+
+// Reports (ReportPolicy::view) and Approvals — vouchers above the company's
+// limits need every investor's approval (docs/plans/cash-controls.md).
+const INVESTOR_LINKS = [
+    { href: '/reports', label: 'Reports', icon: IconChartBar },
+    { href: '/vouchers', label: 'Approvals', icon: IconChecklist },
+];
+
+function InvestorNavLink({ href, label, icon: Icon, active }: (typeof INVESTOR_LINKS)[number] & { active: boolean }) {
+    return (
+        <Link
+            href={href}
+            className={`flex items-center gap-2.5 rounded-md border-l-[3px] px-2.5 py-2 text-sm font-medium ${
+                active ? 'border-amber-600 bg-amber-100 text-amber-800' : 'border-transparent text-slate-600 hover:bg-amber-50 hover:text-amber-700'
+            }`}
+        >
+            <Icon size={18} stroke={1.75} />
+            {label}
+        </Link>
+    );
+}
 
 /**
  * Shell for the Investor tier — see references/rbac-permissions.md section
@@ -10,9 +31,8 @@ import type { PageProps } from '@/types';
  * conditional branch inside AppLayout, per that doc's explicit call), with
  * two deliberate differences from LandlordLayout:
  *
- *   - Essentially no sidebar nav — an investor has exactly one page to
- *     reach (/reports), so the "nav" is just the branding block, not a
- *     list of links.
+ *   - A minimal nav: just Reports and Approvals (INVESTOR_LINKS) — the two
+ *     things an investor does.
  *   - No "back to my workspace" link — investors have no other workspace;
  *     LandlordLayout's equivalent link exists because a landlord is also
  *     a normal tenant member elsewhere, which an investor is not (their
@@ -24,6 +44,7 @@ import type { PageProps } from '@/types';
  */
 export function InvestorLayout({ title, children }: { title: string; children: ReactNode }) {
     const { auth, flash } = usePage<PageProps>().props;
+    const { url } = usePage();
 
     return (
         <div className="flex min-h-screen bg-slate-50">
@@ -37,17 +58,30 @@ export function InvestorLayout({ title, children }: { title: string; children: R
                         <span className="block text-[10px] font-semibold uppercase tracking-wide text-amber-600">Investor</span>
                     </div>
                 </div>
-                <div className="flex-1 space-y-0.5 px-2 py-4">
-                    <div className="flex items-center gap-2.5 rounded-md border-l-[3px] border-amber-600 bg-amber-100 px-2.5 py-2 text-sm font-medium text-amber-800">
-                        <IconChartBar size={18} stroke={1.75} />
-                        Reports
-                    </div>
-                </div>
+                <nav className="flex-1 space-y-0.5 px-2 py-4">
+                    {INVESTOR_LINKS.map((link) => (
+                        <InvestorNavLink key={link.href} {...link} active={url.startsWith(link.href)} />
+                    ))}
+                </nav>
             </aside>
 
             <div className="flex flex-1 flex-col">
                 <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm">
-                    <h1 className="text-base font-semibold text-slate-900">{title}</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-base font-semibold text-slate-900">{title}</h1>
+                        {/* Phones: the sidebar is hidden, so the two pages are linked here. */}
+                        <div className="flex gap-1 md:hidden">
+                            {INVESTOR_LINKS.map((link) => (
+                                <Link
+                                    key={link.href}
+                                    href={link.href}
+                                    className={`rounded-md px-2 py-1 text-xs font-medium ${url.startsWith(link.href) ? 'bg-amber-100 text-amber-800' : 'text-slate-500'}`}
+                                >
+                                    {link.label}
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
                     <div className="flex items-center gap-3">
                         {auth.user && <span className="text-sm font-medium text-slate-700">{auth.user.name}</span>}
                         <Link

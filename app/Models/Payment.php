@@ -24,11 +24,49 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     // null for a web-recorded payment; only pushPayment() ever populates
     // it.
     'collected_at',
+    // How the money came in + the operator transaction ID — see METHODS.
+    'method', 'method_reference',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model
 {
     use Auditable, HasUuid, ScopesRouteBindingToBranch;
+
+    /**
+     * How a customer paid (docs/plans/cash-controls.md). Cash sits in the
+     * collector's hand until it is remitted; the two mobile-money operators
+     * pay straight into the company wallet and must carry the operator's
+     * transaction ID (method_reference) so the cashier can tick it off the
+     * wallet statement.
+     *
+     * @var list<string>
+     */
+    public const array METHODS = ['cash', 'mtn_momo', 'orange_money', 'bank'];
+
+    /** @var list<string> */
+    public const array METHODS_REQUIRING_REFERENCE = ['mtn_momo', 'orange_money'];
+
+    /** @var array<string, string> */
+    public const array METHOD_LABELS = [
+        'cash' => 'Cash',
+        'mtn_momo' => 'MTN MoMo',
+        'orange_money' => 'Orange Money',
+        'bank' => 'Bank',
+    ];
+
+    /**
+     * The shared validation rules for method + reference, used by every
+     * payment-entry request (web, API) so the two never drift.
+     *
+     * @return array<string, list<string>>
+     */
+    public static function methodRules(): array
+    {
+        return [
+            'method' => ['nullable', 'string', 'in:'.implode(',', self::METHODS)],
+            'method_reference' => ['nullable', 'string', 'max:100', 'required_if:method,'.implode(',', self::METHODS_REQUIRING_REFERENCE)],
+        ];
+    }
 
     /**
      * Payment has no direct zone — branch is reached through its Customer.
@@ -83,6 +121,12 @@ class Payment extends Model
     public function receipt(): HasOne
     {
         return $this->hasOne(PaymentReceipt::class);
+    }
+
+    /** The daily-income handover this payment's money went through, if any (cash controls). */
+    public function remittanceLine(): HasOne
+    {
+        return $this->hasOne(RemittanceLine::class);
     }
 
     /**

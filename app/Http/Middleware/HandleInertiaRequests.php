@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Models\Company;
 use App\Services\NotificationService;
+use App\Support\MaintenanceMode;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -84,7 +86,7 @@ class HandleInertiaRequests extends Middleware
             // resolved (and only queries the tenant `companies` table) when
             // tenancy is actually initialized.
             'company' => $context
-                ? fn () => ['name' => \App\Models\Company::cached()?->name ?? tenant()?->name]
+                ? fn () => ['name' => Company::cached()?->name ?? tenant()?->name]
                 : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
@@ -113,6 +115,12 @@ class HandleInertiaRequests extends Middleware
             'notifications' => $user && $context
                 ? fn () => $this->notifications->feedForUser($user, $context)
                 : null,
+            // The running or next scheduled platform maintenance window
+            // (App\Support\MaintenanceMode) — drives the countdown banner
+            // on every layout, the login page included, so staff hear
+            // about it before they are locked out. Polled with
+            // `notifications` by AppLayout.
+            'maintenance' => fn () => MaintenanceMode::current()?->toNotice(),
         ];
     }
 }

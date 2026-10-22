@@ -120,7 +120,40 @@ export interface PageProps {
         whatsapp_url?: string | null;
     };
     notifications: NotificationsFeed | null;
+    /** Running or next scheduled platform maintenance window, else null. */
+    maintenance: MaintenanceNotice | null;
     [key: string]: unknown;
+}
+
+/** App\Models\MaintenanceWindow::toNotice(). Times are ISO-8601. */
+export interface MaintenanceNotice {
+    id: number;
+    starts_at: string;
+    ends_at: string;
+    message: string | null;
+    active: boolean;
+}
+
+/** App\Http\Controllers\Landlord\ActivityController::shape(). */
+export interface LandlordActivityEntry {
+    id: number;
+    action: string;
+    summary: string;
+    subject_type: 'tenant' | 'maintenance' | 'user' | null;
+    subject_id: string | null;
+    details: Record<string, unknown> | null;
+    /** null = done from the command line. */
+    user: string | null;
+    ip_address: string | null;
+    created_at: string | null;
+}
+
+/** A row on the landlord maintenance screen. */
+export interface LandlordMaintenanceWindow extends MaintenanceNotice {
+    status: 'scheduled' | 'active' | 'finished' | 'cancelled';
+    created_by: string | null;
+    cancelled_at: string | null;
+    ended_at: string | null;
 }
 
 /**
@@ -287,6 +320,9 @@ export interface CustomerServiceSelectionForm {
 export type VerificationStatus = 'pending' | 'verified' | 'rejected';
 export type PaymentFrequency = 'monthly' | 'yearly' | 'months';
 
+/** How the customer paid — Payment::METHODS (docs/plans/cash-controls.md). */
+export type PaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+
 export interface PaymentVerification {
     uuid: string;
     status: 'pending' | 'approved' | 'rejected';
@@ -354,6 +390,8 @@ export interface Payment {
     amount: string;
     credit: string;
     frequency: PaymentFrequency;
+    method: PaymentMethod;
+    method_reference: string | null;
     months: number | null;
     expiration_date: string | null;
     verification_status: VerificationStatus;
@@ -552,6 +590,13 @@ export interface Company {
     reconnection_fine: string;
     /** Two-approver threshold for the Arrears Adjustment feature (App\Services\ArrearsAdjustmentService::requiresSecondApproval()). */
     arrears_second_approval_threshold: string;
+    /** Cash controls (docs/plans/cash-controls.md): a voucher above this — or one taking the day's payouts above the daily limit — needs every investor's approval. Null = no limit. */
+    voucher_approval_limit: string | null;
+    voucher_daily_limit: string | null;
+    /** Hours a collector may hold cash before the "not handed over" alert. */
+    remittance_deadline_hours: number;
+    /** Days a cash advance may stay unjustified before it is flagged. */
+    advance_settlement_days: number;
     /** RCCM — Registre du Commerce et du Crédit Mobilier (OHADA commercial registration number). */
     rccm_number: string | null;
     /** NIU — Numéro d'Identifiant Unique (Cameroon DGI taxpayer ID). */
@@ -566,6 +611,8 @@ export interface NotificationSettings {
     email_enabled: boolean;
     sms_enabled: boolean;
     auto_send_receipts: boolean;
+    /** Email every customer with an address when their money is recorded (cash controls). */
+    email_collection_confirmations: boolean;
     twilio_account_sid: string | null;
     twilio_auth_token: string | null;
     twilio_whatsapp_number: string | null;

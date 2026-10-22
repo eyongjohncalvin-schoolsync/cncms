@@ -18,6 +18,8 @@ import { formatCurrency } from '@/lib/formatCurrency';
 
 interface DashboardProps {
     period: string;
+    /** Cash controls: open cash alerts (deferred; null when the viewer can't see them). */
+    cash_alerts?: number | null;
     stats: {
         total_customers: number;
         active_customers: number;
@@ -29,7 +31,7 @@ interface DashboardProps {
     };
 }
 
-export default function Dashboard({ period, stats }: DashboardProps) {
+export default function Dashboard({ period, stats, cash_alerts }: DashboardProps) {
     // Memoized so the derived hint string isn't recomputed on every render
     // (e.g. re-renders triggered by unrelated layout/navigation state) —
     // only when the stats payload itself changes.
@@ -54,6 +56,17 @@ export default function Dashboard({ period, stats }: DashboardProps) {
     return (
         <AppLayout title="Dashboard">
             <Head title="Dashboard" />
+            {typeof cash_alerts === 'number' && cash_alerts > 0 && (
+                <Link
+                    href="/cash/alerts"
+                    className="mb-4 flex items-center justify-between rounded-lg border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800 hover:bg-red-100"
+                >
+                    <span>
+                        <strong>{cash_alerts}</strong> cash control alert{cash_alerts === 1 ? '' : 's'} need attention — cash not handed over, shortages, unsigned vouchers…
+                    </span>
+                    <span className="font-semibold">Review →</span>
+                </Link>
+            )}
 
             <div className="mb-6 animate-fade-up" style={{ animationDelay: '0ms' }}>
                 <h2 className="font-display text-2xl text-slate-900">Dashboard</h2>

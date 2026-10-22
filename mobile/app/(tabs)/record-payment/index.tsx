@@ -20,7 +20,18 @@ import { EmptyState } from '../../../src/components/ui/EmptyState';
 import { colors } from '../../../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../../../src/theme/tokens';
 import { formatFcfa } from '../../../src/utils/format';
-import { calculateGuideAmount, validatePaymentForm, type PaymentFrequency } from '../../../src/utils/paymentCalc';
+import {
+    calculateGuideAmount,
+    methodNeedsReference,
+    PAYMENT_METHODS,
+    validatePaymentForm,
+    type PaymentFrequency,
+    type PaymentMethod,
+} from '../../../src/utils/paymentCalc';
+import { formatReceiptCode, receiptCheckUrl } from '../../../src/utils/receiptCode';
+import { amountInEnglish, amountInFrench } from '../../../src/utils/amountInWords';
+import { generateUuid } from '../../../src/utils/uuid';
+import { issueFieldReceipt, type IssuedFieldReceipt } from '../../../src/fieldReceipts/receiptStock';
 import { getAllCustomers, getCustomerByUuid } from '../../../src/db/customers';
 import { getLastPaymentForCustomer, getPaymentByLocalUuid, insertLocalPayment } from '../../../src/db/payments';
 import type { LocalCustomer, LocalPayment } from '../../../src/types/db';
@@ -106,6 +117,12 @@ export default function RecordPaymentScreen() {
     const [creditExpanded, setCreditExpanded] = useState(false);
     const [credit, setCredit] = useState('');
     const [receiptUri, setReceiptUri] = useState<string | null>(null);
+    const [method, setMethod] = useState<PaymentMethod>('cash');
+    const [methodReference, setMethodReference] = useState('');
+    // The system-issued receipt printed for the payment just recorded — when
+    // present, the confirmation waits for the collector to show it to the
+    // customer instead of returning to the list on a timer.
+    const [issuedReceipt, setIssuedReceipt] = useState<IssuedFieldReceipt | null>(null);
 
     const [submitting, setSubmitting] = useState(false);
     const [stage, setStage] = useState<Stage>('form');
@@ -238,6 +255,9 @@ export default function RecordPaymentScreen() {
         setCredit('');
         setCreditExpanded(false);
         setReceiptUri(null);
+        setMethod('cash');
+        setMethodReference('');
+        setIssuedReceipt(null);
         setReferenceExpanded(false);
         setCustomer(null);
         setLastPayment(null);
@@ -255,8 +275,10 @@ export default function RecordPaymentScreen() {
                 amount,
                 frequency,
                 months,
+                method,
+                methodReference,
             }),
-        [customer?.uuid, amount, frequency, months],
+        [customer?.uuid, amount, frequency, months, method, methodReference],
     );
 
     async function handleAddPhoto() {
@@ -288,7 +310,21 @@ export default function RecordPaymentScreen() {
         setSubmitting(true);
 
         try {
+            // Cash controls: take this collector's next system-issued receipt
+            // number and sign it before the payment is written, so the
+            // receipt the customer sees is the one the server will check.
+            // Null (not registered yet / out of numbers) still records the
+            // payment — the office issues its receipt on verification.
+            const localUuid = generateUuid();
+            const fieldReceipt = await issueFieldReceipt(localUuid, customer.uuid, validation.amountValue);
+
             const row = await insertLocalPayment({
+                local_uuid: localUuid,
+                method,
+                method_reference: methodNeedsReference(method) || method === 'bank' ? methodReference : null,
+                receipt_number: fieldReceipt?.receipt_number ?? null,
+                security_code: fieldReceipt?.security_code ?? null,
+                receipt_issued_at: fieldReceipt?.receipt_issued_at ?? null,
                 customer_uuid: customer.uuid,
                 amount: validation.amountValue,
                 credit: credit.trim() === '' ? 0 : Number(credit),
@@ -306,11 +342,19 @@ export default function RecordPaymentScreen() {
             syncManager.notifyLocalWrite();
 
             setConfirmedPayment(row);
+            setIssuedReceipt(fieldReceipt);
             setConfirmSynced(false);
             setStage('confirming');
         } finally {
             setSubmitting(false);
         }
+    }
+
+    function finishConfirmation() {
+        resetForm();
+        setStage('form');
+        setConfirmedPayment(null);
+        router.replace('/(tabs)/customers');
     }
 
     // --- Confirmation stage: poll this device's own row briefly for a
@@ -331,18 +375,22 @@ export default function RecordPaymentScreen() {
             });
         }, CONFIRM_POLL_MS);
 
-        const navigateTimer = setTimeout(() => {
-            clearInterval(pollTimer);
-            resetForm();
-            setStage('form');
-            setConfirmedPayment(null);
-            router.replace('/(tabs)/customers');
-        }, CONFIRM_DISPLAY_MS);
+        // With a printed receipt on screen the collector decides when the
+        // customer has seen it (the Done button) — no timer.
+        const navigateTimer = issuedReceipt
+            ? null
+            : setTimeout(() => {
+                  clearInterval(pollTimer);
+                  finishConfirmation();
+              }, CONFIRM_DISPLAY_MS);
 
         return () => {
             cancelled = true;
             clearInterval(pollTimer);
-            clearTimeout(navigateTimer);
+
+            if (navigateTimer) {
+                clearTimeout(navigateTimer);
+            }
         };
         // Deliberately keyed only on the identity of the confirmed payment —
         // re-running this on every render would restart the timer/poll.
@@ -356,6 +404,48 @@ export default function RecordPaymentScreen() {
     if (stage === 'confirming' && confirmedPayment) {
         const badge = confirmSynced ? CONFIRM_BADGE.synced : CONFIRM_BADGE.queued;
 
+        if (issuedReceipt) {
+            const methodLabel = PAYMENT_METHODS.find((option) => option.value === confirmedPayment.method)?.label ?? 'Cash';
+
+            return (
+                <ScrollView contentContainerStyle={styles.receiptScreen}>
+                    <Card accentColor={colors.accent.payment} style={styles.receiptCard}>
+                        <View style={styles.receiptHeader}>
+                            <Text style={styles.receiptTitle}>RECEIPT / REÇU</Text>
+                            <Badge label={badge.label} tone={badge.tone} />
+                        </View>
+                        <Text style={styles.receiptNumber}>{issuedReceipt.receipt_number}</Text>
+                        <Text style={styles.receiptMeta}>{new Date(issuedReceipt.receipt_issued_at).toLocaleString()}</Text>
+
+                        <View style={styles.receiptDivider} />
+
+                        <Text style={styles.receiptLabel}>Received from</Text>
+                        <Text style={styles.receiptValue}>{customer?.name ?? '—'}</Text>
+
+                        <Text style={styles.receiptLabel}>Amount</Text>
+                        <Text style={styles.confirmAmount}>{formatFcfa(confirmedPayment.amount)}</Text>
+                        <Text style={styles.receiptWords}>{amountInEnglish(confirmedPayment.amount)}</Text>
+                        <Text style={styles.receiptWords}>{amountInFrench(confirmedPayment.amount)}</Text>
+
+                        <Text style={styles.receiptLabel}>Paid by</Text>
+                        <Text style={styles.receiptValue}>
+                            {methodLabel}
+                            {confirmedPayment.method_reference ? ` · ${confirmedPayment.method_reference}` : ''}
+                        </Text>
+
+                        <View style={styles.receiptDivider} />
+
+                        <Text style={styles.receiptLabel}>Security code — show the customer</Text>
+                        <Text style={styles.receiptCode}>{formatReceiptCode(issuedReceipt.security_code)}</Text>
+                        <Text style={styles.receiptMeta} selectable>
+                            Check at {receiptCheckUrl(issuedReceipt.check_url_base, issuedReceipt.receipt_number, issuedReceipt.security_code)}
+                        </Text>
+                    </Card>
+                    <Button title="Done" size="large" onPress={finishConfirmation} />
+                </ScrollView>
+            );
+        }
+
         return (
             <View style={styles.centerFlex}>
                 <Card accentColor={confirmSynced ? colors.status.syncedDot : colors.status.offlineDot} style={styles.confirmCard}>
@@ -363,6 +453,9 @@ export default function RecordPaymentScreen() {
                     <Text style={styles.confirmAmount}>{formatFcfa(confirmedPayment.amount)}</Text>
                     <Text style={styles.confirmSubtitle}>
                         {customer ? `Recorded for ${customer.name}` : 'Payment recorded'}
+                    </Text>
+                    <Text style={styles.confirmHint}>
+                        No receipt number on this phone yet — the office will issue the receipt. Sync to get receipt numbers.
                     </Text>
                     <Text style={styles.confirmHint}>Returning to the customer list…</Text>
                 </Card>
@@ -612,6 +705,41 @@ export default function RecordPaymentScreen() {
                     </Text>
                 ) : null}
 
+                {/* 5c. Paid by — cash / MTN MoMo / Orange Money / bank (cash
+                    controls). Mobile money must carry the operator's
+                    transaction ID so the cashier can match it to the wallet. */}
+                <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>Paid by</Text>
+                    <View style={[styles.segmented, styles.segmentedWrap]}>
+                        {PAYMENT_METHODS.map((option) => {
+                            const active = method === option.value;
+
+                            return (
+                                <Pressable
+                                    key={option.value}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: active }}
+                                    onPress={() => setMethod(option.value)}
+                                    style={[styles.segmentedOption, styles.methodOption, active && styles.segmentedOptionActive]}
+                                >
+                                    <Text style={[styles.segmentedLabel, active && styles.segmentedLabelActive]}>{option.label}</Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+                </View>
+                {method !== 'cash' ? (
+                    <UiTextInput
+                        label={methodNeedsReference(method) ? 'Transaction ID' : 'Bank reference (optional)'}
+                        value={methodReference}
+                        onChangeText={setMethodReference}
+                        autoCapitalize="characters"
+                        autoCorrect={false}
+                        placeholder={methodNeedsReference(method) ? 'From the customer’s confirmation SMS' : ''}
+                        error={validation.errors.methodReference}
+                    />
+                ) : null}
+
                 {/* 6. Credit — optional, collapsed under a disclosure */}
                 <Pressable
                     accessibilityRole="button"
@@ -737,6 +865,20 @@ const styles = StyleSheet.create({
     segmentedOptionActive: { backgroundColor: colors.surface, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, elevation: 1 },
     segmentedLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
     segmentedLabelActive: { color: colors.textPrimary },
+    segmentedWrap: { flexWrap: 'wrap' },
+    methodOption: { flexBasis: '45%', flexGrow: 1 },
+
+    receiptScreen: { flexGrow: 1, padding: spacing.lg, gap: spacing.lg, backgroundColor: colors.background, justifyContent: 'center' },
+    receiptCard: { gap: spacing.xs, paddingVertical: spacing.lg },
+    receiptHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    receiptTitle: { fontSize: fontSize.sm, fontWeight: '800', letterSpacing: 1, color: colors.textSecondary },
+    receiptNumber: { fontSize: fontSize.xl, fontWeight: '800', color: colors.danger, marginTop: spacing.xs },
+    receiptMeta: { fontSize: fontSize.xs, color: colors.textSecondary },
+    receiptDivider: { borderTopWidth: 1, borderTopColor: colors.border, borderStyle: 'dashed', marginVertical: spacing.sm },
+    receiptLabel: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3, marginTop: spacing.xs },
+    receiptValue: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+    receiptWords: { fontSize: fontSize.sm, fontStyle: 'italic', color: colors.textSecondary },
+    receiptCode: { fontSize: fontSize.display, fontWeight: '800', letterSpacing: 3, color: colors.textPrimary, fontFamily: 'monospace' },
 
     disclosure: { paddingVertical: spacing.sm },
     disclosureLabel: { fontSize: fontSize.sm, fontWeight: '700', color: colors.accent.payment },

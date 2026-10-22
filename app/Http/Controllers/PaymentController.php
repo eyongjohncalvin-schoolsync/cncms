@@ -15,6 +15,7 @@ use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\PaymentVerification;
+use App\Models\ReceiptBlock;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
@@ -178,6 +179,13 @@ class PaymentController extends Controller
 
         return Inertia::render('Payments/Create', [
             'customers' => $customers,
+            // Cash controls: show the "receipt book number" field only to
+            // someone actually holding an open printed book.
+            'has_receipt_book' => ReceiptBlock::query()
+                ->where('holder_user_id', auth()->id())
+                ->where('kind', ReceiptBlock::KIND_BOOK)
+                ->where('status', 'open')
+                ->exists(),
         ]);
     }
 
@@ -373,6 +381,8 @@ class PaymentController extends Controller
             'amount' => (string) $payment->amount,
             'credit' => (string) $payment->credit,
             'frequency' => $payment->frequency,
+            'method' => $payment->method,
+            'method_reference' => $payment->method_reference,
             'months' => $payment->months,
             'expiration_date' => $payment->expiration_date?->toDateString(),
             'verification_status' => $payment->verification_status,

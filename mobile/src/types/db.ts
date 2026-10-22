@@ -49,6 +49,13 @@ export interface LocalPayment {
      * §4.4) — see src/sync/SyncManager.ts's uploadPendingReceipts(). */
     receipt_local_uri: string | null;
     receipt_server_path: string | null;
+    /** Cash controls: how the customer paid (cash / mtn_momo / orange_money / bank) + operator transaction ID. */
+    method: 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+    method_reference: string | null;
+    /** The system-issued receipt this phone printed for the payment (src/fieldReceipts), or null. */
+    receipt_number: string | null;
+    security_code: string | null;
+    receipt_issued_at: string | null;
     sync_status: SyncStatus;
     sync_error: string | null;
     sync_attempts: number;

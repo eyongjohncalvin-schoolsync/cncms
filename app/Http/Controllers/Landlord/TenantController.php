@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Landlord;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreTenantRequest;
 use App\Http\Requests\UpdateTenantRequest;
+use App\Models\LandlordActivity;
 use App\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -95,6 +96,8 @@ class TenantController extends Controller
             return back()->withInput()->with('error', 'Could not provision the new tenant. Please try again.');
         }
 
+        LandlordActivity::record('tenant.created', "Created tenant {$data['name']} ({$data['slug']})", 'tenant', $data['slug']);
+
         return redirect()->route('landlord.tenants.index')->with('success', 'Tenant created.');
     }
 
@@ -126,6 +129,9 @@ class TenantController extends Controller
 
         if ($updates !== []) {
             $tenant->update($updates);
+
+            $changes = collect($updates)->map(fn (bool $value, string $key) => $key.' '.($value ? 'on' : 'off'))->implode(', ');
+            LandlordActivity::record('tenant.updated', "Updated tenant {$tenant->name}: {$changes}", 'tenant', $tenant->id, $updates);
         }
 
         return redirect()->route('landlord.tenants.index')->with('success', 'Tenant updated.');
@@ -148,6 +154,8 @@ class TenantController extends Controller
         $tenant->rejection_reason = null;
         $tenant->save();
 
+        LandlordActivity::record('tenant.approved', "Approved workspace {$tenant->name}", 'tenant', $tenant->id);
+
         return redirect()->route('landlord.tenants.index')->with('success', "Workspace \"{$tenant->name}\" approved.");
     }
 
@@ -167,6 +175,8 @@ class TenantController extends Controller
         // real table column into the `data` JSON column automatically.
         $tenant->rejection_reason = trim((string) $request->input('reason')) ?: null;
         $tenant->save();
+
+        LandlordActivity::record('tenant.rejected', "Rejected workspace {$tenant->name}", 'tenant', $tenant->id, ['reason' => $tenant->rejection_reason]);
 
         return redirect()->route('landlord.tenants.index')->with('success', "Workspace \"{$tenant->name}\" rejected.");
     }

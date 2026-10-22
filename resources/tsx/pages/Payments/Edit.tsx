@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { PaymentMethodFields } from '@/components/shared/PaymentMethodFields';
 import type { Payment, PaymentFrequency } from '@/types';
 
 interface PaymentsEditProps {
@@ -85,6 +86,8 @@ export default function PaymentsEdit({ payment }: PaymentsEditProps) {
         credit: payment.credit,
         frequency: payment.frequency,
         months: payment.months !== null ? String(payment.months) : '',
+        method: payment.method ?? 'cash',
+        method_reference: payment.method_reference ?? '',
     });
 
     function submit(e: FormEvent) {
@@ -158,6 +161,15 @@ export default function PaymentsEdit({ payment }: PaymentsEditProps) {
                                 required
                             />
                         )}
+
+                        <PaymentMethodFields
+                            method={data.method}
+                            reference={data.method_reference}
+                            onMethodChange={(method) => setData('method', method)}
+                            onReferenceChange={(reference) => setData('method_reference', reference)}
+                            methodError={errors.method}
+                            referenceError={errors.method_reference}
+                        />
 
                         <TextInput
                             id="credit"

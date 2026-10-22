@@ -7,6 +7,21 @@
 
 export type PaymentFrequency = 'monthly' | 'yearly' | 'months';
 
+/** How the customer paid — App\Models\Payment::METHODS (docs/plans/cash-controls.md). */
+export type PaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+
+export const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
+    { value: 'cash', label: 'Cash' },
+    { value: 'mtn_momo', label: 'MTN MoMo' },
+    { value: 'orange_money', label: 'Orange Money' },
+    { value: 'bank', label: 'Bank' },
+];
+
+/** MoMo / Orange Money must carry the operator transaction ID (Payment::METHODS_REQUIRING_REFERENCE). */
+export function methodNeedsReference(method: PaymentMethod): boolean {
+    return method === 'mtn_momo' || method === 'orange_money';
+}
+
 /**
  * The non-binding "per-frequency calculation guide" — mirrors the web
  * app's Payments/Create.tsx `guideAmount` memo exactly (bill × 1 for
@@ -46,6 +61,10 @@ export interface PaymentFormValidationInput {
     frequency: PaymentFrequency;
     /** Raw text-field value, only meaningful when frequency === 'months'. */
     months: string;
+    /** Defaults to cash when omitted (older callers). */
+    method?: PaymentMethod;
+    /** Raw transaction-ID field. */
+    methodReference?: string;
 }
 
 export interface PaymentFormValidationResult {
@@ -56,6 +75,7 @@ export interface PaymentFormValidationResult {
         customer?: string;
         amount?: string;
         months?: string;
+        methodReference?: string;
     };
 }
 
@@ -93,6 +113,10 @@ export function validatePaymentForm(input: PaymentFormValidationInput): PaymentF
         } else {
             monthsValue = parsedMonths;
         }
+    }
+
+    if (methodNeedsReference(input.method ?? 'cash') && (input.methodReference ?? '').trim() === '') {
+        errors.methodReference = "Enter the transaction ID from the customer's confirmation SMS.";
     }
 
     return {

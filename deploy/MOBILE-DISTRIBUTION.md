@@ -30,57 +30,13 @@ changes (new permissions, SDK bumps) need a new APK (Phase B again).
 
 ## Phase A — Deploy the backend
 
-Pick **one** path. Both are already documented in this folder; this is just
-which one to run.
+Production is a **Hostinger VPS managed by Ploi**. Follow [`PLOI.md`](./PLOI.md):
+server, site, `.env` (with the dev `APP_KEY`), deploy script (includes
+`tenants:migrate`), the **queue-worker daemon**, the scheduler, SSL, then the
+swecom cutover (`tenant:export` on dev → `tenant:import` on the server) before
+anyone registers.
 
-### A1. Laravel Cloud (recommended to "start now")
-
-Fastest route to a public HTTPS URL. Full config in
-[`LARAVEL-CLOUD.md`](./LARAVEL-CLOUD.md). Short version:
-
-1. The app is already uploaded to Laravel Cloud. In the environment's
-   **Environment** panel set the variables from
-   [`.env.production.example`](./.env.production.example) — critically:
-   - `APP_ENV=production`, `APP_DEBUG=false`, `APP_KEY=base64:…`
-   - `APP_URL=https://<your-cloud-url>` (or a custom domain once attached)
-   - `DB_URL=` Supabase **session pooler** string (port 5432 — *not* the
-     transaction pooler, it breaks schema-per-tenant tenancy)
-   - `SANCTUM_STATEFUL_DOMAINS=<host of APP_URL>` (web admin only; the
-     mobile app uses Bearer tokens and doesn't need this)
-   - `QUEUE_CONNECTION=database`, `CACHE_STORE=redis` (Upstash), `SESSION_DRIVER=database`
-2. Deploy commands (dashboard → Deployments → Commands):
-   ```
-   php artisan migrate --force
-   php artisan tenants:migrate --force
-   php artisan optimize
-   ```
-   `tenants:migrate` is the one people forget — central `migrate` does not
-   touch tenant schemas.
-3. Add a **Worker** resource:
-   ```
-   php artisan queue:work --queue=default,manuscripts,bills --sleep=3 --tries=3 --backoff=10 --max-time=3600 --timeout=1800
-   ```
-   Without it, manuscript runs and bill generation sit `queued` forever.
-4. Make the first landlord + assign yourself a role in the workspace
-   (Commands panel):
-   ```
-   php artisan cncms:grant-landlord you@example.com --create --name="You" --password="pick-one"
-   php artisan cncms:tenant-role swecom you@example.com super
-   ```
-5. Run the testing checklist at the bottom of `LARAVEL-CLOUD.md`.
-
-**swecom's live data** (≈450 customers, manuscripts, payments) stays on the
-dev box for now — validate the deploy with a small xlsx import first. The
-real data migration is a separate scripted job (`LARAVEL-CLOUD.md` §5).
-
-### A2. Bare Ubuntu VPS
-
-More control, more steps. Full runbook in [`../DEPLOYMENT.md`](../DEPLOYMENT.md)
-+ the scripts in this folder (`provision.sh`, `deploy.sh`, `nginx/`,
-`systemd/`, `cron/`). Decisions already made: Ubuntu 24.04, one box,
-PostgreSQL on the same server, nightly `pg_dump` copied off-server.
-
-Either way, the deliverable of Phase A is: **a public `https://…` URL where
+The deliverable of Phase A is: **a public `https://…` URL where
 `/login` loads and `/api/v1/auth/login` answers.**
 
 ---
@@ -108,13 +64,13 @@ later means a rebuild, not an env edit — so set it right before building.
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://<your-cloud-url>/api/v1"
+        "EXPO_PUBLIC_API_BASE_URL": "https://YOUR_DOMAIN/api/v1"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://<your-cloud-url>/api/v1"
+        "EXPO_PUBLIC_API_BASE_URL": "https://YOUR_DOMAIN/api/v1"
       }
     }
   }
@@ -150,7 +106,7 @@ Confirm the API URL took (a wrong URL = "network error" on login).
 
 The web admin already has the distribution page at **`/agent-app`**
 (`config/agent-app.php`, env-driven — no deploy needed to update). Set on
-the **backend** host (Laravel Cloud env panel, or the VPS `.env`):
+the **backend** host (Ploi → site → Environment):
 
 ```
 AGENT_APP_ANDROID_URL=https://expo.dev/accounts/<acct>/projects/cncms-mobile/builds/<id>
@@ -158,7 +114,7 @@ AGENT_APP_VERSION=1.0.0
 AGENT_APP_UPDATED_ON=2026-09-02
 ```
 
-Then `php artisan config:clear` (VPS) / redeploy (Cloud). The page now shows
+Then `php artisan optimize` (or redeploy from Ploi). The page now shows
 the button + a QR agents scan with their phone camera. It's visible to
 super / admin / manager / agent (same gate as Reports); workers don't see
 the nav link.
@@ -167,7 +123,7 @@ the nav link.
 - Download the `.apk` from the build page and drop it in
   `public/downloads/cncms-agent.apk` on the server, set
   `AGENT_APP_ANDROID_URL=https://<your-domain>/downloads/cncms-agent.apk`.
-  (Use `public/`, never `storage/app` — that's wiped on Cloud redeploys.)
+  (Use `public/`, never `storage/app` — it isn't web-served.)
 - Or an S3/R2 bucket with a public object URL.
 
 ---
@@ -240,4 +196,4 @@ specific user needs it.
 | Android APK via EAS internal distribution | free (EAS free tier: limited concurrent builds, fine at this scale) |
 | Google Play listing (optional, not needed) | $25 one-time |
 | Apple Developer (only if iOS) | $99/year |
-| Laravel Cloud + Supabase + Upstash | free tiers work for the pilot; see `LARAVEL-CLOUD.md` §0/§6 for when to upgrade |
+| Hostinger VPS + Ploi | the VPS plan + Ploi subscription; one box runs everything |

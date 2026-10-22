@@ -1,9 +1,11 @@
 # deploy/
 
-Manual-VPS deployment kit for CNCMS. Full walkthrough: **`../DEPLOYMENT.md`**.
+**Production = Hostinger VPS managed by Ploi → [`PLOI.md`](./PLOI.md).** Ploi
+handles Nginx, PHP-FPM, the worker daemon and cron, so of the files below
+only `scripts/backup-db.sh` and `.env.production.example` are used there.
 
-**On Laravel Cloud instead?** → **`LARAVEL-CLOUD.md`** (none of the scripts /
-Nginx / systemd files below apply; Cloud manages all that).
+Everything else is the fully manual fallback kit. Full walkthrough:
+**`../DEPLOYMENT.md`**.
 
 | Path | What it is |
 |---|---|

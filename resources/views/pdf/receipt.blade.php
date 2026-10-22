@@ -34,6 +34,8 @@
     $methodText = $methodLabels[$payment['method'] ?? ''] ?? ucfirst((string) ($payment['method'] ?? ''));
     $months = (int) ($payment['months'] ?? 0) ?: count($periods);
     $description = 'Cable subscription' . ($months > 1 ? " ({$months} months)" : '');
+    $code = ! empty($r['security_code']) ? \App\Support\ReceiptSecurityCode::format($r['security_code']) : null;
+    $words = $r['amount_in_words'] ?? null;
 @endphp
 <!DOCTYPE html>
 <html>
@@ -77,6 +79,8 @@
         table.verify td { vertical-align: middle; font-size: 9px; color: #444; }
         table.verify img { width: 60px; height: 60px; }
         .balance { margin-top: 4px; font-size: 11px; }
+        .code { font-family: 'DejaVu Sans Mono', monospace; font-weight: bold; letter-spacing: 1px; }
+        .words { margin: 2px 0 4px; font-size: 9.5px; font-style: italic; }
     </style>
 </head>
 <body>
@@ -102,6 +106,12 @@
             <td class="label">Receipt No:</td>
             <td>{{ $r['receipt_number'] ?? '' }}</td>
         </tr>
+        @if($code)
+        <tr>
+            <td class="label">Security code:</td>
+            <td class="code">{{ $code }}</td>
+        </tr>
+        @endif
         <tr>
             <td class="label">Issued:</td>
             <td>{{ $issuedAt?->format('d M Y, H:i') }}</td>
@@ -135,6 +145,12 @@
             <td>{{ $payment['collected_by'] }}</td>
         </tr>
         @endif
+        @if(!empty($payment['paid_by_label']))
+        <tr>
+            <td class="label">Paid by:</td>
+            <td>{{ $payment['paid_by_label'] }}@if(!empty($payment['method_reference'])) &middot; Txn {{ $payment['method_reference'] }}@endif</td>
+        </tr>
+        @endif
         @if(!empty($payment['momo_ref']))
         <tr>
             <td class="label">MOMO Ref:</td>
@@ -162,6 +178,13 @@
         </tr>
     </table>
 
+    @if($words)
+        <div class="words">
+            <strong>In words:</strong> {{ $words['en'] ?? '' }}<br>
+            <strong>En lettres :</strong> {{ $words['fr'] ?? '' }}
+        </div>
+    @endif
+
     @if($balance)
         <div class="balance">
             @if((float) $balance['remaining'] > 0)
@@ -183,7 +206,11 @@
     @if(!empty($qr))
         <table class="verify"><tr>
             <td style="width: 66px;"><img src="{{ $qr }}" alt="QR code"></td>
-            <td>Scan to check this receipt is genuine. A cancelled receipt shows as <strong>VOID</strong>.</td>
+            <td>
+                Scan to check this receipt is genuine. A cancelled receipt shows as <strong>VOID</strong>.
+                @if($code)<br>Or enter security code <strong class="code">{{ $code }}</strong> on the check page.@endif
+                <br>Only receipts with a QR code are valid.
+            </td>
         </tr></table>
     @endif
 

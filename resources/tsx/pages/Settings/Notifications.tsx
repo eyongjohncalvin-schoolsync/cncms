@@ -139,6 +139,26 @@ export default function SettingsNotifications({ settings, bulk_whatsapp_entitled
                                             </span>
                                         </span>
                                     </label>
+                                    <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-4 hover:bg-slate-50">
+                                        <input type="hidden" name="email_collection_confirmations" value="0" />
+                                        <input
+                                            type="checkbox"
+                                            name="email_collection_confirmations"
+                                            value="1"
+                                            defaultChecked={settings.email_collection_confirmations}
+                                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                                        />
+                                        <span className="text-sm text-slate-900">
+                                            <span className="flex items-center gap-2 font-medium">
+                                                <IconMail size={16} className="text-blue-600" stroke={1.75} />
+                                                Confirm every collection by email
+                                            </span>
+                                            <span className="mt-1 block text-xs text-slate-500">
+                                                The moment money is recorded for a customer who has an email address, they get the receipt — whatever channel they chose.
+                                                A customer who paid but heard nothing will call you. Needs Email switched on above.
+                                            </span>
+                                        </span>
+                                    </label>
                                 </CardBody>
                             </Card>
 

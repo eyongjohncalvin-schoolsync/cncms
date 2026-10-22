@@ -16,6 +16,10 @@
         "audit_log": "Journal d'audit",
         "arrears_adjustments": "Ajustements d'arriérés",
         "opening_balances": "Soldes d'ouverture",
+        "receipt_stock": "Stock de reçus",
+        "cash_book": "Livre de caisse",
+        "hand_over": "Versement du jour",
+        "vouchers": "Bons de caisse",
         "to_send": "À envoyer",
         "users_control_center": "Gestion des utilisateurs",
         "settings": "Paramètres",
@@ -30,6 +34,16 @@
         "no_notifications": "Aucune notification pour le moment",
         "acknowledge": "Accuser réception",
         "acknowledged": "Accusé réception",
-        "footer_copyright": "© {{year}} ShalomTech — CNCMS"
+        "footer_copyright": "© {{year}} ShalomTech — CNCMS",
+        "maintenance_scheduled_title": "Maintenance planifiée dans {{countdown}}",
+        "maintenance_scheduled_body": "Le système sera indisponible du {{start}} au {{end}}. Enregistrez votre travail avant.",
+        "maintenance_active_title": "Mode maintenance activé — les utilisateurs des locataires sont bloqués",
+        "maintenance_active_body": "Fin {{end}} (dans {{countdown}}). Seuls les administrateurs de la plateforme peuvent utiliser le système.",
+        "maintenance_page_title": "En maintenance",
+        "maintenance_page_heading": "Le système est en maintenance",
+        "maintenance_page_back_in": "De retour dans",
+        "maintenance_page_until": "Retour prévu à {{end}}.",
+        "maintenance_page_offline_note": "Agents de terrain : continuez à enregistrer les paiements dans l’application mobile — ils sont sauvegardés sur le téléphone et se synchronisent automatiquement à la fin de la maintenance.",
+        "maintenance_page_refreshes": "Cette page se met à jour toute seule quand le système revient."
     }
 }

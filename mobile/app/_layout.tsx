@@ -113,6 +113,7 @@ function RootNavigation() {
         <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="hand-over" options={{ headerShown: true, title: "Hand over cash" }} />
             <Stack.Screen
                 name="record-expense"
                 options={{ presentation: 'modal', headerShown: true, title: 'Record Expense' }}

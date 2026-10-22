@@ -88,3 +88,14 @@ test('validatePaymentForm: accepts a fully valid monthly form and returns the pa
     assert.equal(result.valid, true);
     assert.equal(result.amountValue, 3500.5);
 });
+
+test('validatePaymentForm: MoMo and Orange Money need a transaction ID, cash and bank do not', () => {
+    const base = { customerUuid: 'c-1', amount: '2500', frequency: 'monthly' as const, months: '' };
+
+    assert.equal(validatePaymentForm({ ...base, method: 'mtn_momo', methodReference: '' }).errors.methodReference !== undefined, true);
+    assert.equal(validatePaymentForm({ ...base, method: 'orange_money', methodReference: '  ' }).valid, false);
+    assert.equal(validatePaymentForm({ ...base, method: 'mtn_momo', methodReference: 'CI241020.1' }).valid, true);
+    assert.equal(validatePaymentForm({ ...base, method: 'cash' }).valid, true);
+    assert.equal(validatePaymentForm({ ...base, method: 'bank' }).valid, true);
+    assert.equal(validatePaymentForm(base).valid, true);
+});

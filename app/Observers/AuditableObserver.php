@@ -94,6 +94,9 @@ class AuditableObserver
             'last_sync_at',
             'sync_status',
             'attempt_count',
+            // A field device's receipt-signing secret (encrypted at rest,
+            // but never copied into the audit trail either).
+            'secret',
         ]);
     }
 }

@@ -722,4 +722,55 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
         $this->assertSame($commandRun->id, $preExisting->fresh()->command_run_id);
         $payments->each(fn ($payment) => $this->assertSame($period, $payment->fresh()->processed_period));
     }
+
+    /**
+     * Draw-down prepayment rollout step 3 (references/prepayment-drawdown.md
+     * §10): the parallel run. The real monthly pipeline — dispatch, chunked
+     * jobs, publish — over seven consecutive months on a non-swecom tenant,
+     * with a mid-window rate rise, proves a 6-month payment covers exactly 6
+     * months at the locked rate before normal billing resumes at the new one.
+     * A customer with no prepayment runs alongside as the control.
+     */
+    public function test_the_real_monthly_pipeline_gives_a_six_month_prepayment_exactly_six_covered_months(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $prepaid = $this->activeCustomer($zone);
+        $control = $this->activeCustomer($zone);
+
+        PaymentFactory::new()->create([
+            'customer_id' => $prepaid->id,
+            'amount' => 15000,
+            'frequency' => 'months',
+            'months' => 6,
+            'expiration_date' => null,
+            'prepaid_rate' => 2500,
+            'clear_arrears_first' => false,
+            'verification_status' => 'verified',
+        ]);
+
+        $expectedRemaining = ['2026-01' => 5, '2026-02' => 4, '2026-03' => 3, '2026-04' => 2, '2026-05' => 1, '2026-06' => 0];
+
+        foreach ($expectedRemaining as $period => $remaining) {
+            if ($period === '2026-03') {
+                $prepaid->update(['bill' => 3000]);
+            }
+
+            $run = $this->batches->dispatch($period, scheduledTask: null, autoPublish: true, customerIds: [$prepaid->id, $control->id]);
+            $this->assertSame('published', $run->fresh()->status, "{$period} published");
+
+            $row = Manuscript::query()->where('customer_id', $prepaid->id)->where('period', $period)->sole();
+            $this->assertEqualsWithDelta(0.0, (float) $row->total_bill, 0.001, "{$period} is covered");
+            $this->assertSame($remaining, (int) $row->prepaid_months_remaining, "{$period} months left");
+        }
+
+        $this->batches->dispatch('2026-07', scheduledTask: null, autoPublish: true, customerIds: [$prepaid->id, $control->id]);
+
+        $july = Manuscript::query()->where('customer_id', $prepaid->id)->where('period', '2026-07')->sole();
+        $this->assertSame(0, (int) $july->prepaid_months_remaining);
+        $this->assertEqualsWithDelta(6000.0, (float) $july->total_bill, 0.001, 'first billed month after the window, at the new 3000 rate');
+
+        // The control customer was billed every month and owes all seven.
+        $controlJuly = Manuscript::query()->where('customer_id', $control->id)->where('period', '2026-07')->sole();
+        $this->assertEqualsWithDelta(7 * 2500.0, (float) $controlJuly->total_arrears, 0.001);
+    }
 }

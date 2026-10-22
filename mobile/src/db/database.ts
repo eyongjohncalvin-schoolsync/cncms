@@ -151,6 +151,20 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_severity ON notifications(severity);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+
+-- Cash controls (docs/plans/cash-controls.md): the system-issued receipt
+-- numbers this phone may print, per collector (owner_user_uuid) so a
+-- different person signing in never uses someone else's numbers.
+-- status: unused (from the server) -> used (taken by a local payment).
+CREATE TABLE IF NOT EXISTS receipt_numbers (
+    number              TEXT PRIMARY KEY NOT NULL,
+    owner_user_uuid     TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'unused',
+    payment_local_uuid  TEXT,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipt_numbers_owner_status ON receipt_numbers(owner_user_uuid, status);
 `;
 
 /**
@@ -174,6 +188,13 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     // per customer, the only way Customer Detail (which never makes a live
     // call) can show services at all.
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN services TEXT' },
+    // Cash controls (docs/plans/cash-controls.md): how the customer paid, and
+    // the system-issued receipt this phone printed for the payment.
+    { table: 'payments', ddl: "ALTER TABLE payments ADD COLUMN method TEXT NOT NULL DEFAULT 'cash'" },
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN method_reference TEXT' },
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_number TEXT' },
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN security_code TEXT' },
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_issued_at TEXT' },
 ];
 
 /**

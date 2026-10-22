@@ -1,10 +1,25 @@
 import { Link, usePage } from '@inertiajs/react';
 import { ReactNode } from 'react';
-import { IconBroadcast, IconLogout, IconBuildingSkyscraper } from '@tabler/icons-react';
+import {
+    IconBroadcast,
+    IconBuildingSkyscraper,
+    IconHistory,
+    IconLayoutDashboard,
+    IconLogout,
+    IconShieldLock,
+    IconTool,
+} from '@tabler/icons-react';
 import type { BreadcrumbItem, PageProps } from '@/types';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
+import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
 
-const navItems = [{ href: '/landlord/tenants', label: 'Tenants', icon: IconBuildingSkyscraper }];
+const navItems = [
+    { href: '/landlord', label: 'Dashboard', icon: IconLayoutDashboard, exact: true },
+    { href: '/landlord/tenants', label: 'Tenants', icon: IconBuildingSkyscraper },
+    { href: '/landlord/maintenance', label: 'Maintenance', icon: IconTool },
+    { href: '/landlord/landlords', label: 'Landlords', icon: IconShieldLock },
+    { href: '/landlord/activity', label: 'Activity log', icon: IconHistory },
+];
 
 /**
  * Shell for the central/platform-level "landlord" area — kept separate
@@ -30,7 +45,7 @@ export function LandlordLayout({
      */
     breadcrumbs?: BreadcrumbItem[];
 }) {
-    const { auth, flash } = usePage<PageProps>().props;
+    const { auth, flash, maintenance } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
 
     return (
@@ -48,7 +63,7 @@ export function LandlordLayout({
                 <nav className="flex-1 space-y-0.5 px-2 py-4">
                     {navItems.map((item) => {
                         const Icon = item.icon;
-                        const active = currentPath.startsWith(item.href);
+                        const active = item.exact ? currentPath === item.href : currentPath.startsWith(item.href);
 
                         return (
                             <Link
@@ -98,6 +113,8 @@ export function LandlordLayout({
                         <Breadcrumb items={breadcrumbs} />
                     </div>
                 )}
+
+                <MaintenanceBanner notice={maintenance} />
 
                 <main className="flex-1 p-4 md:p-6">
                     {flash.success && (

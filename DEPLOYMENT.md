@@ -1,9 +1,9 @@
 # CNCMS — Production Deployment Runbook
 
-> **Deploying to Laravel Cloud instead?** Ignore this file — see
-> **`deploy/LARAVEL-CLOUD.md`** (Cloud manages the server, TLS, scheduler,
-> and deploys; you just configure env, the worker resource, deploy
-> commands, and — importantly — remote file storage).
+> **Production runs on a Hostinger VPS managed by Ploi** (decided
+> 2026-10-22). Follow **`deploy/PLOI.md`**. This file is the fully manual
+> fallback, but its **swecom cutover** section (under §4) is the data-move
+> procedure for either route. Laravel Cloud is no longer used.
 
 Target: **one bare Ubuntu 24.04 LTS VPS**, everything on it (Nginx + PHP-FPM +
 PostgreSQL + the queue worker + the scheduler). Database on the same box.
@@ -113,9 +113,33 @@ php artisan optimize                   # config + route + view + event cache
 There is **no seeder for production** — real data comes in via the import
 flows and self-service registration. The two existing tenants (`swecom`,
 `multimedia-digital-cable-network`) only exist on your dev box; production
-starts empty. If you are migrating `swecom`'s real data, that's a separate
-`pg_dump`/restore of the `tenantswecom` schema plus the relevant `public`
-rows — ask before doing it, it's not part of this runbook.
+starts empty. To bring `swecom`'s real data across, use the swecom cutover
+below **before creating any user** on the server (imported ids must be free).
+
+### swecom cutover (dev → production)
+
+1. **Same `APP_KEY`.** Copy the dev `.env` `APP_KEY` into production. Receipt
+   security codes and encrypted settings depend on it, and the archive only
+   opens with it. Both `tenant:export` and `tenant:import` print the key's
+   fingerprint, and the two must match.
+2. **Schedule maintenance** on dev: landlord → Maintenance, a set start time
+   with "Email every tenant user" ticked. Staff see a countdown banner
+   straight away; at the start time they are held on a countdown page and the
+   mobile app queues work offline.
+3. **Once it's running, export on dev:** `php artisan tenant:export swecom`
+   (read-only; prints the archive path). Copy the archive to the server.
+4. **Import on production** (after step 4 above, `migrate` done, nobody
+   registered): `php artisan tenant:import /path/to/swecom-….cncms`. It
+   refuses to start if anything would clash, verifies every table against the
+   archive's checksums before committing, undoes everything on any failure,
+   then runs any tenant migrations newer than dev's.
+5. Delete the archive from both machines (it holds password hashes and
+   customer data). Point staff at the new URL. Dev is now an old copy: end
+   its maintenance window only if you mean to keep using it.
+
+Rehearse steps 3–4 once into a scratch database first
+(`createdb cncms_rehearsal`, run with `DB_DATABASE=cncms_rehearsal`,
+`php artisan migrate --force`, then `tenant:import`). That also times it.
 
 ---
 

@@ -29,6 +29,8 @@
     };
     $months = (int) ($payment['months'] ?? 0) ?: count($periods);
     $money = fn ($value): string => number_format((float) $value, 0, '.', ',').' FCFA';
+    $code = ! empty($r['security_code']) ? \App\Support\ReceiptSecurityCode::format($r['security_code']) : null;
+    $words = $r['amount_in_words'] ?? null;
 @endphp
 <!DOCTYPE html>
 <html>
@@ -56,6 +58,8 @@
         td.k { width: 40%; }
         td.v { text-align: right; }
         .total td { font-weight: bold; font-size: {{ $narrow ? 9 : 11 }}pt; padding-top: 3px; }
+        .code { font-family: 'DejaVu Sans Mono', monospace; font-weight: bold; letter-spacing: 1px; }
+        .words { font-size: {{ $narrow ? 6.5 : 7.5 }}pt; font-style: italic; margin-top: 2px; }
         .qr { width: {{ $narrow ? 80 : 100 }}px; height: {{ $narrow ? 80 : 100 }}px; }
     </style>
 </head>
@@ -77,6 +81,7 @@
         <div class="rule"></div>
         <div class="title">PAYMENT RECEIPT</div>
         <div>{{ $r['receipt_number'] ?? '' }}</div>
+        @if($code)<div class="code">Code {{ $code }}</div>@endif
         <div class="muted">{{ $issuedAt?->format('d M Y, H:i') }}</div>
     </div>
 
@@ -89,6 +94,8 @@
         <tr><td class="k">Period</td><td class="v">{{ $periodText }}</td></tr>
         @if(!empty($r['invoice']['number']))<tr><td class="k">For bill</td><td class="v">{{ $r['invoice']['number'] }}</td></tr>@endif
         @if($isPrepayment)<tr><td class="k">Prepaid</td><td class="v">{{ $months }} month(s)</td></tr>@endif
+        @if(!empty($payment['paid_by_label']))<tr><td class="k">Paid by</td><td class="v">{{ $payment['paid_by_label'] }}</td></tr>@endif
+        @if(!empty($payment['method_reference']))<tr><td class="k">Txn ID</td><td class="v">{{ $payment['method_reference'] }}</td></tr>@endif
         @if(!empty($payment['momo_ref']))<tr><td class="k">MOMO ref</td><td class="v">{{ $payment['momo_ref'] }}</td></tr>@endif
         @if(!empty($payment['collected_by']))<tr><td class="k">Collected by</td><td class="v">{{ $payment['collected_by'] }}</td></tr>@endif
     </table>
@@ -107,6 +114,9 @@
             @endif
         @endif
     </table>
+    @if($words)
+        <div class="words">{{ $words['en'] ?? '' }}<br>{{ $words['fr'] ?? '' }}</div>
+    @endif
 
     <div class="rule"></div>
 
@@ -114,6 +124,8 @@
         <div class="center">
             <img src="{{ $qr }}" class="qr" alt="QR code"><br>
             <span class="muted">Scan to check this receipt is genuine</span>
+            @if($code)<br><span class="muted">Security code <span class="code">{{ $code }}</span></span>@endif
+            <br><span class="muted">Only receipts with a QR code are valid.</span>
         </div>
     @endif
 

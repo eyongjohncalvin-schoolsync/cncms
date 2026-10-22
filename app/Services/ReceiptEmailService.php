@@ -57,20 +57,26 @@ class ReceiptEmailService
 
     /**
      * Called whenever a receipt is issued: emails it straight away when
-     * auto-send is on and this customer prefers email.
+     * either
+     *   - auto-send is on and this customer prefers email, or
+     *   - collection confirmations are on (docs/plans/cash-controls.md) —
+     *     every customer with an address hears from the company the moment
+     *     their money is recorded, whatever channel they prefer for the
+     *     receipt itself. A customer who paid and got nothing calls the
+     *     office: that is the control.
      */
     public function autoSendIfWanted(PaymentReceipt $receipt): void
     {
         $settings = NotificationSetting::cached();
 
-        if (! $settings->auto_send_receipts || ! $settings->email_enabled) {
+        if (! $settings->email_enabled || $this->unavailableReason($receipt) !== null) {
             return;
         }
 
-        if ($receipt->payment?->customer?->preferred_channel !== 'email' || $this->unavailableReason($receipt) !== null) {
-            return;
-        }
+        $prefersEmail = $receipt->payment?->customer?->preferred_channel === 'email';
 
-        $this->queue($receipt, null);
+        if (($settings->auto_send_receipts && $prefersEmail) || $settings->email_collection_confirmations) {
+            $this->queue($receipt, null);
+        }
     }
 }

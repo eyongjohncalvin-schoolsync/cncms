@@ -136,6 +136,30 @@ enum Permission: string
      */
     case OpeningBalancesApprove = 'opening_balances.approve';
 
+    // ---- Receipt stock (docs/plans/cash-controls.md) ---------
+    /** Allocate / print receipt books, cancel unused numbers, see who holds which numbers. */
+    case ReceiptsManageStock = 'receipts.manage_stock';
+
+    // ---- Cash book (docs/plans/cash-controls.md) -------------
+    /** The cash book, every remittance and the cash alerts. */
+    case CashView = 'cash.view';
+    /** Submit one's own end-of-day remittance (the daily income form). */
+    case CashRemit = 'cash.remit';
+    /** Receive remittances into a till, record deposits / transfers, close a till's day. */
+    case CashReceive = 'cash.receive';
+
+    // ---- Vouchers / bons de caisse ---------------------------
+    /** Request a voucher or a cash advance. */
+    case VouchersRequest = 'vouchers.request';
+    /**
+     * Approve / reject vouchers within the company's limits. Above a limit
+     * every investor must approve instead — that is the `is_investor` flag,
+     * not this permission (VoucherPolicy).
+     */
+    case VouchersApprove = 'vouchers.approve';
+    /** Pay out an approved voucher and settle cash advances. */
+    case VouchersPay = 'vouchers.pay';
+
     // ---- Audit -------------------------------------------------
     case AuditView = 'audit.view';
 
@@ -213,6 +237,8 @@ enum Permission: string
             'complaints' => 'Complaints',
             'arrears' => 'Arrears adjustments',
             'opening_balances' => 'Opening balances',
+            'receipts', 'cash' => 'Cash & receipts',
+            'vouchers' => 'Vouchers',
             'audit' => 'Audit',
             'company', 'services' => 'Company & settings',
             'command_runs' => 'Task scheduler',

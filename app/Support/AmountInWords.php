@@ -43,6 +43,93 @@ final class AmountInWords
         return ($negative ? 'Minus ' : '').trim($words).' FCFA Only';
     }
 
+    /**
+     * The French counterpart of convert() for receipts and vouchers
+     * (docs/plans/cash-controls.md), e.g. "Dix mille francs CFA". Traditional
+     * spelling as used on Cameroonian cheques: "et" before un/onze below 80,
+     * plural "s" on quatre-vingts and cents only when nothing follows,
+     * "mille" invariable (never "un mille"), "million(s)"/"milliard(s)".
+     */
+    public static function french(string|float|int $amount): string
+    {
+        $whole = (int) round((float) $amount);
+
+        if ($whole < 0) {
+            return 'Moins '.self::spellFrench(-$whole).' francs CFA';
+        }
+
+        // "franc" stays singular for zero and one ("Un franc CFA").
+        return ucfirst(self::spellFrench($whole)).($whole <= 1 ? ' franc CFA' : ' francs CFA');
+    }
+
+    /** @var array<int, string> */
+    private const FR_ONES = [
+        'zéro', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf', 'dix',
+        'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize', 'dix-sept', 'dix-huit', 'dix-neuf',
+    ];
+
+    /** @var array<int, string> */
+    private const FR_TENS = [2 => 'vingt', 3 => 'trente', 4 => 'quarante', 5 => 'cinquante', 6 => 'soixante'];
+
+    /**
+     * $final: nothing follows this number in the phrase — only then do
+     * "quatre-vingts" and "deux cents" take their plural s.
+     */
+    private static function spellFrench(int $number, bool $final = true): string
+    {
+        if ($number < 20) {
+            return self::FR_ONES[$number];
+        }
+
+        if ($number < 100) {
+            $tens = intdiv($number, 10);
+            $unit = $number % 10;
+
+            if ($tens <= 6) {
+                return $unit === 0 ? self::FR_TENS[$tens] : self::FR_TENS[$tens].($unit === 1 ? ' et un' : '-'.self::FR_ONES[$unit]);
+            }
+
+            if ($tens === 7) {
+                return 'soixante'.($unit === 1 ? ' et onze' : '-'.self::FR_ONES[10 + $unit]);
+            }
+
+            $rest = $number - 80;
+
+            return $rest === 0 ? 'quatre-vingt'.($final ? 's' : '') : 'quatre-vingt-'.self::FR_ONES[$rest];
+        }
+
+        if ($number < 1000) {
+            $hundreds = intdiv($number, 100);
+            $rest = $number % 100;
+            $head = $hundreds === 1 ? 'cent' : self::FR_ONES[$hundreds].' cent';
+
+            if ($rest === 0) {
+                return $head.($hundreds > 1 && $final ? 's' : '');
+            }
+
+            return $head.' '.self::spellFrench($rest, $final);
+        }
+
+        if ($number < 1_000_000) {
+            $thousands = intdiv($number, 1000);
+            $rest = $number % 1000;
+            $head = $thousands === 1 ? 'mille' : self::spellFrench($thousands, false).' mille';
+
+            return $head.($rest > 0 ? ' '.self::spellFrench($rest, $final) : '');
+        }
+
+        foreach ([1_000_000_000 => 'milliard', 1_000_000 => 'million'] as $value => $label) {
+            if ($number >= $value) {
+                $count = intdiv($number, $value);
+                $rest = $number % $value;
+
+                return self::spellFrench($count).' '.$label.($count > 1 ? 's' : '').($rest > 0 ? ' '.self::spellFrench($rest, $final) : '');
+            }
+        }
+
+        return (string) $number;
+    }
+
     private static function spellInteger(int $number): string
     {
         if ($number === 0) {

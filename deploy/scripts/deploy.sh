@@ -9,7 +9,7 @@
 set -euo pipefail
 
 APP_DIR=/var/www/cncms
-BRANCH=prepayment-drawdown-credit   # change to `main` once merged
+BRANCH=main
 PHP_FPM=php8.4-fpm
 
 cd "$APP_DIR"

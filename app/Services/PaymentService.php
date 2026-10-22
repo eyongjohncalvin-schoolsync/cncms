@@ -14,6 +14,7 @@ use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class PaymentService
@@ -24,6 +25,7 @@ class PaymentService
         private readonly ZoneRepositoryInterface $zones,
         private readonly TenantContext $context,
         private readonly PaymentReceiptService $receipts,
+        private readonly FieldReceiptService $fieldReceipts,
     ) {}
 
     /**
@@ -136,6 +138,8 @@ class PaymentService
                 && $this->context->zoneId !== null
                 && $customer->zone_id === $this->context->zoneId);
 
+        $this->assertValidMethod($data);
+
         $attributes = $data->toAttributes();
         $attributes['verification_status'] = $canAutoVerify ? 'verified' : 'pending';
         $attributes['recorded_by'] = auth()->id();
@@ -149,6 +153,10 @@ class PaymentService
             $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
         }
 
+        if ($data->receiptNumber !== null) {
+            return $this->createWithFieldReceipt($customer, $data, $attributes);
+        }
+
         $payment = $this->payments->create($customer->id, $attributes);
         $payment->setRelation('customer', $customer);
 
@@ -158,6 +166,43 @@ class PaymentService
         if ($payment->verification_status === 'verified') {
             $this->receipts->issueFor($payment, auth()->user());
         }
+
+        return $payment;
+    }
+
+    /**
+     * A payment the collector already gave a system-issued receipt for in
+     * the field (docs/plans/cash-controls.md, wave 2). The receipt is checked
+     * first (FieldReceiptService — number held by this collector and unused,
+     * code genuine) and the payment, its receipt and the used number are
+     * written in ONE transaction: a refused receipt stores nothing, and a
+     * number can never end up used without its payment or vice versa.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function createWithFieldReceipt(Customer $customer, PaymentData $data, array $attributes): Payment
+    {
+        $actor = auth()->user();
+
+        $payment = DB::transaction(function () use ($customer, $data, $attributes, $actor): Payment {
+            $claim = $this->fieldReceipts->claim(
+                $actor,
+                $customer,
+                (string) $data->amount,
+                (string) $data->receiptNumber,
+                $data->securityCode,
+                $data->receiptIssuedAt,
+            );
+
+            $payment = $this->payments->create($customer->id, $attributes);
+            $payment->setRelation('customer', $customer);
+
+            $this->receipts->issueField($payment, $claim['leaf'], $claim['issued_at'], $claim['device'], $data->securityCode, $actor);
+
+            return $payment;
+        });
+
+        $this->receipts->autoSend($payment->receipt, $payment);
 
         return $payment;
     }
@@ -227,6 +272,9 @@ class PaymentService
 
     public function update(Payment $payment, PaymentData $data): Payment
     {
+        $this->assertValidMethod($data, $payment);
+        $this->assertNotHandedOver($payment, $data);
+
         $attributes = $data->toAttributes();
 
         if ($data->clearArrearsFirst !== null) {
@@ -247,8 +295,55 @@ class PaymentService
         return $payment->load('customer');
     }
 
+    /**
+     * The Form Requests already apply Payment::methodRules(); this repeats
+     * the check for callers that build PaymentData without one — the
+     * offline sync push, whose items are not validated by a request. A
+     * mobile-money payment without its transaction ID can never be ticked
+     * off the wallet statement, so it is refused rather than stored.
+     */
+    private function assertValidMethod(PaymentData $data, ?Payment $existing = null): void
+    {
+        $method = $data->method ?? $existing?->method ?? 'cash';
+        $reference = $data->methodReference ?? $existing?->method_reference;
+
+        if (! in_array($method, Payment::METHODS, true)) {
+            throw ValidationException::withMessages(['method' => "Unknown payment method [{$method}]."]);
+        }
+
+        if (in_array($method, Payment::METHODS_REQUIRING_REFERENCE, true) && ($reference === null || $reference === '')) {
+            throw ValidationException::withMessages([
+                'method_reference' => 'Enter the '.Payment::METHOD_LABELS[$method].' transaction ID.',
+            ]);
+        }
+    }
+
+    /**
+     * Cash controls: once a payment's money has gone through a daily
+     * handover (a remittance line), its amount and method are part of the
+     * cash book — changing them would silently unbalance a counted handover.
+     * Other corrections (frequency, months) stay allowed.
+     */
+    private function assertNotHandedOver(Payment $payment, PaymentData $data): void
+    {
+        $changesMoney = ($data->amount !== null && bccomp($data->amount, (string) $payment->amount, 2) !== 0)
+            || ($data->method !== null && $data->method !== $payment->method);
+
+        if ($changesMoney && $payment->remittanceLine()->exists()) {
+            throw ValidationException::withMessages([
+                'amount' => 'This payment\'s money has already been handed over in a daily remittance — its amount and method can no longer change.',
+            ]);
+        }
+    }
+
     public function delete(Payment $payment): void
     {
+        if ($payment->remittanceLine()->exists()) {
+            throw ValidationException::withMessages([
+                'payment' => 'This payment\'s money has already been handed over in a daily remittance and cannot be deleted.',
+            ]);
+        }
+
         $this->payments->delete($payment);
 
         $this->forgetShowCache($payment->uuid);

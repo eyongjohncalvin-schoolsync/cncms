@@ -42,6 +42,12 @@ export default function MoreScreen() {
             title: 'Field tools',
             links: [
                 {
+                    title: 'Hand over cash',
+                    subtitle: 'Today’s collections — count your cash and give it to the cashier',
+                    href: '/hand-over',
+                    accentColor: colors.accent.payment,
+                },
+                {
                     title: 'Disconnections',
                     subtitle: 'Customers flagged for non-payment in your zone',
                     href: '/disconnections',

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\CustomerStatementController;
 use App\Http\Controllers\PaymentReceiptController;
+use App\Http\Controllers\ReceiptCheckController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -44,3 +45,12 @@ Route::get('payment-receipts/{receiptUuid}/verify', [PaymentReceiptController::c
 Route::get('customers/{customerUuid}/statement/shared', [CustomerStatementController::class, 'sharedPdf'])
     ->middleware(['signed', 'throttle:receipt-share'])
     ->name('customers.statement.shared');
+
+// The short check link printed as the QR on every receipt from cash
+// controls onwards (docs/plans/cash-controls.md): /r/{tenant}/{number}?c=CODE.
+// Deliberately NOT signed — a phone builds this link offline — the
+// receipt's security code is what proves it genuine (ReceiptCheckController).
+Route::get('r/{tenant}/{number}', [ReceiptCheckController::class, 'show'])
+    ->middleware('throttle:receipt-share')
+    ->where('number', '[A-Za-z0-9-]+')
+    ->name('receipts.check');

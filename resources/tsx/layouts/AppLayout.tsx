@@ -11,6 +11,7 @@ import { RoleBadge } from '@/components/shared/StatusBadge';
 import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { NotificationBell } from '@/components/shared/NotificationBell';
 import { EmergencyBanner } from '@/components/shared/EmergencyBanner';
+import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { AppNav } from '@/components/shared/AppNav';
 import { MobileNavDrawer } from '@/layouts/MobileNavDrawer';
@@ -48,7 +49,7 @@ export function AppLayout({
      */
     breadcrumbs?: BreadcrumbItem[];
 }) {
-    const { auth, flash, notifications, company } = usePage<PageProps>().props;
+    const { auth, flash, notifications, company, maintenance } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
     const permissions = auth.user?.permissions ?? [];
     const { t } = useTranslation();
@@ -61,7 +62,7 @@ export function AppLayout({
     // when there's no authenticated user (notifications stays null either
     // way). 60s is a deliberate perf choice — a cable operator's in-app
     // notices aren't time-critical enough to warrant a tighter interval.
-    usePoll(60000, { only: ['notifications'] });
+    usePoll(60000, { only: ['notifications', 'maintenance'] });
 
     // Mobile off-canvas nav (`< md`). Desktop (`>= md`) never opens this —
     // the <aside> below is the only nav there and the hamburger is
@@ -155,7 +156,7 @@ export function AppLayout({
                             <>
                                 {auth.user.is_landlord && (
                                     <Link
-                                        href="/landlord/tenants"
+                                        href="/landlord"
                                         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-indigo-600 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
                                         title={t('common.landlord')}
                                     >
@@ -205,6 +206,8 @@ export function AppLayout({
                         <Breadcrumb items={breadcrumbs} />
                     </div>
                 )}
+
+                <MaintenanceBanner notice={maintenance} />
 
                 <EmergencyBanner notifications={notifications?.emergency ?? []} />
 

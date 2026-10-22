@@ -38,7 +38,7 @@ class StoreRoleRequest extends FormRequest
             'name' => [
                 'required', 'string', 'max:50',
                 'regex:/^[a-z0-9][a-z0-9_-]*$/',
-                Rule::notIn(['super', 'admin', 'manager', 'agent', 'worker']),
+                Rule::notIn(['super', 'admin', 'manager', 'agent', 'cashier', 'worker']),
                 // Tenant `roles` table (default connection is the tenant one
                 // inside this request) — rejects a collision with any system
                 // OR previously-created custom role.

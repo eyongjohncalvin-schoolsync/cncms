@@ -1,7 +1,7 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { acknowledgeNotification, fetchExpenseCategories, pullChanges, pushChanges, uploadReceipt } from '../api/sync';
-import { isNetworkError, extractErrorMessage } from '../api/client';
+import { isNetworkError, isMaintenanceError, extractErrorMessage } from '../api/client';
 import { upsertExpenseCategories } from '../db/categories';
 import {
     getFailedPaymentsCount,
@@ -32,6 +32,7 @@ import { getPendingAcknowledgements, markAckConfirmed, markAckPending, upsertNot
 import { refreshNotificationsState } from '../notifications/notificationStore';
 import { clearLastSyncAt, getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
 import { patchSyncState } from './syncStore';
+import { syncReceiptStock } from '../fieldReceipts/receiptStock';
 import type { SyncPushComplaintItem, SyncPushExpenditureItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
 
 /**
@@ -188,6 +189,7 @@ class SyncManagerImpl {
             await this.pull();
             await this.uploadPendingReceipts();
             await this.flushPendingAcknowledgements();
+            await this.refreshReceiptStock();
 
             this.retryAttempt = 0;
 
@@ -198,9 +200,11 @@ class SyncManagerImpl {
 
             patchSyncState({ lastError: null });
         } catch (error) {
-            if (isNetworkError(error)) {
+            if (isNetworkError(error) || isMaintenanceError(error)) {
                 // Expected/normal — no lastError surfaced, this is the
-                // calm "offline, queuing" path, not an error state.
+                // calm "offline, queuing" path, not an error state. A
+                // platform maintenance window is treated the same way: the
+                // maintenance banner explains it.
                 this.scheduleRetry();
             } else {
                 patchSyncState({ lastError: extractErrorMessage(error, `Sync failed (${trigger}).`) });
@@ -315,6 +319,14 @@ class SyncManagerImpl {
             // SQLite stores this as 0/1; coerce for the JSON payload.
             clear_arrears_first: !!payment.clear_arrears_first,
             created_at: payment.created_at,
+            // Cash controls (docs/plans/cash-controls.md): how they paid, and
+            // the system-issued receipt this phone printed, which the server
+            // checks before it stores the payment.
+            method: payment.method ?? 'cash',
+            method_reference: payment.method_reference,
+            receipt_number: payment.receipt_number,
+            security_code: payment.security_code,
+            receipt_issued_at: payment.receipt_issued_at,
         }));
 
         const expenditureItems: SyncPushExpenditureItem[] = queuedExpenditures.map((expenditure) => ({
@@ -429,6 +441,21 @@ class SyncManagerImpl {
 
         if (anyConfirmed) {
             await refreshNotificationsState();
+        }
+    }
+
+    /**
+     * Cash controls: registers this phone for receipts on first sync and
+     * draws its system-issued receipt numbers (src/fieldReceipts). Best
+     * effort, like uploadPendingReceipts() — a failure (no permission to
+     * record payments, a server hiccup) must never fail the sync; the phone
+     * simply keeps the numbers it already has until the next cycle.
+     */
+    private async refreshReceiptStock(): Promise<void> {
+        try {
+            await syncReceiptStock();
+        } catch {
+            // Swallowed deliberately — see doc comment above.
         }
     }
 

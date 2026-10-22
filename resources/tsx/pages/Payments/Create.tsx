@@ -7,8 +7,9 @@ import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
+import { PaymentMethodFields } from '@/components/shared/PaymentMethodFields';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Customer, CustomerRecentPayment, PageProps, PaymentFrequency } from '@/types';
+import type { Customer, CustomerRecentPayment, PageProps, PaymentFrequency, PaymentMethod } from '@/types';
 
 function frequencyLabel(freq: PaymentFrequency): string {
     return freq === 'monthly' ? 'Monthly' : freq === 'months' ? 'Multi-month' : 'Yearly';
@@ -16,6 +17,8 @@ function frequencyLabel(freq: PaymentFrequency): string {
 
 interface PaymentsCreateProps {
     customers: Customer[];
+    /** The signed-in user holds an open system-printed receipt book (cash controls). */
+    has_receipt_book?: boolean;
 }
 
 const frequencyOptions: { value: PaymentFrequency; label: string }[] = [
@@ -102,7 +105,7 @@ function MissingCustomerNote() {
     );
 }
 
-export default function PaymentsCreate({ customers }: PaymentsCreateProps) {
+export default function PaymentsCreate({ customers, has_receipt_book = false }: PaymentsCreateProps) {
     const [mode, setMode] = useState<'single' | 'bulk'>('single');
     const payableCustomers = useMemo(() => customers.filter(isPayable), [customers]);
 
@@ -138,12 +141,12 @@ export default function PaymentsCreate({ customers }: PaymentsCreateProps) {
                 </div>
             </div>
 
-            {mode === 'single' ? <SinglePaymentForm customers={payableCustomers} /> : <BulkPaymentForm customers={payableCustomers} />}
+            {mode === 'single' ? <SinglePaymentForm customers={payableCustomers} hasReceiptBook={has_receipt_book} /> : <BulkPaymentForm customers={payableCustomers} />}
         </AppLayout>
     );
 }
 
-function SinglePaymentForm({ customers }: { customers: Customer[] }) {
+function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[]; hasReceiptBook: boolean }) {
     const permissions = usePage<PageProps>().props.auth.user?.permissions ?? [];
     const canLeaveArrearsDue = permissions.includes('*') || permissions.includes('arrears.approve');
     const [search, setSearch] = useState('');
@@ -157,6 +160,9 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
         // Owner's rule: a prepayment clears arrears first unless an
         // arrears approver deliberately unticks it (enforced server-side too).
         clear_arrears_first: true,
+        method: 'cash' as PaymentMethod,
+        method_reference: '',
+        receipt_number: '',
     });
 
     const filteredCustomers = useMemo(() => {
@@ -422,6 +428,27 @@ function SinglePaymentForm({ customers }: { customers: Customer[] }) {
                                 )}
                                 {prepaymentSplit && <p className="mt-2 pl-6 text-xs text-slate-500">{prepaymentSplit}</p>}
                             </div>
+                        )}
+
+                        <PaymentMethodFields
+                            method={data.method}
+                            reference={data.method_reference}
+                            onMethodChange={(method) => setData('method', method)}
+                            onReferenceChange={(reference) => setData('method_reference', reference)}
+                            methodError={errors.method}
+                            referenceError={errors.method_reference}
+                        />
+
+                        {hasReceiptBook && (
+                            <TextInput
+                                id="receipt_number"
+                                label="Receipt book number (if you wrote a paper receipt)"
+                                placeholder="RCP-2026-000123"
+                                value={data.receipt_number}
+                                onChange={(e) => setData('receipt_number', e.target.value.toUpperCase())}
+                                error={errors.receipt_number}
+                                hint="The number printed on the leaf you gave the customer. Leave blank if you didn't use your book."
+                            />
                         )}
 
                         <TextInput

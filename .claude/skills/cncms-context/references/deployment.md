@@ -1,5 +1,10 @@
 # Deployment, Hosting & the Landlord Context — prep notes
 
+> **SUPERSEDED HOSTING DECISION (2026-10-22): production = Hostinger VPS managed by Ploi,
+> deploying `main`.** Laravel Cloud is dropped (`deploy/LARAVEL-CLOUD.md` deleted). Runbook:
+> `deploy/PLOI.md`. swecom's data moves with `tenant:export` / `tenant:import` (DEPLOYMENT.md
+> "swecom cutover"). The notes below are historical where they mention Cloud or "no Ploi".
+
 Status: **Deployment kit BUILT 2026-09-01 — not yet run against a real server.** The landlord
 context is still unfinished (§3).
 
