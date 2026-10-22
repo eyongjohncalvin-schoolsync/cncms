@@ -49,6 +49,13 @@ class CashMovement extends Model
 
     public const string KIND_OPENING_BALANCE = 'opening_balance';
 
+    /**
+     * Collected technician motivation fees paid to the technician
+     * (docs/plans/installation-and-promotions.md, D13) — pass-through cash,
+     * never an expense. Source: App\Models\TechnicianFeePayout.
+     */
+    public const string KIND_TECHNICIAN_FEE_PAYOUT = 'technician_fee_payout';
+
     protected function casts(): array
     {
         return [

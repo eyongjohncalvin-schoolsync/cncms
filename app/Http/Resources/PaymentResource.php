@@ -23,6 +23,10 @@ class PaymentResource extends JsonResource
             'amount' => $this->amount,
             'credit' => $this->credit,
             'frequency' => $this->frequency,
+            // Read-only: subscription | installation | technician_fee
+            // (docs/plans/installation-and-promotions.md). Never accepted on
+            // input — a payment recorded through the API is a subscription.
+            'purpose' => $this->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
             'method' => $this->method,
             'method_reference' => $this->method_reference,
             'months' => $this->months,

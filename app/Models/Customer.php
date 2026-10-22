@@ -70,6 +70,15 @@ class Customer extends Model
         return $this->hasMany(Payment::class);
     }
 
+    /**
+     * One-off charges (installation fees) — never part of the monthly bill.
+     * See App\Models\CustomerCharge.
+     */
+    public function charges(): HasMany
+    {
+        return $this->hasMany(CustomerCharge::class);
+    }
+
     public function manuscripts(): HasMany
     {
         return $this->hasMany(Manuscript::class);

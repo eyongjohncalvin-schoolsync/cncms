@@ -158,6 +158,8 @@ class DefaultRolesSeeder extends Seeder
             Permission::ArrearsRequest->value,
             Permission::ArrearsApprove->value,
 
+            Permission::InstallationsManage->value,
+
             Permission::OpeningBalancesView->value,
             Permission::OpeningBalancesEnter->value,
 

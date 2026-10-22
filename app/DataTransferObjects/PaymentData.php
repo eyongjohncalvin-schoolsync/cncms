@@ -57,6 +57,12 @@ final readonly class PaymentData
         public ?string $receiptNumber = null,
         public ?string $securityCode = null,
         public ?string $receiptIssuedAt = null,
+        // What the money is for (Payment::PURPOSES) and, for an installation
+        // payment, the charge it pays. Only server-side callers set these —
+        // fromArray() never reads them, so a payment form or an older mobile
+        // build can only ever record a subscription payment (the column default).
+        public ?string $purpose = null,
+        public ?int $customerChargeId = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -103,6 +109,8 @@ final readonly class PaymentData
             'collected_at' => $this->collectedAt,
             'method' => $this->method,
             'method_reference' => $this->methodReference,
+            'purpose' => $this->purpose,
+            'customer_charge_id' => $this->customerChargeId,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

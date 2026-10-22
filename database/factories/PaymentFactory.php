@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\CustomerCharge;
 use App\Models\Payment;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -44,6 +45,24 @@ class PaymentFactory extends Factory
     {
         return $this->state(fn (array $attributes): array => [
             'verification_status' => 'rejected',
+        ]);
+    }
+
+    /** A reconnection fine — the technician's motivation fee (D13). */
+    public function technicianFee(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'purpose' => Payment::PURPOSE_TECHNICIAN_FEE,
+        ]);
+    }
+
+    /** An instalment against an installation charge, for the same customer. */
+    public function installation(CustomerCharge $charge): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'customer_id' => $charge->customer_id,
+            'purpose' => Payment::PURPOSE_INSTALLATION,
+            'customer_charge_id' => $charge->id,
         ]);
     }
 

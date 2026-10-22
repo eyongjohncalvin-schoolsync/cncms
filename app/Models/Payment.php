@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use LogicException;
 
 #[Fillable([
     'customer_id', 'amount', 'credit', 'frequency', 'expiration_date', 'months', 'prepaid_rate', 'clear_arrears_first',
@@ -26,11 +27,84 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'collected_at',
     // How the money came in + the operator transaction ID — see METHODS.
     'method', 'method_reference',
+    // What the money is for — see PURPOSES. Set only by server-side
+    // callers (PaymentService, CustomerStatusService, CustomerChargeService),
+    // never accepted from a payment form.
+    'purpose', 'customer_charge_id',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model
 {
     use Auditable, HasUuid, ScopesRouteBindingToBranch;
+
+    /** The monthly bill — the only money billing ever sees. */
+    public const string PURPOSE_SUBSCRIPTION = 'subscription';
+
+    /** Pays an installation charge (customer_charge_id), possibly in instalments. */
+    public const string PURPOSE_INSTALLATION = 'installation';
+
+    /** The reconnection fine, owed to the technician (D13) — pass-through, never income. */
+    public const string PURPOSE_TECHNICIAN_FEE = 'technician_fee';
+
+    /**
+     * What a payment is for (docs/plans/installation-and-promotions.md,
+     * phase 1). Defaults to `subscription` at the column, so every existing
+     * payment and every older mobile build keeps its meaning.
+     *
+     * @var list<string>
+     */
+    public const array PURPOSES = [self::PURPOSE_SUBSCRIPTION, self::PURPOSE_INSTALLATION, self::PURPOSE_TECHNICIAN_FEE];
+
+    /** @var array<string, string> */
+    public const array PURPOSE_LABELS = [
+        self::PURPOSE_SUBSCRIPTION => 'Subscription',
+        self::PURPOSE_INSTALLATION => 'Installation',
+        self::PURPOSE_TECHNICIAN_FEE => 'Technician motivation fee',
+    ];
+
+    /**
+     * The heading printed on the receipt for each purpose.
+     *
+     * @var array<string, string>
+     */
+    public const array RECEIPT_TITLES = [
+        self::PURPOSE_SUBSCRIPTION => 'PAYMENT RECEIPT',
+        self::PURPOSE_INSTALLATION => 'INSTALLATION RECEIPT',
+        self::PURPOSE_TECHNICIAN_FEE => 'TECHNICIAN MOTIVATION FEE',
+    ];
+
+    /**
+     * Mirrors the column default so a just-created model already knows it
+     * is a subscription payment without a refresh.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'purpose' => self::PURPOSE_SUBSCRIPTION,
+    ];
+
+    /**
+     * A payment's purpose (and the charge it pays) cannot change once it has
+     * been verified, receipted or handed over — the receipt, the bill run
+     * and the cash book all relied on it. A correction is a reject/void and
+     * a new payment.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (Payment $payment): void {
+            if (! $payment->isDirty(['purpose', 'customer_charge_id'])) {
+                return;
+            }
+
+            $locked = $payment->getOriginal('verification_status') === 'verified'
+                || $payment->receipt()->exists()
+                || $payment->remittanceLine()->exists();
+
+            if ($locked) {
+                throw new LogicException('A payment\'s purpose cannot change once it has been verified, receipted or handed over — reject it and record a new one.');
+            }
+        });
+    }
 
     /**
      * How a customer paid (docs/plans/cash-controls.md). Cash sits in the
@@ -154,8 +228,46 @@ class Payment extends Model
      */
     public function scopeEligibleForPeriod(Builder $query, string $period): Builder
     {
+        // Installation and technician-fee money never pays a bill
+        // (docs/plans/installation-and-promotions.md, phase 1).
         return $query
+            ->where($query->qualifyColumn('purpose'), self::PURPOSE_SUBSCRIPTION)
             ->where('verification_status', 'verified')
             ->where(fn ($inner) => $inner->whereNull('processed_period')->orWhere('processed_period', $period));
+    }
+
+    /**
+     * Subscription money only — the monthly bill. Every read that feeds a
+     * bill, a balance, arrears, credit, a collection rate or a "has paid"
+     * check goes through this.
+     */
+    public function scopeSubscription(Builder $query): Builder
+    {
+        return $query->where($query->qualifyColumn('purpose'), self::PURPOSE_SUBSCRIPTION);
+    }
+
+    /**
+     * Company income — everything except the technician's pass-through fee.
+     */
+    public function scopeIncome(Builder $query): Builder
+    {
+        return $query->where($query->qualifyColumn('purpose'), '!=', self::PURPOSE_TECHNICIAN_FEE);
+    }
+
+    public function isSubscription(): bool
+    {
+        return ($this->purpose ?? self::PURPOSE_SUBSCRIPTION) === self::PURPOSE_SUBSCRIPTION;
+    }
+
+    /** The installation charge this payment pays, when purpose = installation. */
+    public function customerCharge(): BelongsTo
+    {
+        return $this->belongsTo(CustomerCharge::class);
+    }
+
+    /** The cashier's payout to the technician that settled this fee, when purpose = technician_fee. */
+    public function technicianFeePayout(): BelongsTo
+    {
+        return $this->belongsTo(TechnicianFeePayout::class);
     }
 }
