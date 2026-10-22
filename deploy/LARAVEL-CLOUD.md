@@ -202,14 +202,16 @@ Postgres (schema `tenantswecom`). Two-phase:
 
 - *For this test:* don't migrate it. Validate the deploy with fresh
   self-service data + a small xlsx import. Faster, and nothing to lose.
-- *For real production:* a scripted data migration — after `tenants:migrate`
-  builds the empty `tenantswecom` schema on Supabase, load a
-  **data-only** `pg_dump` of that schema plus the swecom-related `public`
-  rows (`tenants`, `users`, `tenant_user_indexes`, `personal_access_tokens`,
-  `domains`), then reset sequences. Do it **before creating any Cloud users**
-  to avoid email/PK collisions, and rehearse it against a throwaway Supabase
-  project first. Building `tenants:migrate` first then loading data-only
-  sidesteps the PG18→Supabase version gap (only data moves, not DDL).
+- *For real production:* `php artisan tenant:export swecom` on dev, then
+  `php artisan tenant:import <archive>` against the Cloud database. Full
+  steps are in DEPLOYMENT.md under "swecom cutover". The import builds the
+  schema with migrations and moves only data, so the PG18→Supabase version
+  gap doesn't matter. Run it **before creating any Cloud users**, with the
+  dev `APP_KEY`, and rehearse against a throwaway Supabase project first.
+  Without shell access to Cloud, run the import from your machine with the
+  `DB_*` variables pointed at the Cloud database. The storage files then land
+  on your machine, not Cloud's disk, so copy them up separately (see "File
+  storage" above).
 
 ## 6. If it feels slow
 
