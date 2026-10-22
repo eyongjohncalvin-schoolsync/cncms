@@ -34,7 +34,7 @@ export default function EditProfileScreen() {
 
     const [name, setName] = useState(user?.name ?? '');
     const [username, setUsername] = useState(user?.username ?? '');
-    const [email, setEmail] = useState(user?.email ?? '');
+    const email = user?.email ?? '';
     const [errors, setErrors] = useState<ProfileFormErrors>({});
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
@@ -56,7 +56,6 @@ export default function EditProfileScreen() {
             const response = await updateProfile({
                 name: name.trim(),
                 username: username.trim(),
-                email: email.trim(),
             });
 
             await updateCachedUser(response.user);
@@ -95,7 +94,7 @@ export default function EditProfileScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
             <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-                <Text style={styles.hint}>Update your name, username, or email. This does not change your password.</Text>
+                <Text style={styles.hint}>Update your name or username. This does not change your password.</Text>
 
                 <UiTextInput
                     label="Name"
@@ -120,18 +119,10 @@ export default function EditProfileScreen() {
                     error={errors.username}
                 />
 
-                <UiTextInput
-                    label="Email"
-                    value={email}
-                    onChangeText={(text) => {
-                        setEmail(text);
-                        setErrors((prev) => ({ ...prev, email: undefined }));
-                    }}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="email-address"
-                    error={errors.email}
-                />
+                {/* A new email must be confirmed with a code sent to it, so it
+                    has its own screen (app/change-email.tsx). */}
+                <UiTextInput label="Email" value={email} editable={false} error={errors.email} />
+                <Button title="Change email" variant="ghost" onPress={() => router.push('/change-email')} />
 
                 {submitError ? (
                     <View style={styles.submitErrorBox}>

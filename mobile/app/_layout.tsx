@@ -201,6 +201,19 @@ function RootNavigation() {
                 name="change-password"
                 options={{ presentation: 'modal', headerShown: true, title: 'Change Password' }}
             />
+            {/* Account security, reached from settings.tsx's Security card. */}
+            <Stack.Screen
+                name="change-email"
+                options={{ presentation: 'modal', headerShown: true, title: 'Change Email' }}
+            />
+            <Stack.Screen
+                name="two-factor"
+                options={{ presentation: 'modal', headerShown: true, title: 'Two-Factor Authentication' }}
+            />
+            <Stack.Screen
+                name="sessions"
+                options={{ presentation: 'modal', headerShown: true, title: 'Signed-in Devices' }}
+            />
             <Stack.Screen name="reports" options={{ presentation: 'modal', headerShown: true, title: 'Reports' }} />
             <Stack.Screen name="resources" options={{ presentation: 'modal', headerShown: true, title: 'Resources' }} />
             <Stack.Screen name="zones" options={{ presentation: 'modal', headerShown: true, title: 'Zones' }} />

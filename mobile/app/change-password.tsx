@@ -79,7 +79,7 @@ export default function ChangePasswordScreen() {
             <View style={styles.confirmFlex}>
                 <Text style={styles.confirmTitle}>Password changed</Text>
                 <Text style={styles.confirmBody}>
-                    Your password has been updated. You're still signed in on this device.
+                    Your password has been updated. You're still signed in on this device; other phones and web browsers were signed out.
                 </Text>
                 <Button title="Done" onPress={() => router.back()} />
             </View>
