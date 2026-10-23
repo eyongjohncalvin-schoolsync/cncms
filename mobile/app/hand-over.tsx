@@ -59,7 +59,7 @@ export default function HandOverScreen() {
             return;
         }
 
-        const expected = Number(preview.totals.cash);
+        const expected = Number((preview.cash_to_hand_over ?? preview.totals.cash));
         const go = async () => {
             setSubmitting(true);
 
@@ -125,11 +125,16 @@ export default function HandOverScreen() {
                 <>
                     <Card accentColor={colors.accent.payment}>
                         <Text style={styles.label}>Cash to hand over</Text>
-                        <Text style={styles.big}>{formatFcfa(Number(preview.totals.cash))}</Text>
+                        <Text style={styles.big}>{formatFcfa(Number((preview.cash_to_hand_over ?? preview.totals.cash)))}</Text>
                         <Text style={styles.meta}>
                             {preview.count} collection(s){preview.oldest_at ? ` since ${new Date(preview.oldest_at).toLocaleString()}` : ''}
                         </Text>
                         {mobile > 0 ? <Text style={styles.meta}>Mobile money {formatFcfa(mobile)} — already in the company wallet.</Text> : null}
+                        {preview.bons && preview.bons.length > 0 ? (
+                            <Text style={styles.meta}>
+                                {`Collected ${formatFcfa(Number(preview.totals.cash))} in cash; ${formatFcfa(Number(preview.bons_total ?? 0))} already paid on approved bons (${preview.bons.map((bon) => bon.number).join(', ')}) — the cashier settles them at the handover.`}
+                            </Text>
+                        ) : null}
                     </Card>
 
                     <Card>
@@ -148,7 +153,7 @@ export default function HandOverScreen() {
                                 </View>
                             ))}
                         </View>
-                        <Text style={[styles.counted, counted !== Number(preview.totals.cash) && styles.countedOff]}>Counted: {formatFcfa(counted)}</Text>
+                        <Text style={[styles.counted, counted !== Number((preview.cash_to_hand_over ?? preview.totals.cash)) && styles.countedOff]}>Counted: {formatFcfa(counted)}</Text>
                     </Card>
 
                     <UiTextInput label="Note (optional)" value={note} onChangeText={setNote} />

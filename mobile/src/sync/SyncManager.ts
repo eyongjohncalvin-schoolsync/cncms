@@ -14,9 +14,11 @@ import {
     applyVerificationUpdates,
 } from '../db/payments';
 import {
+    getBonRequestsAwaitingReceiptUpload,
     getFailedExpendituresCount,
     getQueuedExpenditures,
     getQueuedExpendituresCount,
+    markBonReceiptDone,
     markExpenditureFailed,
     markExpenditureSynced,
 } from '../db/expenditures';
@@ -33,7 +35,7 @@ import { refreshNotificationsState } from '../notifications/notificationStore';
 import { clearLastSyncAt, getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
 import { patchSyncState } from './syncStore';
 import { syncReceiptStock } from '../fieldReceipts/receiptStock';
-import type { SyncPushComplaintItem, SyncPushExpenditureItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
+import type { SyncPushBonRequestItem, SyncPushComplaintItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
 
 /**
  * Speaks the server's real sync protocol directly (POST /sync/push, GET
@@ -329,13 +331,18 @@ class SyncManagerImpl {
             receipt_issued_at: payment.receipt_issued_at,
         }));
 
-        const expenditureItems: SyncPushExpenditureItem[] = queuedExpenditures.map((expenditure) => ({
-            local_uuid: expenditure.local_uuid,
-            category_uuid: expenditure.category_uuid,
-            amount: expenditure.amount,
-            description: expenditure.description,
-            spent_at: expenditure.spent_at,
-            notes: expenditure.notes,
+        // "Request a bon" (docs/plans/expenditures-and-spending-controls.md):
+        // every queued row — including one an older build saved as an
+        // expense — goes up as a bon request and waits for approval.
+        const bonRequestItems: SyncPushBonRequestItem[] = queuedExpenditures.map((row) => ({
+            local_uuid: row.local_uuid,
+            category_uuid: row.category_uuid,
+            amount: row.amount,
+            payee_name: row.payee_name ?? 'Not stated',
+            purpose: row.description?.trim() || 'Expense recorded on the phone',
+            needed_on: row.spent_at,
+            from_collections: row.from_collections === 1,
+            created_at: row.created_at,
         }));
 
         // complaint-desk.md section 7 — third create-only sync entity type,
@@ -353,7 +360,7 @@ class SyncManagerImpl {
         const response = await pushChanges({
             device_id: deviceId,
             last_sync_at: lastSyncAt,
-            changes: { payments: paymentItems, expenditures: expenditureItems, complaints: complaintItems },
+            changes: { payments: paymentItems, bon_requests: bonRequestItems, complaints: complaintItems },
         });
 
         await Promise.all([
@@ -362,9 +369,9 @@ class SyncManagerImpl {
                     ? markPaymentSynced(result.local_uuid, result.server_uuid)
                     : markPaymentFailed(result.local_uuid, result.error ?? 'Sync failed'),
             ),
-            ...response.results.expenditures.map((result) =>
+            ...(response.results.bon_requests ?? []).map((result) =>
                 result.status === 'synced' && result.server_uuid
-                    ? markExpenditureSynced(result.local_uuid, result.server_uuid)
+                    ? markExpenditureSynced(result.local_uuid, result.server_uuid, result.number ?? null)
                     : markExpenditureFailed(result.local_uuid, result.error ?? 'Sync failed'),
             ),
             ...response.results.complaints.map((result) =>
@@ -376,7 +383,7 @@ class SyncManagerImpl {
 
         patchSyncState({
             syncingProgress: {
-                done: response.results.payments.length + response.results.expenditures.length + response.results.complaints.length,
+                done: response.results.payments.length + (response.results.bon_requests ?? []).length + response.results.complaints.length,
                 total: queuedPayments.length + queuedExpenditures.length + queuedComplaints.length,
             },
         });
@@ -488,6 +495,28 @@ class SyncManagerImpl {
                 await markPaymentReceiptUploaded(payment.local_uuid, result.receipt_url);
             } catch {
                 // Swallowed deliberately — see doc comment above.
+            }
+        }
+
+        // A bon request's receipt photo: only its requester, only while the
+        // bon is still pending. Once the server refuses for good (403/422),
+        // stop retrying.
+        const pendingBonReceipts = await getBonRequestsAwaitingReceiptUpload();
+
+        for (const bon of pendingBonReceipts) {
+            if (!bon.server_uuid || !bon.receipt_local_uri) {
+                continue;
+            }
+
+            try {
+                const result = await uploadReceipt('voucher', bon.server_uuid, bon.receipt_local_uri);
+                await markBonReceiptDone(bon.local_uuid, result.receipt_url);
+            } catch (error) {
+                const status = (error as { response?: { status?: number } })?.response?.status;
+
+                if (status === 403 || status === 422) {
+                    await markBonReceiptDone(bon.local_uuid, '');
+                }
             }
         }
     }

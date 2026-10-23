@@ -73,7 +73,7 @@ export default function MoreScreen() {
                 },
                 {
                     title: 'Resources',
-                    subtitle: 'Your recorded expenditures',
+                    subtitle: 'Your bon requests',
                     href: '/resources',
                     accentColor: colors.accent.expense,
                 },

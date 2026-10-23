@@ -195,6 +195,13 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_number TEXT' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN security_code TEXT' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_issued_at TEXT' },
+    // "Request a bon" (docs/plans/expenditures-and-spending-controls.md): the
+    // `expenditures` outbox now holds bon requests — who is paid, whether it
+    // was already paid out of the agent's collections, and the BC- number
+    // the server gave it. spent_at is the day the money is needed.
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN payee_name TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN from_collections INTEGER NOT NULL DEFAULT 0' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN voucher_number TEXT' },
 ];
 
 /**

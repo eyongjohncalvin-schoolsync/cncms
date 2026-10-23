@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, ScrollView, Pressable, Image, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Image, StyleSheet, Alert, Switch } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Button } from '../src/components/ui/Button';
@@ -10,33 +10,34 @@ import { getExpenseCategories } from '../src/db/categories';
 import { insertLocalExpenditure } from '../src/db/expenditures';
 import { syncManager } from '../src/sync/SyncManager';
 import { glyphForCategoryIcon } from '../src/utils/categoryIcons';
-import { validateExpenditureForm, type ExpenditureFormErrors } from '../src/utils/validation';
-import { formatFcfa, todayDateOnly, yesterdayDateOnly } from '../src/utils/format';
+import { validateBonRequestForm, type BonRequestFormErrors } from '../src/utils/validation';
+import { formatFcfa, todayDateOnly } from '../src/utils/format';
 import { colors } from '../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../src/theme/tokens';
 import type { LocalExpenseCategory } from '../src/types/db';
 
 /**
- * Real form per mobile-app-react-native.md §4's "reached one tap deeper"
- * Record Expense spec: category (icon picker), amount, description
- * (required — deliberately stricter than the web form, see
- * src/utils/validation.ts), date (defaults to today, editable), optional
- * camera-only receipt photo. Submits to the local outbox via
- * src/db/expenditures.ts's insertLocalExpenditure() — SyncManager already
- * picks queued rows up on its own triggers; this screen also nudges an
- * immediate sync attempt right after the write (best-effort, never
- * blocking the calm "Saved · will sync" confirmation).
+ * Request a bon (docs/plans/expenditures-and-spending-controls.md, item 2).
+ * Every franc that leaves the company goes through a numbered bon, so the
+ * phone no longer records an expense: it asks for a bon — category, amount,
+ * who is paid, what for, the day it is needed, an optional receipt photo,
+ * and "already paid from my collections" (then, once approved, it is settled
+ * at the agent's next cash handover so the cash count still matches).
+ * Saved to the local outbox first (works offline); SyncManager sends it as
+ * a `bon_requests` item and it waits for approval like any bon.
  */
-export default function RecordExpenseScreen() {
+export default function RequestBonScreen() {
     const router = useRouter();
 
     const [categories, setCategories] = useState<LocalExpenseCategory[]>([]);
     const [categoryUuid, setCategoryUuid] = useState<string | null>(null);
     const [amountText, setAmountText] = useState('');
+    const [payeeName, setPayeeName] = useState('');
     const [description, setDescription] = useState('');
     const [dateText, setDateText] = useState(todayDateOnly());
+    const [fromCollections, setFromCollections] = useState(false);
     const [photoUri, setPhotoUri] = useState<string | null>(null);
-    const [errors, setErrors] = useState<ExpenditureFormErrors>({});
+    const [errors, setErrors] = useState<BonRequestFormErrors>({});
     const [submitting, setSubmitting] = useState(false);
     const [saved, setSaved] = useState(false);
     const [savedSummary, setSavedSummary] = useState<{ category: string; amount: number } | null>(null);
@@ -68,8 +69,10 @@ export default function RecordExpenseScreen() {
     function resetForm() {
         setCategoryUuid(null);
         setAmountText('');
+        setPayeeName('');
         setDescription('');
         setDateText(todayDateOnly());
+        setFromCollections(false);
         setPhotoUri(null);
         setErrors({});
         setSaved(false);
@@ -77,7 +80,7 @@ export default function RecordExpenseScreen() {
     }
 
     async function handleSubmit() {
-        const result = validateExpenditureForm({ categoryUuid, amountText, description, dateText });
+        const result = validateBonRequestForm({ categoryUuid, amountText, payeeName, purpose: description, neededOnText: dateText, today: todayDateOnly() });
 
         if (!result.valid) {
             setErrors(result.errors);
@@ -94,10 +97,12 @@ export default function RecordExpenseScreen() {
                 description: description.trim(),
                 spent_at: dateText,
                 receipt_local_uri: photoUri,
+                payee_name: payeeName.trim(),
+                from_collections: fromCollections,
             });
 
             const category = categories.find((c) => c.uuid === categoryUuid);
-            setSavedSummary({ category: category?.name ?? 'Expense', amount: result.amount });
+            setSavedSummary({ category: category?.name ?? 'Bon', amount: result.amount });
             setSaved(true);
 
             // Best-effort immediate sync attempt (mobile-app-react-native.md
@@ -114,15 +119,15 @@ export default function RecordExpenseScreen() {
         return (
             <View style={styles.confirmFlex}>
                 <Badge label="Saved · will sync" tone="offline" />
-                <Text style={styles.confirmTitle}>Expense recorded</Text>
+                <Text style={styles.confirmTitle}>Bon requested</Text>
                 <Text style={styles.confirmBody}>
                     {savedSummary.category} — {formatFcfa(savedSummary.amount)}
                 </Text>
                 <Text style={styles.confirmHint}>
-                    Saved on this device. It will sync automatically next time you're online — no action needed.
+                    Saved on this device. It goes to the office next time you're online and waits for approval — you'll be notified.
                 </Text>
                 <View style={styles.confirmActions}>
-                    <Button title="Record another expense" variant="secondary" onPress={resetForm} />
+                    <Button title="Request another bon" variant="secondary" onPress={resetForm} />
                     <Button title="Done" onPress={() => router.back()} />
                 </View>
             </View>
@@ -181,21 +186,32 @@ export default function RecordExpenseScreen() {
             />
 
             <TextInput
-                label="Description"
-                placeholder="e.g. Fuel for zone rounds — required, this is the paper trail"
+                label="Pay to"
+                placeholder="Who receives the money"
+                value={payeeName}
+                onChangeText={(text) => {
+                    setPayeeName(text);
+                    setErrors((prev) => ({ ...prev, payee: undefined }));
+                }}
+                error={errors.payee}
+            />
+
+            <TextInput
+                label="What for"
+                placeholder="e.g. Fuel for zone rounds — this is the paper trail"
                 value={description}
                 onChangeText={(text) => {
                     setDescription(text);
-                    setErrors((prev) => ({ ...prev, description: undefined }));
+                    setErrors((prev) => ({ ...prev, purpose: undefined }));
                 }}
-                error={errors.description}
+                error={errors.purpose}
                 multiline
                 numberOfLines={3}
                 style={styles.descriptionInput}
             />
 
             <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Date</Text>
+                <Text style={styles.sectionLabel}>Needed on</Text>
                 <View style={styles.dateChipRow}>
                     <Pressable
                         onPress={() => setDateText(todayDateOnly())}
@@ -205,14 +221,6 @@ export default function RecordExpenseScreen() {
                             Today
                         </Text>
                     </Pressable>
-                    <Pressable
-                        onPress={() => setDateText(yesterdayDateOnly())}
-                        style={[styles.dateChip, dateText === yesterdayDateOnly() && styles.dateChipActive]}
-                    >
-                        <Text style={[styles.dateChipText, dateText === yesterdayDateOnly() && styles.dateChipTextActive]}>
-                            Yesterday
-                        </Text>
-                    </Pressable>
                 </View>
                 <TextInput
                     label="Or enter a date (YYYY-MM-DD)"
@@ -220,12 +228,22 @@ export default function RecordExpenseScreen() {
                     value={dateText}
                     onChangeText={(text) => {
                         setDateText(text);
-                        setErrors((prev) => ({ ...prev, date: undefined }));
+                        setErrors((prev) => ({ ...prev, neededOn: undefined }));
                     }}
-                    error={errors.date}
+                    error={errors.neededOn}
                     autoCapitalize="none"
                     autoCorrect={false}
                 />
+            </View>
+
+            <View style={styles.switchRow}>
+                <View style={styles.switchText}>
+                    <Text style={styles.sectionLabel}>Already paid from my collections</Text>
+                    <Text style={styles.emptyHint}>
+                        Once approved, it is settled at your next cash handover — hand over the rest of the cash.
+                    </Text>
+                </View>
+                <Switch value={fromCollections} onValueChange={setFromCollections} accessibilityLabel="Already paid from my collections" />
             </View>
 
             <View style={styles.section}>
@@ -243,7 +261,7 @@ export default function RecordExpenseScreen() {
                 )}
             </View>
 
-            <Button title="Save expense" size="large" loading={submitting} onPress={handleSubmit} />
+            <Button title="Request the bon" size="large" loading={submitting} onPress={handleSubmit} />
         </ScrollView>
     );
 }
@@ -286,6 +304,8 @@ const styles = StyleSheet.create({
     categoryNameSelected: { color: colors.accent.expense },
     amountInput: { fontSize: fontSize.xl, fontWeight: '700' },
     descriptionInput: { minHeight: 72, textAlignVertical: 'top', paddingTop: spacing.md },
+    switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+    switchText: { flex: 1, gap: spacing.xs },
     dateChipRow: { flexDirection: 'row', gap: spacing.sm },
     // minHeight/justifyContent added 2026-08-27: padding alone put this
     // under the 48dp touch-target floor (mobile-app-react-native.md §6) —

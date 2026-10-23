@@ -21,6 +21,15 @@ export interface RemittancePreview {
         receipt_number: string | null;
     }>;
     denominations: number[];
+    /**
+     * Approved bons this agent already paid out of the collections
+     * (docs/plans/expenditures-and-spending-controls.md) — the cashier
+     * settles them at the handover, so hand over cash_to_hand_over. Absent
+     * on older servers.
+     */
+    bons?: Array<{ uuid: string; number: string; payee_name: string; amount: string }>;
+    bons_total?: string;
+    cash_to_hand_over?: string;
 }
 
 export interface RemittanceSummary {
