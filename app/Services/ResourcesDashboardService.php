@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Budget;
+use App\Models\CustomerCharge;
 use App\Models\Expenditure;
 use App\Models\Payment;
 use App\Support\BusinessTimezone;
@@ -112,7 +113,7 @@ class ResourcesDashboardService
      * for "collected" — rather than `processed_at`, since manuscript
      * processing may lag behind the period the payment was actually made in.
      *
-     * @return array{total: string, verified: string, pending_verification: string, rejected: string, payment_count: int, by_purpose: array{subscription: string, installation: string}}
+     * @return array{total: string, verified: string, pending_verification: string, rejected: string, payment_count: int, by_purpose: array{subscription: string, installation: string, relocation: string, reinstallation: string}}
      */
     private function incomeFor(Carbon $start, Carbon $end, ?int $branchId): array
     {
@@ -121,6 +122,12 @@ class ResourcesDashboardService
         // count() — all 4 were scanning the same created_at date range.
         // Technician motivation fees are the technician's money, never
         // company income (D13, docs/plans/installation-and-promotions.md).
+        // Installation, relocation and re-installation income, one column each.
+        $oneOffSelects = implode(', ', array_map(
+            fn (string $kind): string => "coalesce(sum(amount) filter (where verification_status = 'verified' and ".CustomerCharge::paymentOfKindSql($kind)."), 0) as {$kind}_verified",
+            CustomerCharge::KINDS,
+        ));
+
         $row = Payment::query()
             ->income()
             ->whereBetween('created_at', [$start, $end])
@@ -133,7 +140,7 @@ class ResourcesDashboardService
                 coalesce(sum(amount) filter (where verification_status = 'pending'), 0) as pending,
                 coalesce(sum(amount) filter (where verification_status = 'rejected'), 0) as rejected,
                 coalesce(sum(amount) filter (where verification_status = 'verified' and purpose = 'subscription'), 0) as subscription_verified,
-                coalesce(sum(amount) filter (where verification_status = 'verified' and purpose = 'installation'), 0) as installation_verified,
+                {$oneOffSelects},
                 count(*) as payment_count
             ")
             ->first();
@@ -153,6 +160,8 @@ class ResourcesDashboardService
             'by_purpose' => [
                 'subscription' => (string) $row->subscription_verified,
                 'installation' => (string) $row->installation_verified,
+                'relocation' => (string) $row->relocation_verified,
+                'reinstallation' => (string) $row->reinstallation_verified,
             ],
         ];
     }
@@ -173,6 +182,7 @@ class ResourcesDashboardService
 
         $total = Payment::query()
             ->where('purpose', Payment::PURPOSE_INSTALLATION)
+            ->whereIn('customer_charge_id', CustomerCharge::query()->select('id')->where('kind', CustomerCharge::KIND_INSTALLATION))
             ->where('verification_status', 'verified')
             ->whereBetween('created_at', [$start, $end])
             ->when($branchId !== null, fn ($query) => $query->whereHas(
