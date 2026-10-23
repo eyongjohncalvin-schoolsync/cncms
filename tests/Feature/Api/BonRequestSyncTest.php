@@ -6,6 +6,7 @@ namespace Tests\Feature\Api;
 
 use App\Models\Company;
 use App\Models\ExpenseCategory;
+use App\Models\Role;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
@@ -98,7 +99,7 @@ class BonRequestSyncTest extends TestCase
     {
         // A worker passes nothing; an agent whose role lost vouchers.request fails per item.
         $token = $this->tokenForRole('agent');
-        $agentRole = \App\Models\Role::query()->where('name', 'agent')->firstOrFail();
+        $agentRole = Role::query()->where('name', 'agent')->firstOrFail();
         $agentRole->permissions()->where('permission', 'vouchers.request')->delete();
 
         $entry = $this->push($token);
@@ -119,13 +120,13 @@ class BonRequestSyncTest extends TestCase
         $entry = $this->push($this->tokenForRole('agent'));
         $voucher = Voucher::query()->where('uuid', $entry['server_uuid'])->sole();
 
-        $this->app["auth"]->forgetGuards();
+        $this->app['auth']->forgetGuards();
         $other = $this->tokenFor('patience@shalomtech.dev', 'agent');
         $this->withHeader('Authorization', "Bearer {$other}")
             ->post('/api/v1/sync/upload-receipt', ['entity_type' => 'voucher', 'entity_uuid' => $voucher->uuid, 'receipt' => UploadedFile::fake()->image('r.jpg')], ['Accept' => 'application/json'])
             ->assertForbidden();
 
-        $this->app["auth"]->forgetGuards();
+        $this->app['auth']->forgetGuards();
         $mine = $this->tokenForRole('agent');
         $this->withHeader('Authorization', "Bearer {$mine}")
             ->post('/api/v1/sync/upload-receipt', ['entity_type' => 'voucher', 'entity_uuid' => $voucher->uuid, 'receipt' => UploadedFile::fake()->image('r.jpg')], ['Accept' => 'application/json'])
