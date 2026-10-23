@@ -13,6 +13,7 @@ use App\Models\Tenant;
 use App\Services\ManuscriptCalculator;
 use App\Services\ManuscriptRerunGuard;
 use App\Services\ManuscriptService;
+use App\Support\Billing\FreeMonthPlan;
 use App\Support\DetectsUniqueViolation;
 use Illuminate\Console\Command;
 use Illuminate\Database\QueryException;
@@ -254,6 +255,10 @@ class ManuscriptCalculate extends Command
                 ->get()
                 ->groupBy('customer_id');
 
+            // Free months & first billed month (installation phase 2), two
+            // queries for the whole chunk.
+            $freeMonthPlans = FreeMonthPlan::forCustomers($customers);
+
             // This period's existing rows (a re-run), so the write below
             // updates them without a per-customer lookup.
             $currentManuscriptsByCustomer = Manuscript::query()
@@ -269,6 +274,7 @@ class ManuscriptCalculate extends Command
                         $period,
                         $commandRun,
                         $currentManuscriptsByCustomer,
+                        $freeMonthPlans,
                         $previousManuscriptsByCustomer,
                         $eligibleVerifiedPaymentsByCustomer,
                         $eligibleAdjustmentsByCustomer,
@@ -283,6 +289,7 @@ class ManuscriptCalculate extends Command
                             $previousManuscriptsByCustomer->get($customer->id),
                             $eligibleVerifiedPaymentsByCustomer->get($customer->id, new Collection),
                             $eligibleAdjustmentsByCustomer->get($customer->id, new Collection),
+                            freeMonths: $freeMonthPlans[$customer->id] ?? null,
                         );
 
                         // command_run_id — see ManuscriptGenerationBatchService::

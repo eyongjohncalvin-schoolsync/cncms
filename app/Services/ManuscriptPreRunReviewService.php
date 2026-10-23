@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\Billing\FreeMonthPlan;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -86,22 +87,32 @@ final class ManuscriptPreRunReviewService
 
         $lastPaymentDateByCustomer = $this->lastPaymentDates($customerIds);
 
+        // Rule 5 (installation phase 2): what period P actually charges —
+        // the bill less its free services, nothing before the customer's
+        // first billed month. A customer with nothing charged in P has
+        // nothing to cover and is never flagged.
+        $plans = FreeMonthPlan::forCustomers($candidates);
+        $charges = $candidates->mapWithKeys(fn (Customer $customer): array => [
+            $customer->id => ($plans[$customer->id] ?? FreeMonthPlan::none())->charge($period, $this->normalize((string) $customer->bill)),
+        ]);
+
         $flagged = $candidates
+            ->reject(fn (Customer $customer): bool => bccomp($charges[$customer->id], '0', self::SCALE) <= 0)
             ->reject(fn (Customer $customer): bool => $customerIdsWithEligiblePayment->has($customer->id))
             ->reject(fn (Customer $customer): bool => $this->coveredByPrepaidWindow($customer, $asOf))
-            ->reject(fn (Customer $customer): bool => $this->coveredByCredit($customer))
+            ->reject(fn (Customer $customer): bool => $this->coveredByCredit($customer, $charges[$customer->id]))
             ->values();
 
         return [
             'summary' => [
                 'count' => $flagged->count(),
                 'total_exposure' => $flagged->reduce(
-                    fn (string $carry, Customer $customer): string => bcadd($carry, $this->normalize((string) $customer->bill), self::SCALE),
+                    fn (string $carry, Customer $customer): string => bcadd($carry, $charges[$customer->id], self::SCALE),
                     '0.00'
                 ),
             ],
             'customers' => $flagged
-                ->map(fn (Customer $customer): array => $this->shape($customer, $lastPaymentDateByCustomer->get($customer->id)))
+                ->map(fn (Customer $customer): array => $this->shape($customer, $lastPaymentDateByCustomer->get($customer->id), $charges[$customer->id]))
                 ->values()
                 ->all(),
         ];
@@ -132,11 +143,12 @@ final class ManuscriptPreRunReviewService
     }
 
     /**
-     * Rule 4: credit >= customers.bill (the current rate) — bccomp, never
+     * Rule 4: credit >= what period P charges (customers.bill at the current
+     * rate, less any free services) — bccomp, never
      * float, matching every other money comparison in this codebase
      * (ManuscriptCalculator, CustomerEligibilityService).
      */
-    private function coveredByCredit(Customer $customer): bool
+    private function coveredByCredit(Customer $customer, string $charge): bool
     {
         $manuscript = $customer->latestManuscript;
 
@@ -145,7 +157,7 @@ final class ManuscriptPreRunReviewService
         }
 
         $credit = $this->normalize((string) $manuscript->credit);
-        $bill = $this->normalize((string) $customer->bill);
+        $bill = $charge;
 
         return bccomp($credit, $bill, self::SCALE) >= 0;
     }
@@ -179,7 +191,7 @@ final class ManuscriptPreRunReviewService
     /**
      * @return array<string, mixed>
      */
-    private function shape(Customer $customer, ?string $lastPaymentAt): array
+    private function shape(Customer $customer, ?string $lastPaymentAt, string $charge): array
     {
         return [
             'uuid' => $customer->uuid,
@@ -187,7 +199,7 @@ final class ManuscriptPreRunReviewService
             'zone_uuid' => $customer->zone?->uuid,
             'zone_name' => $customer->zone?->name,
             'phone' => $customer->phone,
-            'bill' => $this->normalize((string) $customer->bill),
+            'bill' => $charge,
             'last_payment_date' => $lastPaymentAt !== null ? Carbon::parse($lastPaymentAt)->toDateString() : null,
         ];
     }

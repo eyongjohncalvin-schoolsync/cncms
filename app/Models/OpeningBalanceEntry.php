@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * a row-level audit trail would be noise. The batch itself is audited, and
  * approval writes Auditable manuscripts carrying the final figures.
  */
-#[Fillable(['opening_balance_batch_id', 'customer_id', 'arrears', 'advance_amount', 'advance_months', 'note'])]
+#[Fillable(['opening_balance_batch_id', 'customer_id', 'arrears', 'advance_amount', 'advance_months', 'free_months', 'note'])]
 class OpeningBalanceEntry extends Model
 {
     protected function casts(): array

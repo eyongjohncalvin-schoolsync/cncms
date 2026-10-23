@@ -159,6 +159,10 @@ class CustomerChargeService
                 'waiver_decided_at' => now(),
             ]);
 
+            // A waiver counts as fully paid: the installation's free months
+            // start the month after (D3).
+            app(FreeMonthGrantService::class)->installationSettled($locked);
+
             return $locked;
         });
 

@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
+use App\Services\FreeMonthGrantService;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -36,6 +37,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'customer_id', 'kind', 'amount', 'standard_amount', 'status', 'reason', 'requested_by', 'approved_by', 'approved_at', 'paid_at',
     'waiver_status', 'waiver_reason', 'waiver_requested_by', 'waiver_requested_at', 'waiver_decided_by', 'waiver_decided_at',
     'waiver_rejection_reason', 'waived_amount',
+    'installation_offer_id', 'approval_status', 'approval_rejection_reason',
+    'refund_status', 'refund_amount', 'refund_reason', 'refund_requested_by', 'refund_requested_at',
+    'refund_decided_by', 'refund_decided_at', 'refund_rejection_reason', 'refund_voucher_id',
 ])]
 #[RouteKey('uuid')]
 class CustomerCharge extends Model
@@ -61,6 +65,13 @@ class CustomerCharge extends Model
 
     public const string WAIVER_REJECTED = 'rejected';
 
+    /** Fee-override approval (D8) and the installation refund (D9) share these. */
+    public const string DECISION_PENDING = 'pending';
+
+    public const string DECISION_APPROVED = 'approved';
+
+    public const string DECISION_REJECTED = 'rejected';
+
     /**
      * A charge has no direct zone — branch is reached through its Customer.
      */
@@ -79,6 +90,9 @@ class CustomerCharge extends Model
             'paid_at' => 'datetime',
             'waiver_requested_at' => 'datetime',
             'waiver_decided_at' => 'datetime',
+            'refund_amount' => 'decimal:2',
+            'refund_requested_at' => 'datetime',
+            'refund_decided_at' => 'datetime',
         ];
     }
 
@@ -102,6 +116,50 @@ class CustomerCharge extends Model
     public function waiverRequestedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'waiver_requested_by');
+    }
+
+    public function offer(): BelongsTo
+    {
+        return $this->belongsTo(InstallationOffer::class, 'installation_offer_id');
+    }
+
+    /** The bon that pays the refund out (D9). */
+    public function refundVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'refund_voucher_id');
+    }
+
+    public function refundRequestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'refund_requested_by');
+    }
+
+    public function refundDecidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'refund_decided_by');
+    }
+
+    /** Free months that come with this installation (D3). */
+    public function freeMonthGrants(): HasMany
+    {
+        return $this->hasMany(FreeMonthGrant::class);
+    }
+
+    /** A fee below the offer's that still waits for admin/owner approval (D8). */
+    public function hasPendingFeeApproval(): bool
+    {
+        return $this->approval_status === self::DECISION_PENDING;
+    }
+
+    public function hasPendingRefund(): bool
+    {
+        return $this->refund_status === self::DECISION_PENDING;
+    }
+
+    /** Paid in full or waived — what starts the installation's free months (D3). */
+    public function isSettled(): bool
+    {
+        return in_array($this->status, [self::STATUS_PAID, self::STATUS_WAIVED], true);
     }
 
     public function waiverDecidedBy(): BelongsTo
@@ -155,6 +213,11 @@ class CustomerCharge extends Model
      * Moves the charge between open and paid to match its verified payments
      * — called after an installation payment is recorded verified, verified
      * later, rejected or deleted. A waived or refunded charge is final.
+     *
+     * A fee below the offer's that still waits for approval (D8) is never
+     * "paid" — the agreed amount isn't settled yet. Reaching `paid` starts
+     * the installation's free months the month after (D3/D4); falling back
+     * to `open` (a settling payment rejected) puts them back on hold.
      */
     public function refreshStatus(): void
     {
@@ -162,12 +225,15 @@ class CustomerCharge extends Model
             return;
         }
 
-        $fullyPaid = bccomp($this->paidAmount(), (string) $this->amount, 2) >= 0;
+        $fullyPaid = ! $this->hasPendingFeeApproval()
+            && bccomp($this->paidAmount(), (string) $this->amount, 2) >= 0;
 
         if ($fullyPaid && $this->status === self::STATUS_OPEN) {
             $this->update(['status' => self::STATUS_PAID, 'paid_at' => now()]);
+            app(FreeMonthGrantService::class)->installationSettled($this);
         } elseif (! $fullyPaid && $this->status === self::STATUS_PAID) {
             $this->update(['status' => self::STATUS_OPEN, 'paid_at' => null]);
+            app(FreeMonthGrantService::class)->installationReopened($this);
         }
     }
 

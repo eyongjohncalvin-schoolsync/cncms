@@ -150,6 +150,12 @@ enum Permission: string
      * arrears adjustments). Seeded to admin only (D8: admin/owner approval).
      */
     case InstallationsApprove = 'installations.approve';
+    /**
+     * Settings → Installation offers: the company's standard installation
+     * deals (fee + free months per service). Managers only pick an offer
+     * (installations.manage); setting them is admin/owner (D8).
+     */
+    case InstallationsOffers = 'installations.offers';
 
     // ---- Opening balances (onboarding) -----------------------
     /** See the opening-balances screen and its batches. */
