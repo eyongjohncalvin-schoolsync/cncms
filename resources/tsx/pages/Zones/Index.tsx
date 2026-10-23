@@ -1,6 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
-import { IconPlus, IconUpload } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconUpload } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { TextInput } from '@/components/ui/TextInput';
 import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
@@ -11,6 +11,9 @@ import { Button } from '@/components/ui/Button';
 import { Dropdown, DropdownItem } from '@/components/ui/Dropdown';
 import { ImportModal } from '@/components/shared/ImportModal';
 import { ImportReportCard } from '@/components/shared/ImportReportCard';
+import { BulkDeleteZonesModal } from '@/components/zones/BulkDeleteZonesModal';
+import type { BulkDeleteZonesTarget } from '@/components/zones/BulkDeleteZonesModal';
+import { hasPermission } from '@/lib/permissions';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { PageProps, PaginatedResponse, Zone } from '@/types';
 
@@ -20,11 +23,55 @@ interface ZonesIndexProps {
 }
 
 export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
-    const { flash } = usePage<PageProps>().props;
+    const { auth, flash } = usePage<PageProps>().props;
+    // Same ability as the single-row Delete (ZonePolicy::delete → `zones.manage`).
+    const canDelete = hasPermission(auth.user?.permissions, 'zones.manage');
     const [search, setSearch] = useState(filters.search ?? '');
     const [loading, setLoading] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [allMatching, setAllMatching] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<BulkDeleteZonesTarget | null>(null);
     const debouncedSearch = useDebounce(search, 300);
+
+    // Selection belongs to the rows on screen: a page/search change (or a
+    // delete that just ran) drops it rather than carrying hidden uuids into
+    // the next bulk delete — same rule as Customers/Index.tsx.
+    useEffect(() => {
+        setSelected(new Set());
+        setAllMatching(false);
+    }, [zones.data]);
+
+    function toggleSelected(uuid: string) {
+        setAllMatching(false);
+        setSelected((current) => {
+            const next = new Set(current);
+            if (next.has(uuid)) {
+                next.delete(uuid);
+            } else {
+                next.add(uuid);
+            }
+            return next;
+        });
+    }
+
+    const allOnPageSelected = zones.data.length > 0 && zones.data.every((zone) => selected.has(zone.uuid));
+    const total = zones.meta.total;
+    const selectedCount = allMatching ? total : selected.size;
+
+    function toggleSelectAllOnPage() {
+        setAllMatching(false);
+        setSelected(allOnPageSelected ? new Set() : new Set(zones.data.map((zone) => zone.uuid)));
+    }
+
+    function clearSelection() {
+        setAllMatching(false);
+        setSelected(new Set());
+    }
+
+    function openBulkDelete() {
+        setDeleteTarget(allMatching ? { mode: 'all_matching', search: filters.search } : { mode: 'uuids', uuids: [...selected] });
+    }
 
     useEffect(() => {
         if (debouncedSearch !== (filters.search ?? '')) {
@@ -103,6 +150,30 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                 {loading && <LoadingSpinner className="mb-2 text-slate-400" label="Loading zones" />}
             </div>
 
+            {canDelete && selectedCount > 0 && (
+                <div className="animate-fade-up mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-100 p-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-blue-900">
+                        <span className="font-medium">
+                            {allMatching ? `All ${total} matching zone${total === 1 ? '' : 's'} selected` : `${selectedCount} selected`}
+                        </span>
+                        {allOnPageSelected && !allMatching && total > zones.data.length && (
+                            <button type="button" onClick={() => setAllMatching(true)} className="font-semibold text-blue-700 underline hover:text-blue-800">
+                                Select all {total} matching zones
+                            </button>
+                        )}
+                        <button type="button" onClick={clearSelection} className="text-blue-700 underline hover:text-blue-800">
+                            Clear selection
+                        </button>
+                    </div>
+                    <Button type="button" variant="danger" onClick={openBulkDelete} className="rounded-lg px-3 py-2 text-sm font-semibold">
+                        <IconTrash size={16} stroke={2} />
+                        Delete selected ({selectedCount})
+                    </Button>
+                </div>
+            )}
+
+            <BulkDeleteZonesModal target={deleteTarget} onClose={() => setDeleteTarget(null)} onSuccess={clearSelection} />
+
             {zones.data.length === 0 ? (
                 <div className="animate-fade-up" style={{ animationDelay: '0.1s' }}>
                     <EmptyState title="No zones found" description="Add a zone to get started." />
@@ -111,6 +182,17 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                 <div className="animate-fade-up relative" style={{ animationDelay: '0.1s' }}>
                     <Table>
                         <TableHead>
+                            {canDelete && (
+                                <Th className="w-10">
+                                    <input
+                                        type="checkbox"
+                                        checked={allOnPageSelected}
+                                        onChange={toggleSelectAllOnPage}
+                                        aria-label="Select all zones on this page"
+                                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                                    />
+                                </Th>
+                            )}
                             <Th>Name</Th>
                             <Th>Branch</Th>
                             <Th>Town</Th>
@@ -120,6 +202,17 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                         <TableBody>
                             {rows.map(({ zone, customerCount }) => (
                                 <tr key={zone.uuid} className="transition-colors hover:bg-slate-50/70">
+                                    {canDelete && (
+                                        <Td>
+                                            <input
+                                                type="checkbox"
+                                                checked={allMatching || selected.has(zone.uuid)}
+                                                onChange={() => toggleSelected(zone.uuid)}
+                                                aria-label={`Select ${zone.name}`}
+                                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                                            />
+                                        </Td>
+                                    )}
                                     <Td className="font-medium text-slate-900">{zone.name}</Td>
                                     <Td>{zone.branch_name ?? '—'}</Td>
                                     <Td>{zone.town}</Td>
