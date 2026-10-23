@@ -6,13 +6,16 @@ namespace App\Http\Controllers;
 
 use App\DataTransferObjects\ZoneData;
 use App\Exports\ZoneImportTemplateExport;
+use App\Http\Requests\BulkDeleteZonesRequest;
 use App\Http\Requests\ImportZonesRequest;
+use App\Http\Requests\PreviewBulkDeleteZonesRequest;
 use App\Http\Requests\StoreZoneRequest;
 use App\Http\Requests\UpdateZoneRequest;
 use App\Models\Zone;
 use App\Services\BranchService;
 use App\Services\ZoneImportService;
 use App\Services\ZoneService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -110,6 +113,58 @@ class ZoneController extends Controller
         }
 
         return redirect()->route('zones.index')->with('success', 'Zone deleted.');
+    }
+
+    /**
+     * POST /zones/bulk-delete/preview. Dry run for the Zones page's bulk
+     * delete modal — lists the selected zones and which would be kept (and
+     * why) without deleting anything. Plain JSON since it backs a modal
+     * fetch, same pattern as CustomerController::previewBulkUpdateBill().
+     */
+    public function previewBulkDestroy(PreviewBulkDeleteZonesRequest $request): JsonResponse
+    {
+        $uuids = $request->boolean('all_matching') && empty($request->validated('zone_uuids'))
+            ? null
+            : $request->validated('zone_uuids');
+
+        return response()->json($this->zones->previewBulkDelete($uuids, $request->only(['search'])));
+    }
+
+    /**
+     * POST /zones/bulk-delete. Deletes many zones at once — each one
+     * authorized and deleted through ZoneService::delete() exactly like
+     * destroy() above, so every rule and the audit trail still apply.
+     * Partial success: zones still in use are kept and named in the flash.
+     */
+    public function bulkDestroy(BulkDeleteZonesRequest $request): RedirectResponse
+    {
+        $zones = $this->zones->resolveForBulkDelete($request->validated('zone_uuids'));
+
+        foreach ($zones as $zone) {
+            $this->authorize('delete', $zone);
+        }
+
+        $result = $this->zones->bulkDelete($zones);
+
+        $deletedCount = count($result['deleted']);
+        $keptCount = count($result['kept']);
+
+        $message = $deletedCount === 1 ? 'Deleted 1 zone.' : "Deleted {$deletedCount} zones.";
+
+        if ($keptCount > 0) {
+            $keptList = collect($result['kept'])
+                ->take(10)
+                ->map(fn (array $kept): string => "{$kept['name']} ({$kept['reason']})")
+                ->implode(', ');
+
+            if ($keptCount > 10) {
+                $keptList .= ' and '.($keptCount - 10).' more';
+            }
+
+            $message .= ' Kept '.($keptCount === 1 ? '1 zone still in use' : "{$keptCount} zones still in use").": {$keptList}.";
+        }
+
+        return redirect()->route('zones.index')->with($deletedCount > 0 ? 'success' : 'error', $message);
     }
 
     /**

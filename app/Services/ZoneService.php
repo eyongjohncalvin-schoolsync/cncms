@@ -16,6 +16,9 @@ use Illuminate\Validation\ValidationException;
 
 class ZoneService
 {
+    /** Most zones one bulk-delete request may touch. */
+    public const int BULK_DELETE_LIMIT = 500;
+
     public function __construct(
         private readonly ZoneRepositoryInterface $zones,
         private readonly BranchRepositoryInterface $branches,
@@ -91,28 +94,144 @@ class ZoneService
      */
     public function delete(Zone $zone): void
     {
-        $customerCount = $zone->customers()->count();
-        $agentCount = $zone->agents()->count();
+        $assignments = $this->describeAssignments($zone->customers()->count(), $zone->agents()->count());
 
-        if ($customerCount > 0 || $agentCount > 0) {
-            $parts = [];
-
-            if ($customerCount > 0) {
-                $parts[] = $customerCount === 1 ? '1 customer' : "{$customerCount} customers";
-            }
-
-            if ($agentCount > 0) {
-                $parts[] = $agentCount === 1 ? '1 agent' : "{$agentCount} agents";
-            }
-
+        if ($assignments !== null) {
             throw ValidationException::withMessages([
-                'zone' => ['Cannot delete this zone — '.implode(' and ', $parts).' still assigned to it. Reassign or remove them first.'],
+                'zone' => ["Cannot delete this zone — {$assignments} still assigned to it. Reassign or remove them first."],
             ]);
         }
 
         $this->zones->delete($zone);
 
         Cache::forget('zones:all');
+    }
+
+    /**
+     * Dry run for the Zones page's bulk delete modal: which of the selected
+     * zones would be deleted and which kept (and why), without writing
+     * anything. Selection is an explicit uuid list, or — when $uuids is
+     * null — every zone matching $filters (the "select all N matching"
+     * path), capped at BULK_DELETE_LIMIT; `truncated` says more matched.
+     * The modal then commits the exact uuids returned here through
+     * bulkDelete(), so what was confirmed on screen is what gets sent.
+     *
+     * @param  array<int, string>|null  $uuids
+     * @param  array<string, mixed>  $filters
+     * @return array{zones: array<int, array{uuid: string, name: string, town: string, customer_count: int, agent_count: int, kept_reason: string|null}>, truncated: bool}
+     *
+     * @throws ValidationException When an explicit uuid is unknown or outside the caller's branch.
+     */
+    public function previewBulkDelete(?array $uuids, array $filters): array
+    {
+        if ($uuids !== null) {
+            $zones = $this->resolveForBulkDelete($uuids);
+            $truncated = false;
+        } else {
+            $zones = $this->zones->forBulkAction($filters, null, self::BULK_DELETE_LIMIT + 1);
+            $truncated = $zones->count() > self::BULK_DELETE_LIMIT;
+            $zones = $zones->take(self::BULK_DELETE_LIMIT);
+        }
+
+        return [
+            'zones' => $zones
+                ->map(fn (Zone $zone): array => [
+                    'uuid' => $zone->uuid,
+                    'name' => $zone->name,
+                    'town' => $zone->town,
+                    'customer_count' => (int) $zone->customers_count,
+                    'agent_count' => (int) $zone->agents_count,
+                    'kept_reason' => $this->keptReason($zone),
+                ])
+                ->values()
+                ->all(),
+            'truncated' => $truncated,
+        ];
+    }
+
+    /**
+     * Resolves an explicit bulk selection to Zone models through the same
+     * branch fence as a single-zone lookup. All-or-nothing: if any uuid is
+     * unknown, already gone, or belongs to a branch the caller can't see,
+     * the whole request is refused before anything is deleted, rather than
+     * silently acting on a different set than the one confirmed.
+     *
+     * @param  array<int, string>  $uuids
+     * @return Collection<int, Zone>
+     *
+     * @throws ValidationException
+     */
+    public function resolveForBulkDelete(array $uuids): Collection
+    {
+        $zones = $this->zones->forBulkAction([], $uuids, self::BULK_DELETE_LIMIT);
+
+        $missing = count($uuids) - $zones->count();
+
+        if ($missing > 0) {
+            throw ValidationException::withMessages([
+                'zone_uuids' => [($missing === 1 ? '1 selected zone no longer exists' : "{$missing} selected zones no longer exist").' or is not available to you. Refresh the page and try again.'],
+            ]);
+        }
+
+        return $zones;
+    }
+
+    /**
+     * Deletes each zone through delete() so every existing rule (and the
+     * Auditable observer's audit row) applies exactly as for a single
+     * delete. Partial success: a zone delete() refuses is kept and
+     * reported, never fatal for the rest of the batch.
+     *
+     * @param  Collection<int, Zone>  $zones
+     * @return array{deleted: array<int, string>, kept: array<int, array{name: string, reason: string}>}
+     */
+    public function bulkDelete(Collection $zones): array
+    {
+        $deleted = [];
+        $kept = [];
+
+        foreach ($zones as $zone) {
+            try {
+                $this->delete($zone);
+                $deleted[] = $zone->name;
+            } catch (ValidationException $e) {
+                $kept[] = [
+                    'name' => $zone->name,
+                    'reason' => $this->keptReason($zone) ?? collect($e->errors())->flatten()->implode(' '),
+                ];
+            }
+        }
+
+        return ['deleted' => $deleted, 'kept' => $kept];
+    }
+
+    /**
+     * Short "why this zone stays" text from forBulkAction()'s preloaded
+     * counts, or null when nothing blocks the delete.
+     */
+    private function keptReason(Zone $zone): ?string
+    {
+        $assignments = $this->describeAssignments((int) $zone->customers_count, (int) $zone->agents_count);
+
+        return $assignments === null ? null : "{$assignments} still assigned";
+    }
+
+    /**
+     * "3 customers and 1 agent" — or null when neither is assigned.
+     */
+    private function describeAssignments(int $customerCount, int $agentCount): ?string
+    {
+        $parts = [];
+
+        if ($customerCount > 0) {
+            $parts[] = $customerCount === 1 ? '1 customer' : "{$customerCount} customers";
+        }
+
+        if ($agentCount > 0) {
+            $parts[] = $agentCount === 1 ? '1 agent' : "{$agentCount} agents";
+        }
+
+        return $parts === [] ? null : implode(' and ', $parts);
     }
 
     /**

@@ -9,6 +9,8 @@ Route::get('zones', [ZoneController::class, 'index'])->name('zones.index');
 Route::get('zones/create', [ZoneController::class, 'create'])->name('zones.create');
 Route::post('zones', [ZoneController::class, 'store'])->name('zones.store');
 Route::post('zones/import', [ZoneController::class, 'import'])->name('zones.import');
+Route::post('zones/bulk-delete/preview', [ZoneController::class, 'previewBulkDestroy'])->name('zones.bulk-delete.preview');
+Route::post('zones/bulk-delete', [ZoneController::class, 'bulkDestroy'])->name('zones.bulk-delete');
 Route::get('zones/import/template', [ZoneController::class, 'importTemplate'])->name('zones.import.template');
 Route::get('zones/{zone}/edit', [ZoneController::class, 'edit'])->name('zones.edit');
 Route::patch('zones/{zone}', [ZoneController::class, 'update'])->name('zones.update');
