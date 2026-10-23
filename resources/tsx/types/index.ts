@@ -1157,6 +1157,17 @@ export interface MonthlyReport {
     collection_health: ReportCollectionHealth;
     trend: ReportTrendPoint[];
     pnl?: ResourcesDashboard;
+    /** Installation phase 2: installations, promo cost (foregone revenue, never income) and who gave what. */
+    installations?: ReportInstallations;
+}
+
+export interface ReportInstallations {
+    by_offer: { offer: string; count: number; fees: string }[];
+    installation_income: string;
+    promo_cost: string;
+    customers_on_promo: number;
+    ending_soon: { customer: string; service: string; ends: string }[];
+    grants_by_user: { user: string; requested: number; approved: number; waivers_approved: number }[];
 }
 
 export type ReportData = DailyReport | WeeklyReport | MonthlyReport;

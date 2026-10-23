@@ -24,6 +24,7 @@ use Database\Factories\InstallationOfferFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -459,6 +460,29 @@ class CustomerInstallationTest extends TestCase
         $this->assertSame('10000.00', (string) $voucher->amount);
         $this->assertSame('Customer refunds', $voucher->category->name);
         $this->assertSame(FreeMonthGrant::STATUS_CANCELLED, FreeMonthGrant::query()->where('customer_charge_id', $charge->id)->value('status'), 'free months not started yet are forfeited');
+    }
+
+    public function test_the_monthly_report_shows_installations_promo_cost_and_who_gave_what(): void
+    {
+        Cache::flush();
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+        $offer = $this->offer();
+        $this->post('/customers', $this->form(['installation_offer_uuid' => $offer->uuid, 'installation_paid' => '10000']))->assertSessionHasNoErrors();
+        $customer = $this->created();
+        $this->bill($customer, '2026-11');
+
+        $this->admin();
+
+        $this->get('/reports?tier=monthly&date=2026-10')->assertOk()->assertInertia(fn ($page) => $page
+            ->where('report.installations.by_offer.0.offer', $offer->name)
+            ->where('report.installations.by_offer.0.count', 1)
+            ->where('report.installations.installation_income', '10000.00'));
+
+        $this->get('/reports?tier=monthly&date=2026-11')->assertOk()->assertInertia(fn ($page) => $page
+            ->where('report.installations.promo_cost', '2500.00')
+            ->where('report.installations.customers_on_promo', 1)
+            ->where('report.installations.ending_soon.0.ends', '2026-12'));
     }
 
     public function test_the_preview_warns_about_a_possible_duplicate(): void
