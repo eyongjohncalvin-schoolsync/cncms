@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Landlord;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ResetTwoFactorRequest;
+use App\Models\LandlordActivity;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\TwoFactorService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -14,7 +18,8 @@ use Inertia\Response;
 /**
  * Every workspace user across all tenants, searchable, with "Log in as"
  * (App\Support\Impersonation) — the main way into impersonation, so a
- * landlord helping someone doesn't have to know which workspace they're in.
+ * landlord helping someone doesn't have to know which workspace they're in —
+ * and "Reset 2FA" for someone locked out of their authenticator.
  * Central data only: the membership index + users.
  */
 class UserController extends Controller
@@ -33,7 +38,7 @@ class UserController extends Controller
                     ->orWhereRaw('LOWER(users.username) LIKE ?', [$like]));
             })
             ->orderBy('users.name')
-            ->select(['users.id', 'users.uuid', 'users.name', 'users.email', 'users.username', 'users.status', 'users.is_landlord', 'tenant_user_index.tenant_id', 'tenant_user_index.role'])
+            ->select(['users.id', 'users.uuid', 'users.name', 'users.email', 'users.username', 'users.status', 'users.is_landlord', 'users.two_factor_secret', 'users.two_factor_confirmed_at', 'tenant_user_index.tenant_id', 'tenant_user_index.role'])
             ->paginate(50)
             ->withQueryString();
 
@@ -53,11 +58,44 @@ class UserController extends Controller
                     'role' => $user->getAttribute('role'),
                     'status' => $user->status,
                     'can_impersonate' => $user->status === 'active' && ! $user->is_landlord,
+                    'can_reset_two_factor' => $user->hasTwoFactorEnabled() && $user->id !== $request->user()->id,
                 ])->values(),
                 'links' => $users->linkCollection(),
                 'total' => $users->total(),
             ],
             'filters' => ['search' => $search],
         ]);
+    }
+
+    /**
+     * "Reset 2FA" for a user locked out of their authenticator app: clears
+     * their secret and recovery codes, signs them out everywhere and emails
+     * them (TwoFactorService::resetBySupport()). Landlord only, never on
+     * yourself (use My account), never while impersonating (route
+     * middleware), and always with a reason, kept in the activity log.
+     */
+    public function resetTwoFactor(ResetTwoFactorRequest $request, User $user, TwoFactorService $twoFactor): RedirectResponse
+    {
+        if ($user->is($request->user())) {
+            return back()->with('error', 'You cannot reset your own two-factor here. Use My account.');
+        }
+
+        if (! $user->hasTwoFactorEnabled()) {
+            return back()->with('error', "{$user->name} does not have two-factor turned on.");
+        }
+
+        $twoFactor->resetBySupport($user);
+
+        $reason = trim($request->validated('reason'));
+
+        LandlordActivity::record(
+            'user.two_factor_reset',
+            "Reset two-factor for {$user->name} <{$user->email}>",
+            'user',
+            $user->id,
+            ['reason' => $reason],
+        );
+
+        return back()->with('success', "Two-factor reset for {$user->name}. They have been signed out everywhere and emailed.");
     }
 }

@@ -1,10 +1,12 @@
 import { Form, Head, Link, router } from '@inertiajs/react';
+import { useState } from 'react';
 import { IconBrandWhatsapp, IconBuildingSkyscraper, IconUsers } from '@tabler/icons-react';
 import { LandlordLayout } from '@/layouts/LandlordLayout';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ResetTwoFactorModal, type ResetTwoFactorTarget } from '@/components/landlord/ResetTwoFactorModal';
 import type { LandlordTenant } from '@/types';
 
 interface Member {
@@ -13,9 +15,12 @@ interface Member {
     email: string;
     role: string;
     can_impersonate: boolean;
+    can_reset_two_factor: boolean;
 }
 
 export default function LandlordTenantsEdit({ tenant, members }: { tenant: LandlordTenant; members: Member[] }) {
+    const [resetTarget, setResetTarget] = useState<ResetTwoFactorTarget | null>(null);
+
     function impersonate(member: Member) {
         if (confirm(`Log in as ${member.name}? You will see and act exactly as them, and everything you change is recorded under your name.`)) {
             router.post(`/landlord/impersonate/${member.uuid}`);
@@ -160,18 +165,27 @@ export default function LandlordTenantsEdit({ tenant, members }: { tenant: Landl
                                         {member.email} · {member.role}
                                     </p>
                                 </div>
-                                {member.can_impersonate ? (
-                                    <Button type="button" variant="secondary" onClick={() => impersonate(member)}>
-                                        Log in as
-                                    </Button>
-                                ) : (
-                                    <span className="text-xs text-slate-400">Not available</span>
-                                )}
+                                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                    {member.can_reset_two_factor && (
+                                        <Button type="button" variant="secondary" onClick={() => setResetTarget({ uuid: member.uuid, name: member.name })}>
+                                            Reset 2FA
+                                        </Button>
+                                    )}
+                                    {member.can_impersonate ? (
+                                        <Button type="button" variant="secondary" onClick={() => impersonate(member)}>
+                                            Log in as
+                                        </Button>
+                                    ) : (
+                                        <span className="text-xs text-slate-400">Not available</span>
+                                    )}
+                                </div>
                             </li>
                         ))}
                     </ul>
                 )}
             </Card>
+
+            <ResetTwoFactorModal target={resetTarget} onClose={() => setResetTarget(null)} />
         </LandlordLayout>
     );
 }

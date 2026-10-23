@@ -102,15 +102,16 @@ class TenantController extends Controller
         return redirect()->route('landlord.tenants.index')->with('success', 'Tenant created.');
     }
 
-    public function edit(Tenant $tenant): Response
+    public function edit(Request $request, Tenant $tenant): Response
     {
         // Members, for support impersonation ("Log in as" — App\Support\
-        // Impersonation). Central data only: the membership index + users.
+        // Impersonation) and "Reset 2FA" (UserController::resetTwoFactor()).
+        // Central data only: the membership index + users.
         $members = User::query()
             ->join('tenant_user_index', 'tenant_user_index.user_id', '=', 'users.id')
             ->where('tenant_user_index.tenant_id', $tenant->id)
             ->orderBy('users.name')
-            ->get(['users.id', 'users.uuid', 'users.name', 'users.email', 'users.status', 'users.is_landlord', 'tenant_user_index.role']);
+            ->get(['users.id', 'users.uuid', 'users.name', 'users.email', 'users.status', 'users.is_landlord', 'users.two_factor_secret', 'users.two_factor_confirmed_at', 'tenant_user_index.role']);
 
         return Inertia::render('Landlord/Tenants/Edit', [
             'tenant' => $this->shape($tenant),
@@ -120,6 +121,7 @@ class TenantController extends Controller
                 'email' => $user->email,
                 'role' => $user->getAttribute('role'),
                 'can_impersonate' => $user->status === 'active' && ! $user->is_landlord,
+                'can_reset_two_factor' => $user->hasTwoFactorEnabled() && $user->id !== $request->user()->id,
             ])->values(),
         ]);
     }
