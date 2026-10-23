@@ -1,6 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
-import { IconArchive, IconCurrencyDollar, IconPlus, IconRestore, IconUpload } from '@tabler/icons-react';
+import { IconArchive, IconCurrencyDollar, IconPlus, IconRestore, IconUpload, IconUserCheck } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
@@ -36,12 +36,22 @@ interface CustomersIndexProps {
     filters: CustomersIndexFilters;
     /** ?archived=1 secondary view — the list shows only archived customers, each with a Restore action. */
     archived_view: boolean;
+    /** ?pending_activation=1 — field registrations awaiting the office (installation phase 3). */
+    pending_activation_view: boolean;
+    pending_activation_count: number;
 }
 
 const statusOptions: CustomerStatus[] = ['active', 'passive', 'disconnected', 'suspended'];
 const levelOptions: CustomerLevel[] = ['normal', 'Vip', 'Operator'];
 
-export default function CustomersIndex({ customers, zones, filters, archived_view: archivedView }: CustomersIndexProps) {
+export default function CustomersIndex({
+    customers,
+    zones,
+    filters,
+    archived_view: archivedView,
+    pending_activation_view: pendingView,
+    pending_activation_count: pendingCount,
+}: CustomersIndexProps) {
     const { auth, flash } = usePage<PageProps>().props;
     // RBAC v2 Wave 4: display affordances from the shared permission matrix
     // (auth.user.permissions), not hardcoded role names. A bulk price
@@ -127,6 +137,7 @@ export default function CustomersIndex({ customers, zones, filters, archived_vie
                 level: filters.level ?? undefined,
                 search: filters.search ?? undefined,
                 archived: archivedView ? '1' : undefined,
+                pending_activation: pendingView ? '1' : undefined,
                 ...overrides,
             },
             {
@@ -157,16 +168,18 @@ export default function CustomersIndex({ customers, zones, filters, archived_vie
             <div className="animate-fade-up mb-6 flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-                        {archivedView ? 'Archived customers' : 'Customers'}
+                        {archivedView ? 'Archived customers' : pendingView ? 'Pending activation' : 'Customers'}
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
                         {archivedView
                             ? 'Removed from the active register and billing runs. Their history is kept — restore any time.'
-                            : 'Manage subscriber accounts, billing zones, and connection status.'}
+                            : pendingView
+                              ? 'Registered by field agents and not billed yet. Open each one to confirm zone, free months and connection date, then activate or reject.'
+                              : 'Manage subscriber accounts, billing zones, and connection status.'}
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    {archivedView ? (
+                    {archivedView || pendingView ? (
                         <Link
                             href="/customers"
                             className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
@@ -175,6 +188,16 @@ export default function CustomersIndex({ customers, zones, filters, archived_vie
                         </Link>
                     ) : (
                         <>
+                            {pendingCount > 0 && (
+                                <Link
+                                    href="/customers?pending_activation=1"
+                                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 ring-1 ring-inset ring-amber-300 transition-colors hover:bg-amber-100"
+                                >
+                                    <IconUserCheck size={18} stroke={2} />
+                                    Pending activation
+                                    <span className="rounded-full bg-amber-600 px-2 py-0.5 text-xs font-bold text-white">{pendingCount}</span>
+                                </Link>
+                            )}
                             <Link
                                 href="/customers?archived=1"
                                 className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
@@ -363,7 +386,13 @@ export default function CustomersIndex({ customers, zones, filters, archived_vie
                                             <Td className="font-medium text-slate-900">{formattedBill}</Td>
                                             <Td className="capitalize">{customer.level}</Td>
                                             <Td>
-                                                <StatusBadge status={customer.status} />
+                                                {customer.activation_status === 'pending' ? (
+                                                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                                                        Pending activation
+                                                    </span>
+                                                ) : (
+                                                    <StatusBadge status={customer.status} />
+                                                )}
                                             </Td>
                                         </>
                                     )}

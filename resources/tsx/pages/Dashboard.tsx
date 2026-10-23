@@ -41,6 +41,8 @@ interface DashboardProps {
         total_arrears: string;
         collection_rate: number;
         pending_arrears_adjustments: number;
+        /** Field registrations awaiting the office (installation phase 3). */
+        pending_activations?: number;
     };
 }
 
@@ -184,6 +186,24 @@ export default function Dashboard({ period, stats, cash_alerts, spending }: Dash
                         tone={hasPendingArrearsAdjustments ? 'red' : 'purple'}
                     />
                 </Link>
+
+                {/* Customers registered by field agents awaiting the office
+                    (installation phase 3) — the activation queue. */}
+                {(stats.pending_activations ?? 0) > 0 && (
+                    <Link
+                        href="/customers?pending_activation=1"
+                        className="animate-fade-up rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
+                        style={{ animationDelay: '370ms' }}
+                    >
+                        <StatCard
+                            label="Pending Activation"
+                            value={(stats.pending_activations ?? 0).toLocaleString()}
+                            hint="Registered in the field — not billed yet"
+                            icon={<IconUserCheck size={20} stroke={1.75} />}
+                            tone="red"
+                        />
+                    </Link>
+                )}
             </div>
 
             <Card className="mt-4 animate-fade-up p-0" style={{ animationDelay: '380ms' }}>

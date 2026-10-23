@@ -225,6 +225,8 @@ export interface Customer {
     others: string;
     level: CustomerLevel;
     status: CustomerStatus;
+    /** 'pending' = registered in the field, awaiting the office (installation phase 3). */
+    activation_status?: 'pending' | null;
     status_reason: string | null;
     status_note: string | null;
     location: string | null;
@@ -692,6 +694,40 @@ export interface InstallationOfferOption {
     months: { service_uuid: string; service_name: string; months: number }[];
 }
 
+/** A customer registered offline by a field agent (CustomerController::shapeFieldInstallation, phase 3). */
+export interface FieldInstallationDetail {
+    uuid: string;
+    status: 'pending' | 'activated' | 'rejected';
+    submitted_by_name: string | null;
+    collected_at: string | null;
+    synced_at: string | null;
+    decided_by_name: string | null;
+    decided_at: string | null;
+    decision_note: string | null;
+    corrections: Record<string, { from: unknown; to: unknown }> | null;
+    possible_duplicates: { uuid: string; name: string; phone: string | null; zone: string | null; status: string }[];
+    refund_voucher_number: string | null;
+    refund_voucher_status: string | null;
+    proposal: {
+        offer_uuid: string | null;
+        offer_name: string | null;
+        fee: string | null;
+        paid: string;
+        reason: string | null;
+        connected_on: string | null;
+        service_plans: { service_uuid: string; service_name: string; free_from: string | null; free_months: number; paid_months: number }[];
+    };
+    payments: { uuid: string; amount: string; purpose: string; verification_status: string; receipt_number: string | null }[];
+    can_decide: boolean;
+    form: {
+        zones: Zone[];
+        offers: InstallationOfferOption[];
+        max_free_months: number;
+        installation_month: string;
+        today: string;
+    };
+}
+
 /** POST /customers/installation-preview (CustomerInstallationService::preview). */
 export interface InstallationPreview {
     bill: string;
@@ -724,6 +760,8 @@ export interface CustomerDetail extends Customer {
     /** Free months (installation offer / compensation) and the coverage line. */
     free_months?: CustomerFreeMonths;
     coverage?: CustomerCoverage;
+    /** The field registration this customer came from, if an agent registered them offline (phase 3). */
+    field_installation?: FieldInstallationDetail | null;
     /** Gates the "Export full record" header control — `customers.export_record`,
      * seeded super/admin only (docs/plans/customer-record-export.md). */
     can_export_record: boolean;

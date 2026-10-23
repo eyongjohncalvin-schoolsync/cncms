@@ -39,6 +39,7 @@ import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustment
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { InstallationCard } from '@/components/customers/InstallationCard';
 import { FreeMonthsCard } from '@/components/customers/FreeMonthsCard';
+import { FieldInstallationCard } from '@/components/customers/FieldInstallationCard';
 import { paymentPurposeLabel } from '@/lib/paymentPurpose';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { hasPermission } from '@/lib/permissions';
@@ -306,6 +307,14 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                     </div>
                 )}
             </div>
+
+            {/* Registered by a field agent offline (installation phase 3):
+                the proposal, the money taken, and Activate / Reject. */}
+            {customer.field_installation && (
+                <div className="animate-fade-up mb-4">
+                    <FieldInstallationCard customerUuid={customer.uuid} zoneUuid={customer.zone_uuid} field={customer.field_installation} />
+                </div>
+            )}
 
             {/* Coverage line (installation phase 2): FREE vs PREPAID vs first bill. */}
             {customer.coverage?.label && (
