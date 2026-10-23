@@ -592,7 +592,27 @@ export interface CustomerCharge {
     waiver_decided_by_name: string | null;
     waiver_rejection_reason: string | null;
     waived_amount: string | null;
-    can: { record_payment: boolean; request_waiver: boolean; decide_waiver: boolean };
+    /** Phase 2: the offer it came from, a fee below the offer's (D8), the refund (D9). */
+    offer_name?: string | null;
+    standard_amount?: string | null;
+    approval_status?: 'pending' | 'approved' | 'rejected' | null;
+    approval_rejection_reason?: string | null;
+    refund_status?: 'pending' | 'approved' | 'rejected' | null;
+    refund_amount?: string | null;
+    refund_reason?: string | null;
+    refund_requested_by_name?: string | null;
+    refund_decided_by_name?: string | null;
+    refund_rejection_reason?: string | null;
+    refund_voucher_number?: string | null;
+    refund_voucher_status?: string | null;
+    can: {
+        record_payment: boolean;
+        request_waiver: boolean;
+        decide_waiver: boolean;
+        decide_fee?: boolean;
+        request_refund?: boolean;
+        decide_refund?: boolean;
+    };
 }
 
 export interface CustomerInstallation {
@@ -600,6 +620,80 @@ export interface CustomerInstallation {
     balance: string;
     charges: CustomerCharge[];
     can_create: boolean;
+    /** False for customers from before installation fees: "not applicable", never "unpaid". */
+    applicable?: boolean;
+    connected_on?: string | null;
+    billing_starts_period?: string | null;
+}
+
+export type FreeMonthGrantStatus = 'awaiting_installation_payment' | 'pending_approval' | 'approved' | 'rejected' | 'cancelled';
+
+/** One free-month grant on the customer page (CustomerController::shapeFreeMonths). */
+export interface FreeMonthGrantRow {
+    uuid: string;
+    group_uuid: string;
+    service: string;
+    months: number;
+    reason: 'installation_offer' | 'compensation' | 'opening_balance';
+    reason_label: string;
+    note: string | null;
+    status: FreeMonthGrantStatus;
+    start_period: string | null;
+    end_period: string | null;
+    requested_by_name: string | null;
+    decided_by_name: string | null;
+    rejection_reason: string | null;
+    cancel_reason: string | null;
+    created_at: string | null;
+    can: { decide: boolean };
+}
+
+export interface CustomerFreeMonths {
+    grants: FreeMonthGrantRow[];
+    can_request: boolean;
+    max_months: number;
+    services: { uuid: string; name: string }[];
+}
+
+/** The coverage line — "TV free until Dec 2026 · paid until Mar 2027 · first bill Apr 2027" (CustomerCoverageService). */
+export interface CustomerCoverage {
+    free: { service: string; from: string; until: string }[];
+    waiting: { service: string; months: number; status: FreeMonthGrantStatus }[];
+    paid_from: string | null;
+    paid_until: string | null;
+    first_bill: string | null;
+    label: string | null;
+}
+
+/** An installation offer a manager can pick (InstallationOfferService::shape). */
+export interface InstallationOfferOption {
+    uuid: string;
+    name: string;
+    description: string | null;
+    fee: string;
+    is_default: boolean;
+    months: { service_uuid: string; service_name: string; months: number }[];
+}
+
+/** POST /customers/installation-preview (CustomerInstallationService::preview). */
+export interface InstallationPreview {
+    bill: string;
+    fee: string;
+    standard_fee: string | null;
+    paid_now: string;
+    installation_balance: string;
+    settled_now: boolean;
+    billing_starts: string;
+    billing_starts_label: string;
+    free: { service: string; months: number; from: string | null; until: string | null; from_label: string | null; until_label: string | null; waiting: boolean }[];
+    advance: { months: number; amount: string; from: string | null; until: string | null; from_label: string | null; until_label: string | null } | null;
+    first_bill: string | null;
+    first_bill_label: string | null;
+    collect_now: string;
+    needs_approval: string[];
+    max_free_months: number;
+    line: string;
+    duplicates: { uuid: string; name: string; phone: string | null; zone: string | null; status: string }[];
 }
 
 export interface CustomerDetail extends Customer {
@@ -610,6 +704,9 @@ export interface CustomerDetail extends Customer {
     arrears_adjustments: ArrearsAdjustment[];
     /** Installation fees — a separate balance, never in the bill's total or arrears. */
     installation?: CustomerInstallation;
+    /** Free months (installation offer / compensation) and the coverage line. */
+    free_months?: CustomerFreeMonths;
+    coverage?: CustomerCoverage;
     /** Gates the "Export full record" header control — `customers.export_record`,
      * seeded super/admin only (docs/plans/customer-record-export.md). */
     can_export_record: boolean;

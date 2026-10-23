@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { IconBuildingStore, IconTerminal2, IconBellRinging, IconPrinter, IconBroadcast } from '@tabler/icons-react';
+import { IconBuildingStore, IconTerminal2, IconBellRinging, IconPrinter, IconBroadcast, IconGift } from '@tabler/icons-react';
 
 // "Users & Roles" moved out of Settings entirely in RBAC v2 Wave 3 — it's
 // now the top-level "Users Control Center" nav item (/users), gated by the
@@ -15,6 +15,9 @@ const tabs = [
     // enforces the real gate; showing a tab that then 403s is the same
     // tradeoff every other tab here already accepts.
     { href: '/settings/services', label: 'Services', icon: IconBroadcast },
+    // installations.offers-gated (InstallationOfferPolicy) — same "tab may
+    // render, controller enforces" tradeoff as Services above.
+    { href: '/settings/installation-offers', label: 'Installation offers', icon: IconGift },
 ];
 
 /**
@@ -28,7 +31,11 @@ const tabs = [
  * user landing there had no way to reach the other tabs short of typing
  * the URL.
  */
-export function SettingsTabs({ active }: { active: 'company' | 'command-runs' | 'notifications' | 'bill-printing' | 'services' }) {
+export function SettingsTabs({
+    active,
+}: {
+    active: 'company' | 'command-runs' | 'notifications' | 'bill-printing' | 'services' | 'installation-offers';
+}) {
     return (
         <div className="mb-6 inline-flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 animate-fade-up">
             {tabs.map((tab) => {
