@@ -12,6 +12,7 @@ use App\Models\Expenditure;
 use App\Models\ExpenditureMonth;
 use App\Models\ExpenseCategory;
 use App\Models\Payment;
+use App\Models\Remittance;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
@@ -498,6 +499,54 @@ class ExpenditureControlsTest extends TestCase
 
         $this->as('blessing@shalomtech.dev', 'super');
         $this->get('/resources/expenditures')->assertInertia(fn (Assert $page) => $page->where('month', '2026-12'));
+    }
+
+    // ---- Item 2: already spent from my collections -----------------
+
+    public function test_a_bon_spent_from_collections_is_paid_at_the_handover_so_the_count_matches(): void
+    {
+        $collector = $this->as('kelvin@shalomtech.dev', 'manager');
+        $zone = ZoneFactory::new()->create();
+
+        foreach ([1, 2] as $ignored) {
+            $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'active']);
+            $this->post('/payments', ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
+        }
+
+        $this->post('/vouchers', [
+            'kind' => 'expense', 'payee_name' => 'Vulcaniseur', 'purpose' => 'Tyre on the round',
+            'category_uuid' => $this->category->uuid, 'amount' => '1500', 'from_collections' => true,
+        ])->assertSessionHasNoErrors();
+        $bon = Voucher::query()->latest('id')->firstOrFail();
+        $this->assertTrue($bon->from_collections);
+        $this->approve($bon);
+
+        // The cashier never pays it out of the till on its own.
+        $this->as('patience@shalomtech.dev', 'cashier');
+        $this->post("/vouchers/{$bon->uuid}/pay", ['account' => 'x', 'method' => 'cash', 'received_by_name' => 'X'])->assertForbidden();
+
+        $this->actingAs($collector);
+        $this->get('/cash/hand-over')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('bons_total', '1500.00')
+            ->where('cash_to_hand_over', '3500.00')
+            ->where('bons.0.number', $bon->number));
+
+        $this->post('/cash/remittances', ['declared_cash' => '3500'])->assertSessionHasNoErrors();
+        $remittance = Remittance::query()->where('collector_user_id', $collector->id)->latest('id')->firstOrFail();
+        $this->assertSame($remittance->id, $bon->refresh()->remittance_id);
+
+        $cashier = $this->as('patience@shalomtech.dev', 'cashier');
+        $this->post("/cash/remittances/{$remittance->uuid}/receive", ['received_cash' => '3500'])->assertSessionHasNoErrors();
+
+        $remittance->refresh();
+        $this->assertSame('0.00', (string) $remittance->cash_variance);
+        $this->assertNull($remittance->shortage_status);
+        $this->assertSame('1500.00', (string) $remittance->bons_total);
+
+        $bon->refresh();
+        $this->assertSame('paid', $bon->status);
+        $this->assertSame('1500.00', (string) Expenditure::query()->findOrFail($bon->expenditure_id)->amount);
+        $this->assertSame('3500.00', app(CashBookService::class)->balance(app(CashBookService::class)->tillFor($cashier)));
     }
 
     // ---- E9: impersonation ------------------------------------------
