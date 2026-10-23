@@ -668,6 +668,11 @@ class SyncService
                     && bccomp((string) $customer->latestManuscript->free_value, '0', 2) > 0
                     && bccomp((string) $customer->latestManuscript->bill, '0', 2) === 0,
                 'prepaid_months_remaining' => (int) ($customer->latestManuscript?->prepaid_months_remaining ?? 0),
+                // Months paid upfront per service still to come (D15).
+                'service_paid_months' => collect((array) ($customer->latestManuscript?->service_prepaid ?? []))
+                    ->map(fn (array $row, int|string $serviceId): array => ['service' => (string) ($serviceNames[(int) $serviceId] ?? 'Service'), 'months' => (int) ($row['months'] ?? 0)])
+                    ->values()
+                    ->all(),
                 'free_months' => array_map(fn (array $window): array => [
                     'service' => $window['service_id'] === null ? 'All services' : (string) ($serviceNames[$window['service_id']] ?? 'Service'),
                     'from' => $window['start'],

@@ -658,11 +658,25 @@ export interface CustomerFreeMonths {
     services: { uuid: string; name: string }[];
 }
 
-/** The coverage line — "TV free until Dec 2026 · paid until Mar 2027 · first bill Apr 2027" (CustomerCoverageService). */
+/** One service's timeline — free → paid → billed (FreeMonthPlan::timelines, revision D15). */
+export interface ServiceTimeline {
+    service_id?: number;
+    service_uuid?: string;
+    service: string;
+    price?: string;
+    paid_amount?: string;
+    free_from: string | null;
+    free_until: string | null;
+    paid_from: string | null;
+    paid_until: string | null;
+    first_billed: string | null;
+}
+
+/** The coverage line — "TV Service: free Oct–Nov 2026, paid Dec 2026–Feb 2027, billed from Mar 2027" (CustomerCoverageService). */
 export interface CustomerCoverage {
+    services: ServiceTimeline[];
     free: { service: string; from: string; until: string }[];
     waiting: { service: string; months: number; status: FreeMonthGrantStatus }[];
-    paid_from: string | null;
     paid_until: string | null;
     first_bill: string | null;
     label: string | null;
@@ -686,10 +700,10 @@ export interface InstallationPreview {
     paid_now: string;
     installation_balance: string;
     settled_now: boolean;
-    billing_starts: string;
-    billing_starts_label: string;
-    free: { service: string; months: number; from: string | null; until: string | null; from_label: string | null; until_label: string | null; waiting: boolean }[];
-    advance: { months: number; amount: string; from: string | null; until: string | null; from_label: string | null; until_label: string | null } | null;
+    installation_month: string;
+    installation_month_label: string;
+    services: ServiceTimeline[];
+    upfront_amount: string;
     first_bill: string | null;
     first_bill_label: string | null;
     collect_now: string;

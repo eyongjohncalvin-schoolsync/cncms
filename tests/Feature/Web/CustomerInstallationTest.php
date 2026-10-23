@@ -119,8 +119,22 @@ class CustomerInstallationTest extends TestCase
         return app(CustomerManuscriptRecalculationService::class)->recalculateOne($customer->fresh(), $period, trigger: 'test');
     }
 
-    public function test_example_a_installation_paid_with_two_free_months_and_a_three_month_advance(): void
+    /**
+     * One service's choice on the form (D15): free months from a month, and
+     * months paid upfront after them.
+     *
+     * @return array{service_uuid: string, free_from: ?string, free_months: int, paid_months: int}
+     */
+    private function plan(Service $service, int $free = 0, int $paid = 0, ?string $from = '2026-10'): array
     {
+        return ['service_uuid' => $service->uuid, 'free_from' => $free > 0 ? $from : null, 'free_months' => $free, 'paid_months' => $paid];
+    }
+
+    public function test_example_a_free_months_then_months_paid_upfront_then_billed(): void
+    {
+        // TV 2,500, installed 10 Oct, fee paid in full: Oct–Nov free (the
+        // installation month + one more), 3 months paid upfront (Dec–Feb),
+        // first billed month March.
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
         $offer = $this->offer();
@@ -128,55 +142,49 @@ class CustomerInstallationTest extends TestCase
         $this->post('/customers', $this->form([
             'installation_offer_uuid' => $offer->uuid,
             'installation_paid' => '10000',
-            'advance_months' => 3,
+            'service_plans' => [$this->plan($this->tv, free: 2, paid: 3)],
         ]))->assertSessionHasNoErrors()->assertRedirect();
 
         $customer = $this->created();
         $this->assertSame('2026-10-10', $customer->connected_on->toDateString());
-        $this->assertSame('2026-11', $customer->billing_starts_period);
+        $this->assertSame('2026-10', $customer->billing_starts_period, 'the installation month');
 
         $charge = CustomerCharge::query()->where('customer_id', $customer->id)->firstOrFail();
         $this->assertSame(CustomerCharge::STATUS_PAID, $charge->status);
-        $this->assertSame('10000.00', (string) $charge->standard_amount);
         $this->assertSame($offer->id, $charge->installation_offer_id);
 
         $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
-        $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->status);
-        $this->assertSame('2026-11', $grant->start_period);
+        $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->status, 'fully paid, within the offer: no approval needed');
+        $this->assertSame('2026-10', $grant->start_period);
         $this->assertSame(2, $grant->months);
 
         $payments = Payment::query()->where('customer_id', $customer->id)->orderBy('id')->get();
         $this->assertCount(2, $payments);
-        $this->assertSame([Payment::PURPOSE_SUBSCRIPTION, '7500.00', 3], [$payments[0]->purpose, (string) $payments[0]->amount, $payments[0]->months]);
+        $this->assertSame('7500.00', (string) $payments[0]->amount, 'months paid upfront at the service price');
+        $this->assertEquals([['service_id' => $this->tv->id, 'months' => 3, 'rate' => '2500.00']], $payments[0]->service_months);
         $this->assertSame([Payment::PURPOSE_INSTALLATION, '10000.00'], [$payments[1]->purpose, (string) $payments[1]->amount]);
 
-        // A receipt per payment; the installation receipt carries the free
-        // period, the advance and the first bill month (D11).
+        // A receipt per payment; the installation receipt carries each
+        // service's free and paid periods and first billed month (D11).
         $this->assertSame(2, PaymentReceipt::query()->whereIn('payment_id', $payments->pluck('id'))->count());
         $installation = PaymentReceipt::query()->where('payment_id', $payments[1]->id)->sole()->snapshot['installation'];
-        $this->assertSame('Nov 2026', $installation['free'][0]['from_label']);
-        $this->assertSame('Dec 2026', $installation['free'][0]['until_label']);
-        $this->assertSame('Mar 2027', $installation['paid_until_label']);
-        $this->assertSame('2027-04', $installation['first_bill']);
+        $this->assertEquals(['service' => 'TV Service', 'free' => 'Oct–Nov 2026', 'paid' => 'Dec 2026–Feb 2027', 'first_billed' => 'Mar 2027'], $installation['services'][0]);
+        $this->assertSame('2027-03', $installation['first_bill']);
 
-        // The customer page's coverage line, before any run.
         $this->get("/customers/{$customer->uuid}")->assertOk()->assertInertia(fn ($page) => $page
-            ->where('customer.coverage.label', 'TV Service free until Dec 2026 · paid until Mar 2027 · first bill Apr 2027')
-            ->where('customer.free_months.grants.0.status', FreeMonthGrant::STATUS_APPROVED));
+            ->where('customer.coverage.label', 'TV Service: free Oct–Nov 2026, paid Dec 2026–Feb 2027, billed from Mar 2027')
+            ->where('customer.installation.applicable', true));
 
-        foreach (['2026-11', '2026-12', '2027-01', '2027-02', '2027-03'] as $period) {
+        foreach (['2026-10', '2026-11', '2026-12', '2027-01', '2027-02'] as $period) {
             $this->assertSame('0.00', (string) $this->bill($customer, $period)->total_bill, "{$period}: nothing to pay");
         }
 
-        $april = $this->bill($customer, '2027-04');
-        $this->assertSame('2500.00', (string) $april->total_bill, 'first bill April');
-
-        $this->get("/customers/{$customer->uuid}")->assertOk()->assertInertia(fn ($page) => $page
-            ->where('customer.installation.applicable', true)
-            ->where('customer.installation.charges.0.offer_name', $offer->name));
+        $march = $this->bill($customer, '2027-03');
+        $this->assertSame('2500.00', (string) $march->bill, 'first billed month March');
+        $this->assertSame('5000.00', (string) $march->total_bill, 'same pay-ahead rule as every customer (D18)');
     }
 
-    public function test_the_preview_computes_what_to_collect_and_the_first_bill(): void
+    public function test_the_preview_shows_each_service_timeline_and_what_to_collect(): void
     {
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
@@ -185,94 +193,98 @@ class CustomerInstallationTest extends TestCase
         $this->postJson('/customers/installation-preview', $this->form([
             'installation_offer_uuid' => $offer->uuid,
             'installation_paid' => '10000',
-            'advance_months' => 3,
+            'service_plans' => [$this->plan($this->tv, free: 2, paid: 3)],
         ]))->assertOk()
             ->assertJsonPath('collect_now', '17500.00')
-            ->assertJsonPath('advance.amount', '7500.00')
-            ->assertJsonPath('first_bill', '2027-04')
-            ->assertJsonPath('line', 'Collect now: 17,500 · TV Service free Nov–Dec · first bill Apr 2027');
+            ->assertJsonPath('upfront_amount', '7500.00')
+            ->assertJsonPath('installation_month', '2026-10')
+            ->assertJsonPath('first_bill', '2027-03')
+            ->assertJsonPath('services.0.paid_until', '2027-02')
+            ->assertJsonPath('line', 'Collect now: 17,500 · TV Service: free Oct–Nov 2026, paid Dec 2026–Feb 2027, billed from Mar 2027');
     }
 
-    public function test_example_b_a_three_month_advance_with_per_service_free_months_costs_12500(): void
+    public function test_example_b_per_service_free_and_paid_months(): void
     {
+        // TV free Oct–Nov + 1 paid, Internet free Oct + 2 paid: 7,500 upfront,
+        // both billed from January.
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
-        $offer = $this->offer('10000', ['tv' => 2, 'internet' => 1]);
 
         $this->postJson('/customers/installation-preview', $this->form([
-            'installation_offer_uuid' => $offer->uuid,
-            'installation_paid' => '10000',
-            'advance_months' => 3,
+            'service_plans' => [$this->plan($this->tv, free: 2, paid: 1), $this->plan($this->internet, free: 1, paid: 2)],
         ], [$this->tv, $this->internet]))->assertOk()
-            ->assertJsonPath('advance.amount', '12500.00')
-            ->assertJsonPath('advance.from', '2026-12')
-            ->assertJsonPath('advance.until', '2027-02')
-            ->assertJsonPath('first_bill', '2027-03');
+            ->assertJsonPath('upfront_amount', '7500.00')
+            ->assertJsonPath('collect_now', '7500.00')
+            ->assertJsonPath('first_bill', '2027-01')
+            ->assertJsonPath('services.0.paid_from', '2026-12')
+            ->assertJsonPath('services.1.paid_from', '2026-11')
+            ->assertJsonPath('services.1.paid_until', '2026-12');
     }
 
-    public function test_example_c_installation_in_instalments_starts_the_free_months_after_the_last_one(): void
+    public function test_the_installation_month_can_be_unticked_and_is_then_billed(): void
     {
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
-        $offer = $this->offer();
 
-        $this->post('/customers', $this->form([
-            'installation_offer_uuid' => $offer->uuid,
-            'installation_paid' => '6000',
-        ]))->assertSessionHasNoErrors();
+        $this->postJson('/customers/installation-preview', $this->form([
+            'service_plans' => [$this->plan($this->tv, free: 1, from: '2026-11')],
+        ]))->assertOk()->assertJsonPath('services.0.first_billed', '2026-10');
 
-        $customer = $this->created();
-        $charge = CustomerCharge::query()->where('customer_id', $customer->id)->sole();
-        $this->assertSame(CustomerCharge::STATUS_OPEN, $charge->status);
-        $this->assertSame(FreeMonthGrant::STATUS_AWAITING_INSTALLATION_PAYMENT, FreeMonthGrant::query()->where('customer_id', $customer->id)->value('status'));
-
-        // Billed normally meanwhile (D3).
-        $this->travelTo(Carbon::parse('2026-10-25 09:00', 'Africa/Lagos'));
-        $this->assertSame('2500.00', (string) $this->bill($customer, '2026-11')->total_bill);
-        $this->travelTo(Carbon::parse('2026-11-25 09:00', 'Africa/Lagos'));
-        $this->assertSame('5000.00', (string) $this->bill($customer, '2026-12')->total_bill);
-
-        // January's bills are already out when the last instalment comes in
-        // on 20 Dec — January is still the first free month (D4).
-        $this->travelTo(Carbon::parse('2026-12-20 09:00', 'Africa/Lagos'));
-        $this->assertSame('2500.00', (string) $this->bill($customer, '2027-01')->bill);
-
-        $this->post("/installation-charges/{$charge->uuid}/payments", ['amount' => 4000, 'method' => 'cash'])->assertSessionHasNoErrors();
-
-        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
-        $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->status);
-        $this->assertSame('2027-01', $grant->start_period);
-
-        $january = Manuscript::query()->where('customer_id', $customer->id)->where('period', '2027-01')->sole();
-        $this->assertSame('0.00', (string) $january->bill, 'January recomputed as free');
-        $this->assertSame('2500.00', (string) $january->free_value);
-        $this->assertSame('5000.00', (string) $january->total_bill, 'only the unpaid Nov–Dec');
+        $this->postJson('/customers/installation-preview', $this->form([
+            'service_plans' => [$this->plan($this->tv, free: 1, from: '2026-09')],
+        ]))->assertStatus(422);
     }
 
-    public function test_example_d_a_customer_added_after_next_months_bills_were_published_gets_that_month(): void
+    public function test_example_c_free_months_without_the_installation_fully_paid_need_approval(): void
     {
-        $this->travelTo(Carbon::parse('2026-10-28 09:00', 'Africa/Lagos'));
-        CommandRun::query()->create(['command' => 'manuscript:calculate', 'period' => '2026-11', 'ran_at' => now(), 'status' => 'published', 'published_at' => now()]);
+        // D17: 6,000 of 10,000 paid at registration — the free months wait
+        // for an admin/owner; meanwhile the customer is billed.
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
         $offer = $this->offer();
+        $form = ['installation_offer_uuid' => $offer->uuid, 'installation_paid' => '6000', 'service_plans' => [$this->plan($this->tv, free: 2)]];
 
-        $this->post('/customers', $this->form([
-            'installation_offer_uuid' => $offer->uuid,
-            'installation_paid' => '10000',
-        ], name: 'Late Promo Customer'))->assertSessionHasNoErrors();
+        $this->post('/customers', $this->form($form))->assertSessionHasErrors('installation_reason');
+        $this->post('/customers', $this->form([...$form, 'installation_reason' => 'Pays the rest on Friday']))->assertSessionHasNoErrors();
+
+        $customer = $this->created();
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame(FreeMonthGrant::STATUS_PENDING_APPROVAL, $grant->status);
+        $this->assertSame('2500.00', (string) $this->bill($customer, '2026-10')->bill, 'billed while waiting');
+
+        // Paying the rest later does not start them by itself (D17).
+        $charge = CustomerCharge::query()->where('customer_id', $customer->id)->sole();
+        $this->post("/installation-charges/{$charge->uuid}/payments", ['amount' => 4000, 'method' => 'cash'])->assertSessionHasNoErrors();
+        $this->assertSame(FreeMonthGrant::STATUS_PENDING_APPROVAL, $grant->fresh()->status);
+
+        $this->post("/free-months/{$grant->uuid}/approve")->assertForbidden();
+        $this->admin();
+        $this->post("/free-months/{$grant->uuid}/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame('2026-10', $grant->fresh()->start_period, 'from the month chosen');
+        $this->assertSame('0.00', (string) $this->bill($customer, '2026-10')->bill, 'October now free');
+    }
+
+    public function test_example_d_a_customer_added_after_next_months_bills_were_published_gets_every_month(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-28 09:00', 'Africa/Lagos'));
+        foreach (['2026-10', '2026-11'] as $period) {
+            CommandRun::query()->create(['command' => 'manuscript:calculate', 'period' => $period, 'ran_at' => now(), 'status' => 'published', 'published_at' => now()]);
+        }
+        $this->manager();
+
+        $this->post('/customers', $this->form(['service_plans' => [$this->plan($this->tv, free: 1)]], name: 'Late Promo Customer'))->assertSessionHasNoErrors();
         $this->post('/customers', $this->form(name: 'Late Plain Customer'))->assertSessionHasNoErrors();
 
         $promo = $this->created('Late Promo Customer');
-        $november = Manuscript::query()->where('customer_id', $promo->id)->where('period', '2026-11')->sole();
-        $this->assertSame('0.00', (string) $november->total_bill);
-        $this->assertSame('2500.00', (string) $november->free_value);
+        $row = fn (Customer $customer, string $period) => Manuscript::query()->where('customer_id', $customer->id)->where('period', $period)->sole();
 
-        $this->assertSame('0.00', (string) $this->bill($promo, '2026-12')->total_bill);
-        $this->assertSame('2500.00', (string) $this->bill($promo, '2027-01')->total_bill, 'first bill January');
+        $this->assertSame('0.00', (string) $row($promo, '2026-10')->total_bill, 'installation month free');
+        $this->assertSame('2500.00', (string) $row($promo, '2026-11')->bill, 'November billed — not skipped');
 
-        // Without free months: November is billed, not skipped.
         $plain = $this->created('Late Plain Customer');
-        $this->assertSame('2500.00', (string) Manuscript::query()->where('customer_id', $plain->id)->where('period', '2026-11')->value('total_bill'));
+        $this->assertSame('2500.00', (string) $row($plain, '2026-10')->bill, 'installation month billed');
+        $this->assertSame('2500.00', (string) $row($plain, '2026-11')->bill);
     }
 
     public function test_a_fee_below_the_offer_waits_for_someone_elses_approval(): void
@@ -281,18 +293,9 @@ class CustomerInstallationTest extends TestCase
         $this->manager();
         $offer = $this->offer();
 
-        $this->post('/customers', $this->form([
-            'installation_offer_uuid' => $offer->uuid,
-            'installation_fee' => '5000',
-            'installation_paid' => '5000',
-        ]))->assertSessionHasErrors('installation_reason');
-
-        $this->post('/customers', $this->form([
-            'installation_offer_uuid' => $offer->uuid,
-            'installation_fee' => '5000',
-            'installation_paid' => '5000',
-            'installation_reason' => 'Neighbour of the zone chief',
-        ]))->assertSessionHasNoErrors();
+        $form = ['installation_offer_uuid' => $offer->uuid, 'installation_fee' => '5000', 'installation_paid' => '5000'];
+        $this->post('/customers', $this->form($form))->assertSessionHasErrors('installation_reason');
+        $this->post('/customers', $this->form([...$form, 'installation_reason' => 'Neighbour of the zone chief']))->assertSessionHasNoErrors();
 
         $charge = CustomerCharge::query()->where('customer_id', $this->created()->id)->sole();
         $this->assertSame(CustomerCharge::DECISION_PENDING, $charge->approval_status);
@@ -302,9 +305,7 @@ class CustomerInstallationTest extends TestCase
 
         $this->admin();
         $this->post("/installation-charges/{$charge->uuid}/fee/approve")->assertSessionHasNoErrors();
-
         $this->assertSame(CustomerCharge::STATUS_PAID, $charge->fresh()->status);
-        $this->assertSame('2026-11', FreeMonthGrant::query()->where('customer_charge_id', $charge->id)->value('start_period'));
     }
 
     public function test_rejecting_a_lower_fee_puts_the_offer_fee_back(): void
@@ -328,8 +329,10 @@ class CustomerInstallationTest extends TestCase
         $this->assertSame(CustomerCharge::DECISION_REJECTED, $charge->fresh()->approval_status);
     }
 
-    public function test_months_beyond_the_offer_need_approval_and_a_rejection_keeps_the_offer_months(): void
+    public function test_months_beyond_the_offer_preset_need_approval(): void
     {
+        // D19: the offer ticks TV 2 free months; the user may change it, but
+        // 3 is beyond the preset.
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
         $offer = $this->offer();
@@ -337,38 +340,40 @@ class CustomerInstallationTest extends TestCase
         $this->post('/customers', $this->form([
             'installation_offer_uuid' => $offer->uuid,
             'installation_paid' => '10000',
-            'free_months' => [['service_uuid' => $this->tv->uuid, 'months' => 3]],
+            'service_plans' => [$this->plan($this->tv, free: 3)],
             'installation_reason' => 'Promised by the field agent',
         ]))->assertSessionHasNoErrors();
 
         $grant = FreeMonthGrant::query()->where('customer_id', $this->created()->id)->sole();
         $this->assertSame(FreeMonthGrant::STATUS_PENDING_APPROVAL, $grant->status);
-
-        $this->post("/free-months/{$grant->uuid}/approve")->assertForbidden();
+        $this->assertSame(2, $grant->standard_months);
 
         $this->admin();
         $this->post("/free-months/{$grant->uuid}/reject", ['reason' => 'Two is the offer'])->assertSessionHasNoErrors();
-
-        $grant->refresh();
-        $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->status);
-        $this->assertSame(2, $grant->months);
-        $this->assertSame('2026-11', $grant->start_period);
+        $this->assertSame(FreeMonthGrant::STATUS_REJECTED, $grant->fresh()->status);
     }
 
-    public function test_free_months_are_capped_per_grant(): void
+    public function test_more_than_the_company_cap_needs_an_admin_and_a_reason(): void
     {
+        // D16: max 3 free months unless an admin/owner approves more.
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
-        $offer = $this->offer();
 
-        $this->post('/customers', $this->form([
-            'installation_offer_uuid' => $offer->uuid,
-            'free_months' => [['service_uuid' => $this->tv->uuid, 'months' => 4]],
-            'installation_reason' => 'Too generous',
-        ]))->assertSessionHasErrors('free_months');
+        $this->post('/customers', $this->form(['service_plans' => [$this->plan($this->tv, free: 4)]]))->assertSessionHasErrors('installation_reason');
+        $this->post('/customers', $this->form(['service_plans' => [$this->plan($this->tv, free: 4)], 'installation_reason' => 'Church']))->assertSessionHasNoErrors();
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $this->created()->id)->sole();
+        $this->assertSame(FreeMonthGrant::STATUS_PENDING_APPROVAL, $grant->status);
+
+        $this->admin();
+        $this->post("/free-months/{$grant->uuid}/approve")->assertSessionHasNoErrors();
+        $grant->refresh();
+        $this->assertSame(4, $grant->months);
+        $this->assertNotNull($grant->decided_by);
+        $this->assertSame('Church', $grant->note, 'the reason is recorded');
     }
 
-    public function test_a_full_waiver_is_asked_for_and_starts_the_free_months_once_approved(): void
+    public function test_a_full_waiver_and_its_free_months_both_need_approval(): void
     {
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
@@ -377,18 +382,22 @@ class CustomerInstallationTest extends TestCase
         $this->post('/customers', $this->form([
             'installation_offer_uuid' => $offer->uuid,
             'installation_fee' => '0',
+            'service_plans' => [$this->plan($this->tv, free: 2)],
             'installation_reason' => 'Church installation',
         ]))->assertSessionHasNoErrors();
 
-        $charge = CustomerCharge::query()->where('customer_id', $this->created()->id)->sole();
-        $this->assertSame('10000.00', (string) $charge->amount);
+        $customer = $this->created();
+        $charge = CustomerCharge::query()->where('customer_id', $customer->id)->sole();
         $this->assertSame(CustomerCharge::WAIVER_PENDING, $charge->waiver_status);
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame(FreeMonthGrant::STATUS_PENDING_APPROVAL, $grant->status);
 
         $this->admin();
         $this->post("/installation-charges/{$charge->uuid}/waiver/approve")->assertSessionHasNoErrors();
+        $this->post("/free-months/{$grant->uuid}/approve")->assertSessionHasNoErrors();
 
         $this->assertSame(CustomerCharge::STATUS_WAIVED, $charge->fresh()->status);
-        $this->assertSame('2026-11', FreeMonthGrant::query()->where('customer_charge_id', $charge->id)->value('start_period'));
+        $this->assertSame('2026-10', $grant->fresh()->start_period);
     }
 
     public function test_an_agent_cannot_set_an_installation(): void
@@ -409,8 +418,7 @@ class CustomerInstallationTest extends TestCase
 
         $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
         $this->assertSame(FreeMonthGrant::REASON_COMPENSATION, $grant->reason);
-        $this->assertNull($grant->service_id, 'all services');
-        $this->assertNotNull($grant->arrears_adjustment_id);
+        $this->assertSame($this->tv->id, $grant->service_id, 'one row per service, on its own timeline (D20)');
         $this->assertSame('pending', ArrearsAdjustment::query()->find($grant->arrears_adjustment_id)->status);
 
         $this->post("/free-months/{$grant->uuid}/approve")->assertForbidden();
@@ -418,15 +426,20 @@ class CustomerInstallationTest extends TestCase
         $this->admin();
         $this->post("/free-months/{$grant->uuid}/approve")->assertSessionHasNoErrors();
         $this->assertSame('2026-11', $grant->fresh()->start_period);
-        $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->fresh()->status);
     }
 
-    public function test_compensation_stacks_after_free_months_already_running(): void
+    public function test_compensation_goes_after_the_services_free_and_paid_months(): void
     {
+        // D20: TV free Oct–Nov, paid Dec–Feb → one compensation month is
+        // March, so no paid month is lost.
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
         $offer = $this->offer();
-        $this->post('/customers', $this->form(['installation_offer_uuid' => $offer->uuid, 'installation_paid' => '10000']))->assertSessionHasNoErrors();
+        $this->post('/customers', $this->form([
+            'installation_offer_uuid' => $offer->uuid,
+            'installation_paid' => '10000',
+            'service_plans' => [$this->plan($this->tv, free: 2, paid: 3)],
+        ]))->assertSessionHasNoErrors();
         $customer = $this->created();
 
         $this->post("/customers/{$customer->uuid}/free-months", ['months' => 1, 'reason' => 'Outage'])->assertSessionHasNoErrors();
@@ -435,61 +448,11 @@ class CustomerInstallationTest extends TestCase
         $this->admin();
         $this->post("/free-months/{$grant->uuid}/approve")->assertSessionHasNoErrors();
 
-        $this->assertSame('2027-01', $grant->fresh()->start_period, 'after the installation months Nov–Dec');
+        $this->assertSame('2027-03', $grant->fresh()->start_period);
     }
 
-    public function test_refund_installation_is_approved_by_someone_else_and_paid_out_through_a_bon(): void
+    public function test_compensation_for_one_service_waits_for_the_months_paid_ahead(): void
     {
-        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
-        $this->manager();
-        $offer = $this->offer();
-        $this->post('/customers', $this->form(['installation_offer_uuid' => $offer->uuid, 'installation_paid' => '10000']))->assertSessionHasNoErrors();
-        $customer = $this->created();
-        $charge = CustomerCharge::query()->where('customer_id', $customer->id)->sole();
-
-        $this->post("/installation-charges/{$charge->uuid}/refund", ['amount' => 12000, 'reason' => 'Could not connect'])->assertSessionHasErrors('amount');
-        $this->post("/installation-charges/{$charge->uuid}/refund", ['amount' => 10000, 'reason' => 'Could not connect'])->assertSessionHasNoErrors();
-        $this->post("/installation-charges/{$charge->uuid}/refund/approve")->assertForbidden();
-
-        $this->admin();
-        $this->post("/installation-charges/{$charge->uuid}/refund/approve")->assertSessionHasNoErrors();
-
-        $charge->refresh();
-        $this->assertSame(CustomerCharge::STATUS_REFUNDED, $charge->status);
-        $voucher = Voucher::query()->findOrFail($charge->refund_voucher_id);
-        $this->assertSame('10000.00', (string) $voucher->amount);
-        $this->assertSame('Customer refunds', $voucher->category->name);
-        $this->assertSame(FreeMonthGrant::STATUS_CANCELLED, FreeMonthGrant::query()->where('customer_charge_id', $charge->id)->value('status'), 'free months not started yet are forfeited');
-    }
-
-    public function test_the_monthly_report_shows_installations_promo_cost_and_who_gave_what(): void
-    {
-        Cache::flush();
-        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
-        $this->manager();
-        $offer = $this->offer();
-        $this->post('/customers', $this->form(['installation_offer_uuid' => $offer->uuid, 'installation_paid' => '10000']))->assertSessionHasNoErrors();
-        $customer = $this->created();
-        $this->bill($customer, '2026-11');
-
-        $this->admin();
-
-        $this->get('/reports?tier=monthly&date=2026-10')->assertOk()->assertInertia(fn ($page) => $page
-            ->where('report.installations.by_offer.0.offer', $offer->name)
-            ->where('report.installations.by_offer.0.count', 1)
-            ->where('report.installations.installation_income', '10000.00'));
-
-        $this->get('/reports?tier=monthly&date=2026-11')->assertOk()->assertInertia(fn ($page) => $page
-            ->where('report.installations.promo_cost', '2500.00')
-            ->where('report.installations.customers_on_promo', 1)
-            ->where('report.installations.ending_soon.0.ends', '2026-12'));
-    }
-
-    public function test_free_months_for_only_some_services_wait_until_paid_months_run_out(): void
-    {
-        // D6 keeps paid months whole: a TV+Internet customer with 3 paid
-        // months left gets Internet-only compensation — it starts after the
-        // paid months, so no paid month is spent on a half-free month.
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
         $customer = CustomerFactory::new()->create(['zone_id' => $this->zone->id, 'bill' => 5000, 'status' => 'active']);
@@ -506,21 +469,63 @@ class CustomerInstallationTest extends TestCase
         $this->assertSame('2027-02', $grant->fresh()->start_period, 'after Nov–Jan paid');
     }
 
-    public function test_a_rejected_settling_payment_puts_the_free_months_back_on_hold(): void
+    public function test_refund_installation_is_approved_by_someone_else_and_paid_out_through_a_bon(): void
     {
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
         $this->manager();
         $offer = $this->offer();
-        $this->post('/customers', $this->form(['installation_offer_uuid' => $offer->uuid, 'installation_paid' => '10000']))->assertSessionHasNoErrors();
+        $this->post('/customers', $this->form([
+            'installation_offer_uuid' => $offer->uuid,
+            'installation_paid' => '10000',
+            'service_plans' => [$this->plan($this->tv, free: 2)],
+        ]))->assertSessionHasNoErrors();
         $customer = $this->created();
-        $payment = Payment::query()->where('customer_id', $customer->id)->where('purpose', Payment::PURPOSE_INSTALLATION)->sole();
+        $charge = CustomerCharge::query()->where('customer_id', $customer->id)->sole();
+
+        $this->post("/installation-charges/{$charge->uuid}/refund", ['amount' => 12000, 'reason' => 'Could not connect'])->assertSessionHasErrors('amount');
+        $this->post("/installation-charges/{$charge->uuid}/refund", ['amount' => 10000, 'reason' => 'Could not connect'])->assertSessionHasNoErrors();
+        $this->post("/installation-charges/{$charge->uuid}/refund/approve")->assertForbidden();
 
         $this->admin();
-        $this->post("/payments/{$payment->uuid}/verify", ['action' => 'reject', 'notes' => 'Fake note'])->assertSessionHasNoErrors();
+        $this->post("/installation-charges/{$charge->uuid}/refund/approve")->assertSessionHasNoErrors();
 
-        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
-        $this->assertSame(FreeMonthGrant::STATUS_AWAITING_INSTALLATION_PAYMENT, $grant->status);
-        $this->assertNull($grant->start_period);
+        $charge->refresh();
+        $this->assertSame(CustomerCharge::STATUS_REFUNDED, $charge->status);
+        $voucher = Voucher::query()->findOrFail($charge->refund_voucher_id);
+        $this->assertSame('10000.00', (string) $voucher->amount);
+        $this->assertSame('Customer refunds', $voucher->category->name);
+
+        $grant = FreeMonthGrant::query()->where('customer_charge_id', $charge->id)->sole();
+        $this->assertSame(1, $grant->months, 'October was given; November forfeited');
+        $this->assertNotNull($grant->cancelled_at);
+    }
+
+    public function test_the_monthly_report_shows_installations_promo_cost_and_who_gave_what(): void
+    {
+        Cache::flush();
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+        $offer = $this->offer();
+        $this->post('/customers', $this->form([
+            'installation_offer_uuid' => $offer->uuid,
+            'installation_paid' => '10000',
+            'service_plans' => [$this->plan($this->tv, free: 2)],
+        ]))->assertSessionHasNoErrors();
+        $customer = $this->created();
+        $this->bill($customer, '2026-10');
+        $this->bill($customer, '2026-11');
+
+        $this->admin();
+
+        $this->get('/reports?tier=monthly&date=2026-10')->assertOk()->assertInertia(fn ($page) => $page
+            ->where('report.installations.by_offer.0.offer', $offer->name)
+            ->where('report.installations.by_offer.0.count', 1)
+            ->where('report.installations.installation_income', '10000.00'));
+
+        $this->get('/reports?tier=monthly&date=2026-11')->assertOk()->assertInertia(fn ($page) => $page
+            ->where('report.installations.promo_cost', '2500.00')
+            ->where('report.installations.customers_on_promo', 1)
+            ->where('report.installations.ending_soon.0.ends', '2026-11'));
     }
 
     public function test_the_preview_warns_about_a_possible_duplicate(): void
