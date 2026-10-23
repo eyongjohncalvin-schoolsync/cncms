@@ -69,6 +69,9 @@ class ManuscriptController extends Controller
             'payment_expiration' => $manuscript->payment_expiration?->toDateString(),
             'prepaid_months_remaining' => (int) $manuscript->prepaid_months_remaining,
             'prepaid_rate' => $manuscript->prepaid_rate,
+            // Free months (installation phase 2): what the free services
+            // would have cost — the register shows FREE, not PREPAID.
+            'free_value' => (string) $manuscript->free_value,
             'period' => $manuscript->period,
             'status' => $manuscript->customer->status,
             // Built from THIS row's own manuscript (not necessarily the
@@ -356,6 +359,7 @@ class ManuscriptController extends Controller
                     'total_bill' => $a['total_bill'] ?? null,
                     'payment_expiration' => $a['payment_expiration'] ?? null,
                     'prepaid_months_remaining' => (int) ($a['prepaid_months_remaining'] ?? 0),
+                    'free_value' => $a['free_value'] ?? '0.00',
                     'payments_applied' => count($entry['processed_payment_ids'] ?? []),
                     'adjustments_applied' => count($entry['processed_adjustment_ids'] ?? []),
                 ];
@@ -506,7 +510,9 @@ class ManuscriptController extends Controller
         $content = $this->billNotifications->composeMessage($customer);
 
         if ($content === null) {
-            return redirect()->back()->with('error', "No manuscript found for {$customer->name} yet — nothing to remind them about.");
+            return redirect()->back()->with('error', $customer->latestManuscript !== null
+                ? "{$customer->name} has nothing to pay this month (free, prepaid or covered by credit) — no reminder sent."
+                : "No manuscript found for {$customer->name} yet — nothing to remind them about.");
         }
 
         Message::create([

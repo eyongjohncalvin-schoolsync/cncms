@@ -106,6 +106,7 @@ class BillController extends Controller
                 'available' => $phone !== null && $message !== null,
                 'reason' => match (true) {
                     $phone === null => 'no_phone',
+                    $message === null && $customer->latestManuscript !== null => 'nothing_due',
                     $message === null => 'no_manuscript',
                     default => null,
                 },

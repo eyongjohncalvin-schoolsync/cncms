@@ -431,6 +431,8 @@ export interface Manuscript {
      * still covered by a months/yearly prepayment, and the rate locked when
      * it was paid. 0 / null outside a prepaid window. */
     prepaid_months_remaining: number;
+    /** Installation phase 2: foregone value of free services this month (FREE label). */
+    free_value?: string;
     prepaid_rate: string | null;
     period: string;
     status: CustomerStatus;
@@ -491,6 +493,7 @@ export interface CustomerManuscriptSummary {
     total_bill: string;
     payment_expiration: string | null;
     prepaid_months_remaining: number;
+    free_value?: string;
     prepaid_rate: string | null;
     period: string;
 }

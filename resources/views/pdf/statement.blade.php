@@ -105,7 +105,7 @@
                 <tr>
                     <td>{{ $month($bill['period']) }}</td>
                     <td>{{ $bill['number'] }}</td>
-                    <td class="r">{{ $money($bill['monthly_charge']) }}</td>
+                    <td class="r">@if($bill['is_free'] ?? false)FREE@else{{ $money($bill['monthly_charge']) }}@endif</td>
                     <td class="r">{{ $money($bill['amount_due']) }}</td>
                     <td class="r">{{ $money($bill['paid']) }}</td>
                     <td class="{{ $bill['status'] }}">{{ $statusLabels[$bill['status']] ?? $bill['status'] }}@if($bill['prepaid_months_remaining'] > 0) · {{ $bill['prepaid_months_remaining'] }} prepaid left @endif</td>

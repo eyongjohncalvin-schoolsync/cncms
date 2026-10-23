@@ -74,6 +74,13 @@ class Manuscript extends Model
      */
     public function expiryLabel(): string
     {
+        // Free months (installation phase 2): a month where nothing was
+        // charged because every service was free reads FREE — never
+        // PREPAID, which is money the customer paid.
+        if ($this->isFreeMonth()) {
+            return 'FREE';
+        }
+
         if ($this->payment_expiration !== null) {
             return $this->payment_expiration->format('M y');
         }
@@ -90,6 +97,16 @@ class Manuscript extends Model
         }
 
         return '-';
+    }
+
+    /**
+     * Nothing charged this month because of free months (every service
+     * free): free_value > 0 and the month's charge (`bill`) is 0.
+     */
+    public function isFreeMonth(): bool
+    {
+        return bccomp((string) ($this->free_value ?? '0'), '0', 2) > 0
+            && bccomp((string) $this->bill, '0', 2) === 0;
     }
 
     /**

@@ -152,6 +152,11 @@ class InvoiceService
                 'status' => self::status($due, $paid),
                 'balance' => bcsub((string) $manuscript->total_arrears, (string) $manuscript->credit, 2),
                 'prepaid_months_remaining' => (int) $manuscript->prepaid_months_remaining,
+                // Free months (installation phase 2) are never billed: the
+                // month's charge above already leaves the free services out;
+                // free_value is what they would have cost (zero-value).
+                'free_value' => bcadd((string) ($manuscript->free_value ?? '0'), '0', 2),
+                'is_free' => $manuscript->isFreeMonth(),
             ];
         })->values()->all();
     }

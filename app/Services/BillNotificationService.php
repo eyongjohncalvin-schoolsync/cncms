@@ -57,6 +57,12 @@ final class BillNotificationService
             return null;
         }
 
+        // Nothing due — a free month, a prepaid month, credit covering the
+        // bill (installation phase 2): no reminder to send.
+        if (bccomp((string) $manuscript->total_bill, '0', 2) <= 0) {
+            return null;
+        }
+
         $company = Company::cached();
         // `!Y-m` — reset day/time to base first so a short target month never
         // rolls forward when this runs on the 29th–31st (see the fuller note

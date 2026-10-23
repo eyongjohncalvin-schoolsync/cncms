@@ -17,6 +17,7 @@ interface Entry {
     arrears: string;
     advance_amount: string;
     advance_months: number;
+    free_months?: number;
     note: string | null;
 }
 
@@ -74,14 +75,15 @@ interface Draft {
     arrears: string;
     advance_amount: string;
     advance_months: string;
+    free_months: string;
     note: string;
 }
 
-type Column = 'arrears' | 'advance_amount' | 'advance_months' | 'note';
+type Column = 'arrears' | 'advance_amount' | 'advance_months' | 'free_months' | 'note';
 type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 type Show = 'all' | 'not_entered' | 'entered' | 'warnings';
 
-const COLUMNS: Column[] = ['arrears', 'advance_amount', 'advance_months', 'note'];
+const COLUMNS: Column[] = ['arrears', 'advance_amount', 'advance_months', 'free_months', 'note'];
 const AUTOSAVE_DELAY_MS = 800;
 
 function monthLabel(period: string): string {
@@ -98,6 +100,7 @@ function draftFromEntry(entry: Entry | null): Draft {
             arrears: '',
             advance_amount: '',
             advance_months: '',
+            free_months: '',
             note: '',
         };
     }
@@ -108,6 +111,7 @@ function draftFromEntry(entry: Entry | null): Draft {
         arrears: amount(entry.arrears),
         advance_amount: amount(entry.advance_amount),
         advance_months: String(entry.advance_months),
+        free_months: entry.free_months ? String(entry.free_months) : '',
         note: entry.note ?? '',
     };
 }
@@ -118,7 +122,7 @@ function cleanAmount(value: string): string {
 }
 
 function isBlank(draft: Draft): boolean {
-    return draft.arrears === '' && draft.advance_amount === '' && draft.advance_months === '';
+    return draft.arrears === '' && draft.advance_amount === '' && draft.advance_months === '' && draft.free_months === '';
 }
 
 function num(value: string): number {
@@ -146,6 +150,9 @@ function invalidReason(draft: Draft, maxAmount: number, maxMonths: number): stri
     }
     if (num(draft.advance_months) > maxMonths) {
         return `Months can be at most ${maxMonths}.`;
+    }
+    if (draft.free_months !== '' && (!/^\d+$/.test(draft.free_months.trim()) || num(draft.free_months) > 12)) {
+        return 'Free months left must be a whole number up to 12.';
     }
     if (num(draft.arrears) > 0 && num(draft.advance_months) > 0) {
         return "Can't owe and be prepaid for months at once — deduct the arrears from what was paid ahead and enter only what remains.";
@@ -273,6 +280,7 @@ export default function OpeningBalancesIndex({ batch, rows, history, can_start, 
                 arrears: blank ? null : cleanAmount(draft.arrears) || null,
                 advance_amount: blank ? null : cleanAmount(draft.advance_amount) || null,
                 advance_months: blank || draft.advance_months.trim() === '' ? null : Number(draft.advance_months),
+                free_months: blank || draft.free_months.trim() === '' ? null : Number(draft.free_months),
                 note: draft.note.trim() || null,
             };
         });
@@ -344,6 +352,7 @@ export default function OpeningBalancesIndex({ batch, rows, history, can_start, 
                 arrears: '0',
                 advance_amount: '0',
                 advance_months: '0',
+                free_months: '',
             },
         }));
         setDirty((current) => new Set(current).add(uuid));
@@ -357,6 +366,7 @@ export default function OpeningBalancesIndex({ batch, rows, history, can_start, 
                 arrears: '',
                 advance_amount: '',
                 advance_months: '',
+                free_months: '',
                 note: '',
             },
         }));
@@ -845,6 +855,10 @@ function LedgerTable({
                         <th className="w-36 px-3 py-2 text-right">Owed before {goLiveLabel}</th>
                         <th className="w-32 px-3 py-2 text-right">Advance (FCFA)</th>
                         <th className="w-28 px-3 py-2 text-right">Months paid ahead</th>
+                        <th className="w-28 px-3 py-2 text-right" title="Free months still to run at go-live — zero-value, never credit">
+                            Free months left
+                        </th>
+                        <th className="w-28 px-3 py-2 text-right" title="Free months still to run at go-live — zero-value, never credit">Free months left</th>
                         <th className="w-48 px-3 py-2">Note</th>
                         {editable && <th className="px-3 py-2" />}
                     </tr>
@@ -883,7 +897,7 @@ function LedgerTable({
                                             ref={(element) => registerInput(`${row.uuid}:${column}`, element)}
                                             value={draft?.[column] ?? ''}
                                             disabled={!editable}
-                                            inputMode={column === 'note' ? 'text' : column === 'advance_months' ? 'numeric' : 'decimal'}
+                                            inputMode={column === 'note' ? 'text' : column === 'advance_months' || column === 'free_months' ? 'numeric' : 'decimal'}
                                             placeholder={editable && column !== 'note' ? '—' : ''}
                                             aria-label={`${row.name} ${column.replace('_', ' ')}`}
                                             onChange={(event) => onChange(row.uuid, column, event.target.value)}

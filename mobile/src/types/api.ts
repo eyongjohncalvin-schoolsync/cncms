@@ -766,7 +766,7 @@ export interface ManuscriptIndexResponse {
  * `available` is true. Never a raw HTTP error for either case — the mobile
  * UI keys off this field to show a clear disabled/explanatory state.
  */
-export type BillWhatsappMessageUnavailableReason = 'no_phone' | 'no_manuscript' | null;
+export type BillWhatsappMessageUnavailableReason = 'no_phone' | 'no_manuscript' | 'nothing_due' | null;
 
 export interface BillWhatsappMessageApi {
     has_phone: boolean;
