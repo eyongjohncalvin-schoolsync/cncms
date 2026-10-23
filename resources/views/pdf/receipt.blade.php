@@ -196,7 +196,7 @@
 
     @if($installation)
         <div class="balance">
-            <strong>Installation fee:</strong> {{ number_format((float) $installation['fee'], 2) }} FCFA
+            <strong>{{ $installation['fee_label'] ?? 'Installation fee' }}:</strong> {{ number_format((float) $installation['fee'], 2) }} FCFA
             &middot; <strong>Paid so far:</strong> {{ number_format((float) $installation['paid'], 2) }} FCFA
             &middot; <strong>Balance:</strong>
             @if((float) $installation['balance'] > 0)

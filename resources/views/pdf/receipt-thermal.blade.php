@@ -113,7 +113,7 @@
     <table>
         <tr class="total"><td class="k">PAID</td><td class="v">{{ $money($r['amount'] ?? 0) }}</td></tr>
         @if($installation)
-            <tr><td class="k">Install fee</td><td class="v">{{ $money($installation['fee']) }}</td></tr>
+            <tr><td class="k">{{ match ($installation['kind'] ?? 'installation') { 'relocation' => 'Reloc. fee', 'reinstallation' => 'Re-inst. fee', default => 'Install fee' } }}</td><td class="v">{{ $money($installation['fee']) }}</td></tr>
             <tr><td class="k">Paid so far</td><td class="v">{{ $money($installation['paid']) }}</td></tr>
             <tr><td class="k">Balance</td><td class="v">{{ (float) $installation['balance'] > 0 ? $money($installation['balance']) : (($installation['status'] ?? '') === 'waived' ? 'Rest waived' : 'Fully paid') }}</td></tr>
             @foreach(($installation['services'] ?? []) as $timeline)

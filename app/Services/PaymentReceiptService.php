@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Company;
+use App\Models\CustomerCharge;
 use App\Models\FieldDevice;
 use App\Models\Manuscript;
 use App\Models\Payment;
@@ -426,6 +427,10 @@ class PaymentReceiptService
         $company = Company::cached();
         $purpose = $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION;
         $isSubscription = $purpose === Payment::PURPOSE_SUBSCRIPTION;
+        // A one-off charge's kind (installation / relocation /
+        // re-installation) names the receipt; all three are `installation`
+        // purpose money.
+        $chargeKind = $purpose === Payment::PURPOSE_INSTALLATION ? $payment->customerCharge?->kind : null;
 
         return [
             'issued_at' => now()->toIso8601String(),
@@ -433,7 +438,8 @@ class PaymentReceiptService
             // drives the receipt heading and which balance it shows. A
             // snapshot without it is an older subscription receipt.
             'purpose' => $purpose,
-            'title' => Payment::RECEIPT_TITLES[$purpose] ?? Payment::RECEIPT_TITLES[Payment::PURPOSE_SUBSCRIPTION],
+            'charge_kind' => $chargeKind,
+            'title' => CustomerCharge::RECEIPT_TITLES[$chargeKind ?? ''] ?? Payment::RECEIPT_TITLES[$purpose] ?? Payment::RECEIPT_TITLES[Payment::PURPOSE_SUBSCRIPTION],
             'description' => $this->describe($payment),
             'installation' => $this->installationFor($payment),
             'customer' => [
@@ -493,7 +499,11 @@ class PaymentReceiptService
     private function describe(Payment $payment): string
     {
         return match ($payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION) {
-            Payment::PURPOSE_INSTALLATION => 'Installation fee',
+            Payment::PURPOSE_INSTALLATION => match ($payment->customerCharge?->kind) {
+                CustomerCharge::KIND_RELOCATION => 'Relocation fee',
+                CustomerCharge::KIND_REINSTALLATION => 'Re-installation fee',
+                default => 'Installation fee',
+            },
             Payment::PURPOSE_TECHNICIAN_FEE => 'Technician motivation fee (reconnection)',
             default => 'Cable subscription',
         };
@@ -516,6 +526,23 @@ class PaymentReceiptService
 
         if ($charge === null) {
             return null;
+        }
+
+        // Relocation / re-installation: the fee block only — no free months
+        // come with them, so no coverage lines.
+        if ($charge->kind !== CustomerCharge::KIND_INSTALLATION) {
+            return [
+                'kind' => $charge->kind,
+                'fee_label' => "{$charge->kindLabel()} fee",
+                'fee' => bcadd((string) $charge->amount, '0', 2),
+                'paid' => $charge->paidAmount(),
+                'balance' => $charge->balance(),
+                'status' => $charge->status,
+                'services' => [],
+                'waiting' => [],
+                'first_bill' => null,
+                'first_bill_label' => null,
+            ];
         }
 
         // D11: no bill slips for free months — the free period, any advance
