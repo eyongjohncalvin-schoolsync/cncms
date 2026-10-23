@@ -412,6 +412,7 @@ class ReportService
 
         $expectedByZone = Customer::query()
             ->where('status', 'active')
+            ->activated()
             ->whereIn('zone_id', $zones->pluck('id'))
             ->groupBy('zone_id')
             ->selectRaw('zone_id, coalesce(sum(bill), 0) as expected')

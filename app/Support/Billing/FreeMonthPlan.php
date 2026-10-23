@@ -36,6 +36,13 @@ final readonly class FreeMonthPlan
     private const int SCALE = 2;
 
     /**
+     * The "billing start" of a field registration awaiting activation
+     * (installation phase 3): every month is before it, so the engine
+     * reads the customer as not started: nothing charged, payments wait.
+     */
+    public const string NOT_ACTIVATED = '9999-12';
+
+    /**
      * @param  array<int, string>  $servicePrices  service id => what that service (its base row plus
      *                                             any options) costs the customer each month
      * @param  list<array{service_id: ?int, start: string, end: string}>  $windows  approved grants
@@ -88,7 +95,7 @@ final readonly class FreeMonthPlan
 
         foreach ($customers as $customer) {
             $plans[$customer->id] = new self(
-                billingStartsPeriod: $customer->billing_starts_period,
+                billingStartsPeriod: $customer->isPendingActivation() ? self::NOT_ACTIVATED : $customer->billing_starts_period,
                 servicePrices: $pricesByCustomer->get($customer->id, new Collection)
                     ->mapWithKeys(fn (object $row): array => [(int) $row->service_id => bcadd((string) $row->price, '0', self::SCALE)])
                     ->all(),

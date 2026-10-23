@@ -120,6 +120,9 @@ class CustomerRepository implements CustomerRepositoryInterface
         return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
             ->with(['zone', 'latestManuscript'])
             ->where('status', 'active')
+            // Field registrations awaiting activation are never billed,
+            // so never at risk and never eligible (installation phase 3).
+            ->activated()
             ->when($zoneId, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
             ->orderBy('name')
             ->get();

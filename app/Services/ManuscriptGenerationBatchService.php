@@ -139,7 +139,7 @@ class ManuscriptGenerationBatchService
             throw $e;
         }
 
-        $customerIds ??= Customer::query()->orderBy('id')->pluck('id')->all();
+        $customerIds ??= Customer::query()->activated()->orderBy('id')->pluck('id')->all();
         $chunkSize = max(1, (int) config('scheduled_tasks.manuscript_generation.chunk_size', 250));
         $chunks = array_chunk($customerIds, $chunkSize);
 
