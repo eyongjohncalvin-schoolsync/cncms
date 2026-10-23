@@ -174,6 +174,37 @@ as **pending activation** (not billed, no reminders); the office confirms zone,
 offer and connection date and activates, or rejects (payments voided, refund
 voucher). Zones and offers cached on the phone; duplicate detection at sync.
 
+### Phase 3 status (2026-10-23, branch `installation-phase-3`, not merged)
+
+Built. Sync item `changes.installations[]` (App\Services\FieldInstallationService
+via SyncService, applied before payments): the phone generates the customer
+uuid, signs a field receipt per amount (installation, months paid upfront)
+from its block, and the server creates customer + charge + payments + receipts
+in one transaction (CustomerInstallationService::createPending), idempotent on
+local_uuid, `installations.field` + own zone only (seeded to agent). The
+customer is `customers.activation_status = pending`: FreeMonthPlan reads it as
+not started for every month, the run/chunk job, pre-run review, eligibility,
+reminders, recalculation and expected-revenue report skip it; no free-month
+grants exist until activation. Office: Customers → "Pending activation"
+(`?pending_activation=1`), dashboard count, and the customer page's "Registered
+in the field" card — Activate (confirm/correct zone, offer, free months,
+connection date; same D16/D17/D19 approval rules; Option X rows for months
+already generated) or Reject with a reason (payments rejected, receipts
+voided, refund bon raised pending approval, charge closed as refunded,
+customer archived). `installations.activate` (manager, admin); both routes are
+`not-impersonating:money`. Duplicates are flagged on the registration
+(`possible_duplicates`), never blocked or merged. The pull returns
+`changes.installations` (this user's registrations and the decision with its
+reason) and `activation_status` on customers.
+
+Deviations: pending is an explicit `customers.activation_status` column, not a
+null `billing_starts_period` (null already means a legacy customer billed
+normally) — it feeds the same `not_started` engine state. Money taken with a
+rejected registration stays in the collector's remittance (payments carry
+`field_installation_id`) and the refund is a bon, so the cash still reaches
+the till before any of it is paid back. Months paid upfront cannot be
+corrected at activation (they are money already taken) — reject instead.
+
 ## Out of scope / later
 
 Relocation and re-installation fees (same charge model, kind `relocation`),
