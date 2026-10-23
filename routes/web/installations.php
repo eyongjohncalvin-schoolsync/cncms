@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Route;
 // docs/plans/expenditures-and-spending-controls.md).
 Route::middleware('not-impersonating:money')->group(function () {
     Route::post('customers/{customer}/installation-charges', [CustomerChargeController::class, 'store'])->name('installation-charges.store');
+    // Relocation (moved house) and re-installation (same address) fees —
+    // the same charge with another kind; the actions below work on them too.
+    Route::post('customers/{customer}/relocation', [CustomerChargeController::class, 'relocate'])->name('customers.relocate');
+    Route::post('customers/{customer}/reinstallation', [CustomerChargeController::class, 'reinstall'])->name('customers.reinstall');
     Route::post('installation-charges/{customerCharge}/payments', [CustomerChargeController::class, 'storePayment'])->name('installation-charges.payments.store');
     Route::post('installation-charges/{customerCharge}/waiver', [CustomerChargeController::class, 'requestWaiver'])->name('installation-charges.waiver.request');
     Route::post('installation-charges/{customerCharge}/waiver/approve', [CustomerChargeController::class, 'approveWaiver'])->name('installation-charges.waiver.approve');
