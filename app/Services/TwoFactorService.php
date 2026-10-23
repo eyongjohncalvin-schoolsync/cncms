@@ -97,6 +97,28 @@ class TwoFactorService
         return $codes;
     }
 
+    /**
+     * Support reset for someone locked out of their authenticator (landlord
+     * "Reset 2FA"): clears the secret and recovery codes and, in the same
+     * transaction, signs the person out of every browser and phone, then
+     * emails them a notice. Callers authorize and record who did it.
+     */
+    public function resetBySupport(User $user): void
+    {
+        DB::connection('pgsql')->transaction(function () use ($user): void {
+            $user->forceFill([
+                'two_factor_secret' => null,
+                'two_factor_confirmed_at' => null,
+                'two_factor_recovery_codes' => null,
+                'two_factor_last_used_step' => null,
+            ])->save();
+
+            $this->account->signOutEverywhere($user);
+        });
+
+        $this->account->notify($user, SecurityNoticeMail::TWO_FACTOR_RESET);
+    }
+
     public function disable(User $user): void
     {
         $wasEnabled = $user->hasTwoFactorEnabled();

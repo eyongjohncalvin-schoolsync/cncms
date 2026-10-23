@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Pagination } from '@/components/ui/Pagination';
+import { ResetTwoFactorModal, type ResetTwoFactorTarget } from '@/components/landlord/ResetTwoFactorModal';
 import type { PaginationLink } from '@/types';
 
 interface WorkspaceUser {
@@ -19,6 +20,7 @@ interface WorkspaceUser {
     role: string;
     status: string;
     can_impersonate: boolean;
+    can_reset_two_factor: boolean;
 }
 
 /**
@@ -33,6 +35,7 @@ export default function LandlordUsersIndex({
     filters: { search: string };
 }) {
     const [search, setSearch] = useState(filters.search);
+    const [resetTarget, setResetTarget] = useState<ResetTwoFactorTarget | null>(null);
 
     function submit(event: FormEvent) {
         event.preventDefault();
@@ -104,13 +107,20 @@ export default function LandlordUsersIndex({
                                             <Badge tone={user.status === 'active' ? 'slate' : 'yellow'}>{user.status === 'active' ? user.role : `${user.role} · inactive`}</Badge>
                                         </Td>
                                         <Td className="text-right">
-                                            {user.can_impersonate ? (
-                                                <Button type="button" variant="secondary" onClick={() => impersonate(user)}>
-                                                    Log in as
-                                                </Button>
-                                            ) : (
-                                                <span className="text-xs text-slate-400">Not available</span>
-                                            )}
+                                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                                {user.can_reset_two_factor && (
+                                                    <Button type="button" variant="secondary" onClick={() => setResetTarget({ uuid: user.uuid, name: user.name })}>
+                                                        Reset 2FA
+                                                    </Button>
+                                                )}
+                                                {user.can_impersonate ? (
+                                                    <Button type="button" variant="secondary" onClick={() => impersonate(user)}>
+                                                        Log in as
+                                                    </Button>
+                                                ) : (
+                                                    <span className="text-xs text-slate-400">Not available</span>
+                                                )}
+                                            </div>
                                         </Td>
                                     </tr>
                                 ))}
@@ -122,6 +132,8 @@ export default function LandlordUsersIndex({
                     </div>
                 </>
             )}
+
+            <ResetTwoFactorModal target={resetTarget} onClose={() => setResetTarget(null)} />
         </LandlordLayout>
     );
 }

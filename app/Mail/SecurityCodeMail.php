@@ -12,7 +12,8 @@ use Illuminate\Mail\Mailables\Envelope;
 
 /**
  * A one-time 6-digit code (App\Services\SecurityCodeService): sign-in code,
- * two-factor fallback code, or new-email confirmation code. Platform
+ * two-factor fallback code, new-email confirmation code, or forgotten
+ * password reset code. Platform
  * branded — it is sent before any tenant is resolved.
  */
 class SecurityCodeMail extends Mailable
@@ -29,9 +30,11 @@ class SecurityCodeMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: $this->purpose === SecurityCode::PURPOSE_EMAIL_CHANGE
-                ? "{$this->code} is your code to confirm this email address"
-                : "{$this->code} is your CNCMS sign-in code",
+            subject: match ($this->purpose) {
+                SecurityCode::PURPOSE_EMAIL_CHANGE => "{$this->code} is your code to confirm this email address",
+                SecurityCode::PURPOSE_PASSWORD_RESET => "{$this->code} is your CNCMS password reset code",
+                default => "{$this->code} is your CNCMS sign-in code",
+            },
         );
     }
 
@@ -43,6 +46,7 @@ class SecurityCodeMail extends Mailable
                 'recipientName' => $this->recipientName,
                 'code' => $this->code,
                 'isEmailChange' => $this->purpose === SecurityCode::PURPOSE_EMAIL_CHANGE,
+                'isPasswordReset' => $this->purpose === SecurityCode::PURPOSE_PASSWORD_RESET,
                 'expiresInMinutes' => $this->expiresInMinutes,
             ],
         );

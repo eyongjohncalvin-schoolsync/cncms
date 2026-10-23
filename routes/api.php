@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\AccountSecurityController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LoginCodeController;
+use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\TwoFactorChallengeController;
 use App\Http\Middleware\ResolveTenant;
 use Illuminate\Support\Facades\Route;
@@ -23,6 +24,10 @@ Route::prefix('v1')->group(function () {
     Route::post('auth/two-factor/email', [TwoFactorChallengeController::class, 'sendEmail'])->middleware('throttle:security-code-send');
     Route::post('auth/login-code', [LoginCodeController::class, 'send'])->middleware('throttle:security-code-send');
     Route::post('auth/login-code/verify', [LoginCodeController::class, 'verify'])->middleware('throttle:security-code-verify');
+
+    // "Forgot password?" with an emailed code (for a later mobile build).
+    Route::post('auth/password/forgot', [PasswordResetController::class, 'forgot'])->middleware('throttle:security-code-send');
+    Route::post('auth/password/reset', [PasswordResetController::class, 'reset'])->middleware('throttle:security-code-verify');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('auth/logout', [AuthController::class, 'logout']);

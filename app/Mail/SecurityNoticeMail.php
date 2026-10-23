@@ -28,6 +28,10 @@ class SecurityNoticeMail extends Mailable
 
     public const string RECOVERY_CODES_REGENERATED = 'recovery_codes_regenerated';
 
+    public const string PASSWORD_RESET = 'password_reset';
+
+    public const string TWO_FACTOR_RESET = 'two_factor_reset';
+
     /**
      * @param  string  $kind  One of the constants above.
      * @param  string  $occurredAt  Already formatted in Cameroon time.
@@ -48,6 +52,8 @@ class SecurityNoticeMail extends Mailable
             self::TWO_FACTOR_ENABLED => 'Two-factor authentication turned on',
             self::TWO_FACTOR_DISABLED => 'Two-factor authentication turned off',
             self::RECOVERY_CODES_REGENERATED => 'New recovery codes were generated',
+            self::PASSWORD_RESET => 'Your password was reset',
+            self::TWO_FACTOR_RESET => 'Two-factor authentication was reset by support',
             default => 'Your account security settings changed',
         };
     }

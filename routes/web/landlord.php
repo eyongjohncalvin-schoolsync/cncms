@@ -35,6 +35,10 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::get('account', [AccountController::class, 'show'])->name('account.show');
 
     Route::get('users', [UserController::class, 'index'])->name('users.index');
+    // Support reset of a locked-out user's authenticator two-factor.
+    Route::post('users/{user}/two-factor/reset', [UserController::class, 'resetTwoFactor'])
+        ->middleware('not-impersonating')
+        ->name('users.two-factor.reset');
     Route::post('impersonate/{user}', [ImpersonationController::class, 'start'])->name('impersonate');
 
     Route::get('landlords', [LandlordController::class, 'index'])->name('landlords.index');
