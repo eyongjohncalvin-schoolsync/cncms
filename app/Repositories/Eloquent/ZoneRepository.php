@@ -53,6 +53,23 @@ class ZoneRepository implements ZoneRepositoryInterface
             ->first();
     }
 
+    public function forBulkAction(array $filters, ?array $uuids, int $limit): Collection
+    {
+        return $this->scopeToBranchDirect(Zone::query(), $this->currentBranchId())
+            ->withCount(['customers', 'agents'])
+            ->when(
+                $uuids !== null,
+                fn ($query) => $query->whereIn('uuid', $uuids),
+                fn ($query) => $query->when(
+                    $filters['search'] ?? null,
+                    fn ($query, string $search) => $query->where('name', 'ILIKE', "%{$search}%")
+                ),
+            )
+            ->orderBy('name')
+            ->limit($limit)
+            ->get();
+    }
+
     public function create(int $branchId, ZoneData $data): Zone
     {
         return Zone::query()->create(['branch_id' => $branchId, ...$data->toAttributes()]);

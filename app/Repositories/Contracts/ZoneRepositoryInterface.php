@@ -27,6 +27,19 @@ interface ZoneRepositoryInterface
 
     public function findByUuid(string $uuid): ?Zone;
 
+    /**
+     * Zones a bulk action (bulk delete) may act on, branch-fenced exactly
+     * like paginate()/findByUuid() so a bulk request can never reach a zone
+     * the caller couldn't open one by one. Either an explicit uuid list
+     * (filters ignored) or every zone matching $filters, ordered by name,
+     * at most $limit rows, each carrying customers_count and agents_count.
+     *
+     * @param  array<string, mixed>  $filters  Supported keys: 'search'.
+     * @param  array<int, string>|null  $uuids
+     * @return Collection<int, Zone>
+     */
+    public function forBulkAction(array $filters, ?array $uuids, int $limit): Collection;
+
     public function create(int $branchId, ZoneData $data): Zone;
 
     public function update(Zone $zone, ZoneData $data, ?int $branchId = null): Zone;
