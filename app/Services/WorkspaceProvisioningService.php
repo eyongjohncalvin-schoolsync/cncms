@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Mail\NewWorkspaceRegisteredMail;
 use App\Models\Tenant;
 use App\Models\User;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * Provisions a brand-new self-service workspace (Tenant), following the
@@ -46,7 +48,7 @@ class WorkspaceProvisioningService
         // the TenantCreated pipeline, after the schema is migrated + seeded)
         // reads them, writes the tenant_users + companies rows, then nulls
         // them out.
-        return Tenant::create([
+        $tenant = Tenant::create([
             'id' => $slug,
             'name' => $data['company_name'],
             'slug' => $slug,
@@ -60,5 +62,35 @@ class WorkspaceProvisioningService
                 'momo_name' => $data['momo_name'] ?? null,
             ],
         ]);
+
+        $this->notifyLandlords($tenant, $owner, $data);
+
+        return $tenant;
+    }
+
+    /**
+     * Every active landlord with an email hears about the new signup, so it
+     * doesn't sit unnoticed on the landlord dashboard. The company details
+     * travel in the mail itself: the provisioning job clears them from the
+     * tenant row before a queued mail is sent.
+     *
+     * @param  array{company_name: string, company_location: string, company_phone: string}  $data
+     */
+    private function notifyLandlords(Tenant $tenant, User $owner, array $data): void
+    {
+        User::query()
+            ->where('is_landlord', true)
+            ->where('status', 'active')
+            ->whereNotNull('email')
+            ->get(['id', 'name', 'email'])
+            ->each(fn (User $landlord) => Mail::to($landlord->email)->queue(new NewWorkspaceRegisteredMail(
+                workspaceName: $data['company_name'],
+                workspaceSlug: (string) $tenant->id,
+                ownerName: $owner->name,
+                ownerEmail: (string) $owner->email,
+                location: $data['company_location'] ?? null,
+                phone: $data['company_phone'] ?? null,
+                landlordName: $landlord->name,
+            )));
     }
 }

@@ -93,7 +93,7 @@ class GoogleAuthController extends Controller
         // A landlord with no workspace belongs in the platform area, not the
         // "create your workspace" form.
         if ($user->is_landlord) {
-            return redirect()->route('landlord.tenants.index');
+            return redirect()->route('landlord.dashboard');
         }
 
         return redirect()->route('register.workspace');

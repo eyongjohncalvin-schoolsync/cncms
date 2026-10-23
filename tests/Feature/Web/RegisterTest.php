@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Mail\NewWorkspaceRegisteredMail;
 use App\Models\Company;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\User as SocialiteUser;
@@ -56,11 +58,23 @@ class RegisterTest extends TestCase
     public function test_submitting_registration_creates_a_pending_workspace_and_redirects_to_the_pending_page(): void
     {
         $payload = $this->registrationPayload();
+        Mail::fake();
+
+        $landlord = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $wasLandlord = (bool) $landlord->is_landlord;
+        $landlord->forceFill(['is_landlord' => true])->save();
 
         try {
             $response = $this->post('/register', $payload);
 
             $response->assertRedirect(route('workspace.pending'));
+
+            // Every active landlord is told a new workspace awaits approval.
+            Mail::assertQueued(NewWorkspaceRegisteredMail::class, fn (NewWorkspaceRegisteredMail $mail) => $mail->hasTo('kelvin@shalomtech.dev')
+                && $mail->workspaceName === 'Acme Cable Co'
+                && $mail->workspaceSlug === $payload['workspace_slug']
+                && $mail->ownerEmail === $payload['email']);
+            Mail::assertNotQueued(NewWorkspaceRegisteredMail::class, fn (NewWorkspaceRegisteredMail $mail) => $mail->hasTo($payload['email']));
 
             $user = User::query()->where('email', $payload['email'])->first();
             $this->assertNotNull($user, 'Registering should have created a central User.');
@@ -92,9 +106,16 @@ class RegisterTest extends TestCase
             $this->assertAuthenticatedAs($user);
             $this->get('/dashboard')->assertRedirect(route('workspace.pending'));
         } finally {
+            $landlord->forceFill(['is_landlord' => $wasLandlord])->save();
             Tenant::find($payload['workspace_slug'])?->delete();
             User::query()->where('email', $payload['email'])->delete();
         }
+    }
+
+    public function test_the_login_page_offers_google_sign_in(): void
+    {
+        $this->get('/login')->assertOk()->assertInertia(fn (Assert $page) => $page->component('Auth/Login'));
+        $this->get('/auth/google/redirect')->assertRedirect();
     }
 
     public function test_a_workspace_slug_collision_returns_a_validation_error(): void
