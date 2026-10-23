@@ -30,6 +30,12 @@ export interface LocalCustomer {
      * `JSON.parse` directly, which also handles that null/malformed case.
      */
     services: string | null;
+    /**
+     * Installation phase 2: JSON-encoded PromoState (src/utils/installation.ts)
+     * — first billed month, FREE vs PREPAID, free months to come. Parse with
+     * `parseLocalCustomerPromo()`. `null` for rows cached before the column.
+     */
+    promo?: string | null;
 }
 
 export interface LocalPayment {

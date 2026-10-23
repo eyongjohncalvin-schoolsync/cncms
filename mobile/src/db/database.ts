@@ -202,6 +202,9 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN payee_name TEXT' },
     { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN from_collections INTEGER NOT NULL DEFAULT 0' },
     { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN voucher_number TEXT' },
+    // Installation phase 2: the customer's promo state (first billed month,
+    // FREE vs PREPAID, free months to come), JSON-encoded.
+    { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN promo TEXT' },
 ];
 
 /**

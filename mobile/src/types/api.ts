@@ -10,6 +10,7 @@
  * (127.0.0.1:8124) during this build, not just read from source — see the
  * verification notes in the phase-1 report.
  */
+import type { InstallationRequestFields } from '../utils/installation';
 
 // ---------------------------------------------------------------------------
 // Auth — app/Http/Controllers/Api/AuthController.php
@@ -283,6 +284,15 @@ export interface SyncPullCustomer {
      * (stored as a JSON-encoded string, parsed on read).
      */
     services: CustomerServiceApi[];
+    /**
+     * Installation phase 2 promo state (SyncService::upsertedCustomers()):
+     * first billed month, FREE vs PREPAID on the latest bill, free months
+     * still to come. Absent from older servers.
+     */
+    billing_starts_period?: string | null;
+    is_free?: boolean;
+    prepaid_months_remaining?: number;
+    free_months?: { service: string; from: string; until: string }[];
 }
 
 export interface SyncPullChangedPayment {
@@ -455,6 +465,9 @@ export interface CustomerDetailApi {
     installation_balance?: string;
     /** services.md section 6 — this customer's ticked services/options; `bill` above is their sum. */
     services: CustomerServiceApi[];
+    /** Installation phase 2: first billed month and the coverage line. Absent from older servers. */
+    billing_starts_period?: string | null;
+    coverage?: CustomerCoverageApi;
 }
 
 export interface CustomerDetailResponse {
@@ -482,7 +495,7 @@ export interface CustomerServiceSelection {
 
 export type PreferredChannel = 'whatsapp' | 'email' | 'print';
 
-export interface CreateCustomerRequestBody {
+export interface CreateCustomerRequestBody extends Partial<InstallationRequestFields> {
     zone_uuid: string;
     name: string;
     phone: string;
@@ -495,10 +508,66 @@ export interface CreateCustomerRequestBody {
 }
 
 /** All fields optional (StoreCustomerRequest -> UpdateCustomerRequest's `sometimes` rules) — the edit form always sends the full set it has, in practice. */
-export type UpdateCustomerRequestBody = Partial<CreateCustomerRequestBody>;
+export type UpdateCustomerRequestBody = Partial<Omit<CreateCustomerRequestBody, keyof InstallationRequestFields>>;
 
 export interface CreateCustomerResponse {
     data: CustomerDetailApi;
+    /** Installation phase 2: every payment taken with the save, each with its receipt number. */
+    payments?: { uuid: string; amount: string; purpose: string; months: number | null; verification_status: string; receipt_number: string | null }[];
+}
+
+// ---------------------------------------------------------------------------
+// Installation & first payment (docs/plans/installation-and-promotions.md,
+// phase 2) — GET /customers/installation-options, POST
+// /customers/installation-preview (App\Services\CustomerInstallationService).
+// ---------------------------------------------------------------------------
+
+export interface InstallationOfferApi {
+    uuid: string;
+    name: string;
+    description: string | null;
+    fee: string;
+    is_default: boolean;
+    months: { service_uuid: string; service_name: string; months: number }[];
+}
+
+export interface InstallationOptionsResponse {
+    data: {
+        offers: InstallationOfferApi[];
+        max_free_months: number;
+        can_manage: boolean;
+        can_take_payment: boolean;
+        today: string;
+    };
+}
+
+export interface InstallationPreviewApi {
+    bill: string;
+    fee: string;
+    paid_now: string;
+    installation_balance: string;
+    billing_starts: string;
+    billing_starts_label: string;
+    free: { service: string; months: number; from_label: string | null; until_label: string | null; waiting: boolean }[];
+    advance: { months: number; amount: string; from_label: string | null; until_label: string | null } | null;
+    first_bill: string | null;
+    first_bill_label: string | null;
+    collect_now: string;
+    needs_approval: string[];
+    max_free_months: number;
+    line: string;
+    duplicates: { uuid: string; name: string; phone: string | null; zone: string | null; status: string }[];
+}
+
+export interface InstallationPreviewResponse {
+    data: InstallationPreviewApi;
+}
+
+/** The coverage line on the live customer detail (App\Services\CustomerCoverageService). */
+export interface CustomerCoverageApi {
+    paid_until: string | null;
+    first_bill: string | null;
+    label: string | null;
 }
 
 export interface UpdateCustomerResponse {

@@ -6,7 +6,8 @@ import { Button } from '../../../src/components/ui/Button';
 import { Badge, type BadgeTone } from '../../../src/components/ui/Badge';
 import { EmptyState } from '../../../src/components/ui/EmptyState';
 import { BillHistoryCard } from '../../../src/components/customers/BillHistoryCard';
-import { getCustomerByUuid, parseLocalCustomerServices } from '../../../src/db/customers';
+import { getCustomerByUuid, parseLocalCustomerPromo, parseLocalCustomerServices } from '../../../src/db/customers';
+import { promoLabel } from '../../../src/utils/installation';
 import { getLastPaymentForCustomer } from '../../../src/db/payments';
 import { fetchBillWhatsappMessage } from '../../../src/api/bills';
 import { extractErrorMessage } from '../../../src/api/client';
@@ -67,6 +68,10 @@ export default function CustomerDetailScreen() {
     // render; `customer` only changes on focus/refresh (useFocusEffect
     // above), not on the unrelated local state below (sendingWhatsapp etc).
     const services = useMemo(() => (customer ? parseLocalCustomerServices(customer) : []), [customer]);
+    const promo = useMemo(
+        () => (customer ? promoLabel(parseLocalCustomerPromo(customer), new Date().toISOString().slice(0, 7)) : null),
+        [customer],
+    );
 
     useFocusEffect(
         useCallback(() => {
@@ -231,6 +236,15 @@ export default function CustomerDetailScreen() {
                     </Text>
                 </Card>
             </View>
+
+            {/* Installation phase 2: FREE vs PREPAID and the first billed
+                month, from the local cache (pull()'s promo state). */}
+            {promo ? (
+                <Card accentColor={colors.accent.payment}>
+                    <Text style={styles.sectionTitle}>Coverage</Text>
+                    <Text style={styles.noServices}>{promo}</Text>
+                </Card>
+            ) : null}
 
             {/* services.md section 6 — from the local cache only (pull()'s
                 subscriptions eager-load), same offline-first rule as the
