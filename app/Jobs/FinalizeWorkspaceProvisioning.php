@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Models\Company;
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -61,13 +62,18 @@ class FinalizeWorkspaceProvisioning implements ShouldQueue
             );
 
             if ($company !== []) {
-                Company::query()->first()?->update(array_filter([
-                    'name' => $company['company_name'] ?? null,
-                    'location' => $company['company_location'] ?? null,
-                    'phone' => $company['company_phone'] ?? null,
-                    'momo_number' => $company['momo_number'] ?? null,
-                    'momo_name' => $company['momo_name'] ?? null,
-                ], fn ($v): bool => $v !== null && $v !== ''));
+                // Exactly what the registrant entered — an empty MoMo stays
+                // empty (never another workspace's details). The company email
+                // defaults to the owner's sign-up email; both are editable in
+                // Settings → Company.
+                Company::query()->first()?->update([
+                    'name' => mb_substr((string) ($company['company_name'] ?? $tenant->name), 0, 50),
+                    'location' => (string) ($company['company_location'] ?? ''),
+                    'phone' => (string) ($company['company_phone'] ?? ''),
+                    'email' => User::query()->find((int) $ownerId)?->email,
+                    'momo_number' => ($company['momo_number'] ?? null) ?: null,
+                    'momo_name' => ($company['momo_name'] ?? null) ?: null,
+                ]);
 
                 Company::forgetCache();
             }

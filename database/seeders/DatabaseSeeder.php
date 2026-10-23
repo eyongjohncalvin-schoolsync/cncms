@@ -54,6 +54,10 @@ class DatabaseSeeder extends Seeder
             ['role' => 'super']
         );
 
+        // swecom's own zones and company details (dev/test only) — the
+        // generic TenantDatabaseSeeder no longer seeds them for every tenant.
+        $this->call(SwecomReferenceDataSeeder::class);
+
         tenancy()->end();
     }
 }
