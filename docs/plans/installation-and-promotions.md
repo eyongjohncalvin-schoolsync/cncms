@@ -127,6 +127,20 @@ Never touch the live `cncms` database.
 11. **Duplicate guard:** warn on matching phone/name when creating a customer;
     offers apply to new installations only.
 
+### Phase 2 status (2026-10-23, branch `installation-phase-2`, not merged)
+
+Built: items 1–11. Free months are stateless — `App\Support\Billing\FreeMonthPlan`
+derives every month from approved `free_month_grants` (calendar windows per
+service) + `customers.billing_starts_period`; nothing is counted down on the
+manuscript, so reruns/publish/unpublish/forward recalculation stay consistent.
+New installations are billed month by month (first bill = exactly one month);
+customers from before phase 2 keep the original ledger. Deviations: a third
+grant reason `opening_balance` and a `cancelled` status (refund forfeits); a
+grant for only some services on a customer who still has paid months starts
+after those paid months (so a paid month is never spent on a half-free month);
+the duplicate guard warns (web + mobile require a tick) but the server never
+blocks, for older app builds. Owner to set: Settings → Installation offers.
+
 ## Phase 3 — offline field installations (agents)
 
 Agents (own zone) register a customer + take installation (and advance) money

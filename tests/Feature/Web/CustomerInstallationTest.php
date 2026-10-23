@@ -485,6 +485,44 @@ class CustomerInstallationTest extends TestCase
             ->where('report.installations.ending_soon.0.ends', '2026-12'));
     }
 
+    public function test_free_months_for_only_some_services_wait_until_paid_months_run_out(): void
+    {
+        // D6 keeps paid months whole: a TV+Internet customer with 3 paid
+        // months left gets Internet-only compensation — it starts after the
+        // paid months, so no paid month is spent on a half-free month.
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+        $customer = CustomerFactory::new()->create(['zone_id' => $this->zone->id, 'bill' => 5000, 'status' => 'active']);
+        $customer->subscriptions()->create(['service_id' => $this->tv->id, 'price' => 2500]);
+        $customer->subscriptions()->create(['service_id' => $this->internet->id, 'price' => 2500]);
+        Manuscript::query()->create(['customer_id' => $customer->id, 'period' => '2026-10', 'bill' => 5000, 'total_arrears' => 0, 'credit' => 0, 'total_bill' => 0, 'prepaid_months_remaining' => 3, 'prepaid_rate' => 5000]);
+
+        $this->post("/customers/{$customer->uuid}/free-months", ['months' => 1, 'reason' => 'Internet down', 'service_uuids' => [$this->internet->uuid]])->assertSessionHasNoErrors();
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+
+        $this->admin();
+        $this->post("/free-months/{$grant->uuid}/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame('2027-02', $grant->fresh()->start_period, 'after Nov–Jan paid');
+    }
+
+    public function test_a_rejected_settling_payment_puts_the_free_months_back_on_hold(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+        $offer = $this->offer();
+        $this->post('/customers', $this->form(['installation_offer_uuid' => $offer->uuid, 'installation_paid' => '10000']))->assertSessionHasNoErrors();
+        $customer = $this->created();
+        $payment = Payment::query()->where('customer_id', $customer->id)->where('purpose', Payment::PURPOSE_INSTALLATION)->sole();
+
+        $this->admin();
+        $this->post("/payments/{$payment->uuid}/verify", ['action' => 'reject', 'notes' => 'Fake note'])->assertSessionHasNoErrors();
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame(FreeMonthGrant::STATUS_AWAITING_INSTALLATION_PAYMENT, $grant->status);
+        $this->assertNull($grant->start_period);
+    }
+
     public function test_the_preview_warns_about_a_possible_duplicate(): void
     {
         $this->manager();

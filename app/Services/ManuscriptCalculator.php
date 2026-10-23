@@ -108,6 +108,21 @@ use Illuminate\Support\Collection;
  *   marked processed; normal monthly billing resumes automatically once
  *   `payment_expiration` is no longer in the future.
  */
+/*
+ * Free months & first billed month (docs/plans/installation-and-promotions.md,
+ * phase 2) — every branch above reads App\Support\Billing\FreeMonthPlan:
+ *  - before customers.billing_starts_period nothing is charged (frozen,
+ *    reason 'not_started'; payments wait);
+ *  - a month's charge is the bill less the services free that month (D7);
+ *    a fully free month uses no prepaid month (D6) and, for a legacy
+ *    prepaid window, pushes payment_expiration back a month;
+ *  - free months run by calendar on the grants, so frozen months still use
+ *    them (D5); their value is reported in free_value, never in the ledger;
+ *  - new installations (billing_starts_period set) are billed month by
+ *    month: the month's charge is shown on its bill (manuscript `bill`) and
+ *    folded into arrears at the next month's run, so the first bill is one
+ *    month. Customers from before phase 2 keep the original ledger.
+ */
 final class ManuscriptCalculator
 {
     private const SCALE = 2;
