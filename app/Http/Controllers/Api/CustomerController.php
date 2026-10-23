@@ -5,18 +5,25 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\DataTransferObjects\CustomerData;
+use App\DataTransferObjects\InstallationData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DisconnectCustomerRequest;
+use App\Http\Requests\PreviewCustomerInstallationRequest;
 use App\Http\Requests\ReconnectCustomerRequest;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\SuspendCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
 use App\Http\Resources\CustomerResource;
 use App\Models\Customer;
+use App\Models\Payment;
 use App\Services\CustomerEligibilityService;
+use App\Services\CustomerInstallationService;
 use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
+use App\Services\FreeMonthGrantService;
+use App\Services\InstallationOfferService;
 use App\Services\ZoneService;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -57,11 +64,68 @@ class CustomerController extends Controller
         return (new CustomerResource($customer))->response();
     }
 
+    /**
+     * One save, one transaction (installation phase 2): the customer and,
+     * when the mobile app sends them (online only), the installation
+     * charge and payment, an advance and the free months. Older builds
+     * send none of those fields and get exactly what they got before — plus
+     * the first billed month being the month after joining (D4). `payments`
+     * lists every payment taken, each with its receipt number.
+     */
     public function store(StoreCustomerRequest $request): JsonResponse
     {
-        $customer = $this->customers->create(CustomerData::fromArray($request->validated()));
+        $result = app(CustomerInstallationService::class)->create(
+            CustomerData::fromArray($request->validated()),
+            InstallationData::fromArray($request->validated()),
+            $request->user(),
+        );
 
-        return (new CustomerResource($customer))->response()->setStatusCode(201);
+        $customer = $this->customers->findOrFail($result['customer']->uuid);
+
+        return (new CustomerResource($customer))->additional([
+            'payments' => array_map(fn (Payment $payment): array => [
+                'uuid' => $payment->uuid,
+                'amount' => (string) $payment->amount,
+                'purpose' => $payment->purpose,
+                'months' => $payment->months,
+                'verification_status' => $payment->verification_status,
+                'receipt_number' => $payment->receipt()->value('receipt_number'),
+            ], $result['payments']),
+        ])->response()->setStatusCode(201);
+    }
+
+    /**
+     * GET /customers/installation-options — what the mobile add-customer
+     * screen needs for its "Installation & first payment" section.
+     */
+    public function installationOptions(): JsonResponse
+    {
+        $this->authorize('create', Customer::class);
+
+        return response()->json(['data' => [
+            'offers' => app(InstallationOfferService::class)->availableForForm(),
+            'max_free_months' => FreeMonthGrantService::maxMonths(),
+            'can_manage' => $this->context->can('installations.manage'),
+            'can_take_payment' => $this->context->can('payments.create'),
+            'today' => BusinessTimezone::today(),
+        ]]);
+    }
+
+    /**
+     * POST /customers/installation-preview — the live preview line, the
+     * advance amount, what needs approval and possible duplicates. Writes
+     * nothing. Same service as the web form.
+     */
+    public function installationPreview(PreviewCustomerInstallationRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        return response()->json(['data' => app(CustomerInstallationService::class)->preview(
+            CustomerData::fromArray(['services' => $validated['services'] ?? []])->services ?? [],
+            InstallationData::fromArray($validated),
+            $validated['name'] ?? null,
+            $validated['phone'] ?? null,
+        )]);
     }
 
     public function update(UpdateCustomerRequest $request, Customer $customer): JsonResponse

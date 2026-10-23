@@ -382,6 +382,8 @@ class FreeMonthGrantService
         if ($recalculateFrom !== null) {
             $this->recalculateFrom($charge->customer, $recalculateFrom);
         }
+
+        $charge->customer->touch();
     }
 
     /**
@@ -531,6 +533,8 @@ class FreeMonthGrantService
             $this->recalculateFrom($customer, $earliest);
         }
 
+        // The mobile pull only re-sends customers whose row changed.
+        $customer->touch();
         $this->forgetCustomerCache($customer);
     }
 

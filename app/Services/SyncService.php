@@ -12,10 +12,12 @@ use App\Models\Customer;
 use App\Models\CustomerSubscription;
 use App\Models\Expenditure;
 use App\Models\Payment;
+use App\Models\Service;
 use App\Models\SyncQueue;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\Billing\FreeMonthPlan;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
@@ -615,7 +617,7 @@ class SyncService
         $zoneId = TenantContext::currentZoneId();
         $branchId = TenantContext::currentBranchId();
 
-        return Customer::query()
+        $customers = Customer::query()
             // latestManuscript is eager-loaded alongside zone so the mobile
             // Customers list/detail cache (mobile-app-react-native.md
             // section 4) has arrears/credit to render offline without a
@@ -633,7 +635,15 @@ class SyncService
                 $zoneId === null && $branchId !== null,
                 fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId))
             )
-            ->get()
+            ->get();
+
+        // Promo state (installation phase 2): first billed month and the
+        // free months still to come, two queries for the whole pull.
+        $plans = FreeMonthPlan::forCustomers($customers);
+        $serviceNames = Service::query()->pluck('name', 'id');
+        $currentPeriod = BusinessTimezone::currentPeriod();
+
+        return $customers
             ->map(fn (Customer $customer): array => [
                 'uuid' => $customer->uuid,
                 'name' => $customer->name,
@@ -652,6 +662,17 @@ class SyncService
                     'service_variant_name' => $row->serviceVariant?->name,
                     'price' => $row->price,
                 ])->values()->all(),
+                'billing_starts_period' => $customer->billing_starts_period,
+                // FREE (not PREPAID): the latest bill's month was free.
+                'is_free' => $customer->latestManuscript !== null
+                    && bccomp((string) $customer->latestManuscript->free_value, '0', 2) > 0
+                    && bccomp((string) $customer->latestManuscript->bill, '0', 2) === 0,
+                'prepaid_months_remaining' => (int) ($customer->latestManuscript?->prepaid_months_remaining ?? 0),
+                'free_months' => array_map(fn (array $window): array => [
+                    'service' => $window['service_id'] === null ? 'All services' : (string) ($serviceNames[$window['service_id']] ?? 'Service'),
+                    'from' => $window['start'],
+                    'until' => $window['end'],
+                ], ($plans[$customer->id] ?? FreeMonthPlan::none())->windowsFrom($currentPeriod)),
             ])
             ->all();
     }

@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\CustomerCharge;
 use App\Models\CustomerSubscription;
 use App\Models\Payment;
+use App\Services\CustomerCoverageService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -70,6 +71,12 @@ class CustomerResource extends JsonResource
             'installation_balance' => $this->whenLoaded('charges', fn (): string => $this->charges
                 ->filter(fn (CustomerCharge $charge): bool => $charge->isOpen())
                 ->reduce(fn (string $sum, CustomerCharge $charge): string => bcadd($sum, $charge->balance(), 2), '0.00')),
+            // Free months & first billed month (installation phase 2): the
+            // coverage line "TV free until Dec · paid until Mar · first bill
+            // Apr" — single-customer reads only (same condition as the
+            // installation balance above), never on a list.
+            'billing_starts_period' => $this->billing_starts_period,
+            'coverage' => $this->whenLoaded('charges', fn (): array => app(CustomerCoverageService::class)->summarize($this->resource)),
             'recent_payments' => $this->whenLoaded('payments', fn () => $this->payments->map(fn ($payment) => [
                 'uuid' => $payment->uuid,
                 'amount' => $payment->amount,
