@@ -20,7 +20,8 @@ use Tests\Feature\Concerns\InteractsWithTwoFactor;
 use Tests\TestCase;
 
 /**
- * "My account" (/account): profile, password, code-confirmed email change,
+ * "My account" (/account, and /landlord/account for landlords — same page
+ * and actions, no workspace needed): profile, password, code-confirmed email change,
  * authenticator two-factor, sessions, and the impersonation block. Uses the
  * seeded owner (kelvin@shalomtech.dev / password), who belongs to the
  * swecom workspace; every write rolls back with the test transaction.
@@ -82,6 +83,48 @@ class AccountTest extends TestCase
     public function test_guests_cannot_open_the_account_page(): void
     {
         $this->get('/account')->assertRedirect('/login');
+        $this->get('/landlord/account')->assertRedirect('/login');
+    }
+
+    public function test_workspace_users_get_the_workspace_shell(): void
+    {
+        $this->actingAs($this->user)
+            ->get('/account')
+            ->assertInertia(fn (Assert $page) => $page->component('Account/Show')->where('area', 'workspace'));
+    }
+
+    public function test_a_landlord_without_any_workspace_manages_their_own_account(): void
+    {
+        $landlord = User::factory()->create(['password' => 'old-password-123']);
+        $landlord->forceFill(['is_landlord' => true])->save();
+
+        $this->actingAs($landlord)
+            ->get('/landlord/account')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Account/Show')
+                ->where('area', 'landlord')
+                ->where('account.email', $landlord->email));
+
+        // The shared actions need no workspace.
+        $this->patch('/account/profile', ['name' => 'Platform Owner', 'username' => 'platform-owner', 'locale' => 'en'])
+            ->assertSessionHasNoErrors();
+        $this->put('/account/password', [
+            'current_password' => 'old-password-123',
+            'password' => 'New-password-456!',
+            'password_confirmation' => 'New-password-456!',
+        ])->assertSessionHasNoErrors();
+
+        $fresh = $landlord->fresh();
+        $this->assertSame('Platform Owner', $fresh->name);
+        $this->assertTrue(Hash::check('New-password-456!', $fresh->password));
+    }
+
+    public function test_the_landlord_account_page_is_for_landlords_only(): void
+    {
+        $this->user->forceFill(['is_landlord' => false])->save();
+
+        $this->actingAs($this->user)->get('/landlord/account')->assertForbidden();
     }
 
     public function test_profile_update_changes_name_username_and_language(): void

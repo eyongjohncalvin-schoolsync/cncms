@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Landlord\ActivityController;
 use App\Http\Controllers\Landlord\DashboardController;
 use App\Http\Controllers\Landlord\ImpersonationController;
@@ -28,6 +29,10 @@ use Illuminate\Support\Facades\Route;
 Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->group(function () {
     Route::get('/', DashboardController::class)->name('dashboard');
     Route::get('activity', [ActivityController::class, 'index'])->name('activity.index');
+
+    // The landlord's own My account (profile, password, email, 2FA,
+    // devices) — same page and actions as /account, no workspace needed.
+    Route::get('account', [AccountController::class, 'show'])->name('account.show');
 
     Route::get('users', [UserController::class, 'index'])->name('users.index');
     Route::post('impersonate/{user}', [ImpersonationController::class, 'start'])->name('impersonate');

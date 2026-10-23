@@ -19,6 +19,12 @@ require __DIR__.'/web/workspace.php';
 // routes/web/landlord.php's doc comment.
 require __DIR__.'/web/landlord.php';
 
+// My account writes need a signed-in user but no workspace, so the landlord
+// area (/landlord/account) and the workspace page (/account) share them.
+Route::middleware(['auth', 'throttle:web'])->group(function () {
+    require __DIR__.'/web/account-actions.php';
+});
+
 // Public, signed, unauthenticated receipt-PDF link — its own top-level
 // require for the same reason as landlord.php above: it must NOT go through
 // ['auth', 'tenant.web']. See that file's doc comment.

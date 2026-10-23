@@ -12,6 +12,7 @@ import {
     IconUserCircle,
 } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
+import { LandlordLayout } from '@/layouts/LandlordLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { TextInput } from '@/components/ui/TextInput';
 import { PasswordInput } from '@/components/ui/PasswordInput';
@@ -30,6 +31,8 @@ interface AccountProps {
     sessions: { ip_address: string | null; user_agent: string | null; last_active_at: string; is_current: boolean }[];
     devices: { id: number; name: string; last_used_at: string | null; created_at: string | null; is_current: boolean }[];
     isImpersonating: boolean;
+    /** Rendered at /landlord/account (landlord shell) or /account (workspace shell). */
+    area: 'landlord' | 'workspace';
 }
 
 /**
@@ -40,9 +43,16 @@ interface AccountProps {
 export default function AccountShow(props: AccountProps) {
     const { t } = useTranslation();
     const locked = props.isImpersonating;
+    // A landlord without a workspace (or one managing the platform) gets the
+    // same page inside the landlord shell — no workspace needed.
+    const Layout = props.area === 'landlord' ? LandlordLayout : AppLayout;
+    const breadcrumbs =
+        props.area === 'landlord'
+            ? [{ label: 'Landlord', href: '/landlord' }, { label: t('account.title') }]
+            : [{ label: t('account.title') }];
 
     return (
-        <AppLayout title={t('account.title')} breadcrumbs={[{ label: t('account.title') }]}>
+        <Layout title={t('account.title')} breadcrumbs={breadcrumbs}>
             <Head title={t('account.title')} />
 
             <div className="mx-auto flex max-w-3xl flex-col gap-6">
@@ -60,7 +70,7 @@ export default function AccountShow(props: AccountProps) {
                 <TwoFactorSection twoFactor={props.twoFactor} locked={locked} />
                 <SessionsSection sessions={props.sessions} devices={props.devices} locked={locked} />
             </div>
-        </AppLayout>
+        </Layout>
     );
 }
 
