@@ -38,6 +38,7 @@ import { CustomerStatusActions } from '@/components/customers/CustomerStatusActi
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { InstallationCard } from '@/components/customers/InstallationCard';
+import { OneOffChargesCard } from '@/components/customers/OneOffChargesCard';
 import { FreeMonthsCard } from '@/components/customers/FreeMonthsCard';
 import { FieldInstallationCard } from '@/components/customers/FieldInstallationCard';
 import { paymentPurposeLabel } from '@/lib/paymentPurpose';
@@ -520,6 +521,13 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
             {customer.installation && (
                 <div className="animate-fade-up mt-6" style={{ animationDelay: '0.14s' }}>
                     <InstallationCard customerUuid={customer.uuid} installation={customer.installation} />
+                </div>
+            )}
+
+            {/* Relocation and re-installation fees — the same separate balance. */}
+            {customer.one_off_charges && (customer.one_off_charges.charges.length > 0 || customer.one_off_charges.can_relocate || customer.one_off_charges.can_reinstall) && (
+                <div className="animate-fade-up mt-6" style={{ animationDelay: '0.142s' }}>
+                    <OneOffChargesCard customerUuid={customer.uuid} zoneUuid={customer.zone_uuid} location={customer.location} oneOff={customer.one_off_charges} />
                 </div>
             )}
 

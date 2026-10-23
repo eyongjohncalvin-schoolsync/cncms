@@ -318,11 +318,18 @@ function AgentView({ tier, report }: { tier: ReportTier; report: ReportData }) {
  * fees are never part of report figures.
  */
 function purposeHint(byPurpose?: ReportIncomeByPurpose): string {
-    if (!byPurpose || Number(byPurpose.installation) <= 0) {
+    const relocation = Number(byPurpose?.relocation ?? 0);
+    const reinstallation = Number(byPurpose?.reinstallation ?? 0);
+
+    if (!byPurpose || (Number(byPurpose.installation) <= 0 && relocation <= 0 && reinstallation <= 0)) {
         return '';
     }
 
-    return ` · subscriptions ${formatCurrency(byPurpose.subscription)} · installations ${formatCurrency(byPurpose.installation)}`;
+    return (
+        ` · subscriptions ${formatCurrency(byPurpose.subscription)} · installations ${formatCurrency(byPurpose.installation)}` +
+        (relocation > 0 ? ` · relocations ${formatCurrency(byPurpose.relocation ?? '0')}` : '') +
+        (reinstallation > 0 ? ` · re-installations ${formatCurrency(byPurpose.reinstallation ?? '0')}` : '')
+    );
 }
 
 function DailyView({ report }: { report: DailyReport }) {
@@ -774,6 +781,22 @@ function InstallationsReport({ data }: { data: ReportInstallations }) {
                         <dd className="font-medium text-slate-900">{data.customers_on_promo.toLocaleString()}</dd>
                     </div>
                 </dl>
+
+                {data.one_off_charges && data.one_off_charges.length > 0 && (
+                    <div>
+                        <h3 className="mb-1 font-medium text-slate-700">Relocation &amp; re-installation (one-off service charges)</h3>
+                        <ul className="space-y-0.5">
+                            {data.one_off_charges.map((row) => (
+                                <li key={row.kind} className="flex justify-between gap-2">
+                                    <span>{row.label}</span>
+                                    <span className="tabular-nums text-slate-600">
+                                        {row.count} raised · {formatCurrency(row.fees)} · income {formatCurrency(row.income)}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
 
                 <div>
                     <h3 className="mb-1 font-medium text-slate-700">Installations this month, by offer</h3>

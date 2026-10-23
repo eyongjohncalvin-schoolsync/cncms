@@ -40,6 +40,7 @@ interface InstallationOffersProps {
     offers: OfferRow[];
     services: ServiceOption[];
     max_free_months: number;
+    one_off_fees: { relocation_fee: string | null; reinstallation_fee: string | null };
 }
 
 /**
@@ -49,9 +50,10 @@ interface InstallationOffersProps {
  * on free months per grant. Anything below an offer's fee or beyond its
  * months needs admin/owner approval on the customer.
  */
-export default function InstallationOffers({ offers, services, max_free_months }: InstallationOffersProps) {
+export default function InstallationOffers({ offers, services, max_free_months, one_off_fees }: InstallationOffersProps) {
     const [modal, setModal] = useState<{ offer: OfferRow | null } | null>(null);
     const cap = useForm({ max_free_months: max_free_months });
+    const fees = useForm({ relocation_fee: one_off_fees.relocation_fee ?? '', reinstallation_fee: one_off_fees.reinstallation_fee ?? '' });
 
     return (
         <AppLayout title="Installation offers" breadcrumbs={[{ label: 'Settings', href: '/settings/company' }, { label: 'Installation offers' }]}>
@@ -103,6 +105,54 @@ export default function InstallationOffers({ offers, services, max_free_months }
                             Save cap
                         </Button>
                         <p className="text-xs text-slate-500">Applies to offers, installation grants and compensation alike.</p>
+                    </form>
+                </CardBody>
+            </Card>
+
+            {/* Default relocation / re-installation fees — the same charge model as
+                installation; empty = no default (typed each time). */}
+            <Card className="mb-6">
+                <CardBody>
+                    <form
+                        className="flex flex-wrap items-end gap-3"
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            fees.patch('/settings/installation-offers/one-off-fees', { preserveScroll: true });
+                        }}
+                    >
+                        <div className="w-48">
+                            <TextInput
+                                id="relocation_fee"
+                                type="number"
+                                min="1"
+                                step="0.01"
+                                label="Relocation fee (FCFA)"
+                                placeholder="No default"
+                                value={fees.data.relocation_fee}
+                                onChange={(e) => fees.setData('relocation_fee', e.target.value)}
+                                error={fees.errors.relocation_fee}
+                            />
+                        </div>
+                        <div className="w-48">
+                            <TextInput
+                                id="reinstallation_fee"
+                                type="number"
+                                min="1"
+                                step="0.01"
+                                label="Re-installation fee (FCFA)"
+                                placeholder="No default"
+                                value={fees.data.reinstallation_fee}
+                                onChange={(e) => fees.setData('reinstallation_fee', e.target.value)}
+                                error={fees.errors.reinstallation_fee}
+                            />
+                        </div>
+                        <Button type="submit" variant="secondary" disabled={fees.processing}>
+                            Save fees
+                        </Button>
+                        <p className="text-xs text-slate-500">
+                            Charged when a customer moves house or is installed again. A lower fee or a waiver needs an admin or the owner to
+                            approve it. No free months come with them.
+                        </p>
                     </form>
                 </CardBody>
             </Card>

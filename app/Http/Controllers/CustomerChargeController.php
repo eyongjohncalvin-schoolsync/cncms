@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ReinstallCustomerRequest;
 use App\Http\Requests\RejectInstallationFeeRequest;
 use App\Http\Requests\RejectInstallationRefundRequest;
 use App\Http\Requests\RejectInstallationWaiverRequest;
+use App\Http\Requests\RelocateCustomerRequest;
 use App\Http\Requests\RequestInstallationRefundRequest;
 use App\Http\Requests\RequestInstallationWaiverRequest;
 use App\Http\Requests\StoreCustomerChargeRequest;
@@ -14,6 +16,7 @@ use App\Http\Requests\StoreInstallationPaymentRequest;
 use App\Models\Customer;
 use App\Models\CustomerCharge;
 use App\Services\CustomerChargeService;
+use App\Services\CustomerRelocationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -28,6 +31,7 @@ class CustomerChargeController extends Controller
 {
     public function __construct(
         private readonly CustomerChargeService $charges,
+        private readonly CustomerRelocationService $relocations,
     ) {}
 
     public function store(StoreCustomerChargeRequest $request, Customer $customer): RedirectResponse
@@ -40,6 +44,34 @@ class CustomerChargeController extends Controller
         );
 
         return back()->with('success', 'Installation fee added. It is shown on the bill but never added to the monthly amount due.');
+    }
+
+    /**
+     * "Relocate": the customer moved house — a relocation fee, the payment
+     * taken now (with receipt) and the new address/zone, in one go.
+     */
+    public function relocate(RelocateCustomerRequest $request, Customer $customer): RedirectResponse
+    {
+        $result = $this->relocations->relocate($customer, $request->toData(), $request->user());
+
+        return back()->with('success', $this->oneOffMessage($result['charge'], 'Relocation recorded — the new address is saved.'));
+    }
+
+    /** "Re-install": installed again at the same address — a re-installation fee. */
+    public function reinstall(ReinstallCustomerRequest $request, Customer $customer): RedirectResponse
+    {
+        $result = $this->relocations->reinstall($customer, $request->toData(), $request->user());
+
+        return back()->with('success', $this->oneOffMessage($result['charge'], 'Re-installation recorded.'));
+    }
+
+    private function oneOffMessage(CustomerCharge $charge, string $done): string
+    {
+        return match (true) {
+            $charge->hasPendingWaiver() => "{$done} The waiver waits for someone else to approve it.",
+            $charge->hasPendingFeeApproval() => "{$done} The lower fee waits for someone else to approve it.",
+            default => "{$done} The fee is shown on the bill but never added to the monthly amount due.",
+        };
     }
 
     public function storePayment(StoreInstallationPaymentRequest $request, CustomerCharge $customerCharge): RedirectResponse

@@ -15,8 +15,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A one-off amount a customer owes outside the monthly bill
- * (docs/plans/installation-and-promotions.md, phase 1). Only `installation`
- * today.
+ * (docs/plans/installation-and-promotions.md, phase 1): `installation`,
+ * `relocation` (the customer moved house) or `reinstallation` (installed
+ * again at the same address). Every kind is paid with payments.purpose =
+ * 'installation' — a one-off service charge billing never sees — and the
+ * kind tells receipts and reports which fee it was.
  *
  * The balance is never stored: amount − the verified installation payments
  * linked to it (payments.customer_charge_id), so instalments (D2) just work.
@@ -39,6 +42,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'installation_offer_id', 'approval_status', 'approval_rejection_reason',
     'refund_status', 'refund_amount', 'refund_reason', 'refund_requested_by', 'refund_requested_at',
     'refund_decided_by', 'refund_decided_at', 'refund_rejection_reason', 'refund_voucher_id',
+    'from_zone_id', 'to_zone_id', 'from_location', 'to_location', 'note',
 ])]
 #[RouteKey('uuid')]
 class CustomerCharge extends Model
@@ -47,8 +51,40 @@ class CustomerCharge extends Model
 
     public const string KIND_INSTALLATION = 'installation';
 
+    /** The customer moved house: same account, the cable re-run to the new address. */
+    public const string KIND_RELOCATION = 'relocation';
+
+    /** Installed again at the same address (equipment removed, damage, …). */
+    public const string KIND_REINSTALLATION = 'reinstallation';
+
     /** @var list<string> */
-    public const array KINDS = [self::KIND_INSTALLATION];
+    public const array KINDS = [self::KIND_INSTALLATION, self::KIND_RELOCATION, self::KIND_REINSTALLATION];
+
+    /**
+     * The one-off service charges the office raises on an existing
+     * customer (an installation comes with the customer's registration).
+     *
+     * @var list<string>
+     */
+    public const array SERVICE_KINDS = [self::KIND_RELOCATION, self::KIND_REINSTALLATION];
+
+    /** @var array<string, string> */
+    public const array KIND_LABELS = [
+        self::KIND_INSTALLATION => 'Installation',
+        self::KIND_RELOCATION => 'Relocation',
+        self::KIND_REINSTALLATION => 'Re-installation',
+    ];
+
+    /**
+     * The heading printed on the receipt of a payment toward each kind.
+     *
+     * @var array<string, string>
+     */
+    public const array RECEIPT_TITLES = [
+        self::KIND_INSTALLATION => 'INSTALLATION RECEIPT',
+        self::KIND_RELOCATION => 'RELOCATION RECEIPT',
+        self::KIND_REINSTALLATION => 'RE-INSTALLATION RECEIPT',
+    ];
 
     public const string STATUS_OPEN = 'open';
 
@@ -98,6 +134,39 @@ class CustomerCharge extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /** Relocation: the zone the customer moved out of. */
+    public function fromZone(): BelongsTo
+    {
+        return $this->belongsTo(Zone::class, 'from_zone_id');
+    }
+
+    /** Relocation: the zone the customer moved into. */
+    public function toZone(): BelongsTo
+    {
+        return $this->belongsTo(Zone::class, 'to_zone_id');
+    }
+
+    /**
+     * A SQL condition true for a payment toward a charge of this kind —
+     * for reports that split one-off income by kind inside one aggregate
+     * query (`sum(...) filter (where …)`). $kind is one of KINDS, never
+     * user input.
+     */
+    public static function paymentOfKindSql(string $kind, string $payments = 'payments'): string
+    {
+        if (! in_array($kind, self::KINDS, true)) {
+            throw new \InvalidArgumentException("Unknown charge kind {$kind}.");
+        }
+
+        return "{$payments}.purpose = 'installation' and {$payments}.customer_charge_id in (select customer_charges.id from customer_charges where customer_charges.kind = '{$kind}')";
+    }
+
+    /** "Installation", "Relocation" or "Re-installation". */
+    public function kindLabel(): string
+    {
+        return self::KIND_LABELS[$this->kind] ?? self::KIND_LABELS[self::KIND_INSTALLATION];
     }
 
     /** Every payment recorded against this charge (any verification status). */

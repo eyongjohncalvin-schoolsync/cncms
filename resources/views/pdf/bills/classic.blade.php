@@ -227,6 +227,14 @@
             </tr>
         </table>
     @endif
+    @foreach ($one_off_balances ?? [] as $oneOff)
+        <table class="bc-money">
+            <tr>
+                <td>{{ $oneOff['label'] }} (separate — not in the total above)</td>
+                <td class="bc-mval">{{ number_format((float) $oneOff['amount'], 2) }} FCFA</td>
+            </tr>
+        </table>
+    @endforeach
 
     <div class="bc-warning">
         Pay before the deadline above to avoid disconnection. Reconnection after disconnection

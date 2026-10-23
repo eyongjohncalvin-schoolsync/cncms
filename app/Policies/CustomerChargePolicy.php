@@ -30,6 +30,22 @@ class CustomerChargePolicy
         return $this->context->can('installations.manage');
     }
 
+    /**
+     * "Relocate" on the customer page: a relocation fee and a new address
+     * (and zone) — `installations.manage` plus `customers.update`, since
+     * it edits the customer's address.
+     */
+    public function relocate(User $user): bool
+    {
+        return $this->context->can('installations.manage') && $this->context->can('customers.update');
+    }
+
+    /** "Re-install" on the customer page: a re-installation fee. */
+    public function reinstall(User $user): bool
+    {
+        return $this->context->can('installations.manage');
+    }
+
     public function recordPayment(User $user, CustomerCharge $charge): bool
     {
         return $charge->isOpen() && $this->context->can('payments.create');

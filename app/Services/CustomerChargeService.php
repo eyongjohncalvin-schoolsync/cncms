@@ -37,6 +37,10 @@ use Illuminate\Validation\ValidationException;
  * disconnect (D1). Phase 2 creates the charge from an installation offer in
  * the add-customer flow and starts the offer's free months once the charge
  * is paid or waived (D3).
+ *
+ * Relocation and re-installation fees are the same charge with another
+ * `kind` (App\Services\CustomerRelocationService opens them); every action
+ * here works on any kind, and their money is `installation`-purpose too.
  */
 class CustomerChargeService
 {
@@ -47,25 +51,33 @@ class CustomerChargeService
         private readonly PaymentService $payments,
     ) {}
 
-    public function open(Customer $customer, string $amount, ?string $reason, User $actor): CustomerCharge
+    /**
+     * One open charge of each kind at a time per customer.
+     *
+     * @param  array<string, mixed>  $extra  more columns for the new row (relocation from/to, note)
+     */
+    public function open(Customer $customer, string $amount, ?string $reason, User $actor, string $kind = CustomerCharge::KIND_INSTALLATION, array $extra = []): CustomerCharge
     {
-        return DB::transaction(function () use ($customer, $amount, $reason, $actor): CustomerCharge {
+        return DB::transaction(function () use ($customer, $amount, $reason, $actor, $kind, $extra): CustomerCharge {
             // Serialises two clicks on "Add installation fee".
             Customer::query()->whereKey($customer->id)->lockForUpdate()->first();
 
             $hasOpen = CustomerCharge::query()
                 ->where('customer_id', $customer->id)
-                ->where('kind', CustomerCharge::KIND_INSTALLATION)
+                ->where('kind', $kind)
                 ->where('status', CustomerCharge::STATUS_OPEN)
                 ->exists();
 
             if ($hasOpen) {
-                throw ValidationException::withMessages(['amount' => "{$customer->name} already has an open installation fee. Record payments against it or waive it first."]);
+                $label = strtolower(CustomerCharge::KIND_LABELS[$kind] ?? $kind);
+
+                throw ValidationException::withMessages(['amount' => "{$customer->name} already has an open {$label} fee. Record payments against it or waive it first."]);
             }
 
             $charge = CustomerCharge::query()->create([
+                ...$extra,
                 'customer_id' => $customer->id,
-                'kind' => CustomerCharge::KIND_INSTALLATION,
+                'kind' => $kind,
                 'amount' => $amount,
                 'status' => CustomerCharge::STATUS_OPEN,
                 'reason' => $reason,
@@ -94,15 +106,17 @@ class CustomerChargeService
         return DB::transaction(function () use ($charge, $amount, $method, $methodReference, $field): Payment {
             $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
 
+            $label = strtolower($locked->kindLabel());
+
             if (! $locked->isOpen()) {
-                throw ValidationException::withMessages(['amount' => "This installation fee is already {$locked->status}."]);
+                throw ValidationException::withMessages(['amount' => "This {$label} fee is already {$locked->status}."]);
             }
 
             $recordable = $locked->recordableAmount();
 
             if (bccomp($amount, $recordable, 2) > 0) {
                 throw ValidationException::withMessages([
-                    'amount' => 'Only '.number_format((float) $recordable, 0, '.', ' ').' FCFA of the installation fee is still to be paid.',
+                    'amount' => 'Only '.number_format((float) $recordable, 0, '.', ' ')." FCFA of the {$label} fee is still to be paid.",
                 ]);
             }
 
@@ -132,7 +146,7 @@ class CustomerChargeService
     public function requestWaiver(CustomerCharge $charge, string $reason, User $actor): CustomerCharge
     {
         if (! $charge->isOpen()) {
-            throw ValidationException::withMessages(['reason' => "This installation fee is already {$charge->status}."]);
+            throw ValidationException::withMessages(['reason' => 'This '.strtolower($charge->kindLabel())." fee is already {$charge->status}."]);
         }
 
         if ($charge->hasPendingWaiver()) {
@@ -209,7 +223,7 @@ class CustomerChargeService
             $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
 
             if (! $locked->hasPendingFeeApproval()) {
-                throw ValidationException::withMessages(['fee' => 'This installation fee is not waiting for approval.']);
+                throw ValidationException::withMessages(['fee' => 'This '.strtolower($locked->kindLabel()).' fee is not waiting for approval.']);
             }
 
             $locked->update(['approval_status' => CustomerCharge::DECISION_APPROVED, 'approved_by' => $actor->id, 'approved_at' => now()]);
@@ -230,7 +244,7 @@ class CustomerChargeService
             $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
 
             if (! $locked->hasPendingFeeApproval()) {
-                throw ValidationException::withMessages(['fee' => 'This installation fee is not waiting for approval.']);
+                throw ValidationException::withMessages(['fee' => 'This '.strtolower($locked->kindLabel()).' fee is not waiting for approval.']);
             }
 
             $locked->update([
@@ -257,7 +271,7 @@ class CustomerChargeService
             $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
 
             if (! in_array($locked->status, [CustomerCharge::STATUS_OPEN, CustomerCharge::STATUS_PAID], true) || $locked->hasPendingRefund()) {
-                throw ValidationException::withMessages(['amount' => 'This installation fee cannot be refunded.']);
+                throw ValidationException::withMessages(['amount' => 'This '.strtolower($locked->kindLabel()).' fee cannot be refunded.']);
             }
 
             $paid = $locked->paidAmount();
@@ -305,13 +319,13 @@ class CustomerChargeService
             $voucher = $vouchers->request([
                 'kind' => Voucher::KIND_EXPENSE,
                 'payee_name' => (string) $locked->customer->name,
-                'purpose' => "Installation refund — {$locked->customer->name} ({$locked->customer->accountCode()}): {$locked->refund_reason}",
+                'purpose' => "{$locked->kindLabel()} refund — {$locked->customer->name} ({$locked->customer->accountCode()}): {$locked->refund_reason}",
                 'category_uuid' => $category->uuid,
                 'amount' => (string) $locked->refund_amount,
             ], $requester);
 
             if ($vouchers->canDecide($voucher, $actor, app(TenantContext::class))) {
-                $vouchers->approve($voucher, $actor, 'Installation refund approved');
+                $vouchers->approve($voucher, $actor, "{$locked->kindLabel()} refund approved");
             }
 
             $locked->update([
@@ -349,27 +363,28 @@ class CustomerChargeService
      * The customer's installation charges, newest first, each with its
      * live balance — for the customer page and the API.
      *
+     * @param  list<string>  $kinds
      * @return Collection<int, CustomerCharge>
      */
-    public function forCustomer(Customer $customer): Collection
+    public function forCustomer(Customer $customer, array $kinds = [CustomerCharge::KIND_INSTALLATION]): Collection
     {
         return CustomerCharge::query()
-            ->with(['requestedBy', 'waiverRequestedBy', 'waiverDecidedBy', 'offer', 'refundRequestedBy', 'refundDecidedBy', 'refundVoucher'])
+            ->with(['requestedBy', 'waiverRequestedBy', 'waiverDecidedBy', 'offer', 'refundRequestedBy', 'refundDecidedBy', 'refundVoucher', 'fromZone', 'toZone'])
             ->where('customer_id', $customer->id)
-            ->where('kind', CustomerCharge::KIND_INSTALLATION)
+            ->whereIn('kind', $kinds)
             ->latest('id')
             ->get();
     }
 
     /**
-     * What each customer still owes on open installation charges — one
-     * query for a whole list (bill batches print hundreds at once).
-     * Customers with nothing owed are absent.
+     * What each customer still owes on open charges, per kind — one query
+     * for a whole list. Customers and kinds with nothing owed are absent.
      *
      * @param  array<int, int>  $customerIds
-     * @return array<int, string> customer id => balance
+     * @param  list<string>  $kinds
+     * @return array<int, array<string, string>> customer id => [kind => balance]
      */
-    public static function openInstallationBalances(array $customerIds): array
+    public static function openBalancesByKind(array $customerIds, array $kinds = CustomerCharge::KINDS): array
     {
         if ($customerIds === []) {
             return [];
@@ -382,17 +397,43 @@ class CustomerChargeService
             ->where('verification_status', 'verified')
             ->groupBy('customer_charge_id');
 
-        return CustomerCharge::query()
+        $rows = CustomerCharge::query()
             ->leftJoinSub($paid, 'paid', 'paid.customer_charge_id', '=', 'customer_charges.id')
             ->whereIn('customer_charges.customer_id', $customerIds)
-            ->where('customer_charges.kind', CustomerCharge::KIND_INSTALLATION)
+            ->whereIn('customer_charges.kind', $kinds)
             ->where('customer_charges.status', CustomerCharge::STATUS_OPEN)
-            ->groupBy('customer_charges.customer_id')
-            ->selectRaw('customer_charges.customer_id, sum(greatest(customer_charges.amount - coalesce(paid.paid, 0), 0)) as balance')
-            ->pluck('balance', 'customer_id')
-            ->map(fn ($balance): string => bcadd((string) $balance, '0', 2))
-            ->filter(fn (string $balance): bool => bccomp($balance, '0', 2) > 0)
-            ->all();
+            ->groupBy('customer_charges.customer_id', 'customer_charges.kind')
+            ->selectRaw('customer_charges.customer_id, customer_charges.kind, sum(greatest(customer_charges.amount - coalesce(paid.paid, 0), 0)) as balance')
+            ->toBase()
+            ->get();
+
+        $balances = [];
+
+        foreach ($rows as $row) {
+            $balance = bcadd((string) $row->balance, '0', 2);
+
+            if (bccomp($balance, '0', 2) > 0) {
+                $balances[(int) $row->customer_id][(string) $row->kind] = $balance;
+            }
+        }
+
+        return $balances;
+    }
+
+    /**
+     * What each customer still owes on open installation charges — one
+     * query for a whole list (bill batches print hundreds at once).
+     * Customers with nothing owed are absent.
+     *
+     * @param  array<int, int>  $customerIds
+     * @return array<int, string> customer id => balance
+     */
+    public static function openInstallationBalances(array $customerIds): array
+    {
+        return array_filter(array_map(
+            fn (array $byKind): ?string => $byKind[CustomerCharge::KIND_INSTALLATION] ?? null,
+            self::openBalancesByKind($customerIds, [CustomerCharge::KIND_INSTALLATION]),
+        ));
     }
 
     public static function openInstallationBalance(Customer $customer): string

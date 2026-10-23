@@ -69,8 +69,23 @@ class CustomerResource extends JsonResource
             // customer was loaded with its charges (every single-customer
             // read via CustomerService::findOrFail()).
             'installation_balance' => $this->whenLoaded('charges', fn (): string => $this->charges
-                ->filter(fn (CustomerCharge $charge): bool => $charge->isOpen())
+                ->filter(fn (CustomerCharge $charge): bool => $charge->isOpen() && $charge->kind === CustomerCharge::KIND_INSTALLATION)
                 ->reduce(fn (string $sum, CustomerCharge $charge): string => bcadd($sum, $charge->balance(), 2), '0.00')),
+            // Every open one-off charge (installation, relocation,
+            // re-installation) with what is still owed — read-only, same
+            // rule: never in the bill's total or arrears.
+            'one_off_charges' => $this->whenLoaded('charges', fn (): array => $this->charges
+                ->filter(fn (CustomerCharge $charge): bool => $charge->isOpen())
+                ->map(fn (CustomerCharge $charge): array => [
+                    'uuid' => $charge->uuid,
+                    'kind' => $charge->kind,
+                    'label' => $charge->kindLabel(),
+                    'amount' => (string) $charge->amount,
+                    'paid' => $charge->paidAmount(),
+                    'balance' => $charge->balance(),
+                ])
+                ->values()
+                ->all()),
             // Free months & first billed month (installation phase 2): the
             // coverage line "TV free until Dec · paid until Mar · first bill
             // Apr" — single-customer reads only (same condition as the

@@ -27,4 +27,16 @@ class CustomerChargeFactory extends Factory
             'reason' => null,
         ];
     }
+
+    /** An open relocation fee (the customer moved house). */
+    public function relocation(): static
+    {
+        return $this->state(['kind' => CustomerCharge::KIND_RELOCATION, 'amount' => 5000]);
+    }
+
+    /** An open re-installation fee (same address). */
+    public function reinstallation(): static
+    {
+        return $this->state(['kind' => CustomerCharge::KIND_REINSTALLATION, 'amount' => 7500]);
+    }
 }

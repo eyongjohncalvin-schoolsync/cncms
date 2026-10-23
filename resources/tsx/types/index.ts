@@ -579,9 +579,20 @@ export interface ArrearsAdjustmentAuditRow extends ArrearsAdjustment {
 
 export type CustomerChargeStatus = 'open' | 'paid' | 'waived' | 'refunded';
 
+export type CustomerChargeKind = 'installation' | 'relocation' | 'reinstallation';
+
 /** One installation charge on the customer page (AppHttpControllersCustomerController::shapeInstallation). */
 export interface CustomerCharge {
     uuid: string;
+    /** installation, relocation (moved house) or reinstallation (same address). */
+    kind?: CustomerChargeKind;
+    kind_label?: string;
+    /** Relocation: where the customer moved from and to. */
+    from_zone_name?: string | null;
+    to_zone_name?: string | null;
+    from_location?: string | null;
+    to_location?: string | null;
+    note?: string | null;
     amount: string;
     paid: string;
     balance: string;
@@ -629,6 +640,18 @@ export interface CustomerInstallation {
     applicable?: boolean;
     connected_on?: string | null;
     billing_starts_period?: string | null;
+}
+
+/** Relocation and re-installation fees on the customer page (CustomerController::shapeOneOffCharges). */
+export interface CustomerOneOffCharges {
+    /** Open relocation + re-installation balance. */
+    balance: string;
+    charges: CustomerCharge[];
+    can_relocate: boolean;
+    can_reinstall: boolean;
+    can_record_payment: boolean;
+    default_fees: { relocation: string | null; reinstallation: string | null };
+    zones: { uuid: string; name: string; town: string }[];
 }
 
 export type FreeMonthGrantStatus = 'awaiting_installation_payment' | 'pending_approval' | 'approved' | 'rejected' | 'cancelled';
@@ -757,6 +780,7 @@ export interface CustomerDetail extends Customer {
     arrears_adjustments: ArrearsAdjustment[];
     /** Installation fees — a separate balance, never in the bill's total or arrears. */
     installation?: CustomerInstallation;
+    one_off_charges?: CustomerOneOffCharges;
     /** Free months (installation offer / compensation) and the coverage line. */
     free_months?: CustomerFreeMonths;
     coverage?: CustomerCoverage;
@@ -1054,6 +1078,8 @@ export interface ReportDelta {
 export interface ReportIncomeByPurpose {
     subscription: string;
     installation: string;
+    relocation?: string;
+    reinstallation?: string;
 }
 
 export interface ReportPaymentsBreakdown {
@@ -1216,6 +1242,8 @@ export interface MonthlyReport {
 export interface ReportInstallations {
     by_offer: { offer: string; count: number; fees: string }[];
     installation_income: string;
+    /** Relocation and re-installation: fees raised and verified income this period. */
+    one_off_charges?: { kind: CustomerChargeKind; label: string; count: number; fees: string; income: string }[];
     promo_cost: string;
     customers_on_promo: number;
     ending_soon: { customer: string; service: string; ends: string }[];

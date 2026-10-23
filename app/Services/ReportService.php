@@ -331,7 +331,7 @@ class ReportService
     }
 
     /**
-     * @return array{collections: array{total: string, verified: string, count: int, by_purpose: array{subscription: string, installation: string}}, new_customers: int, net_disconnections: int}
+     * @return array{collections: array{total: string, verified: string, count: int, by_purpose: array{subscription: string, installation: string, relocation: string, reinstallation: string}}, new_customers: int, net_disconnections: int}
      */
     private function weeklyRollup(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
     {
@@ -340,7 +340,7 @@ class ReportService
             ->selectRaw("
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified'), 0) as verified,
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'subscription'), 0) as subscription_verified,
-                coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'installation'), 0) as installation_verified,
+                {$this->oneOffIncomeSelects()},
                 coalesce(sum(payments.amount), 0) as total,
                 count(*) as payment_count
             ")
@@ -362,7 +362,7 @@ class ReportService
                 'count' => (int) $paymentsRow->payment_count,
                 'by_purpose' => [
                     'subscription' => (string) $paymentsRow->subscription_verified,
-                    'installation' => (string) $paymentsRow->installation_verified,
+                    ...$this->oneOffIncome($paymentsRow),
                 ],
             ],
             'new_customers' => $newCustomers,
@@ -523,7 +523,7 @@ class ReportService
     }
 
     /**
-     * @return array{by_offer: list<array{offer: string, count: int, fees: string}>, installation_income: string, promo_cost: string, customers_on_promo: int, ending_soon: list<array{customer: string, service: string, ends: string}>, grants_by_user: list<array{user: string, requested: int, approved: int, waivers_approved: int}>}
+     * @return array{by_offer: list<array{offer: string, count: int, fees: string}>, installation_income: string, one_off_charges: list<array{kind: string, label: string, count: int, fees: string, income: string}>, promo_cost: string, customers_on_promo: int, ending_soon: list<array{customer: string, service: string, ends: string}>, grants_by_user: list<array{user: string, requested: int, approved: int, waivers_approved: int}>}
      */
     private function installationsAndPromotions(string $period, Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
     {
@@ -542,13 +542,38 @@ class ReportService
             ->map(fn ($row): array => ['offer' => (string) $row->offer, 'count' => (int) $row->count, 'fees' => bcadd((string) $row->fees, '0', 2)])
             ->all();
 
-        $income = $this->fenceZones(Payment::query()
+        // Verified one-off income by charge kind — installation stays its
+        // own figure; relocation and re-installation are separate lines.
+        $incomeByKind = $this->fenceZones(Payment::query()
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId)
+            ->join('customer_charges', 'customer_charges.id', '=', 'payments.customer_charge_id')
             ->where('payments.purpose', Payment::PURPOSE_INSTALLATION)
             ->where('payments.verification_status', 'verified')
             ->whereBetween('payments.created_at', [$start, $end])
-            ->sum('payments.amount');
+            ->groupBy('customer_charges.kind')
+            ->selectRaw('customer_charges.kind, sum(payments.amount) as income')
+            ->toBase()
+            ->pluck('income', 'kind');
+
+        $income = $incomeByKind[CustomerCharge::KIND_INSTALLATION] ?? '0';
+
+        $serviceCharges = $charges()
+            ->whereIn('customer_charges.kind', CustomerCharge::SERVICE_KINDS)
+            ->whereBetween('customer_charges.created_at', [$start, $end])
+            ->groupBy('customer_charges.kind')
+            ->selectRaw('customer_charges.kind, count(*) as count, coalesce(sum(customer_charges.amount), 0) as fees')
+            ->toBase()
+            ->get()
+            ->keyBy('kind');
+
+        $oneOff = array_map(fn (string $kind): array => [
+            'kind' => $kind,
+            'label' => CustomerCharge::KIND_LABELS[$kind],
+            'count' => (int) ($serviceCharges[$kind]->count ?? 0),
+            'fees' => bcadd((string) ($serviceCharges[$kind]->fees ?? '0'), '0', 2),
+            'income' => bcadd((string) ($incomeByKind[$kind] ?? '0'), '0', 2),
+        ], CustomerCharge::SERVICE_KINDS);
 
         $manuscripts = fn () => $this->fenceZones(Manuscript::query()
             ->join('customers', 'customers.id', '=', 'manuscripts.customer_id')
@@ -599,6 +624,9 @@ class ReportService
         return [
             'by_offer' => $byOffer,
             'installation_income' => bcadd((string) $income, '0', 2),
+            // Relocation and re-installation: fees raised and verified
+            // income this period, one row per kind — never subscription.
+            'one_off_charges' => $oneOff,
             'promo_cost' => bcadd((string) $manuscripts()->sum('manuscripts.free_value'), '0', 2),
             'customers_on_promo' => $manuscripts()->distinct()->count('manuscripts.customer_id'),
             'ending_soon' => $endingSoon,
@@ -752,7 +780,7 @@ class ReportService
     // -----------------------------------------------------------------
 
     /**
-     * @return array{total: string, verified: string, pending: string, rejected: string, count: int, by_purpose: array{subscription: string, installation: string}}
+     * @return array{total: string, verified: string, pending: string, rejected: string, count: int, by_purpose: array{subscription: string, installation: string, relocation: string, reinstallation: string}}
      */
     private function paymentsBreakdown(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
     {
@@ -763,7 +791,7 @@ class ReportService
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'pending'), 0) as pending,
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'rejected'), 0) as rejected,
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'subscription'), 0) as subscription_verified,
-                coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and payments.purpose = 'installation'), 0) as installation_verified,
+                {$this->oneOffIncomeSelects()},
                 count(*) as payment_count
             ")
             ->first();
@@ -781,7 +809,7 @@ class ReportService
             // Verified income by what it was for (installation-and-promotions.md).
             'by_purpose' => [
                 'subscription' => (string) $row->subscription_verified,
-                'installation' => (string) $row->installation_verified,
+                ...$this->oneOffIncome($row),
             ],
         ];
     }
@@ -934,6 +962,34 @@ class ReportService
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * The `select` columns splitting verified one-off income by charge kind
+     * — installation_verified, relocation_verified, reinstallation_verified
+     * — for a payments aggregate query.
+     */
+    private function oneOffIncomeSelects(): string
+    {
+        return implode(",\n", array_map(
+            fn (string $kind): string => "coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified' and ".CustomerCharge::paymentOfKindSql($kind)."), 0) as {$kind}_verified",
+            CustomerCharge::KINDS,
+        ));
+    }
+
+    /**
+     * Verified income per one-off charge kind from a row selected with
+     * oneOffIncomeSelects(): installation, relocation, reinstallation.
+     *
+     * @return array{installation: string, relocation: string, reinstallation: string}
+     */
+    private function oneOffIncome(object $row): array
+    {
+        return [
+            'installation' => (string) $row->installation_verified,
+            'relocation' => (string) $row->relocation_verified,
+            'reinstallation' => (string) $row->reinstallation_verified,
+        ];
     }
 
     /**
