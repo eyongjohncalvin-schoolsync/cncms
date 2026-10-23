@@ -120,7 +120,9 @@ class SettingsTest extends TestCase
         $editResponse = $this->get('/settings/company');
         $editResponse->assertInertia(fn (Assert $page) => $page
             ->component('Settings/Company')
-            ->where('company.logo_url', $company->getFirstMediaUrl('logo')));
+            // The streamed, tenant-aware URL — the media library's own
+            // /storage URL can't reach tenant-suffixed storage (Company::logoUrl()).
+            ->where('company.logo_url', $company->logoUrl()));
     }
 
     public function test_uploading_a_new_logo_replaces_the_previous_one(): void

@@ -33,6 +33,9 @@ class UpdateCompanyRequest extends FormRequest
             // Cash controls (docs/plans/cash-controls.md). Blank = no limit.
             'voucher_approval_limit' => ['nullable', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'voucher_daily_limit' => ['nullable', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
+            // docs/plans/expenditures-and-spending-controls.md (E2): above it, every
+            // investor approves. Blank = no cap.
+            'monthly_spending_cap' => ['nullable', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'remittance_deadline_hours' => ['sometimes', 'required', 'integer', 'min:1', 'max:720'],
             'advance_settlement_days' => ['sometimes', 'required', 'integer', 'min:1', 'max:365'],
             'rccm_number' => ['nullable', 'string', 'max:40'],

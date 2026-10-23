@@ -116,7 +116,7 @@ function RootNavigation() {
             <Stack.Screen name="hand-over" options={{ headerShown: true, title: "Hand over cash" }} />
             <Stack.Screen
                 name="record-expense"
-                options={{ presentation: 'modal', headerShown: true, title: 'Record Expense' }}
+                options={{ presentation: 'modal', headerShown: true, title: 'Request a bon' }}
             />
             <Stack.Screen
                 name="log-complaint"

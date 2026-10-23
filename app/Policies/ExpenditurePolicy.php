@@ -4,19 +4,17 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Expenditure;
 use App\Models\User;
 use App\Support\TenantContext;
 
 /**
- * Expenditures: everyone with tenant access can view (needed for the
- * expenditure list and the dashboard's underlying data). Per
- * business-rules.md section 10's role table: agents may additionally
- * record ("Record expense": super/admin/manager/agent), but only
- * super/admin may edit or delete a recorded expenditure ("Edit/delete
- * expense": super/admin) — expenditures have no verification workflow to
- * fall back on, so this is the only control. Viewing the P&L dashboard
- * itself is a step up from viewing the raw list ("View P&L dashboard":
- * super/admin/manager — agents excluded).
+ * Expenditures after docs/plans/expenditures-and-spending-controls.md.
+ * Nobody records one directly any more (E1 — every cash-out is a bon), so
+ * there is no `create`. Edits and voids (E7) belong to admin and owner —
+ * `expenditures.update` / `expenditures.delete` — and never to the person
+ * who requested or recorded the money: maker ≠ checker. Budgets have their
+ * own `budgets.manage`; reopening a closed month is the owner's alone.
  */
 class ExpenditurePolicy
 {
@@ -34,23 +32,39 @@ class ExpenditurePolicy
         return $this->context->can('expenditures.view');
     }
 
-    public function create(User $user): bool
+    /** Re-categorise / fix description and notes, with a reason. */
+    public function update(User $user, Expenditure $expenditure): bool
     {
-        return $this->context->can('expenditures.create');
+        return $this->context->can('expenditures.update') && ! $this->isRequester($user, $expenditure);
     }
 
-    public function update(User $user): bool
+    /** Void a legacy expenditure, with a reason. Never a hard delete. */
+    public function void(User $user, Expenditure $expenditure): bool
     {
-        return $this->context->can('expenditures.update');
-    }
-
-    public function delete(User $user): bool
-    {
-        return $this->context->can('expenditures.delete');
+        return $expenditure->source === Expenditure::SOURCE_LEGACY
+            && $this->context->can('expenditures.delete')
+            && ! $this->isRequester($user, $expenditure);
     }
 
     public function viewDashboard(User $user): bool
     {
         return $this->context->can('expenditures.dashboard');
+    }
+
+    public function manageBudgets(User $user): bool
+    {
+        return $this->context->can('budgets.manage');
+    }
+
+    /** Reopen (or close again) a month — the owner only (E6). */
+    public function manageMonths(User $user): bool
+    {
+        return $this->context->isSuper();
+    }
+
+    private function isRequester(User $user, Expenditure $expenditure): bool
+    {
+        return $expenditure->user_id === $user->id
+            || ($expenditure->voucher_id !== null && $expenditure->voucher?->requested_by === $user->id);
     }
 }

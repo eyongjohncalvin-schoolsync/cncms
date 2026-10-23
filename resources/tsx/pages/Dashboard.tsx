@@ -20,6 +20,17 @@ interface DashboardProps {
     period: string;
     /** Cash controls: open cash alerts (deferred; null when the viewer can't see them). */
     cash_alerts?: number | null;
+    /** docs/plans/expenditures-and-spending-controls.md, items 5–6 — deferred, P&L viewers only. */
+    spending?: {
+        period: string;
+        spent: string;
+        income: string;
+        net: string;
+        deficit: boolean;
+        cap: string | null;
+        cap_pct: number | null;
+        budget_warnings: number;
+    } | null;
     stats: {
         total_customers: number;
         active_customers: number;
@@ -33,7 +44,7 @@ interface DashboardProps {
     };
 }
 
-export default function Dashboard({ period, stats, cash_alerts }: DashboardProps) {
+export default function Dashboard({ period, stats, cash_alerts, spending }: DashboardProps) {
     // Memoized so the derived hint string isn't recomputed on every render
     // (e.g. re-renders triggered by unrelated layout/navigation state) —
     // only when the stats payload itself changes.
@@ -67,6 +78,24 @@ export default function Dashboard({ period, stats, cash_alerts }: DashboardProps
                         <strong>{cash_alerts}</strong> cash control alert{cash_alerts === 1 ? '' : 's'} need attention — cash not handed over, shortages, unsigned vouchers…
                     </span>
                     <span className="font-semibold">Review →</span>
+                </Link>
+            )}
+
+            {spending && (spending.deficit || (spending.cap_pct ?? 0) >= 80 || spending.budget_warnings > 0) && (
+                <Link
+                    href="/resources/expenditures"
+                    className={`mb-4 flex items-center justify-between rounded-lg border-l-4 px-4 py-3 text-sm ${
+                        spending.deficit ? 'border-red-500 bg-red-50 text-red-800 hover:bg-red-100' : 'border-amber-500 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    }`}
+                >
+                    <span>
+                        {spending.deficit
+                            ? `Spending is above income this month: ${formatCurrency(spending.spent)} spent against ${formatCurrency(spending.income)} verified income.`
+                            : (spending.cap_pct ?? 0) >= 80
+                              ? `${spending.cap_pct}% of the monthly spending cap is committed.`
+                              : `${spending.budget_warnings} expense categor${spending.budget_warnings === 1 ? 'y is' : 'ies are'} near or over budget.`}
+                    </span>
+                    <span className="font-semibold">Expenditures →</span>
                 </Link>
             )}
 

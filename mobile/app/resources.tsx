@@ -112,7 +112,7 @@ export default function ResourcesScreen() {
             <View style={styles.flex}>
                 <EmptyState
                     title="Resources"
-                    subtitle="Expenses you record will show up here, newest first, with their sync status."
+                    subtitle="Bons you request will show up here, newest first. Synced ones carry their BC- number and wait for approval in the office."
                 />
             </View>
         );
@@ -129,7 +129,7 @@ export default function ResourcesScreen() {
                         </View>
                     </View>
                     <Text style={styles.heroValue}>{periodTotal === null ? '—' : formatFcfa(periodTotal)}</Text>
-                    <Text style={styles.heroHint}>From this device — renders instantly, even offline.</Text>
+                    <Text style={styles.heroHint}>Bons requested from this device — approval happens in the office.</Text>
                 </Card>
 
                 <View style={styles.periodRow}>
@@ -205,8 +205,11 @@ export default function ResourcesScreen() {
                                             {category?.name ?? 'Unknown category'}
                                         </Text>
                                         <Text style={styles.rowMeta} numberOfLines={1}>
+                                            {item.voucher_number ? `${item.voucher_number} · ` : ''}
                                             {formatShortDate(item.spent_at)}
+                                            {item.payee_name ? ` · ${item.payee_name}` : ''}
                                             {item.description ? ` · ${item.description}` : ''}
+                                            {item.from_collections === 1 ? ' · from my collections' : ''}
                                         </Text>
                                     </View>
                                     <View style={styles.rowEnd}>

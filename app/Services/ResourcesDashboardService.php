@@ -72,7 +72,7 @@ class ResourcesDashboardService
 
     private function resolvePeriod(?string $period): string
     {
-        $period ??= Carbon::now()->format('Y-m');
+        $period ??= BusinessTimezone::currentPeriod();
 
         if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
             throw ValidationException::withMessages(['period' => ['The period must be in YYYY-MM format.']]);
@@ -209,15 +209,19 @@ class ResourcesDashboardService
         $start = Carbon::createFromFormat('!Y-m', $period)->startOfMonth()->toDateString();
         $end = Carbon::createFromFormat('!Y-m', $period)->endOfMonth()->toDateString();
 
+        // Voided rows stay in the table but never count
+        // (docs/plans/expenditures-and-spending-controls.md, item 9).
         $rows = Expenditure::query()
+            ->counted()
             ->join('expense_categories', 'expense_categories.id', '=', 'expenditures.category_id')
             ->whereBetween('expenditures.spent_at', [$start, $end])
             ->groupBy('expense_categories.id', 'expense_categories.name', 'expense_categories.sort_order')
             ->orderBy('expense_categories.sort_order')
-            ->selectRaw('expense_categories.name as name, coalesce(sum(expenditures.amount), 0) as amount, count(expenditures.id) as count')
+            ->selectRaw('expense_categories.id as category_id, expense_categories.name as name, coalesce(sum(expenditures.amount), 0) as amount, count(expenditures.id) as count')
             ->get();
 
         $byCategory = $rows->map(fn ($row): array => [
+            'category_id' => (int) $row->category_id,
             'name' => (string) $row->name,
             'amount' => (string) $row->amount,
             'count' => (int) $row->count,
@@ -273,12 +277,14 @@ class ResourcesDashboardService
             return [];
         }
 
-        $actualsByName = collect($actualsByCategory)->keyBy('name');
+        // Matched by category id, not name: two categories may share a name,
+        // and a rename must not detach a budget from its spending.
+        $actualsById = collect($actualsByCategory)->keyBy('category_id');
 
-        return $budgets->map(function (Budget $budget) use ($actualsByName): array {
+        return $budgets->map(function (Budget $budget) use ($actualsById): array {
             $categoryName = $budget->category->name;
             $budgeted = (string) $budget->amount;
-            $actual = (string) ($actualsByName->get($categoryName)['amount'] ?? '0.00');
+            $actual = (string) ($actualsById->get($budget->category_id)['amount'] ?? '0.00');
             $variance = bcsub($budgeted, $actual, 2);
 
             $variancePct = bccomp($budgeted, '0.00', 2) > 0

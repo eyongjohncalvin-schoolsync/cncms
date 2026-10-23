@@ -56,9 +56,24 @@ class VoucherPolicy
 
     public function pay(User $user, Voucher $voucher): bool
     {
+        // A bon "already spent from my collections" is paid at the
+        // requester's handover (RemittanceService::receive), never twice.
         return $voucher->status === 'approved'
+            && ! $voucher->from_collections
             && $this->context()->can('vouchers.pay')
             && ($voucher->requested_by !== $user->id || $this->context()->isSuper());
+    }
+
+    /**
+     * Correct a paid bon (docs/plans/expenditures-and-spending-controls.md,
+     * item 9 / E7): admin or owner (`expenditures.delete`), never the bon's
+     * own requester.
+     */
+    public function correct(User $user, Voucher $voucher): bool
+    {
+        return in_array($voucher->status, ['paid', 'settled'], true)
+            && $this->context()->can('expenditures.delete')
+            && $voucher->requested_by !== $user->id;
     }
 
     public function settle(User $user, Voucher $voucher): bool

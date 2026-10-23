@@ -29,6 +29,10 @@ interface Props {
     /** What the money is for — technician fees are the technician's, handed over with the cash. */
     purpose_totals?: Record<PaymentPurpose, string>;
     oldest_at: string | null;
+    /** Approved bons already paid out of these collections — the cashier pays them at the handover. */
+    bons?: { uuid: string; number: string; payee_name: string; purpose: string; amount: string }[];
+    bons_total?: string;
+    cash_to_hand_over?: string;
     history: {
         uuid: string;
         number: string;
@@ -50,14 +54,15 @@ interface Props {
  * cash they hold and submits. The cashier then counts it again and receives
  * it — a difference is recorded against the collector.
  */
-export default function CashHandOver({ payments, totals, purpose_totals, oldest_at, history, denominations }: Props) {
+export default function CashHandOver({ payments, totals, purpose_totals, oldest_at, bons = [], bons_total = '0', cash_to_hand_over, history, denominations }: Props) {
+    const cashDue = cash_to_hand_over ?? totals.cash;
     const [counts, setCounts] = useState<DenominationCounts>({});
     const { data, setData, post, processing, errors, transform } = useForm({ declared_cash: '', note: '' });
 
     const counted = denominationTotal(counts);
     const usingCounter = counted > 0;
     const declared = usingCounter ? counted : Number(data.declared_cash || 0);
-    const difference = declared - Number(totals.cash);
+    const difference = declared - Number(cashDue);
     const mobileTotal = Number(totals.mtn_momo) + Number(totals.orange_money);
 
     transform((form) => ({ ...form, declared_cash: String(declared), denominations: usingCounter ? counts : null }));
@@ -75,11 +80,28 @@ export default function CashHandOver({ payments, totals, purpose_totals, oldest_
             </div>
 
             <div className="mb-6 grid gap-4 sm:grid-cols-4">
-                <Total label="Cash to hand over" value={totals.cash} strong />
+                <Total label="Cash to hand over" value={cashDue} strong />
                 <Total label="MTN MoMo" value={totals.mtn_momo} />
                 <Total label="Orange Money" value={totals.orange_money} />
                 <Total label="Bank" value={totals.bank} />
             </div>
+
+            {bons.length > 0 && (
+                <div className="-mt-3 mb-6 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
+                    You collected {formatCurrency(totals.cash)} in cash and already paid {formatCurrency(bons_total)} out of it on approved bons — hand over the rest. The cashier
+                    settles these bons as part of receiving:
+                    <ul className="mt-1 list-disc pl-5">
+                        {bons.map((bon) => (
+                            <li key={bon.uuid}>
+                                <Link href={`/vouchers/${bon.uuid}`} className="font-medium hover:underline">
+                                    {bon.number}
+                                </Link>{' '}
+                                — {bon.payee_name}: {formatCurrency(bon.amount)}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
 
             {purpose_totals && Number(purpose_totals.technician_fee) > 0 && (
                 <p className="-mt-3 mb-6 text-sm text-slate-600">

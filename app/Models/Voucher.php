@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'requested_by', 'approved_at', 'rejected_by', 'rejection_reason',
     'paid_by', 'paid_at', 'paid_from_account_id', 'payment_method', 'payment_reference', 'received_by_name', 'signed_copy_path', 'expenditure_id',
     'settle_due_on', 'spent_amount', 'returned_amount', 'settled_by', 'settled_at', 'settlement_note',
+    'from_collections', 'remittance_id', 'local_uuid', 'recorded_by_device', 'receipt_path',
 ])]
 #[RouteKey('uuid')]
 class Voucher extends Model
@@ -51,6 +52,7 @@ class Voucher extends Model
             'spent_amount' => 'decimal:2',
             'returned_amount' => 'decimal:2',
             'settled_at' => 'datetime',
+            'from_collections' => 'boolean',
         ];
     }
 
@@ -72,6 +74,18 @@ class Voucher extends Model
     public function expenditure(): BelongsTo
     {
         return $this->belongsTo(Expenditure::class);
+    }
+
+    /** Every expenditure row this bon produced: the payout, then any correction adjustments. */
+    public function expenditures(): HasMany
+    {
+        return $this->hasMany(Expenditure::class);
+    }
+
+    /** The handover this "spent from my collections" bon was paid at. */
+    public function remittance(): BelongsTo
+    {
+        return $this->belongsTo(Remittance::class);
     }
 
     // Cross-schema — User is pinned to the central connection.

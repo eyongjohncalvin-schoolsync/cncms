@@ -3,6 +3,10 @@ import type { LocalExpenditure, SyncStatus } from '../types/db';
 import { generateUuid } from '../utils/uuid';
 import { nowIso } from '../utils/format';
 
+/**
+ * A bon request queued on this phone (docs/plans/expenditures-and-spending-controls.md):
+ * `description` = what it is for, `spent_at` = the day the money is needed.
+ */
 export interface NewLocalExpenditureInput {
     category_uuid: string;
     amount: number;
@@ -10,6 +14,8 @@ export interface NewLocalExpenditureInput {
     spent_at: string;
     notes?: string | null;
     receipt_local_uri?: string | null;
+    payee_name?: string | null;
+    from_collections?: boolean;
 }
 
 export async function insertLocalExpenditure(input: NewLocalExpenditureInput): Promise<LocalExpenditure> {
@@ -26,6 +32,9 @@ export async function insertLocalExpenditure(input: NewLocalExpenditureInput): P
         notes: input.notes ?? null,
         receipt_local_uri: input.receipt_local_uri ?? null,
         receipt_server_path: null,
+        payee_name: input.payee_name ?? null,
+        from_collections: input.from_collections ? 1 : 0,
+        voucher_number: null,
         sync_status: 'queued',
         sync_error: null,
         sync_attempts: 0,
@@ -37,10 +46,10 @@ export async function insertLocalExpenditure(input: NewLocalExpenditureInput): P
         `INSERT INTO expenditures
             (local_uuid, server_uuid, category_uuid, amount, description, spent_at, notes,
              receipt_local_uri, receipt_server_path, sync_status, sync_error, sync_attempts,
-             created_at, updated_at)
+             created_at, updated_at, payee_name, from_collections)
          VALUES ($local_uuid, $server_uuid, $category_uuid, $amount, $description, $spent_at, $notes,
              $receipt_local_uri, $receipt_server_path, $sync_status, $sync_error, $sync_attempts,
-             $created_at, $updated_at)`,
+             $created_at, $updated_at, $payee_name, $from_collections)`,
         {
             $local_uuid: row.local_uuid,
             $server_uuid: row.server_uuid,
@@ -56,6 +65,8 @@ export async function insertLocalExpenditure(input: NewLocalExpenditureInput): P
             $sync_attempts: row.sync_attempts,
             $created_at: row.created_at,
             $updated_at: row.updated_at,
+            $payee_name: row.payee_name ?? null,
+            $from_collections: row.from_collections ?? 0,
         },
     );
 
@@ -87,13 +98,35 @@ export async function setExpendituresSyncStatus(localUuids: string[], status: Sy
     );
 }
 
-export async function markExpenditureSynced(localUuid: string, serverUuid: string): Promise<void> {
+export async function markExpenditureSynced(localUuid: string, serverUuid: string, voucherNumber: string | null = null): Promise<void> {
     const db = await getDatabase();
 
     await db.runAsync(
-        `UPDATE expenditures SET server_uuid = ?, sync_status = 'synced', sync_error = NULL, updated_at = ? WHERE local_uuid = ?`,
-        [serverUuid, nowIso(), localUuid],
+        `UPDATE expenditures SET server_uuid = ?, voucher_number = COALESCE(?, voucher_number), sync_status = 'synced', sync_error = NULL, updated_at = ? WHERE local_uuid = ?`,
+        [serverUuid, voucherNumber, nowIso(), localUuid],
     );
+}
+
+/**
+ * Synced bon requests whose receipt photo hasn't gone up yet. The server only
+ * takes it from the requester while the bon is still pending — see
+ * markBonReceiptDone().
+ */
+export async function getBonRequestsAwaitingReceiptUpload(): Promise<LocalExpenditure[]> {
+    const db = await getDatabase();
+
+    return db.getAllAsync<LocalExpenditure>(
+        `SELECT * FROM expenditures
+         WHERE sync_status = 'synced' AND server_uuid IS NOT NULL
+           AND receipt_local_uri IS NOT NULL AND receipt_server_path IS NULL`,
+    );
+}
+
+/** `receiptUrl` = '' when the server refused for good (bon no longer pending), so it isn't retried forever. */
+export async function markBonReceiptDone(localUuid: string, receiptUrl: string): Promise<void> {
+    const db = await getDatabase();
+
+    await db.runAsync(`UPDATE expenditures SET receipt_server_path = ?, updated_at = ? WHERE local_uuid = ?`, [receiptUrl, nowIso(), localUuid]);
 }
 
 export async function markExpenditureFailed(localUuid: string, error: string): Promise<void> {

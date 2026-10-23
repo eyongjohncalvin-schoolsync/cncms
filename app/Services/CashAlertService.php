@@ -14,6 +14,7 @@ use App\Models\Remittance;
 use App\Models\RemittanceLine;
 use App\Models\User;
 use App\Models\Voucher;
+use App\Support\BusinessTimezone;
 use Illuminate\Support\Carbon;
 
 /**
@@ -37,6 +38,10 @@ class CashAlertService
     /** A paid voucher still without its signed copy after this many days. */
     private const int MISSING_SIGNATURE_DAYS = 2;
 
+    public function __construct(
+        private readonly SpendingControlService $spending,
+    ) {}
+
     /**
      * @return list<array{key: string, severity: string, title: string, advice: string, items: list<array{label: string, detail: string, amount: ?string, link: ?string}>}>
      */
@@ -56,6 +61,7 @@ class CashAlertService
             $this->advancesNotJustified(),
             $this->approvedVouchersUnpaid(),
             $this->vouchersWithoutSignedCopy(),
+            $this->monthInDeficit(),
         ], fn (?array $alert): bool => $alert !== null && $alert['items'] !== []));
     }
 
@@ -174,7 +180,7 @@ class CashAlertService
 
     private function tillsNotClosed(): array
     {
-        $yesterday = Carbon::yesterday()->toDateString();
+        $yesterday = BusinessTimezone::now()->subDay()->toDateString();
 
         $tillIds = CashMovement::query()
             ->whereDate('business_date', $yesterday)
@@ -199,7 +205,7 @@ class CashAlertService
         return $this->alert('close_differences', 'warning', 'Till count differences (last 7 days)', 'The drawer did not match the book at day close.',
             CashDayClose::query()->with('account')
                 ->where('variance', '!=', 0)
-                ->whereDate('business_date', '>=', Carbon::today()->subDays(7))
+                ->whereDate('business_date', '>=', BusinessTimezone::now()->subDays(7)->toDateString())
                 ->get()
                 ->map(fn (CashDayClose $close): array => [
                     'label' => (string) $close->account?->name,
@@ -215,7 +221,7 @@ class CashAlertService
             Voucher::query()->with('requestedBy')
                 ->where('kind', Voucher::KIND_ADVANCE)
                 ->where('status', 'paid')
-                ->whereDate('settle_due_on', '<', Carbon::today())
+                ->whereDate('settle_due_on', '<', BusinessTimezone::today())
                 ->get()
                 ->map(fn (Voucher $voucher): array => $this->voucherItem($voucher, 'Due '.$voucher->settle_due_on?->toDateString()))
                 ->all());
@@ -242,6 +248,24 @@ class CashAlertService
                 ->get()
                 ->map(fn (Voucher $voucher): array => $this->voucherItem($voucher, "Paid to {$voucher->received_by_name}"))
                 ->all());
+    }
+
+    /**
+     * The month's expenses are above its verified income (subscription +
+     * installation; technician fees are never income) — docs/plans/
+     * expenditures-and-spending-controls.md item 6. A warning, never a block.
+     */
+    private function monthInDeficit(): array
+    {
+        $summary = $this->spending->summary(BusinessTimezone::currentPeriod());
+
+        return $this->alert('month_deficit', 'danger', 'Spending above income this month', 'This month\'s expenses are higher than the verified income so far. Hold back non-essential bons.',
+            $summary['deficit'] ? [[
+                'label' => BusinessTimezone::periodStart($summary['period'])->format('F Y'),
+                'detail' => 'Spent '.number_format((float) $summary['spent'], 0, '.', ' ').' FCFA against '.number_format((float) $summary['income'], 0, '.', ' ').' FCFA income',
+                'amount' => ltrim($summary['net'], '-'),
+                'link' => '/resources/expenditures',
+            ]] : []);
     }
 
     /**

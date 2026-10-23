@@ -23,7 +23,9 @@ use Illuminate\Support\Facades\Route;
 |
 */
 Route::get('settings/company', [SettingsCompanyController::class, 'edit'])->name('settings.company.edit');
-Route::patch('settings/company', [SettingsCompanyController::class, 'update'])->name('settings.company.update');
+// Carries the bon limits and the monthly spending cap — a money setting,
+// refused while a landlord impersonates (E9).
+Route::patch('settings/company', [SettingsCompanyController::class, 'update'])->middleware('not-impersonating:money')->name('settings.company.update');
 
 // Users & Roles moved to the top-level Users Control Center (/users) in
 // RBAC v2 Wave 3 — detached from Settings per the plan doc. This redirect

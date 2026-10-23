@@ -63,6 +63,14 @@ export interface LocalPayment {
     updated_at: string;
 }
 
+/**
+ * Outbox + history row of the `expenditures` table. Since
+ * docs/plans/expenditures-and-spending-controls.md every row is a bon
+ * request ("Request a bon"): `description` is what it is for, `spent_at`
+ * the day the money is needed, `server_uuid` the bon's uuid once synced.
+ * Rows queued by an older build (no payee) still sync — the server turns
+ * them into pending bons too.
+ */
 export interface LocalExpenditure {
     local_uuid: string;
     server_uuid: string | null;
@@ -70,6 +78,10 @@ export interface LocalExpenditure {
     amount: number;
     description: string | null;
     spent_at: string;
+    payee_name?: string | null;
+    /** 0/1 — already paid out of this agent's collections; settled at the cash handover. */
+    from_collections?: number;
+    voucher_number?: string | null;
     notes: string | null;
     receipt_local_uri: string | null;
     receipt_server_path: string | null;

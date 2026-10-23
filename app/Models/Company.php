@@ -16,7 +16,7 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'voucher_approval_limit', 'voucher_daily_limit', 'remittance_deadline_hours', 'advance_settlement_days', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page'])]
+#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'voucher_approval_limit', 'voucher_daily_limit', 'monthly_spending_cap', 'remittance_deadline_hours', 'advance_settlement_days', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page'])]
 #[RouteKey('uuid')]
 class Company extends Model implements HasMedia
 {
@@ -47,6 +47,7 @@ class Company extends Model implements HasMedia
             'arrears_second_approval_threshold' => 'decimal:2',
             'voucher_approval_limit' => 'decimal:2',
             'voucher_daily_limit' => 'decimal:2',
+            'monthly_spending_cap' => 'decimal:2',
             'remittance_deadline_hours' => 'integer',
             'advance_settlement_days' => 'integer',
             'cash_controls_start_date' => 'date',

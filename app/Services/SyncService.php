@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DataTransferObjects\ComplaintData;
-use App\DataTransferObjects\ExpenditureData;
 use App\DataTransferObjects\PaymentData;
 use App\Models\Agent;
 use App\Models\Complaint;
@@ -15,7 +14,9 @@ use App\Models\Expenditure;
 use App\Models\Payment;
 use App\Models\SyncQueue;
 use App\Models\User;
+use App\Models\Voucher;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -34,7 +35,7 @@ class SyncService
     public function __construct(
         private readonly PaymentService $payments,
         private readonly PaymentVerificationService $verifications,
-        private readonly ExpenditureService $expenditures,
+        private readonly VoucherService $vouchers,
         private readonly ComplaintService $complaints,
         private readonly NotificationService $notifications,
         private readonly TenantContext $context,
@@ -49,14 +50,14 @@ class SyncService
      * per-record try/catch in App\Console\Commands\ManuscriptCalculate's
      * runForEveryCustomer(), which does the same for per-customer errors.
      *
-     * @param  array<string, mixed>  $changes  {"payments": [...], "expenditures": [...], "complaints": [...]}
+     * @param  array<string, mixed>  $changes  {"payments": [...], "bon_requests": [...], "expenditures": [...], "complaints": [...]}
      * @return array<string, mixed>
      */
     public function push(array $changes, string $deviceId, ?string $lastSyncAt, User $actor): array
     {
         $this->registerDevice($actor, $deviceId);
 
-        $results = ['payments' => [], 'expenditures' => [], 'complaints' => []];
+        $results = ['payments' => [], 'bon_requests' => [], 'expenditures' => [], 'complaints' => []];
         $errors = [];
 
         $paymentLookups = $this->paymentPushLookups($changes['payments'] ?? []);
@@ -70,8 +71,19 @@ class SyncService
             }
         }
 
+        foreach ($changes['bon_requests'] ?? [] as $item) {
+            [$entry, $error] = $this->pushBonRequest($item, $deviceId, $actor, 'bon_request');
+            $results['bon_requests'][] = $entry;
+
+            if ($error !== null) {
+                $errors[] = $error;
+            }
+        }
+
+        // Older app builds still push "Record expense" items. Since E1 they
+        // become bon requests awaiting approval — the data is never dropped.
         foreach ($changes['expenditures'] ?? [] as $item) {
-            [$entry, $error] = $this->pushExpenditure($item, $deviceId, $actor);
+            [$entry, $error] = $this->pushBonRequest($this->legacyExpenditureAsBonRequest($item), $deviceId, $actor, 'expenditure');
             $results['expenditures'][] = $entry;
 
             if ($error !== null) {
@@ -146,10 +158,44 @@ class SyncService
     }
 
     /**
+     * A receipt photo for a payment, or for a bon request (`voucher`; an
+     * older build's `expenditure` is the same bon — its server_uuid is the
+     * bon's uuid). A bon's photo may only be attached by the person who
+     * requested it, and only while it is still pending — after that it is
+     * evidence and nobody replaces it.
+     *
      * @return array{message: string, receipt_url: string}
      */
-    public function uploadReceipt(string $entityType, string $entityUuid, UploadedFile $file): array
+    public function uploadReceipt(string $entityType, string $entityUuid, UploadedFile $file, ?User $actor = null): array
     {
+        if ($entityType === 'voucher' || $entityType === 'expenditure') {
+            $voucher = Voucher::query()->where('uuid', $entityUuid)->first();
+
+            if ($voucher === null && $entityType === 'expenditure' && Expenditure::query()->where('uuid', $entityUuid)->exists()) {
+                throw ValidationException::withMessages(['entity_uuid' => ['This expenditure is already on record; its receipt can no longer be replaced.']]);
+            }
+
+            if ($voucher === null) {
+                throw ValidationException::withMessages(['entity_uuid' => ['Unknown bon.']]);
+            }
+
+            if ($actor === null || $voucher->requested_by !== $actor->id) {
+                abort(403, 'Only the person who requested this bon can attach its receipt.');
+            }
+
+            if (! $voucher->isPending()) {
+                throw ValidationException::withMessages(['entity_uuid' => ["{$voucher->number} is no longer pending; its receipt can't be changed."]]);
+            }
+
+            $storedPath = $file->store('vouchers', $this->vouchers->disk());
+            $voucher->update(['receipt_path' => $storedPath]);
+
+            return [
+                'message' => 'Receipt uploaded',
+                'receipt_url' => "/vouchers/{$voucher->uuid}/files/receipt",
+            ];
+        }
+
         if ($entityType === 'payment') {
             $payment = Payment::query()->where('uuid', $entityUuid)->firstOrFail();
 
@@ -163,23 +209,7 @@ class SyncService
             ];
         }
 
-        if ($entityType === 'expenditure') {
-            $expenditure = Expenditure::query()->where('uuid', $entityUuid)->firstOrFail();
-
-            $storedPath = $file->store('receipts/expenditures', 'public');
-
-            // No verification workflow exists for expenditures (unlike
-            // payments), so there is no service indirection to go through —
-            // updating the column directly is the whole operation.
-            $expenditure->update(['receipt_path' => $storedPath]);
-
-            return [
-                'message' => 'Receipt uploaded',
-                'receipt_url' => Storage::disk('public')->url($storedPath),
-            ];
-        }
-
-        throw ValidationException::withMessages(['entity_type' => ['entity_type must be payment or expenditure.']]);
+        throw ValidationException::withMessages(['entity_type' => ['entity_type must be payment or voucher.']]);
     }
 
     /**
@@ -386,21 +416,25 @@ class SyncService
     }
 
     /**
-     * Mirrors pushPayment() for `changes.expenditures[]`, calling
-     * App\Services\ExpenditureService::create(ExpenditureData $data, int
-     * $userId): Expenditure.
+     * A bon request from the phone ("Request a bon",
+     * docs/plans/expenditures-and-spending-controls.md item 2): queued
+     * offline, created here by App\Services\VoucherService::request() as a
+     * pending bon by this agent — the same approval chain as the web.
+     * Idempotent on local_uuid. Needs `vouchers.request` (not merely sync
+     * access); a refusal fails only this item.
      *
      * @param  array<string, mixed>  $item
      * @return array{0: array<string, mixed>, 1: ?array<string, mixed>}
      */
-    private function pushExpenditure(array $item, string $deviceId, User $actor): array
+    private function pushBonRequest(array $item, string $deviceId, User $actor, string $entityType): array
     {
         $localUuid = $item['local_uuid'] ?? null;
 
-        // Same idempotency guard as pushPayment() above — see that method's
-        // comment for the full rationale.
+        // Same idempotency guard as pushPayment() above. A row an older
+        // build synced before E1 is a legacy expenditure with that local_uuid.
         if ($localUuid !== null) {
-            $existingUuid = Expenditure::query()->where('local_uuid', $localUuid)->value('uuid');
+            $existingUuid = Voucher::query()->where('local_uuid', $localUuid)->value('uuid')
+                ?? Expenditure::query()->where('local_uuid', $localUuid)->value('uuid');
 
             if ($existingUuid !== null) {
                 return [
@@ -411,37 +445,78 @@ class SyncService
         }
 
         try {
-            $data = ExpenditureData::fromArray([
+            if (! $this->context->can('vouchers.request')) {
+                throw ValidationException::withMessages(['permission' => ['You are not allowed to request bons.']]);
+            }
+
+            $voucher = $this->vouchers->request([
+                'kind' => Voucher::KIND_EXPENSE,
+                'payee_name' => trim((string) ($item['payee_name'] ?? '')) !== '' ? mb_substr(trim((string) $item['payee_name']), 0, 150) : 'Not stated',
+                'purpose' => trim((string) ($item['purpose'] ?? '')) !== '' ? mb_substr(trim((string) $item['purpose']), 0, 500) : 'Expense recorded on the phone',
                 'category_uuid' => $item['category_uuid'] ?? null,
-                'amount' => $item['amount'] ?? null,
-                'description' => $item['description'] ?? null,
-                'spent_at' => $item['spent_at'] ?? null,
-                'notes' => $item['notes'] ?? null,
-                'recorded_offline' => true,
-                'recorded_by_device' => $deviceId,
+                'amount' => number_format((float) ($item['amount'] ?? 0), 2, '.', ''),
+                'needed_on' => $this->neededOn($item['needed_on'] ?? null),
+                'from_collections' => (bool) ($item['from_collections'] ?? false),
                 'local_uuid' => $localUuid,
-            ]);
+                'recorded_by_device' => $deviceId,
+            ], $actor);
 
-            $expenditure = $this->expenditures->create($data, $actor->id);
-
-            $this->recordSyncQueue($deviceId, 'expenditure', $expenditure->uuid, $localUuid, $item, 'synced');
+            $this->recordSyncQueue($deviceId, $entityType, $voucher->uuid, $localUuid, $item, 'synced');
 
             return [
-                ['local_uuid' => $localUuid, 'server_uuid' => $expenditure->uuid, 'status' => 'synced'],
+                ['local_uuid' => $localUuid, 'server_uuid' => $voucher->uuid, 'status' => 'synced', 'number' => $voucher->number],
                 null,
             ];
         } catch (Throwable $e) {
             $message = $this->errorMessage($e);
 
-            $this->recordSyncQueue($deviceId, 'expenditure', null, $localUuid, $item, 'failed', $message);
+            $this->recordSyncQueue($deviceId, $entityType, null, $localUuid, $item, 'failed', $message);
 
-            report($e);
+            if (! $e instanceof ValidationException) {
+                report($e);
+            }
 
             return [
                 ['local_uuid' => $localUuid, 'status' => 'failed', 'error' => $message],
-                ['entity_type' => 'expenditure', 'local_uuid' => $localUuid, 'message' => $message],
+                ['entity_type' => $entityType, 'local_uuid' => $localUuid, 'message' => $message],
             ];
         }
+    }
+
+    /**
+     * An older build's "Record expense" item, as a bon request: its
+     * description becomes the purpose (with the day it says it was spent),
+     * the payee is unknown. It waits for approval like any bon.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>
+     */
+    private function legacyExpenditureAsBonRequest(array $item): array
+    {
+        $description = trim((string) ($item['description'] ?? ''));
+        $spentAt = isset($item['spent_at']) ? substr((string) $item['spent_at'], 0, 10) : null;
+
+        return [
+            'local_uuid' => $item['local_uuid'] ?? null,
+            'category_uuid' => $item['category_uuid'] ?? null,
+            'amount' => $item['amount'] ?? null,
+            'payee_name' => null,
+            'purpose' => mb_substr($description !== '' ? $description : 'Expense recorded on an older app version', 0, 470).($spentAt ? " (spent {$spentAt})" : ''),
+        ];
+    }
+
+    /** A requested day in the past or unreadable becomes today (Cameroon time). */
+    private function neededOn(mixed $value): string
+    {
+        $today = BusinessTimezone::today();
+
+        if (! is_string($value) || ! preg_match('/^\d{4}-\d{2}-\d{2}/', $value)) {
+            return $today;
+        }
+
+        $date = substr($value, 0, 10);
+
+        return $date < $today ? $today : $date;
     }
 
     /**

@@ -161,6 +161,23 @@ export interface SyncPushPaymentItem {
     receipt_issued_at?: string | null;
 }
 
+/**
+ * "Request a bon" (docs/plans/expenditures-and-spending-controls.md, item 2)
+ * — App\Http\Requests\SyncPushRequest's `changes.bon_requests.*`; becomes a
+ * pending bon by this agent (App\Services\SyncService::pushBonRequest()).
+ */
+export interface SyncPushBonRequestItem {
+    local_uuid: string;
+    category_uuid: string;
+    amount: number;
+    payee_name: string;
+    purpose: string;
+    needed_on: string;
+    from_collections: boolean;
+    created_at?: string | null;
+}
+
+/** Older builds' "Record expense" item — still accepted, turned into a pending bon server-side. */
 export interface SyncPushExpenditureItem {
     local_uuid: string;
     category_uuid: string;
@@ -194,6 +211,7 @@ export interface SyncPushRequestBody {
     last_sync_at?: string | null;
     changes: {
         payments?: SyncPushPaymentItem[];
+        bon_requests?: SyncPushBonRequestItem[];
         expenditures?: SyncPushExpenditureItem[];
         complaints?: SyncPushComplaintItem[];
     };
@@ -204,6 +222,8 @@ export interface SyncPushResultItem {
     server_uuid?: string;
     status: 'synced' | 'failed';
     error?: string;
+    /** A bon request's BC- number. */
+    number?: string;
 }
 
 export interface SyncPushResponse {
@@ -211,6 +231,8 @@ export interface SyncPushResponse {
     synced_at: string;
     results: {
         payments: SyncPushResultItem[];
+        /** Absent on servers older than the bon-request change. */
+        bon_requests?: SyncPushResultItem[];
         expenditures: SyncPushResultItem[];
         complaints: SyncPushResultItem[];
     };
@@ -331,7 +353,7 @@ export interface SyncStatusResponse {
     failed_items: number;
 }
 
-export type ReceiptEntityType = 'payment' | 'expenditure';
+export type ReceiptEntityType = 'payment' | 'voucher' | 'expenditure';
 
 /**
  * POST /api/v1/sync/upload-receipt — a separate multipart upload, sent only

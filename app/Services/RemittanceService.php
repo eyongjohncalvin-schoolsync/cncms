@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\RemittanceLine;
 use App\Models\User;
+use App\Models\Voucher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,7 @@ class RemittanceService
         private readonly DocumentNumberService $documentNumbers,
         private readonly NotificationService $notifications,
         private readonly CashNotificationService $cashNotifier,
+        private readonly VoucherService $vouchers,
     ) {}
 
     /**
@@ -55,13 +57,36 @@ class RemittanceService
     }
 
     /**
-     * @return array{payments: Collection<int, Payment>, totals: array{cash: string, mtn_momo: string, orange_money: string, bank: string}, purpose_totals: array{subscription: string, installation: string, technician_fee: string}, oldest_at: ?string}
+     * Approved bons this collector already paid out of their collections
+     * ("already spent from my collections",
+     * docs/plans/expenditures-and-spending-controls.md item 2) and not yet
+     * handed over — the cashier pays them as part of receiving.
+     *
+     * @return Builder<Voucher>
+     */
+    public function outstandingBonsQuery(User $collector): Builder
+    {
+        return Voucher::query()
+            ->where('requested_by', $collector->id)
+            ->where('from_collections', true)
+            ->where('status', 'approved')
+            ->whereNull('remittance_id');
+    }
+
+    /**
+     * @return array{payments: Collection<int, Payment>, totals: array{cash: string, mtn_momo: string, orange_money: string, bank: string}, purpose_totals: array{subscription: string, installation: string, technician_fee: string}, oldest_at: ?string, bons: Collection<int, Voucher>, bons_total: string, cash_to_hand_over: string}
      */
     public function preview(User $collector): array
     {
         $payments = $this->outstandingQuery($collector)->with(['customer', 'receipt'])->orderBy('created_at')->get();
+        $bons = $this->outstandingBonsQuery($collector)->orderBy('id')->get();
+        $totals = $this->totalsByMethod($payments);
+        $bonsTotal = $this->sumAmounts($bons);
 
         return [
+            'bons' => $bons,
+            'bons_total' => $bonsTotal,
+            'cash_to_hand_over' => bcsub($totals['cash'], $bonsTotal, 2),
             'payments' => $payments,
             'totals' => $this->totalsByMethod($payments),
             // Technician fees ride along with the day's cash but are the
@@ -89,8 +114,10 @@ class RemittanceService
             }
 
             $totals = $this->totalsByMethod($payments);
+            $bons = $this->outstandingBonsQuery($collector)->lockForUpdate()->get();
 
             $remittance = Remittance::query()->create([
+                'bons_total' => $this->sumAmounts($bons),
                 'number' => $this->documentNumbers->next(DocumentNumberService::REMITTANCE),
                 'collector_user_id' => $collector->id,
                 'business_date' => $this->cashBook->today(),
@@ -117,6 +144,10 @@ class RemittanceService
                 'created_at' => $now,
                 'updated_at' => $now,
             ])->all());
+
+            if ($bons->isNotEmpty()) {
+                Voucher::query()->whereKey($bons->modelKeys())->update(['remittance_id' => $remittance->id]);
+            }
 
             return $remittance;
         });
@@ -163,7 +194,18 @@ class RemittanceService
                 ]);
             }
 
-            $variance = bcsub($receivedCash, (string) $locked->expected_cash, 2);
+            // Bons the collector already paid out of this cash: the cashier
+            // pays each one now (cash in, straight back out on the bon), so
+            // the drawer is expected to hold the collections minus them.
+            $bonsPaid = '0.00';
+
+            foreach ($locked->bons()->lockForUpdate()->get() as $bon) {
+                if ($this->vouchers->payAtHandover($bon, $receiver, $till, $locked->collector?->name ?? 'Collector')) {
+                    $bonsPaid = bcadd($bonsPaid, (string) $bon->amount, 2);
+                }
+            }
+
+            $variance = bcsub(bcadd($receivedCash, $bonsPaid, 2), (string) $locked->expected_cash, 2);
 
             $locked->update([
                 'status' => 'received',
@@ -174,6 +216,7 @@ class RemittanceService
                 'received_denominations' => $denominations,
                 'cash_variance' => $variance,
                 'receiver_note' => $note,
+                'bons_total' => $bonsPaid,
                 'shortage_status' => bccomp($variance, '0', 2) < 0 ? 'open' : null,
             ]);
 
@@ -233,6 +276,14 @@ class RemittanceService
         }
 
         return $totals;
+    }
+
+    /**
+     * @param  Collection<int, Voucher>  $bons
+     */
+    private function sumAmounts(Collection $bons): string
+    {
+        return $bons->reduce(fn (string $carry, Voucher $bon): string => bcadd($carry, (string) $bon->amount, 2), '0.00');
     }
 
     /**

@@ -4,45 +4,50 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\DataTransferObjects\ExpenditureData;
 use App\Models\Expenditure;
 use App\Models\User;
 use App\Repositories\Contracts\ExpenditureRepositoryInterface;
 use App\Repositories\Contracts\ExpenseCategoryRepositoryInterface;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * Expenditures after docs/plans/expenditures-and-spending-controls.md:
+ * read them, re-categorise / fix their wording (E7), void a legacy row.
+ * Creating them is App\Services\VoucherService's job alone (E1) — a bon
+ * paid or settled, or a correction of one — and nothing is ever deleted.
+ * Amounts never change here; a wrong amount is corrected on the bon.
+ */
 class ExpenditureService
 {
     public function __construct(
         private readonly ExpenditureRepositoryInterface $expenditures,
         private readonly ExpenseCategoryRepositoryInterface $categories,
+        private readonly ExpenditureMonthService $months,
     ) {}
 
     /**
-     * Expenditures are written moderately often (agents/managers recording
-     * throughout the day), so this uses a short TTL rather than precise
-     * per-filter/page invalidation — same tradeoff as PaymentService::list().
-     *
-     * @param  array<string, mixed>  $filters  Supported keys: 'category_uuid', 'from', 'to', 'user_uuid'.
+     * @param  array<string, mixed>  $filters  Supported keys: 'month' (Y-m), 'category_uuid', 'from', 'to', 'user_uuid', 'source', 'status'.
      */
     public function list(array $filters, int $perPage): LengthAwarePaginator
     {
-        $scopedFilters = $this->scopedFilters($filters);
-        $page = Paginator::resolveCurrentPage() ?: 1;
+        return $this->expenditures->paginate($this->scopedFilters($filters), $perPage);
+    }
 
-        $cacheKey = 'resources:expenditures:list:'.md5(json_encode([$scopedFilters, $perPage, $page]));
-
-        return Cache::remember(
-            $cacheKey,
-            now()->addSeconds(30),
-            fn (): LengthAwarePaginator => $this->expenditures->paginate($scopedFilters, $perPage),
-        );
+    /**
+     * @param  array<string, mixed>  $filters  Same keys as list().
+     * @return Collection<int, Expenditure>
+     */
+    public function all(array $filters): Collection
+    {
+        return $this->expenditures->all($this->scopedFilters($filters));
     }
 
     public function findOrFail(string $uuid): Expenditure
@@ -57,87 +62,91 @@ class ExpenditureService
     }
 
     /**
-     * Fixed interface contract — the Sync API depends on this exact
-     * signature (see ExpenditureData's class doc). $userId is passed in
-     * explicitly rather than read from auth() internally, because the Sync
-     * API calls this on behalf of an agent whose ID it already has for
-     * offline-recorded expenditures. Expenditures have no verification
-     * workflow (no `verification_status` column) — they are trusted once
-     * recorded; role gating via ExpenditurePolicy is the only control.
+     * Re-categorise and/or fix the description and notes, with a reason —
+     * only while the month is open, never by the person who requested or
+     * recorded it (ExpenditurePolicy::update). An empty description or note
+     * clears it.
+     *
+     * @param  array{category_uuid?: ?string, description?: ?string, notes?: ?string}  $changes
      */
-    public function create(ExpenditureData $data, int $userId): Expenditure
+    public function edit(Expenditure $expenditure, array $changes, string $reason): Expenditure
     {
-        $categoryId = $this->resolveCategoryId($data->categoryUuid);
+        $this->assertEditable($expenditure);
 
-        $expenditure = $this->expenditures->create($categoryId, $userId, $data->toAttributes());
+        $attributes = ['edit_reason' => $reason];
 
-        $this->forgetDashboardCache($expenditure->spent_at);
-
-        return $expenditure->load(['category', 'user']);
-    }
-
-    public function update(Expenditure $expenditure, ExpenditureData $data): Expenditure
-    {
-        $attributes = $data->toAttributes();
-
-        if ($data->categoryUuid !== null) {
-            $attributes['category_id'] = $this->resolveCategoryId($data->categoryUuid);
+        if (array_key_exists('category_uuid', $changes) && $changes['category_uuid'] !== null) {
+            $attributes['category_id'] = $this->resolveCategoryId($changes['category_uuid']);
         }
 
-        // spent_at may move the expenditure into a different period, so both
-        // the period it's leaving and the one it's landing in need their
-        // dashboard cache invalidated (a no-op forget on the same key twice
-        // when spent_at is unchanged or stays within the period).
-        $previousSpentAt = $expenditure->spent_at;
+        foreach (['description', 'notes'] as $field) {
+            if (array_key_exists($field, $changes)) {
+                $value = $changes[$field] === null ? null : trim((string) $changes[$field]);
+                $attributes[$field] = $value === '' ? null : $value;
+            }
+        }
 
         $expenditure = $this->expenditures->update($expenditure, $attributes);
-
-        $this->forgetDashboardCache($previousSpentAt);
-        $this->forgetDashboardCache($expenditure->spent_at);
+        $this->forgetCaches($expenditure->spent_at);
 
         return $expenditure->load(['category', 'user']);
-    }
-
-    public function delete(Expenditure $expenditure): void
-    {
-        $spentAt = $expenditure->spent_at;
-
-        $this->expenditures->delete($expenditure);
-
-        $this->forgetDashboardCache($spentAt);
     }
 
     /**
-     * Derives the expenditure's YYYY-MM period from its spent_at date and
-     * forgets ResourcesDashboardService's cache entry for that period, so the
-     * P&L dashboard reflects a newly-recorded/edited/deleted expense promptly
-     * rather than waiting out the full 5-minute TTL. Its cache key is now
-     * branch-suffixed (income is branch-scoped even though expenses are not
-     * — see ResourcesDashboardService::expensesFor()'s doc comment), so —
-     * same tradeoff as CustomerService::forgetShowCache() — only this
-     * actor's own key and the unrestricted ('all') key are explicitly
-     * forgotten; any other branch-fenced caller's copy is bounded by the 5
-     * minute TTL instead.
+     * Voids a legacy (directly recorded) expenditure: the row stays, marked
+     * void, out of every total. A bon's expenditure is corrected on the bon
+     * instead (VoucherService::correct) — the cash really left.
      */
-    private function forgetDashboardCache(mixed $spentAt): void
+    public function void(Expenditure $expenditure, User $actor, string $reason): Expenditure
+    {
+        if ($expenditure->source !== Expenditure::SOURCE_LEGACY) {
+            throw ValidationException::withMessages(['reason' => 'A bon\'s expenditure is corrected on the bon, not voided.']);
+        }
+
+        $this->assertEditable($expenditure);
+
+        return DB::transaction(function () use ($expenditure, $actor, $reason): Expenditure {
+            $expenditure->update([
+                'status' => Expenditure::STATUS_VOID,
+                'void_reason' => $reason,
+                'voided_by' => $actor->id,
+                'voided_at' => now(),
+            ]);
+
+            $this->forgetCaches($expenditure->spent_at);
+
+            return $expenditure;
+        });
+    }
+
+    /**
+     * Forgets the dashboard and report caches for the month $spentAt falls
+     * in. ResourcesDashboardService's key is branch-suffixed, so only this
+     * actor's own key and the unrestricted ('all') key are forgotten; other
+     * branch-fenced copies age out with the 5-minute TTL.
+     */
+    public function forgetCaches(mixed $spentAt): void
     {
         if ($spentAt === null) {
             return;
         }
 
-        $period = ($spentAt instanceof Carbon ? $spentAt : Carbon::parse($spentAt))->format('Y-m');
+        $date = $spentAt instanceof Carbon ? $spentAt : Carbon::parse($spentAt);
+        $period = $date->format('Y-m');
 
         Cache::forget('resources:dashboard:'.$period.':'.(TenantContext::currentBranchId() ?? 'all'));
         Cache::forget('resources:dashboard:'.$period.':all');
 
-        // Extends the same forget-on-write to /reports' Daily/Weekly/Monthly
-        // caches — expenditures feed the Daily tier's "expenditures recorded
-        // today" figure and (via ResourcesDashboardService::dashboard())
-        // the Monthly tier's P&L block. Expenditures carry no branch
-        // attribution (see ResourcesDashboardService::expensesFor()'s doc
-        // comment), so only the unrestricted ('all') report keys are ever
-        // forgotten here — see ReportService::forgetCache()'s doc comment.
-        ReportService::forgetCache($spentAt instanceof Carbon ? $spentAt : Carbon::parse($spentAt));
+        ReportService::forgetCache($date);
+    }
+
+    private function assertEditable(Expenditure $expenditure): void
+    {
+        if ($expenditure->isVoid()) {
+            throw ValidationException::withMessages(['reason' => 'This expenditure is void.']);
+        }
+
+        $this->months->assertOpen($expenditure->period());
     }
 
     /**
@@ -146,6 +155,10 @@ class ExpenditureService
      */
     private function scopedFilters(array $filters): array
     {
+        if (BusinessTimezone::isValidPeriod($filters['month'] ?? null)) {
+            [$filters['from'], $filters['to']] = BusinessTimezone::periodDates($filters['month']);
+        }
+
         if (! empty($filters['category_uuid'])) {
             $filters['category_id'] = $this->resolveCategoryId($filters['category_uuid']);
         }
@@ -154,15 +167,19 @@ class ExpenditureService
             $filters['user_id'] = $this->resolveUserId($filters['user_uuid']);
         }
 
+        if (isset($filters['source']) && ! in_array($filters['source'], Expenditure::SOURCES, true)) {
+            unset($filters['source']);
+        }
+
+        if (isset($filters['status']) && ! in_array($filters['status'], [Expenditure::STATUS_ACTIVE, Expenditure::STATUS_VOID], true)) {
+            unset($filters['status']);
+        }
+
         return $filters;
     }
 
-    private function resolveCategoryId(?string $categoryUuid): int
+    private function resolveCategoryId(string $categoryUuid): int
     {
-        if (! $categoryUuid) {
-            throw ValidationException::withMessages(['category_uuid' => ['The category_uuid field is required.']]);
-        }
-
         $category = $this->categories->findByUuid($categoryUuid);
 
         if (! $category) {

@@ -200,7 +200,7 @@ export default function HomeScreen() {
                     mobile-app-react-native.md §4 / complaint-desk.md §7's
                     explicit "not a 5th tab" decision for Log a Complaint. */}
                 <Button
-                    title="Record an expense"
+                    title="Request a bon"
                     variant="secondary"
                     onPress={() => router.push('/record-expense')}
                 />

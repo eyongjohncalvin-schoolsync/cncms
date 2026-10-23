@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\RemittanceLine;
+use App\Models\Voucher;
 use App\Services\CashBookService;
 use App\Services\RemittanceService;
 use Illuminate\Http\RedirectResponse;
@@ -47,6 +48,11 @@ class RemittanceController extends Controller
             'totals' => $preview['totals'],
             'purpose_totals' => $preview['purpose_totals'],
             'oldest_at' => $preview['oldest_at'],
+            // Approved bons already paid out of these collections — the
+            // cashier pays them as part of receiving, so hand over the rest.
+            'bons' => $preview['bons']->map(fn (Voucher $bon): array => $this->shapeBon($bon))->values()->all(),
+            'bons_total' => $preview['bons_total'],
+            'cash_to_hand_over' => $preview['cash_to_hand_over'],
             'history' => Remittance::query()->where('collector_user_id', $request->user()->id)->latest('submitted_at')->limit(10)->get()
                 ->map(fn (Remittance $remittance): array => [
                     'uuid' => $remittance->uuid,
@@ -84,7 +90,7 @@ class RemittanceController extends Controller
     {
         $this->authorize('view', $remittance);
 
-        $remittance->load(['collector', 'receivedBy', 'till', 'lines.payment.customer', 'lines.payment.receipt']);
+        $remittance->load(['collector', 'receivedBy', 'till', 'lines.payment.customer', 'lines.payment.receipt', 'bons']);
 
         return Inertia::render('Cash/Remittance', [
             'remittance' => [
@@ -99,6 +105,9 @@ class RemittanceController extends Controller
                     'orange_money' => (string) $remittance->expected_orange,
                     'bank' => (string) $remittance->expected_bank,
                 ],
+                'bons' => $remittance->bons->map(fn (Voucher $bon): array => $this->shapeBon($bon))->values()->all(),
+                'bons_total' => (string) $remittance->bons_total,
+                'cash_to_hand_over' => $remittance->cashToHandOver(),
                 'declared_cash' => (string) $remittance->declared_cash,
                 'declared_denominations' => $remittance->declared_denominations,
                 'collector_note' => $remittance->collector_note,
@@ -173,6 +182,21 @@ class RemittanceController extends Controller
         $this->remittances->settleShortage($remittance, $validated['outcome'], $request->user(), $validated['note'] ?? null);
 
         return back()->with('success', $validated['outcome'] === 'repaid' ? 'Shortage repaid into your till.' : 'Shortage written off.');
+    }
+
+    /**
+     * @return array{uuid: string, number: string, payee_name: string, purpose: string, amount: string, status: string}
+     */
+    private function shapeBon(Voucher $bon): array
+    {
+        return [
+            'uuid' => $bon->uuid,
+            'number' => $bon->number,
+            'payee_name' => $bon->payee_name,
+            'purpose' => $bon->purpose,
+            'amount' => (string) $bon->amount,
+            'status' => $bon->status,
+        ];
     }
 
     /**

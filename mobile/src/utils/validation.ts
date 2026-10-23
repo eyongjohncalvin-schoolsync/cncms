@@ -268,3 +268,81 @@ export function validateExpenditureForm(input: ExpenditureFormInput): Expenditur
 
     return { valid: true, errors: {}, amount };
 }
+
+/**
+ * "Request a bon" (docs/plans/expenditures-and-spending-controls.md, item 2)
+ * — every cash-out goes through a numbered bon now, so the phone asks for
+ * one rather than recording an expense. Mirrors the server's
+ * `changes.bon_requests.*` rules (SyncPushRequest) so an item that shows
+ * "Saved · will sync" never fails validation later.
+ */
+export interface BonRequestFormInput {
+    categoryUuid: string | null;
+    amountText: string;
+    payeeName: string;
+    purpose: string;
+    /** YYYY-MM-DD — the day the money is needed; never before today. */
+    neededOnText: string;
+    /** Today on this phone, YYYY-MM-DD (passed in so this stays pure). */
+    today: string;
+}
+
+export interface BonRequestFormErrors {
+    category?: string;
+    amount?: string;
+    payee?: string;
+    purpose?: string;
+    neededOn?: string;
+}
+
+export type BonRequestFormResult =
+    | { valid: true; errors: Record<string, never>; amount: number }
+    | { valid: false; errors: BonRequestFormErrors };
+
+export const BON_PAYEE_MAX = 150;
+export const BON_PURPOSE_MAX = 500;
+
+export function validateBonRequestForm(input: BonRequestFormInput): BonRequestFormResult {
+    const errors: BonRequestFormErrors = {};
+
+    if (!input.categoryUuid) {
+        errors.category = 'Choose a category — every bon must reach the P&L.';
+    }
+
+    const trimmedAmount = input.amountText.trim();
+    const amount = Number(trimmedAmount);
+
+    if (!trimmedAmount || !Number.isFinite(amount) || amount <= 0) {
+        errors.amount = 'Enter an amount greater than 0.';
+    } else if (Math.round(amount * 100) !== amount * 100) {
+        errors.amount = 'Use at most 2 decimals.';
+    }
+
+    const payee = input.payeeName.trim();
+
+    if (!payee) {
+        errors.payee = 'Who is the money for?';
+    } else if (payee.length > BON_PAYEE_MAX) {
+        errors.payee = `Keep it under ${BON_PAYEE_MAX} characters.`;
+    }
+
+    const purpose = input.purpose.trim();
+
+    if (!purpose) {
+        errors.purpose = 'Say what it is for — this is the paper trail.';
+    } else if (purpose.length > BON_PURPOSE_MAX) {
+        errors.purpose = `Keep it under ${BON_PURPOSE_MAX} characters.`;
+    }
+
+    if (!DATE_ONLY_RE.test(input.neededOnText) || Number.isNaN(new Date(input.neededOnText).getTime())) {
+        errors.neededOn = 'Enter a valid date.';
+    } else if (input.neededOnText < input.today) {
+        errors.neededOn = 'The day it is needed cannot be in the past.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+        return { valid: false, errors };
+    }
+
+    return { valid: true, errors: {}, amount };
+}

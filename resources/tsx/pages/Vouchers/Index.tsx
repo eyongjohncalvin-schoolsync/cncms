@@ -12,6 +12,8 @@ import { TextInput } from '@/components/ui/TextInput';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Table, TableBody, TableHead, Th, Td } from '@/components/ui/Table';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { monthLabel } from '@/lib/expenditures';
+import type { SpendingSummary } from '@/types';
 
 export type VoucherStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'paid' | 'settled';
 
@@ -39,6 +41,8 @@ interface Props {
     categories: { uuid: string; name: string }[];
     today: string;
     is_investor: boolean;
+    spending: SpendingSummary;
+    can_spend_from_collections: boolean;
 }
 
 export function VoucherStatusBadge({ status }: { status: VoucherStatus }) {
@@ -59,7 +63,7 @@ const TABS = [
  * (docs/plans/cash-controls.md, wave 5). Investors see it in their own
  * layout: it is where they approve payouts above the company's limits.
  */
-export default function VouchersIndex({ vouchers, can_request, limits, categories, today, is_investor }: Props) {
+export default function VouchersIndex({ vouchers, can_request, limits, categories, today, is_investor, spending, can_spend_from_collections }: Props) {
     const [tab, setTab] = useState<(typeof TABS)[number]['key']>('mine');
     const [requestOpen, setRequestOpen] = useState(false);
 
@@ -91,9 +95,15 @@ export default function VouchersIndex({ vouchers, can_request, limits, categorie
                     </p>
                     {limits.daily && (
                         <p className="mt-1 text-xs text-slate-500">
-                            Committed for today: {formatCurrency(limits.committed_today)} of {formatCurrency(limits.daily)}.
+                            Paid or approved today: {formatCurrency(limits.committed_today)} of {formatCurrency(limits.daily)} (counted on the day a bon is paid).
                         </p>
                     )}
+                    {spending.cap && (
+                        <p className={`mt-1 text-xs ${spending.cap_pct !== null && spending.cap_pct >= 100 ? 'font-medium text-red-700' : 'text-slate-500'}`}>
+                            {monthLabel(spending.period)}: {formatCurrency(spending.committed)} committed of a {formatCurrency(spending.cap)} monthly cap ({spending.cap_pct ?? 0}%).
+                        </p>
+                    )}
+                    {spending.deficit && <p className="mt-1 text-xs font-medium text-red-700">This month&apos;s spending is above its verified income.</p>}
                 </div>
                 {can_request && (
                     <Button onClick={() => setRequestOpen(true)}>
@@ -158,7 +168,17 @@ export default function VouchersIndex({ vouchers, can_request, limits, categorie
                 )}
             </Card>
 
-            {can_request && <RequestModal open={requestOpen} onClose={() => setRequestOpen(false)} categories={categories} today={today} limits={limits} />}
+            {can_request && (
+                <RequestModal
+                    open={requestOpen}
+                    onClose={() => setRequestOpen(false)}
+                    categories={categories}
+                    today={today}
+                    limits={limits}
+                    spending={spending}
+                    canSpendFromCollections={can_spend_from_collections}
+                />
+            )}
         </>
     );
 
@@ -177,12 +197,16 @@ function RequestModal({
     categories,
     today,
     limits,
+    spending,
+    canSpendFromCollections,
 }: {
     open: boolean;
     onClose: () => void;
     categories: Props['categories'];
     today: string;
     limits: Props['limits'];
+    spending: SpendingSummary;
+    canSpendFromCollections: boolean;
 }) {
     const { data, setData, post, processing, errors, reset } = useForm<{
         kind: 'expense' | 'advance';
@@ -192,11 +216,17 @@ function RequestModal({
         amount: string;
         needed_on: string;
         attachment: File | null;
-    }>({ kind: 'expense', payee_name: '', purpose: '', category_uuid: '', amount: '', needed_on: today, attachment: null });
+        from_collections: boolean;
+    }>({ kind: 'expense', payee_name: '', purpose: '', category_uuid: '', amount: '', needed_on: today, attachment: null, from_collections: false });
 
     const amount = Number(data.amount || 0);
     const aboveSingle = limits.single !== null && amount > Number(limits.single);
-    const aboveDaily = limits.daily !== null && data.needed_on === today && Number(limits.committed_today) + amount > Number(limits.daily);
+    // E8: the day is counted by when bons are paid, whatever "needed on" says.
+    const aboveDaily = limits.daily !== null && Number(limits.committed_today) + amount > Number(limits.daily);
+    const capAfter = spending.cap !== null ? Math.round(((Number(spending.committed) + amount) / Number(spending.cap)) * 1000) / 10 : null;
+    const aboveCap = capAfter !== null && capAfter > 100;
+    const budgetRow = spending.categories.find((row) => row.uuid === data.category_uuid);
+    const budgetAfter = budgetRow?.budget ? Math.round(((Number(budgetRow.amount) + amount) / Number(budgetRow.budget)) * 1000) / 10 : null;
 
     return (
         <Modal open={open} onClose={onClose} title="Request a voucher">
@@ -231,7 +261,7 @@ function RequestModal({
                 <TextInput id="payee_name" label="Pay to" value={data.payee_name} onChange={(e) => setData('payee_name', e.target.value)} error={errors.payee_name} required />
                 <TextInput id="purpose" label="What for" value={data.purpose} onChange={(e) => setData('purpose', e.target.value)} error={errors.purpose} required />
                 <SelectInput
-                    label={data.kind === 'expense' ? 'Expense category' : 'Expense category (optional)'}
+                    label={data.kind === 'expense' ? 'Expense category' : 'Expense category (or when it is justified)'}
                     value={data.category_uuid}
                     onChange={(e) => setData('category_uuid', e.target.value)}
                     error={errors.category_uuid}
@@ -248,10 +278,25 @@ function RequestModal({
                     <TextInput id="amount" label="Amount (FCFA)" type="number" min="0" value={data.amount} onChange={(e) => setData('amount', e.target.value)} error={errors.amount} required />
                     <TextInput id="needed_on" label="Needed on" type="date" min={today} value={data.needed_on} onChange={(e) => setData('needed_on', e.target.value)} error={errors.needed_on} />
                 </div>
-                {(aboveSingle || aboveDaily) && (
+                {(aboveSingle || aboveDaily || aboveCap) && (
                     <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-                        {aboveSingle ? 'This is above the single-voucher limit' : 'This takes today’s payouts above the daily limit'} — every stakeholder will have to approve it.
+                        {aboveSingle ? 'This is above the single-bon limit' : aboveDaily ? 'This takes today’s payouts above the daily limit' : `This takes ${monthLabel(spending.period)} to ${capAfter}% of the monthly cap`} — every stakeholder will have to approve it.
                     </p>
+                )}
+                {!aboveCap && capAfter !== null && amount > 0 && <p className="-mt-2 text-xs text-slate-500">This takes {monthLabel(spending.period)} to {capAfter}% of the monthly cap.</p>}
+                {budgetAfter !== null && amount > 0 && budgetAfter >= 80 && (
+                    <p className={`rounded-lg p-3 text-sm ${budgetAfter >= 100 ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-800'}`}>
+                        {budgetRow?.name} would be at {budgetAfter}% of its budget this month. A warning only — it does not block the bon.
+                    </p>
+                )}
+                {canSpendFromCollections && data.kind === 'expense' && (
+                    <label className="flex items-start gap-2 text-sm text-slate-700">
+                        <input type="checkbox" className="mt-0.5" checked={data.from_collections} onChange={(e) => setData('from_collections', e.target.checked)} />
+                        <span>
+                            Already paid from my collections — once approved, it is settled at my next cash handover.
+                            {errors.from_collections && <span className="block text-xs text-red-600">{errors.from_collections}</span>}
+                        </span>
+                    </label>
                 )}
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-700">
                     Invoice / quote (optional)

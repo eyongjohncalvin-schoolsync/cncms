@@ -13,11 +13,12 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { hasPermission } from '@/lib/permissions';
-import type { PageProps, ResourcesDashboard } from '@/types';
+import { SpendingStrip } from '@/components/shared/SpendingStrip';
+import type { PageProps, ResourcesDashboard, SpendingSummary } from '@/types';
 
 const CATEGORY_COLORS = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#64748b'];
 
-export default function ResourcesDashboardPage({ period, income, expenses, pnl, budgets }: ResourcesDashboard) {
+export default function ResourcesDashboardPage({ period, income, expenses, pnl, budgets, spending }: ResourcesDashboard & { spending: SpendingSummary }) {
     const { auth } = usePage<PageProps>().props;
     // RBAC v2 Wave 4: ExpenseCategoryPolicy::create/update/delete →
     // `expense_categories.manage`.
@@ -78,10 +79,20 @@ export default function ResourcesDashboardPage({ period, income, expenses, pnl, 
                     <Link href="/resources/expenditures" className="flex-1 sm:flex-none">
                         <Button variant="secondary" className="w-full sm:w-auto">View Expenditures</Button>
                     </Link>
-                    <Link href="/resources/expenditures/create" className="flex-1 sm:flex-none">
-                        <Button className="w-full sm:w-auto">Record Expense</Button>
+                    {hasPermission(auth.user?.permissions, 'budgets.manage') && (
+                        <Link href={`/resources/budgets?month=${period}`} className="flex-1 sm:flex-none">
+                            <Button variant="secondary" className="w-full sm:w-auto">Budgets</Button>
+                        </Link>
+                    )}
+                    {/* Every cash-out is a bon (docs/plans/expenditures-and-spending-controls.md, E1). */}
+                    <Link href="/vouchers" className="flex-1 sm:flex-none">
+                        <Button className="w-full sm:w-auto">Request a bon</Button>
                     </Link>
                 </div>
+            </div>
+
+            <div className="mb-4 animate-fade-up">
+                <SpendingStrip summary={spending} budgetsHref={hasPermission(auth.user?.permissions, 'budgets.manage') ? `/resources/budgets?month=${period}` : undefined} />
             </div>
 
             {/* Hero: the Net Profit/Loss figure is the one number this page exists to

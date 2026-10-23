@@ -58,6 +58,21 @@ class SyncPushRequest extends FormRequest
             'changes.payments.*.security_code' => ['nullable', 'string', 'max:12'],
             'changes.payments.*.receipt_issued_at' => ['nullable', 'string', 'max:40'],
 
+            // "Request a bon" from the phone
+            // (docs/plans/expenditures-and-spending-controls.md, item 2) —
+            // becomes a pending bon; the category is checked per item.
+            'changes.bon_requests' => ['nullable', 'array'],
+            'changes.bon_requests.*.local_uuid' => ['required', 'uuid'],
+            'changes.bon_requests.*.category_uuid' => ['required', 'string'],
+            'changes.bon_requests.*.amount' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
+            'changes.bon_requests.*.payee_name' => ['nullable', 'string', 'max:150'],
+            'changes.bon_requests.*.purpose' => ['required', 'string', 'max:500'],
+            'changes.bon_requests.*.needed_on' => ['nullable', 'date'],
+            'changes.bon_requests.*.from_collections' => ['nullable', 'boolean'],
+            'changes.bon_requests.*.created_at' => ['nullable', 'date'],
+
+            // Older app builds' "Record expense" — accepted and turned into
+            // a pending bon request (never recorded as spent directly).
             'changes.expenditures' => ['nullable', 'array'],
             'changes.expenditures.*.local_uuid' => ['required', 'uuid'],
             'changes.expenditures.*.category_uuid' => ['required', 'string'],

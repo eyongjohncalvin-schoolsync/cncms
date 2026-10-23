@@ -58,7 +58,7 @@ class InvestorTest extends TestCase
      */
     private const FORBIDDEN_ENDPOINTS = [
         ['get', '/resources', 'ExpenditurePolicy::viewDashboard'],
-        ['get', '/resources/expenditures/create', 'ExpenditurePolicy::create'],
+        ['get', '/resources/budgets', 'ExpenditurePolicy::manageBudgets'],
         ['post', '/resources/categories', 'ExpenseCategoryPolicy::create'],
         ['get', '/users', 'TenantUserPolicy::viewAny'],
         ['get', '/settings/command-runs', 'CommandRunPolicy::viewAny'],
