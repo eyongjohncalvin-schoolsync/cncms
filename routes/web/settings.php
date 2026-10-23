@@ -94,5 +94,6 @@ Route::post('settings/services/{service}/variants/{variant}/apply-price', [Setti
 Route::get('settings/installation-offers', [SettingsInstallationOfferController::class, 'index'])->name('settings.installation-offers.index');
 Route::post('settings/installation-offers', [SettingsInstallationOfferController::class, 'store'])->name('settings.installation-offers.store');
 Route::patch('settings/installation-offers/cap', [SettingsInstallationOfferController::class, 'updateCap'])->name('settings.installation-offers.cap');
+Route::patch('settings/installation-offers/one-off-fees', [SettingsInstallationOfferController::class, 'updateOneOffFees'])->name('settings.installation-offers.one-off-fees');
 Route::patch('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'update'])->name('settings.installation-offers.update');
 Route::delete('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'destroy'])->name('settings.installation-offers.destroy');

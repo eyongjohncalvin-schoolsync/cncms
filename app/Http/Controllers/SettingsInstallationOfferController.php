@@ -6,9 +6,12 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\SaveInstallationOfferRequest;
 use App\Http\Requests\UpdateFreeMonthsCapRequest;
+use App\Http\Requests\UpdateOneOffFeesRequest;
 use App\Models\Company;
+use App\Models\CustomerCharge;
 use App\Models\InstallationOffer;
 use App\Models\Service;
+use App\Services\CustomerRelocationService;
 use App\Services\FreeMonthGrantService;
 use App\Services\InstallationOfferService;
 use Illuminate\Http\RedirectResponse;
@@ -59,6 +62,10 @@ class SettingsInstallationOfferController extends Controller
                 ->values()
                 ->all(),
             'max_free_months' => FreeMonthGrantService::maxMonths(),
+            'one_off_fees' => [
+                'relocation_fee' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_RELOCATION),
+                'reinstallation_fee' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_REINSTALLATION),
+            ],
         ]);
     }
 
@@ -91,5 +98,19 @@ class SettingsInstallationOfferController extends Controller
         Company::forgetCache();
 
         return redirect()->route('settings.installation-offers.index')->with('success', 'Free-month cap saved.');
+    }
+
+    /** Default relocation and re-installation fees (null = no default). */
+    public function updateOneOffFees(UpdateOneOffFeesRequest $request): RedirectResponse
+    {
+        $money = fn (mixed $value): ?string => $value === null || $value === '' ? null : number_format((float) $value, 2, '.', '');
+
+        Company::query()->firstOrFail()->update([
+            'relocation_fee' => $money($request->validated('relocation_fee')),
+            'reinstallation_fee' => $money($request->validated('reinstallation_fee')),
+        ]);
+        Company::forgetCache();
+
+        return redirect()->route('settings.installation-offers.index')->with('success', 'Relocation and re-installation fees saved.');
     }
 }
