@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
-#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'free_value', 'period', 'command_run_id', 'opening_balance_batch_id', 'sent_log'])]
+#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'free_value', 'service_prepaid', 'period', 'command_run_id', 'opening_balance_batch_id', 'sent_log'])]
 #[RouteKey('uuid')]
 class Manuscript extends Model
 {
@@ -46,6 +46,7 @@ class Manuscript extends Model
             'prepaid_months_remaining' => 'integer',
             'prepaid_rate' => 'decimal:2',
             'free_value' => 'decimal:2',
+            'service_prepaid' => 'array',
             'sent_log' => 'array',
             // `date:Y-m-d`, not bare `date`: the bare cast serializes to a
             // full ISO-8601 datetime ("2026-12-29T00:00:00.000000Z") in

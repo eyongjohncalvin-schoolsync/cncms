@@ -60,6 +60,9 @@ final readonly class ManuscriptCalculationResult
         // services free this month would have cost — foregone revenue for
         // reports and the register's FREE label, never part of the ledger.
         public string $freeValue = '0.00',
+        // Months paid upfront per service still to come (D15):
+        // service id => ['months' => n, 'rate' => locked price].
+        public array $servicePrepaid = [],
     ) {}
 
     /**
@@ -76,6 +79,26 @@ final readonly class ManuscriptCalculationResult
             'prepaid_months_remaining' => $this->prepaidMonthsRemaining,
             'prepaid_rate' => $this->prepaidRate,
             'free_value' => $this->freeValue,
+            'service_prepaid' => $this->servicePrepaidForStorage(),
         ];
+    }
+
+    /**
+     * Only services with months left; null when there are none (keeps
+     * every ordinary row's column empty).
+     *
+     * @return array<string, array{months: int, rate: string}>|null
+     */
+    private function servicePrepaidForStorage(): ?array
+    {
+        $rows = [];
+
+        foreach ($this->servicePrepaid as $serviceId => $state) {
+            if (($state['months'] ?? 0) > 0) {
+                $rows[(string) $serviceId] = ['months' => (int) $state['months'], 'rate' => (string) $state['rate']];
+            }
+        }
+
+        return $rows === [] ? null : $rows;
     }
 }

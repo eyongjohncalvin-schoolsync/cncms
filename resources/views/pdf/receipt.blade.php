@@ -208,15 +208,15 @@
             @endif
             {{-- D11: no slips for free months — the free period and the first
                  bill month are printed here instead. --}}
-            @foreach(($installation['free'] ?? []) as $window)
-                <br><strong>Free:</strong> {{ $window['service'] }} {{ $window['from_label'] }} – {{ $window['until_label'] }}
+            @foreach(($installation['services'] ?? []) as $timeline)
+                <br><strong>{{ $timeline['service'] }}:</strong>
+                @if($timeline['free']) free {{ $timeline['free'] }}@endif{{ $timeline['free'] && $timeline['paid'] ? ',' : '' }}
+                @if($timeline['paid']) paid {{ $timeline['paid'] }}@endif
+                @if($timeline['first_billed']) · billed from {{ $timeline['first_billed'] }}@endif
             @endforeach
             @foreach(($installation['waiting'] ?? []) as $waiting)
-                <br><strong>Free:</strong> {{ $waiting['service'] }} {{ $waiting['months'] }} month(s) {{ $waiting['status'] === 'pending_approval' ? '(awaiting approval)' : 'from the month after the fee is fully paid' }}
+                <br><strong>Free:</strong> {{ $waiting['service'] }} {{ $waiting['months'] }} month(s) (awaiting approval)
             @endforeach
-            @if(!empty($installation['paid_until_label']))
-                <br><strong>Paid in advance until:</strong> {{ $installation['paid_until_label'] }}
-            @endif
             @if(!empty($installation['first_bill_label']))
                 <br><strong>First bill:</strong> {{ $installation['first_bill_label'] }}
             @endif

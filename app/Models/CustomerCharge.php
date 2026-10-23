@@ -6,7 +6,6 @@ namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
-use App\Services\FreeMonthGrantService;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -215,9 +214,8 @@ class CustomerCharge extends Model
      * later, rejected or deleted. A waived or refunded charge is final.
      *
      * A fee below the offer's that still waits for approval (D8) is never
-     * "paid" — the agreed amount isn't settled yet. Reaching `paid` starts
-     * the installation's free months the month after (D3/D4); falling back
-     * to `open` (a settling payment rejected) puts them back on hold.
+     * "paid" — the agreed amount isn't settled yet. (Free months no longer
+     * follow this status: D17 decides them at registration.)
      */
     public function refreshStatus(): void
     {
@@ -230,10 +228,8 @@ class CustomerCharge extends Model
 
         if ($fullyPaid && $this->status === self::STATUS_OPEN) {
             $this->update(['status' => self::STATUS_PAID, 'paid_at' => now()]);
-            app(FreeMonthGrantService::class)->installationSettled($this);
         } elseif (! $fullyPaid && $this->status === self::STATUS_PAID) {
             $this->update(['status' => self::STATUS_OPEN, 'paid_at' => null]);
-            app(FreeMonthGrantService::class)->installationReopened($this);
         }
     }
 

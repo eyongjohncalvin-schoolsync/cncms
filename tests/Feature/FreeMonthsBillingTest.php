@@ -145,158 +145,178 @@ class FreeMonthsBillingTest extends TestCase
         return $result;
     }
 
-    public function test_example_a_two_free_months_then_three_paid_months_then_the_first_bill(): void
+    /**
+     * A "paid upfront" payment (D15): months per service at its own price.
+     *
+     * @param  array<string, int>  $months  service slug => months
+     */
+    private function upfront(Customer $customer, array $months, string $price = '2500'): Payment
     {
-        // TV 2,500; installation paid in full on 10 Oct; 2 free months; a
-        // 3-month advance paid the same day â†’ Novâ€“Dec free, Janâ€“Mar paid,
-        // first bill April.
-        $customer = $this->customer();
-        $this->grant($customer, 'tv', 2, '2026-11');
-        $this->advance($customer, '7500', 3, '2500');
+        $rows = [];
+        $amount = '0';
 
-        foreach (['2026-11', '2026-12'] as $period) {
+        foreach ($months as $slug => $count) {
+            $rows[] = ['service_id' => $this->service($slug)->id, 'months' => $count, 'rate' => $price];
+            $amount = bcadd($amount, bcmul((string) $count, $price, 2), 2);
+        }
+
+        return PaymentFactory::new()->create([
+            'customer_id' => $customer->id,
+            'amount' => $amount,
+            'frequency' => 'months',
+            'months' => max($months),
+            'expiration_date' => null,
+            'service_months' => $rows,
+            'verification_status' => 'verified',
+        ]);
+    }
+
+    public function test_example_a_free_months_then_paid_months_then_billed_like_everyone(): void
+    {
+        // TV 2,500, installed in October: Oct–Nov free (the installation
+        // month ticked + one more), 3 months paid upfront → Dec–Feb paid,
+        // first billed month March — on the same ledger as everyone (D18).
+        $customer = $this->customer(billingStarts: '2026-10');
+        $this->grant($customer, 'tv', 2, '2026-10');
+        $this->upfront($customer, ['tv' => 3]);
+
+        foreach (['2026-10', '2026-11'] as $period) {
             $result = $this->runMonth($customer, $period);
             $this->assertSame('0.00', $result->totalBill, "{$period} free");
-            $this->assertSame('2500.00', $result->freeValue, "{$period} foregone value");
-            $this->assertSame(3, $result->prepaidMonthsRemaining, "{$period} uses no paid month");
+            $this->assertSame('2500.00', $result->freeValue);
             $this->assertSame('free', $result->frozenReason);
+            $this->assertSame(3, $result->servicePrepaid[$this->service('tv')->id]['months'], "{$period} uses no paid month");
         }
-
-        foreach (['2027-01' => 2, '2027-02' => 1, '2027-03' => 0] as $period => $left) {
-            $result = $this->runMonth($customer, $period);
-            $this->assertSame('0.00', $result->totalBill, "{$period} paid in advance");
-            $this->assertSame($left, $result->prepaidMonthsRemaining);
-            $this->assertSame('0.00', $result->freeValue);
-        }
-
-        $april = $this->runMonth($customer, '2027-04');
-        $this->assertSame('2500.00', $april->totalBill, 'first bill is exactly one month');
-        $this->assertSame('0.00', $april->totalArrears);
-        $this->assertSame('0.00', $april->credit, 'free months never become credit');
-
-        $may = $this->runMonth($customer, '2027-05');
-        $this->assertSame('2500.00', $may->totalArrears, 'April unpaid');
-        $this->assertSame('5000.00', $may->totalBill);
-    }
-
-    public function test_example_b_free_months_per_service(): void
-    {
-        // TV + Internet at 2,500; TV 2 free, Internet 1 free â†’ month 1
-        // nothing, month 2 2,500 (TV still free), month 3 5,000.
-        $customer = $this->customer(['tv', 'internet']);
-        $this->grant($customer, 'tv', 2, '2026-11');
-        $this->grant($customer, 'internet', 1, '2026-11');
-
-        $plan = FreeMonthPlan::forCustomer($customer);
-        $this->assertSame('0.00', $plan->charge('2026-11', '5000'));
-        $this->assertSame('2500.00', $plan->charge('2026-12', '5000'));
-        $this->assertSame('5000.00', $plan->charge('2027-01', '5000'));
-
-        $this->assertSame('0.00', $this->runMonth($customer, '2026-11')->totalBill);
-
-        $december = $this->runMonth($customer, '2026-12');
-        $this->assertSame('2500.00', $december->bill);
-        $this->assertSame('2500.00', $december->totalBill);
-        $this->assertSame('2500.00', $december->freeValue);
-
-        $this->pay($customer, '2500');
-        $january = $this->runMonth($customer, '2027-01');
-        $this->assertSame('5000.00', $january->totalBill, 'December paid, January in full');
-        $this->assertSame('0.00', $january->totalArrears);
-    }
-
-    public function test_example_b_a_three_month_advance_costs_12500_and_covers_exactly_three_charged_months(): void
-    {
-        $customer = $this->customer(['tv', 'internet']);
-        $this->grant($customer, 'tv', 2, '2026-11');
-        $this->grant($customer, 'internet', 1, '2026-11');
-
-        $bought = FreeMonthPlan::forCustomer($customer)->monthsBought('2026-11', '12500', '5000', 3, 0, '5000');
-        $this->assertSame(['months' => 3, 'cost' => '12500.00'], $bought);
-
-        $this->advance($customer, '12500', 3, '5000');
-
-        $november = $this->runMonth($customer, '2026-11');
-        $this->assertSame(3, $november->prepaidMonthsRemaining, 'nothing charged, no paid month used');
-        $this->assertSame('0.00', $november->credit);
 
         foreach (['2026-12' => 2, '2027-01' => 1, '2027-02' => 0] as $period => $left) {
             $result = $this->runMonth($customer, $period);
-            $this->assertSame('0.00', $result->totalBill, "{$period} covered");
-            $this->assertSame($left, $result->prepaidMonthsRemaining);
+            $this->assertSame('0.00', $result->totalBill, "{$period} paid upfront");
+            $this->assertSame('0.00', $result->bill);
+            $this->assertSame('prepaid', $result->frozenReason);
+            $this->assertSame($left, $result->servicePrepaid[$this->service('tv')->id]['months'] ?? 0);
         }
 
         $march = $this->runMonth($customer, '2027-03');
-        $this->assertSame('5000.00', $march->totalBill, 'first bill: the full month');
-        $this->assertSame('0.00', $march->credit);
+        $this->assertSame('2500.00', $march->bill, 'first billed month');
+        $this->assertSame('0.00', $march->credit, 'free months never become credit');
+        // Same pay-ahead rule as every existing customer (step 5).
+        $this->assertSame('5000.00', $march->totalBill);
     }
 
-    public function test_free_months_keep_running_while_the_customer_is_disconnected(): void
+    public function test_example_b_free_and_paid_months_per_service(): void
     {
-        // D5: free months run by calendar. Disconnected through Novâ€“Dec, the
-        // two free months are gone by January.
-        $customer = $this->customer();
-        $this->grant($customer, 'tv', 2, '2026-11');
+        // TV + Internet at 2,500: TV free Oct–Nov then 1 paid month,
+        // Internet free Oct then 2 paid months → Oct, Nov, Dec nothing to
+        // pay; both billed from January. Collected upfront: 7,500.
+        $customer = $this->customer(['tv', 'internet'], billingStarts: '2026-10');
+        $this->grant($customer, 'tv', 2, '2026-10');
+        $this->grant($customer, 'internet', 1, '2026-10');
+        $payment = $this->upfront($customer, ['tv' => 1, 'internet' => 2]);
+        $this->assertSame('7500.00', (string) $payment->amount);
+
+        $walk = FreeMonthPlan::forCustomer($customer)->timelines('2026-10', [$this->service('tv')->id => 1, $this->service('internet')->id => 2]);
+        $this->assertSame(['free_from' => '2026-10', 'free_until' => '2026-11', 'paid_from' => '2026-12', 'paid_until' => '2026-12', 'first_billed' => '2027-01'], $walk['services'][$this->service('tv')->id]);
+        $this->assertSame(['free_from' => '2026-10', 'free_until' => '2026-10', 'paid_from' => '2026-11', 'paid_until' => '2026-12', 'first_billed' => '2027-01'], $walk['services'][$this->service('internet')->id]);
+
+        foreach (['2026-10', '2026-11', '2026-12'] as $period) {
+            $this->assertSame('0.00', $this->runMonth($customer, $period)->totalBill, "{$period}: nothing to pay");
+        }
+
+        $january = $this->runMonth($customer, '2027-01');
+        $this->assertSame('5000.00', $january->bill);
+        $this->assertSame([], array_filter($january->servicePrepaid, fn (array $s): bool => $s['months'] > 0));
+    }
+
+    public function test_a_service_paid_upfront_is_charged_while_another_is_free(): void
+    {
+        // Partly free month: only Internet charged, and it is paid upfront.
+        $customer = $this->customer(['tv', 'internet'], billingStarts: '2026-10');
+        $this->grant($customer, 'tv', 2, '2026-10');
+        $this->upfront($customer, ['internet' => 1]);
+
+        $october = $this->runMonth($customer, '2026-10');
+        $this->assertSame('0.00', $october->bill);
+        $this->assertSame('2500.00', $october->freeValue);
+
+        $november = $this->runMonth($customer, '2026-11');
+        $this->assertSame('2500.00', $november->bill, 'TV still free, Internet billed');
+    }
+
+    public function test_free_months_keep_running_while_disconnected_but_paid_months_wait(): void
+    {
+        // D5 for free months, PD-8 for paid months: disconnected through
+        // Oct–Nov, the free months are gone, the paid month is still there.
+        $customer = $this->customer(billingStarts: '2026-10');
+        $this->grant($customer, 'tv', 2, '2026-10');
+        $this->upfront($customer, ['tv' => 1]);
 
         $customer->update(['status' => 'disconnected']);
+        $this->runMonth($customer, '2026-10');
         $this->runMonth($customer, '2026-11');
-        $this->runMonth($customer, '2026-12');
 
         $customer->update(['status' => 'active']);
-        $january = $this->runMonth($customer, '2027-01');
-
-        $this->assertSame('2500.00', $january->totalBill);
-        $this->assertSame('0.00', $january->freeValue);
+        $december = $this->runMonth($customer, '2026-12');
+        $this->assertSame('0.00', $december->totalBill, 'the paid month covers December');
+        $this->assertSame('0.00', $december->freeValue);
+        $this->assertSame('2500.00', $this->runMonth($customer, '2027-01')->bill);
     }
 
-    public function test_a_rate_change_during_free_months_has_no_effect(): void
+    public function test_a_rate_change_during_free_or_paid_months_has_no_effect(): void
     {
-        $customer = $this->customer();
-        $this->grant($customer, 'tv', 2, '2026-11');
+        $customer = $this->customer(billingStarts: '2026-10');
+        $this->grant($customer, 'tv', 1, '2026-10');
+        $this->upfront($customer, ['tv' => 1]);
 
-        $this->runMonth($customer, '2026-11');
+        $this->runMonth($customer, '2026-10');
         $customer->subscriptions()->update(['price' => 4000]);
         $customer->update(['bill' => 4000]);
 
-        $december = $this->runMonth($customer, '2026-12');
-        $this->assertSame('0.00', $december->totalBill);
-        $this->assertSame('0.00', $december->totalArrears);
+        $november = $this->runMonth($customer, '2026-11');
+        $this->assertSame('0.00', $november->totalBill, 'the paid month covers November whatever the new price');
+        $this->assertSame('0.00', $november->totalArrears);
 
-        $this->assertSame('4000.00', $this->runMonth($customer, '2027-01')->totalBill, 'the new rate applies once the free months end');
+        $this->assertSame('4000.00', $this->runMonth($customer, '2026-12')->bill, 'the new rate applies once the months end');
     }
 
-    public function test_example_e_compensation_on_a_customer_with_seven_paid_months_uses_the_free_months_first(): void
+    public function test_example_e_compensation_after_seven_paid_months_keeps_every_paid_month(): void
     {
-        // An existing customer (no first billed month) with seven paid
-        // months gets two free months: free first, paid months preserved â€”
-        // nine months with nothing to pay, then the bill.
+        // An existing customer pays 7 months ahead (whole bill). Compensation
+        // of 2 months is placed after them (D20): 9 months with nothing to
+        // pay, then the bill — the same total whether free or paid come first.
         $customer = $this->customer(billingStarts: null);
         $this->advance($customer, '17500', 7, '2500');
 
         $this->assertSame(6, $this->runMonth($customer, '2026-10')->prepaidMonthsRemaining);
 
-        $this->grant($customer, null, 2, '2026-11');
+        $this->grant($customer, null, 2, '2027-05');
 
         $zeroBills = 0;
         $period = '2026-11';
 
         for ($i = 0; $i < 8; $i++) {
-            $result = $this->runMonth($customer, $period);
-            if ($result->totalBill === '0.00') {
+            if ($this->runMonth($customer, $period)->totalBill === '0.00') {
                 $zeroBills++;
-            }
-            if (in_array($period, ['2026-11', '2026-12'], true)) {
-                $this->assertSame(6, $result->prepaidMonthsRemaining, "{$period} is free, the paid months are kept");
             }
             $period = FreeMonthGrant::addMonths($period, 1);
         }
 
-        $this->assertSame(8, $zeroBills, 'Oct paid + Novâ€“Dec free + 6 more paid months');
+        $this->assertSame(8, $zeroBills, 'Nov–Apr paid + May–Jun free');
         $this->assertSame('0.00', $this->runMonth($customer, '2027-07')->credit);
-        $this->assertNotSame('0.00', $this->runMonth($customer, '2027-08')->totalBill);
+        $this->assertNotSame('0.00', $this->runMonth($customer, '2027-07')->totalBill);
     }
 
-    public function test_a_month_before_billing_starts_is_not_billed_and_payments_wait(): void
+    public function test_free_months_on_top_of_whole_bill_paid_months_use_no_paid_month(): void
+    {
+        $customer = $this->customer(billingStarts: null);
+        $this->advance($customer, '17500', 7, '2500');
+        $this->runMonth($customer, '2026-10');
+        $this->grant($customer, null, 2, '2026-11');
+
+        $this->assertSame(6, $this->runMonth($customer, '2026-11')->prepaidMonthsRemaining);
+        $this->assertSame(6, $this->runMonth($customer, '2026-12')->prepaidMonthsRemaining);
+    }
+
+    public function test_a_month_before_the_installation_month_is_not_billed_and_payments_wait(): void
     {
         $customer = $this->customer(billingStarts: '2026-11');
         $this->pay($customer, '2500');
@@ -306,17 +326,18 @@ class FreeMonthsBillingTest extends TestCase
         $this->assertSame('0.00', $october->totalBill);
         $this->assertCount(0, $october->processedPayments);
 
-        $november = $this->runMonth($customer, '2026-11');
-        $this->assertSame('0.00', $november->totalBill, 'the payment made in October covers November');
-        $this->assertSame('2500.00', $november->bill);
+        $this->assertSame('2500.00', $this->runMonth($customer, '2026-11')->bill);
     }
 
-    public function test_a_new_customer_without_free_months_gets_a_first_bill_of_exactly_one_month(): void
+    public function test_a_new_customer_without_free_months_is_billed_like_everyone(): void
     {
-        $customer = $this->customer(billingStarts: '2026-11');
+        // D18: no separate rule for new customers — the first billed month
+        // follows the pay-ahead rule exactly like an existing customer's.
+        $new = $this->customer(billingStarts: '2026-11');
+        $existing = $this->customer(billingStarts: null);
 
-        $this->assertSame('2500.00', $this->runMonth($customer, '2026-11')->totalBill);
-        $this->assertSame('5000.00', $this->runMonth($customer, '2026-12')->totalBill, 'November unpaid + December');
+        $this->assertSame($this->runMonth($existing, '2026-11')->totalBill, $this->runMonth($new, '2026-11')->totalBill);
+        $this->assertSame($this->runMonth($existing, '2026-12')->totalBill, $this->runMonth($new, '2026-12')->totalBill);
     }
 
     public function test_a_fully_free_month_extends_a_legacy_prepaid_window(): void

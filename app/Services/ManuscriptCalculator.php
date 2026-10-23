@@ -118,10 +118,14 @@ use Illuminate\Support\Collection;
  *    prepaid window, pushes payment_expiration back a month;
  *  - free months run by calendar on the grants, so frozen months still use
  *    them (D5); their value is reported in free_value, never in the ledger;
- *  - new installations (billing_starts_period set) are billed month by
- *    month: the month's charge is shown on its bill (manuscript `bill`) and
- *    folded into arrears at the next month's run, so the first bill is one
- *    month. Customers from before phase 2 keep the original ledger.
+ *  - months paid upfront per service (D15, payments.service_months) are
+ *    counters carried on manuscripts.service_prepaid: a month the service
+ *    is free or the customer is frozen uses none, so N paid months cover N
+ *    billed months of that service;
+ *  - once free and paid months end, every customer is billed on the same
+ *    ledger and pay-ahead rule (D18) — there is no separate rule for new
+ *    customers. billing_starts_period is only the installation month:
+ *    nothing is billed before it.
  */
 final class ManuscriptCalculator
 {
@@ -144,9 +148,10 @@ final class ManuscriptCalculator
      *                                                                   $period — see this class's doc comment for exactly
      *                                                                   what "eligible" means, resolved by the caller the
      *                                                                   same way as $eligibleVerifiedPayments.
-     * @param  ?FreeMonthPlan  $freeMonths  The customer's free months and first billed month
-     *                                      (App\Support\Billing\FreeMonthPlan), batch-resolved by
-     *                                      the run per chunk; loaded here when a caller passes null.
+     * @param  ?FreeMonthPlan  $freeMonths  The customer's free months, per-service prices and
+     *                                      installation month (App\Support\Billing\FreeMonthPlan),
+     *                                      batch-resolved by the run per chunk; loaded here when a
+     *                                      caller passes null.
      */
     public function calculate(
         Customer $customer,
@@ -167,16 +172,8 @@ final class ManuscriptCalculator
         $asOf ??= Carbon::createFromFormat('!Y-m', $period)->startOfMonth();
         $freeMonths ??= FreeMonthPlan::forCustomer($customer);
 
-        // Free months & first billed month (docs/plans/installation-and-
-        // promotions.md, phase 2). $billDue is what THIS month charges: the
-        // bill less its free services, nothing before billing starts. The
-        // free part ($freeValue) is reporting only — never in the ledger.
         $fullBill = $this->normalize((string) $customer->bill);
         $hasPlan = ! $freeMonths->isEmpty();
-        $billDue = $hasPlan ? $freeMonths->charge($period, $fullBill) : $fullBill;
-        $freeValue = $hasPlan ? $freeMonths->freeValue($period, $fullBill) : '0.00';
-        $fullyFree = $hasPlan && $freeMonths->isFullyFree($period, $fullBill);
-        $monthByMonth = $freeMonths->billsMonthByMonth();
 
         $isFirstRun = $previousManuscript === null;
 
@@ -188,19 +185,6 @@ final class ManuscriptCalculator
             ? '0.00'
             : $this->normalize((string) $previousManuscript->credit);
 
-        // A new installation (billing_starts_period set) is billed month by
-        // month: a month's charge is shown on that month's bill (its
-        // manuscript `bill`, 0 when free or prepaid) and becomes owed when
-        // the NEXT month is calculated — so the first bill is exactly one
-        // month and a free or prepaid month never lands in arrears later.
-        if ($monthByMonth && ! $isFirstRun) {
-            $previousDue = $this->normalize((string) $previousManuscript->bill);
-
-            if ($this->compare($previousDue, '0.00') > 0) {
-                [$previousArrears, $previousCredit] = $this->splitNet($this->add($this->sub($previousArrears, $previousCredit), $previousDue));
-            }
-        }
-
         $previousExpiration = $isFirstRun ? null : $previousManuscript->payment_expiration;
 
         // Draw-down prepayment state carried forward from the prior row
@@ -211,18 +195,23 @@ final class ManuscriptCalculator
             ? null
             : $this->normalize((string) $previousManuscript->prepaid_rate);
 
+        // Months paid upfront PER SERVICE (installation phase 2 revision,
+        // D15) — service id => [months, rate], carried forward like the
+        // whole-bill counter above.
+        $previousServicePrepaid = $isFirstRun ? [] : $this->servicePrepaidFrom($previousManuscript->service_prepaid);
+
         $adjustmentNet = $this->adjustmentNet($eligibleAdjustments);
         $processedAdjustments = $eligibleAdjustments->values();
 
-        // Before the first billed month (D4) the customer is not billed at
-        // all — like a frozen month, payments wait for the first real run.
+        // Before the installation month nothing is billed at all — like a
+        // frozen month, payments wait for the first real run.
         $notStarted = $freeMonths->beforeBillingStarts($period);
 
         if ($notStarted || in_array($customer->status, ['disconnected', 'passive', 'suspended'], true)) {
             [$totalArrears, $credit] = $this->splitNet($this->add($this->sub($previousArrears, $previousCredit), $adjustmentNet));
 
             return new ManuscriptCalculationResult(
-                bill: $monthByMonth ? '0.00' : $billDue,
+                bill: $hasPlan ? $freeMonths->charge($period, $fullBill) : $fullBill,
                 totalArrears: $totalArrears,
                 credit: $credit,
                 totalBill: '0.00',
@@ -236,12 +225,17 @@ final class ManuscriptCalculator
                 processedAdjustments: $processedAdjustments,
                 // PD-8: a frozen customer does NOT consume prepaid months —
                 // carry the window forward untouched so it is all still there
-                // on reconnection. Free months, by contrast, keep running by
-                // calendar (D5) — they live on the grants, not here.
+                // on reconnection (per service too). Free months, by
+                // contrast, keep running by calendar (D5) — they live on the
+                // grants, not here.
                 prepaidMonthsRemaining: $previousPrepaidMonths,
                 prepaidRate: $previousPrepaidRate,
+                servicePrepaid: $previousServicePrepaid,
             );
         }
+
+        $freeValue = $hasPlan ? $freeMonths->freeValue($period, $fullBill) : '0.00';
+        $fullyFree = $hasPlan && $freeMonths->isFullyFree($period, $fullBill);
 
         $expiringPayments = $eligibleVerifiedPayments
             ->filter(fn (Payment $payment): bool => $payment->expiration_date !== null);
@@ -260,7 +254,7 @@ final class ManuscriptCalculator
             $paymentExpiration = $fullyFree ? $candidateExpiration->copy()->addMonthNoOverflow() : $candidateExpiration;
 
             return new ManuscriptCalculationResult(
-                bill: $billDue,
+                bill: $hasPlan ? $freeMonths->charge($period, $fullBill) : $fullBill,
                 totalArrears: $totalArrears,
                 credit: $credit,
                 totalBill: '0.00',
@@ -278,24 +272,71 @@ final class ManuscriptCalculator
                 prepaidMonthsRemaining: $previousPrepaidMonths,
                 prepaidRate: $previousPrepaidRate,
                 freeValue: $freeValue,
+                servicePrepaid: $previousServicePrepaid,
             );
         }
 
+        // --- Months paid upfront per service (D15) ---
+        // A "paid upfront" payment (payments.service_months) adds months to
+        // each service's own counter at that service's locked price. This
+        // month, every service that is not free and still has months left
+        // is covered and uses one; the rest of the bill is charged as usual.
+        $servicePayments = $eligibleVerifiedPayments->filter(fn (Payment $payment): bool => ! empty($payment->service_months));
+        $servicePrepaid = $previousServicePrepaid;
+        $serviceLeftover = '0.00';
+
+        foreach ($servicePayments as $payment) {
+            $cost = '0.00';
+
+            foreach ((array) $payment->service_months as $row) {
+                $serviceId = (int) ($row['service_id'] ?? 0);
+                $months = (int) ($row['months'] ?? 0);
+                $rate = $this->normalize((string) ($row['rate'] ?? '0'));
+
+                if ($serviceId <= 0 || $months <= 0) {
+                    continue;
+                }
+
+                $servicePrepaid[$serviceId] = [
+                    'months' => ($servicePrepaid[$serviceId]['months'] ?? 0) + $months,
+                    'rate' => $rate,
+                ];
+                $cost = $this->add($cost, $this->mul((string) $months, $rate));
+            }
+
+            // Anything the months didn't use is ordinary money (credit).
+            $serviceLeftover = $this->add($serviceLeftover, $this->sub($this->normalize((string) $payment->amount), $cost));
+        }
+
+        $coveredServiceIds = [];
+
+        foreach ($servicePrepaid as $serviceId => $state) {
+            if ($state['months'] > 0 && isset($freeMonths->servicePrices[$serviceId]) && ! $freeMonths->isServiceFree($serviceId, $period)) {
+                $coveredServiceIds[] = $serviceId;
+                $servicePrepaid[$serviceId]['months']--;
+            }
+        }
+
+        $billDue = $hasPlan || $coveredServiceIds !== [] ? $freeMonths->charge($period, $fullBill, $coveredServiceIds) : $fullBill;
+        $nothingCharged = $this->compare($billDue, '0.00') === 0 && ($fullyFree || $coveredServiceIds !== []);
+        $chargedReason = $nothingCharged ? ($fullyFree && $coveredServiceIds === [] ? 'free' : 'prepaid') : null;
+
         // --- Draw-down prepayment branch (references/prepayment-drawdown.md) ---
-        // A months/yearly payment with NO expiration_date is a post-cutover
-        // draw-down prepayment: it buys N whole billing periods at the rate
-        // in effect when it was made, and the account carries a
+        // A months/yearly payment with NO expiration_date (and no per-service
+        // months) is a whole-bill draw-down prepayment: it buys N whole billing
+        // periods at the rate in effect when it was made, and the account carries a
         // prepaid_months_remaining counter. A covered period is not charged
         // the monthly bill at all (so a later rate change is irrelevant —
         // PD-3); total_bill shows only outstanding old debt.
         $drawdownPayments = $eligibleVerifiedPayments->filter(
             fn (Payment $payment): bool => in_array($payment->frequency, ['months', 'yearly'], true)
-                && $payment->expiration_date === null,
+                && $payment->expiration_date === null
+                && empty($payment->service_months),
         );
 
         if ($previousPrepaidMonths > 0 || $drawdownPayments->isNotEmpty()) {
             $arrears = $previousArrears;
-            $credit = $previousCredit;
+            $credit = $this->add($previousCredit, $serviceLeftover);
             $prepaidMonths = $previousPrepaidMonths;
             $prepaidRate = $previousPrepaidRate;
 
@@ -344,7 +385,7 @@ final class ManuscriptCalculator
             //    against the debt/credit ledger — a customer paying down old
             //    arrears while prepaid.
             $otherIncome = $eligibleVerifiedPayments
-                ->reject(fn (Payment $payment): bool => $drawdownPayments->contains($payment))
+                ->reject(fn (Payment $payment): bool => $drawdownPayments->contains($payment) || $servicePayments->contains($payment))
                 ->reduce(
                     fn (string $carry, Payment $payment): string => $this->add($carry, $this->normalize((string) $payment->amount)),
                     '0.00',
@@ -353,11 +394,10 @@ final class ManuscriptCalculator
             // 3. Net position WITHOUT this period's monthly charge when a
             //    prepaid month covers it; WITH it when the window is already
             //    empty (a new prepayment too small to buy a whole month). A
-            //    month with nothing charged (all services free) uses no
-            //    prepaid month: free first, then paid months (D6).
-            $coveredThisPeriod = $prepaidMonths > 0 && (! $hasPlan || $this->compare($billDue, '0.00') > 0);
-            $shownThisPeriod = $coveredThisPeriod ? '0.00' : $billDue;
-            $chargeThisPeriod = $monthByMonth ? '0.00' : $shownThisPeriod;
+            //    month with nothing charged (free, or covered per service)
+            //    uses no whole-bill month: free first, then paid (D6).
+            $coveredThisPeriod = $prepaidMonths > 0 && (! ($hasPlan || $coveredServiceIds !== []) || $this->compare($billDue, '0.00') > 0);
+            $chargeThisPeriod = $coveredThisPeriod ? '0.00' : $billDue;
 
             $net = $this->add(
                 $this->add($this->sub($arrears, $credit), $this->sub($chargeThisPeriod, $otherIncome)),
@@ -377,13 +417,13 @@ final class ManuscriptCalculator
             // formula (bill + arrears - credit).
             $totalBill = $coveredThisPeriod
                 ? $totalArrears
-                : $this->add($shownThisPeriod, $this->sub($totalArrears, $creditOut));
+                : $this->add($billDue, $this->sub($totalArrears, $creditOut));
             if ($this->compare($totalBill, '0.00') < 0) {
                 $totalBill = '0.00';
             }
 
             return new ManuscriptCalculationResult(
-                bill: $monthByMonth ? $shownThisPeriod : $billDue,
+                bill: $billDue,
                 totalArrears: $totalArrears,
                 credit: $creditOut,
                 totalBill: $totalBill,
@@ -396,27 +436,29 @@ final class ManuscriptCalculator
                 income: $otherIncome,
                 adjustmentNet: $adjustmentNet,
                 isFirstRun: $isFirstRun,
-                isFrozen: $coveredThisPeriod || $fullyFree,
-                frozenReason: $coveredThisPeriod ? 'prepaid' : ($fullyFree ? 'free' : null),
+                isFrozen: $coveredThisPeriod || $nothingCharged,
+                frozenReason: $coveredThisPeriod ? 'prepaid' : $chargedReason,
                 processedPayments: $eligibleVerifiedPayments->values(),
                 processedAdjustments: $processedAdjustments,
                 prepaidMonthsRemaining: max(0, $prepaidMonths),
                 prepaidRate: $prepaidRate,
                 freeValue: $freeValue,
+                servicePrepaid: $servicePrepaid,
             );
         }
 
-        $income = $eligibleVerifiedPayments->reduce(
-            fn (string $carry, Payment $payment): string => $this->add($carry, $this->normalize((string) $payment->amount)),
-            '0.00'
-        );
+        $income = $eligibleVerifiedPayments
+            ->reject(fn (Payment $payment): bool => $servicePayments->contains($payment))
+            ->reduce(
+                fn (string $carry, Payment $payment): string => $this->add($carry, $this->normalize((string) $payment->amount)),
+                $serviceLeftover,
+            );
 
-        // Month by month (new installations): this month's charge is only
-        // shown, it becomes owed next month (folded in above).
-        $chargeThisPeriod = $monthByMonth ? '0.00' : $billDue;
-
+        // Same ledger for everyone (D18): this month's charge (the bill less
+        // free services and services paid upfront) enters net, and the bill
+        // shows it once more on top — the pay-ahead rule (step 5).
         $net = $this->add(
-            $this->add($this->sub($previousArrears, $previousCredit), $this->sub($chargeThisPeriod, $income)),
+            $this->add($this->sub($previousArrears, $previousCredit), $this->sub($billDue, $income)),
             $adjustmentNet,
         );
 
@@ -437,12 +479,33 @@ final class ManuscriptCalculator
             income: $income,
             adjustmentNet: $adjustmentNet,
             isFirstRun: $isFirstRun,
-            isFrozen: $fullyFree,
-            frozenReason: $fullyFree ? 'free' : null,
+            isFrozen: $nothingCharged,
+            frozenReason: $chargedReason,
             processedPayments: $eligibleVerifiedPayments->values(),
             processedAdjustments: $processedAdjustments,
             freeValue: $freeValue,
+            servicePrepaid: $servicePrepaid,
         );
+    }
+
+    /**
+     * manuscripts.service_prepaid as service id => [months, rate].
+     *
+     * @return array<int, array{months: int, rate: string}>
+     */
+    private function servicePrepaidFrom(mixed $stored): array
+    {
+        $state = [];
+
+        foreach ((array) $stored as $serviceId => $row) {
+            $months = (int) ($row['months'] ?? 0);
+
+            if ($months > 0) {
+                $state[(int) $serviceId] = ['months' => $months, 'rate' => $this->normalize((string) ($row['rate'] ?? '0'))];
+            }
+        }
+
+        return $state;
     }
 
     /**

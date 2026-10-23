@@ -63,6 +63,10 @@ final readonly class PaymentData
         // build can only ever record a subscription payment (the column default).
         public ?string $purpose = null,
         public ?int $customerChargeId = null,
+        // Installation phase 2 (D15): months paid upfront per service, each
+        // at that service's locked price — [{service_id, months, rate}]. Set
+        // only by AppServicesCustomerInstallationService.
+        public ?array $serviceMonths = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -111,6 +115,7 @@ final readonly class PaymentData
             'method_reference' => $this->methodReference,
             'purpose' => $this->purpose,
             'customer_charge_id' => $this->customerChargeId,
+            'service_months' => $this->serviceMonths,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

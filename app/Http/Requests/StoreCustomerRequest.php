@@ -79,17 +79,20 @@ class StoreCustomerRequest extends FormRequest
             'installation_fee' => ['nullable', 'numeric', 'min:0', 'max:99999999.99', 'decimal:0,2'],
             'installation_paid' => ['nullable', 'numeric', 'min:0', 'max:99999999.99', 'decimal:0,2'],
             'installation_reason' => ['nullable', 'string', 'max:500'],
-            'free_months' => ['nullable', 'array'],
-            'free_months.*.service_uuid' => ['required', 'uuid'],
-            'free_months.*.months' => ['required', 'integer', 'min:0', 'max:36'],
-            'advance_months' => ['nullable', 'integer', 'min:0', 'max:24'],
+            // Per service ticked (revision D15): free months (a consecutive
+            // run from free_from) and months paid upfront that follow them.
+            'service_plans' => ['nullable', 'array'],
+            'service_plans.*.service_uuid' => ['required', 'uuid'],
+            'service_plans.*.free_from' => ['nullable', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+            'service_plans.*.free_months' => ['nullable', 'integer', 'min:0', 'max:36'],
+            'service_plans.*.paid_months' => ['nullable', 'integer', 'min:0', 'max:24'],
             ...Payment::methodRules(),
         ];
     }
 
     /**
-     * Picking an offer / fee / free months is `installations.manage`; an
-     * advance is a payment (`payments.create`); and no money is taken while
+     * Picking an offer / fee / free months is `installations.manage`; months
+     * paid upfront are a payment (`payments.create`); and no money is taken while
      * a landlord impersonates (E9).
      *
      * @return array<int, \Closure>
@@ -101,17 +104,17 @@ class StoreCustomerRequest extends FormRequest
             $installation = InstallationData::fromArray($this->all());
 
             $touchesInstallation = $installation->offerUuid !== null || $installation->fee !== null
-                || bccomp($installation->paidNow, '0', 2) > 0 || $installation->freeMonths !== null;
+                || bccomp($installation->paidNow, '0', 2) > 0 || $installation->choosesFreeMonths();
 
             if ($touchesInstallation && ! $context->can('installations.manage')) {
                 $validator->errors()->add('installation_offer_uuid', 'You may not set an installation fee or free months.');
             }
 
-            if ($installation->advanceMonths > 0 && ! $context->can('payments.create')) {
-                $validator->errors()->add('advance_months', 'You may not record payments.');
+            if ($installation->paysUpfront() && ! $context->can('payments.create')) {
+                $validator->errors()->add('service_plans', 'You may not record payments.');
             }
 
-            $takesMoney = bccomp($installation->paidNow, '0', 2) > 0 || $installation->advanceMonths > 0;
+            $takesMoney = bccomp($installation->paidNow, '0', 2) > 0 || $installation->paysUpfront();
 
             if ($takesMoney && Impersonation::active()) {
                 $validator->errors()->add('installation_paid', BlockDuringImpersonation::MONEY_MESSAGE);

@@ -24,25 +24,30 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Adding a customer with their installation and first payment
- * (docs/plans/installation-and-promotions.md, phase 2, item 5) — web and
- * mobile (online) share this service.
+ * (docs/plans/installation-and-promotions.md, phase 2 item 5 + revision
+ * D15–D19) — web and mobile (online) share this service.
  *
- *  - preview() — the live "Collect now: 17,500 · TV free Nov–Dec · first
- *    bill Jan 2027" line the form shows while it is being filled in. Never
- *    writes anything.
+ * Per service ticked the form chooses ☐ free months — one consecutive run
+ * from the installation month or later (the installation month is ticked
+ * by default; untick it and it is billed) — and ☐ months paid upfront that
+ * follow straight after, at that service's own price. Each service then has
+ * its own timeline: free → paid → billed. After that every customer is
+ * billed on the same ledger (D18).
+ *
+ *  - preview() — the live line ("Collect now: 17,500 · TV Service: free
+ *    Oct–Nov 2026, paid Dec 2026–Feb 2027, billed from Mar 2027"), each
+ *    service's timeline, what needs approval and possible duplicates.
+ *    Writes nothing.
  *  - create() — ONE save in ONE transaction: the customer, the installation
- *    charge and its payment, an optional advance payment and the free
- *    months, each payment with its receipt. The month after the customer
- *    joins is their first billed month (D4); if that month's bills were
- *    already generated, the customer's own row is calculated straight away
- *    so nothing is skipped.
+ *    charge and its payment, the months paid upfront (one payment, per
+ *    service) and the free months, each payment with its receipt. If the
+ *    installation month (or a later one) was already generated, the
+ *    customer's own rows are calculated straight away so nothing is skipped.
  *
- * The rules (D3–D8): free months come from the offer, per service, and
- * start the month after the installation is fully paid or waived; until
- * then the customer is billed normally. A fee below the offer's, months
- * beyond the offer and a full waiver need a reason and admin/owner
- * approval. An advance covers exactly what is charged each month, and the
- * amount is computed here, never typed.
+ * Approval (admin/owner, maker ≠ checker): free months need it unless the
+ * installation is fully paid at registration (D17) and they are within the
+ * company cap (D16) and the offer picked (D19); a fee below the offer's
+ * and a full waiver need it too (D8).
  */
 class CustomerInstallationService
 {
@@ -62,10 +67,8 @@ class CustomerInstallationService
      */
     public function preview(array $services, InstallationData $installation, ?string $name = null, ?string $phone = null): array
     {
-        $plan = $this->planFor($services, $installation);
-
         return [
-            ...$plan['summary'],
+            ...$this->planFor($services, $installation)['summary'],
             'duplicates' => $this->possibleDuplicates($name, $phone),
         ];
     }
@@ -114,15 +117,14 @@ class CustomerInstallationService
      */
     public function create(CustomerData $customerData, InstallationData $installation, User $actor): array
     {
-        $services = $customerData->services ?? [];
-        $plan = $this->planFor($services, $installation);
+        $plan = $this->planFor($customerData->services ?? [], $installation);
 
         return DB::transaction(function () use ($customerData, $installation, $actor, $plan): array {
             return $this->grants->deferRecalculation(function () use ($customerData, $installation, $actor, $plan): array {
                 $customer = $this->customers->create($customerData);
                 $customer->forceFill([
                     'connected_on' => $plan['connected_on'],
-                    'billing_starts_period' => $plan['billing_starts'],
+                    'billing_starts_period' => $plan['installation_month'],
                 ])->save();
 
                 $offer = $plan['offer'];
@@ -146,22 +148,23 @@ class CustomerInstallationService
                     $customer,
                     $charge,
                     $offer,
-                    $plan['months_by_service_id'],
+                    $plan['free_by_service_id'],
+                    $plan['free_needs_approval'],
                     $actor,
-                    $plan['months_need_approval'] ? $installation->reason : null,
+                    $plan['free_needs_approval'] ? $installation->reason : null,
                 );
 
-                // The advance first, so the installation receipt (issued
-                // when the fee is paid) can already show "paid until".
-                if ($installation->advanceMonths > 0) {
+                // Months paid upfront first, so the installation receipt
+                // (issued when the fee is paid) already shows them.
+                if ($plan['service_months'] !== []) {
                     $payments[] = $this->payments->createForCustomer($customer, new PaymentData(
                         customerUuid: $customer->uuid,
-                        amount: $plan['summary']['advance']['amount'],
+                        amount: $plan['upfront_amount'],
                         frequency: 'months',
-                        months: $installation->advanceMonths,
-                        clearArrearsFirst: true,
+                        months: max(array_column($plan['service_months'], 'months')),
                         method: $installation->method,
                         methodReference: $installation->methodReference,
+                        serviceMonths: $plan['service_months'],
                     ));
                 }
 
@@ -169,9 +172,9 @@ class CustomerInstallationService
                     $payments[] = $this->charges->recordPayment($charge->fresh(), $installation->paidNow, $installation->method, $installation->methodReference);
                 }
 
-                // D4: the first billed month — if its bills (or later ones)
-                // were already generated, write this customer's rows now.
-                $this->grants->recalculateFrom($customer, $plan['billing_starts']);
+                // The installation month (or later ones) may already be
+                // generated: write this customer's rows now.
+                $this->grants->recalculateFrom($customer, $plan['installation_month']);
 
                 return [
                     'customer' => $customer->fresh(['zone', 'subscriptions.service', 'subscriptions.serviceVariant']),
@@ -187,7 +190,7 @@ class CustomerInstallationService
      * Resolves and checks the section, and works out what it means.
      *
      * @param  list<CustomerServiceSelection>  $services
-     * @return array{offer: ?InstallationOffer, standard_fee: ?string, charge_amount: ?string, fee_needs_approval: bool, waiver_needed: bool, months_by_service_id: array<int, int>, months_need_approval: bool, connected_on: string, billing_starts: string, summary: array<string, mixed>}
+     * @return array{offer: ?InstallationOffer, standard_fee: ?string, charge_amount: ?string, fee_needs_approval: bool, waiver_needed: bool, free_by_service_id: array<int, array{from: string, months: int}>, free_needs_approval: bool, service_months: list<array{service_id: int, months: int, rate: string}>, upfront_amount: string, connected_on: string, installation_month: string, summary: array<string, mixed>}
      */
     private function planFor(array $services, InstallationData $installation): array
     {
@@ -210,24 +213,29 @@ class CustomerInstallationService
         foreach ($services as $selection) {
             $service = $catalogue->get($selection->serviceUuid);
 
-            if ($service === null) {
-                continue;
+            if ($service !== null) {
+                $prices[$service->id] = bcadd($prices[$service->id] ?? '0', $selection->price, 2);
+                $bill = bcadd($bill, $selection->price, 2);
             }
-
-            $prices[$service->id] = bcadd($prices[$service->id] ?? '0', $selection->price, 2);
-            $bill = bcadd($bill, $selection->price, 2);
         }
 
-        if ($services === []) {
-            $default = Service::default();
-
-            if ($default !== null) {
-                $prices[$default->id] = bcadd((string) $default->price, '0', 2);
-                $bill = $prices[$default->id];
-            }
+        if ($services === [] && ($default = Service::default()) !== null) {
+            $prices[$default->id] = bcadd((string) $default->price, '0', 2);
+            $bill = $prices[$default->id];
         }
 
         $serviceNames = Service::query()->whereIn('id', array_keys($prices))->pluck('name', 'id');
+        $uuidToId = Service::query()->whereIn('id', array_keys($prices))->pluck('id', 'uuid');
+
+        // The installation month: when the customer was connected, never a
+        // month that has already passed (locked).
+        $connectedOn = $installation->connectedOn ?? $today;
+
+        if ($connectedOn > $today) {
+            throw ValidationException::withMessages(['connected_on' => 'The connection date cannot be in the future.']);
+        }
+
+        $installationMonth = max(BusinessTimezone::periodOf(Carbon::parse($connectedOn, BusinessTimezone::WAT)), $this->lock->currentPeriod());
 
         // Fee: the offer's unless overridden.
         $standardFee = $offer !== null ? bcadd((string) $offer->fee, '0', 2) : null;
@@ -240,7 +248,6 @@ class CustomerInstallationService
         $waiverNeeded = $standardFee !== null && bccomp($standardFee, '0', 2) > 0 && bccomp($fee, '0', 2) === 0;
         $feeNeedsApproval = ! $waiverNeeded && $standardFee !== null && bccomp($fee, $standardFee, 2) < 0;
         $chargeAmount = $waiverNeeded ? $standardFee : (bccomp($fee, '0', 2) > 0 ? $fee : null);
-
         $paidNow = bcadd($installation->paidNow, '0', 2);
 
         if (bccomp($paidNow, $chargeAmount ?? '0', 2) > 0) {
@@ -251,118 +258,107 @@ class CustomerInstallationService
             throw ValidationException::withMessages(['installation_paid' => 'A waived installation fee is not paid — set the amount paid to 0.']);
         }
 
-        // Free months per service: the offer's unless changed.
-        $standardMonths = $offer?->monthsByService() ?? [];
-        $monthsByServiceId = [];
+        // Per service: free months (consecutive, from the installation month
+        // or later) and months paid upfront (D15/D16). No plan sent = the
+        // offer's preset from the installation month (D19).
+        $presets = $offer?->monthsByService() ?? [];
+        $plans = [];
 
-        if ($installation->freeMonths === null) {
-            foreach ($standardMonths as $serviceId => $months) {
+        if ($installation->servicePlans === null) {
+            foreach ($presets as $serviceId => $months) {
                 if (isset($prices[$serviceId])) {
-                    $monthsByServiceId[$serviceId] = $months;
+                    $plans[$serviceId] = ['free_from' => $installationMonth, 'free_months' => $months, 'paid_months' => 0];
                 }
             }
         } else {
-            $uuids = Service::query()->whereIn('uuid', array_keys($installation->freeMonths))->pluck('id', 'uuid');
+            foreach ($installation->servicePlans as $uuid => $row) {
+                $serviceId = $uuidToId[$uuid] ?? null;
 
-            foreach ($installation->freeMonths as $uuid => $months) {
-                $serviceId = $uuids[$uuid] ?? null;
-
-                if ($serviceId === null || ! isset($prices[$serviceId])) {
-                    if ($months > 0) {
-                        throw ValidationException::withMessages(['free_months' => 'Free months can only be given on services the customer takes.']);
+                if ($serviceId === null) {
+                    if ($row['free_months'] > 0 || $row['paid_months'] > 0) {
+                        throw ValidationException::withMessages(['service_plans' => 'Free or paid months can only be chosen on services the customer takes.']);
                     }
 
                     continue;
                 }
 
-                if ($months > 0) {
-                    $monthsByServiceId[(int) $serviceId] = $months;
-                }
+                $plans[(int) $serviceId] = [...$row, 'free_from' => $row['free_from'] ?? $installationMonth];
             }
         }
 
         $max = FreeMonthGrantService::maxMonths();
+        $freeById = [];
+        $serviceMonths = [];
+        $beyondCap = false;
+        $beyondOffer = false;
 
-        foreach ($monthsByServiceId as $months) {
-            if ($months < 0 || $months > $max) {
-                throw ValidationException::withMessages(['free_months' => "At most {$max} free months per service."]);
+        foreach ($plans as $serviceId => $row) {
+            if ($row['free_months'] < 0 || $row['free_months'] > 36 || $row['paid_months'] < 0 || $row['paid_months'] > 24) {
+                throw ValidationException::withMessages(['service_plans' => 'Free months are 0–36 and paid months 0–24 per service.']);
+            }
+
+            if ($row['free_months'] > 0) {
+                if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) $row['free_from']) || $row['free_from'] < $installationMonth) {
+                    throw ValidationException::withMessages(['service_plans' => 'Free months start at the installation month or later.']);
+                }
+
+                $freeById[$serviceId] = ['from' => (string) $row['free_from'], 'months' => $row['free_months']];
+                $beyondCap = $beyondCap || $row['free_months'] > $max;
+                $beyondOffer = $beyondOffer || ($offer !== null && $row['free_months'] > ($presets[$serviceId] ?? 0));
+            }
+
+            if ($row['paid_months'] > 0) {
+                $serviceMonths[] = ['service_id' => $serviceId, 'months' => $row['paid_months'], 'rate' => $prices[$serviceId]];
             }
         }
 
-        $monthsNeedApproval = collect($monthsByServiceId)->contains(fn (int $months, int $serviceId): bool => $months > ($standardMonths[$serviceId] ?? 0));
+        $settledAtRegistration = ! $feeNeedsApproval && ! $waiverNeeded && ($chargeAmount === null || bccomp($paidNow, $chargeAmount, 2) >= 0);
+        $freeNeedsApproval = $freeById !== [] && (! $settledAtRegistration || $beyondCap || $beyondOffer);
 
         $needsApproval = array_values(array_filter([
             $feeNeedsApproval ? 'Installation fee below the offer' : null,
             $waiverNeeded ? 'Installation fee waived' : null,
-            $monthsNeedApproval ? 'Free months beyond the offer' : null,
+            $freeById !== [] && ! $settledAtRegistration ? 'Free months without the installation fully paid' : null,
+            $beyondCap ? "More than {$max} free months" : null,
+            $beyondOffer ? 'Free months beyond the offer' : null,
         ]));
 
         if ($needsApproval !== [] && $installation->reason === null) {
             throw ValidationException::withMessages(['installation_reason' => 'Give the reason for '.mb_strtolower(implode(', ', $needsApproval)).' — it needs approval.']);
         }
 
-        if ($installation->advanceMonths < 0 || $installation->advanceMonths > 24) {
-            throw ValidationException::withMessages(['advance_months' => 'An advance is between 1 and 24 months.']);
+        $upfront = '0.00';
+
+        foreach ($serviceMonths as $row) {
+            $upfront = bcadd($upfront, bcmul((string) $row['months'], $row['rate'], 2), 2);
         }
 
-        // D4: the month the customer joins is not billed; never a month
-        // that has already passed.
-        $connectedOn = $installation->connectedOn ?? $today;
-
-        if ($connectedOn > $today) {
-            throw ValidationException::withMessages(['connected_on' => 'The connection date cannot be in the future.']);
-        }
-
-        $billingStarts = max(FreeMonthGrant::addMonths(BusinessTimezone::periodOf(Carbon::parse($connectedOn, BusinessTimezone::WAT)), 1), $this->lock->currentPeriod());
-
-        // The free months start the month after the fee is settled (D3) —
-        // today, if it is settled at this save.
-        $settledNow = ! $feeNeedsApproval && ! $waiverNeeded && ($chargeAmount === null || bccomp($paidNow, $chargeAmount, 2) >= 0);
-        $freeStart = max(FreeMonthGrant::addMonths(BusinessTimezone::currentPeriod(), 1), $billingStarts);
-        $startsNow = $settledNow && ! $monthsNeedApproval;
-
+        // Each service's timeline as the billing engine will play it, the
+        // free months shown as if approved.
         $windows = [];
 
-        if ($startsNow) {
-            foreach ($monthsByServiceId as $serviceId => $months) {
-                $windows[] = ['service_id' => $serviceId, 'start' => $freeStart, 'end' => FreeMonthGrant::addMonths($freeStart, $months - 1)];
-            }
+        foreach ($freeById as $serviceId => $row) {
+            $windows[] = ['service_id' => $serviceId, 'start' => $row['from'], 'end' => FreeMonthGrant::addMonths($row['from'], $row['months'] - 1)];
         }
 
-        $freePlan = new FreeMonthPlan($billingStarts, $prices, $windows);
-        $advance = null;
+        $walk = (new FreeMonthPlan($installationMonth, $prices, $windows))->timelines(
+            $installationMonth,
+            array_combine(array_column($serviceMonths, 'service_id'), array_column($serviceMonths, 'months')) ?: [],
+        );
 
-        if ($installation->advanceMonths > 0) {
-            $bought = $freePlan->monthsBought($billingStarts, '999999999.99', $bill, $installation->advanceMonths, 0, $bill);
-            $covered = $freePlan->coverage($billingStarts, $bill, $bought['months']);
-            $advance = [
-                'months' => $bought['months'],
-                'amount' => $bought['cost'],
-                'from' => $covered['paid_from'],
-                'until' => $covered['paid_until'],
-                'from_label' => $covered['paid_from'] !== null ? CustomerCoverageService::monthLabel($covered['paid_from']) : null,
-                'until_label' => $covered['paid_until'] !== null ? CustomerCoverageService::monthLabel($covered['paid_until']) : null,
-            ];
-        }
+        $timelines = [];
 
-        $walk = $freePlan->coverage($billingStarts, $bill, $advance['months'] ?? 0);
-
-        $free = [];
-
-        foreach ($monthsByServiceId as $serviceId => $months) {
-            $window = $startsNow ? ['start' => $freeStart, 'end' => FreeMonthGrant::addMonths($freeStart, $months - 1)] : null;
-            $free[] = [
+        foreach ($walk['services'] as $serviceId => $timeline) {
+            $timelines[] = [
+                'service_uuid' => (string) array_search($serviceId, $uuidToId->all(), true),
                 'service' => (string) ($serviceNames[$serviceId] ?? 'Service'),
-                'months' => $months,
-                'from' => $window['start'] ?? null,
-                'until' => $window['end'] ?? null,
-                'from_label' => $window !== null ? CustomerCoverageService::monthLabel($window['start']) : null,
-                'until_label' => $window !== null ? CustomerCoverageService::monthLabel($window['end']) : null,
-                'waiting' => $window === null,
+                'price' => $prices[$serviceId],
+                ...$timeline,
+                'paid_amount' => bcmul((string) ($plans[$serviceId]['paid_months'] ?? 0), $prices[$serviceId], 2),
             ];
         }
 
-        $collectNow = bcadd($paidNow, $advance['amount'] ?? '0', 2);
+        $collectNow = bcadd($paidNow, $upfront, 2);
 
         return [
             'offer' => $offer,
@@ -370,56 +366,45 @@ class CustomerInstallationService
             'charge_amount' => $chargeAmount,
             'fee_needs_approval' => $feeNeedsApproval,
             'waiver_needed' => $waiverNeeded,
-            'months_by_service_id' => $monthsByServiceId,
-            'months_need_approval' => $monthsNeedApproval,
+            'free_by_service_id' => $freeById,
+            'free_needs_approval' => $freeNeedsApproval,
+            'service_months' => $serviceMonths,
+            'upfront_amount' => $upfront,
             'connected_on' => $connectedOn,
-            'billing_starts' => $billingStarts,
+            'installation_month' => $installationMonth,
             'summary' => [
                 'bill' => $bill,
                 'fee' => $chargeAmount !== null && ! $waiverNeeded ? $chargeAmount : '0.00',
                 'standard_fee' => $standardFee,
                 'paid_now' => $paidNow,
                 'installation_balance' => $chargeAmount !== null && ! $waiverNeeded ? bcsub($chargeAmount, $paidNow, 2) : '0.00',
-                'settled_now' => $settledNow,
-                'billing_starts' => $billingStarts,
-                'billing_starts_label' => CustomerCoverageService::monthLabel($billingStarts),
-                'free' => $free,
-                'advance' => $advance,
+                'settled_now' => $settledAtRegistration,
+                'installation_month' => $installationMonth,
+                'installation_month_label' => CustomerCoverageService::monthLabel($installationMonth),
+                'services' => $timelines,
+                'upfront_amount' => $upfront,
                 'first_bill' => $walk['first_bill'],
                 'first_bill_label' => $walk['first_bill'] !== null ? CustomerCoverageService::monthLabel($walk['first_bill']) : null,
                 'collect_now' => $collectNow,
                 'needs_approval' => $needsApproval,
                 'max_free_months' => $max,
-                'line' => $this->line($collectNow, $free, $walk['first_bill']),
+                'line' => $this->line($collectNow, $timelines, $freeNeedsApproval),
             ],
         ];
     }
 
     /**
-     * "Collect now: 17,500 · TV free Nov–Dec · Internet free Nov · first bill Jan 2027".
+     * "Collect now: 17,500 · TV Service: free Oct–Nov 2026, paid Dec 2026–Feb
+     * 2027, billed from Mar 2027".
      *
-     * @param  list<array<string, mixed>>  $free
+     * @param  list<array<string, mixed>>  $timelines
      */
-    private function line(string $collectNow, array $free, ?string $firstBill): string
+    private function line(string $collectNow, array $timelines, bool $freeAwaitingApproval): string
     {
-        $parts = ['Collect now: '.number_format((float) $collectNow, 0, '.', ',')];
+        $label = app(CustomerCoverageService::class)->label($timelines);
 
-        foreach ($free as $window) {
-            if ($window['waiting']) {
-                $parts[] = "{$window['service']} {$window['months']} free month(s) once installation is paid";
-
-                continue;
-            }
-
-            $from = Carbon::createFromFormat('!Y-m', $window['from'])->format('M');
-            $until = Carbon::createFromFormat('!Y-m', $window['until'])->format('M');
-            $parts[] = "{$window['service']} free ".($from === $until ? $from : "{$from}–{$until}");
-        }
-
-        if ($firstBill !== null) {
-            $parts[] = 'first bill '.CustomerCoverageService::monthLabel($firstBill);
-        }
-
-        return implode(' · ', $parts);
+        return 'Collect now: '.number_format((float) $collectNow, 0, '.', ',')
+            .($label !== null ? ' · '.$label : '')
+            .($freeAwaitingApproval ? ' (free months awaiting approval)' : '');
     }
 }

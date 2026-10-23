@@ -14,14 +14,14 @@ use Illuminate\Support\Carbon;
 
 /**
  * The customer's coverage line (docs/plans/installation-and-promotions.md,
- * phase 2, item 8): which services are free until when, until when they
- * have paid in advance, and the first month they will be billed — e.g.
- * "TV free until Dec 2026 · paid until Mar 2027 · first bill Apr 2027".
+ * phase 2 item 8, revision D15): each service's timeline — free → paid →
+ * billed — and the first month they will be billed, e.g.
+ * "TV Service: free Oct–Nov 2026, paid Dec 2026–Feb 2027, billed from Mar 2027".
  *
  * Shown on the customer page, sent to the mobile app and printed on the
  * installation receipt (D11). Derived, never stored: the same
  * App\Support\Billing\FreeMonthPlan the billing engine reads, walked
- * forward from the customer's latest manuscript (advances not yet absorbed
+ * forward from the customer's latest manuscript (payments not yet absorbed
  * by a run are counted as the run will count them).
  */
 class CustomerCoverageService
@@ -31,7 +31,7 @@ class CustomerCoverageService
     ) {}
 
     /**
-     * @return array{free: list<array{service: string, from: string, until: string}>, waiting: list<array{service: string, months: int, status: string}>, paid_from: ?string, paid_until: ?string, first_bill: ?string, label: ?string}
+     * @return array{services: list<array{service_id: int, service: string, free_from: ?string, free_until: ?string, paid_from: ?string, paid_until: ?string, first_billed: ?string}>, free: list<array{service: string, from: string, until: string}>, waiting: list<array{service: string, months: int, status: string}>, paid_until: ?string, first_bill: ?string, label: ?string}
      */
     public function summarize(Customer $customer): array
     {
@@ -40,16 +40,50 @@ class CustomerCoverageService
         $current = $this->lock->currentPeriod();
 
         $latest = Manuscript::query()->where('customer_id', $customer->id)->orderByDesc('period')->first();
-        $from = $latest !== null ? FreeMonthGrant::addMonths($latest->period, 1) : FreeMonthGrant::addMonths($current, 1);
+        $from = $latest !== null ? FreeMonthGrant::addMonths($latest->period, 1) : max($customer->billing_starts_period ?? $current, $current);
 
-        if ($customer->billing_starts_period !== null && $from < $customer->billing_starts_period) {
-            $from = $customer->billing_starts_period;
+        // Paid months still to come: what the latest row carries plus
+        // payments no run has absorbed yet.
+        $servicePaid = [];
+
+        foreach ((array) ($latest?->service_prepaid ?? []) as $serviceId => $row) {
+            $servicePaid[(int) $serviceId] = (int) ($row['months'] ?? 0);
         }
 
-        $prepaid = (int) ($latest?->prepaid_months_remaining ?? 0) + $this->unabsorbedAdvanceMonths($customer, $plan, $from, (int) ($latest?->prepaid_months_remaining ?? 0), $bill);
-        $walk = $plan->coverage($from, $bill, $prepaid);
+        $wholeBill = (int) ($latest?->prepaid_months_remaining ?? 0);
 
+        $pending = Payment::query()
+            ->where('customer_id', $customer->id)
+            ->subscription()
+            ->where('verification_status', 'verified')
+            ->whereIn('frequency', ['months', 'yearly'])
+            ->whereNull('expiration_date')
+            ->whereNull('processed_period')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($pending as $payment) {
+            if (! empty($payment->service_months)) {
+                foreach ((array) $payment->service_months as $row) {
+                    $servicePaid[(int) $row['service_id']] = ($servicePaid[(int) $row['service_id']] ?? 0) + (int) $row['months'];
+                }
+
+                continue;
+            }
+
+            $rate = bcadd((string) ($payment->prepaid_rate ?? $bill), '0', 2);
+            $cap = $payment->clear_arrears_first ? PHP_INT_MAX : ($payment->frequency === 'yearly' ? 12 : (int) $payment->months);
+            $wholeBill += $plan->monthsBought($from, bcadd((string) $payment->amount, '0', 2), $rate, $cap, $wholeBill, $bill)['months'];
+        }
+
+        $walk = $plan->timelines($from, $servicePaid, $wholeBill);
         $serviceNames = Service::query()->pluck('name', 'id');
+
+        $services = [];
+
+        foreach ($walk['services'] as $serviceId => $timeline) {
+            $services[] = ['service_id' => (int) $serviceId, 'service' => (string) ($serviceNames[$serviceId] ?? 'Service'), ...$timeline];
+        }
 
         $free = array_map(fn (array $window): array => [
             'service' => $window['service_id'] === null ? 'All services' : (string) ($serviceNames[$window['service_id']] ?? 'Service'),
@@ -75,42 +109,49 @@ class CustomerCoverageService
         $firstBill = $notYetPaying ? $walk['first_bill'] : null;
 
         return [
+            'services' => $services,
             'free' => $free,
             'waiting' => $waiting,
-            'paid_from' => $walk['paid_from'],
             'paid_until' => $walk['paid_until'],
             'first_bill' => $firstBill,
-            'label' => $this->label($free, $waiting, $walk['paid_until'], $firstBill),
+            'label' => $notYetPaying ? $this->label($services, $waiting) : null,
         ];
     }
 
     /**
-     * "TV free until Dec 2026 · paid until Mar 2027 · first bill Apr 2027".
+     * "TV Service: free Oct–Nov 2026, paid Dec 2026–Feb 2027, billed from
+     * Mar 2027 · Internet: billed from Oct 2026".
      *
-     * @param  list<array{service: string, from: string, until: string}>  $free
+     * @param  list<array{service: string, free_from: ?string, free_until: ?string, paid_from: ?string, paid_until: ?string, first_billed: ?string}>  $services
      * @param  list<array{service: string, months: int, status: string}>  $waiting
      */
-    public function label(array $free, array $waiting, ?string $paidUntil, ?string $firstBill): ?string
+    public function label(array $services, array $waiting = []): ?string
     {
         $parts = [];
 
-        foreach ($free as $window) {
-            $parts[] = "{$window['service']} free until ".self::monthLabel($window['until']);
+        foreach ($services as $timeline) {
+            $bits = [];
+
+            if ($timeline['free_from'] !== null) {
+                $bits[] = 'free '.self::range($timeline['free_from'], (string) $timeline['free_until']);
+            }
+
+            if ($timeline['paid_from'] !== null) {
+                $bits[] = 'paid '.self::range($timeline['paid_from'], (string) $timeline['paid_until']);
+            }
+
+            if ($timeline['first_billed'] !== null) {
+                $bits[] = 'billed from '.self::monthLabel($timeline['first_billed']);
+            }
+
+            if ($bits !== []) {
+                $parts[] = "{$timeline['service']}: ".implode(', ', $bits);
+            }
         }
 
         foreach ($waiting as $grant) {
             $months = $grant['months'] === 1 ? '1 free month' : "{$grant['months']} free months";
-            $parts[] = $grant['status'] === FreeMonthGrant::STATUS_PENDING_APPROVAL
-                ? "{$grant['service']}: {$months} awaiting approval"
-                : "{$grant['service']}: {$months} once installation is paid";
-        }
-
-        if ($paidUntil !== null) {
-            $parts[] = 'paid until '.self::monthLabel($paidUntil);
-        }
-
-        if ($firstBill !== null) {
-            $parts[] = 'first bill '.self::monthLabel($firstBill);
+            $parts[] = "{$grant['service']}: {$months} awaiting approval";
         }
 
         return $parts === [] ? null : implode(' · ', $parts);
@@ -122,30 +163,18 @@ class CustomerCoverageService
         return Carbon::createFromFormat('!Y-m', $period)->format('M Y');
     }
 
-    /**
-     * Advance (months/yearly) payments verified but not yet absorbed by a
-     * run — counted exactly as the run will count them.
-     */
-    private function unabsorbedAdvanceMonths(Customer $customer, FreeMonthPlan $plan, string $from, int $alreadyCovered, string $bill): int
+    /** "Oct–Nov 2026", "Dec 2026–Feb 2027", "Oct 2026". */
+    public static function range(string $from, string $until): string
     {
-        $months = 0;
-
-        $advances = Payment::query()
-            ->where('customer_id', $customer->id)
-            ->subscription()
-            ->where('verification_status', 'verified')
-            ->whereIn('frequency', ['months', 'yearly'])
-            ->whereNull('expiration_date')
-            ->whereNull('processed_period')
-            ->orderBy('id')
-            ->get();
-
-        foreach ($advances as $payment) {
-            $rate = bcadd((string) ($payment->prepaid_rate ?? $bill), '0', 2);
-            $cap = $payment->clear_arrears_first ? PHP_INT_MAX : ($payment->frequency === 'yearly' ? 12 : (int) $payment->months);
-            $months += $plan->monthsBought($from, bcadd((string) $payment->amount, '0', 2), $rate, $cap, $alreadyCovered + $months, $bill)['months'];
+        if ($from === $until) {
+            return self::monthLabel($from);
         }
 
-        return $months;
+        $start = Carbon::createFromFormat('!Y-m', $from);
+        $end = Carbon::createFromFormat('!Y-m', $until);
+
+        return $start->year === $end->year
+            ? $start->format('M').'–'.$end->format('M Y')
+            : $start->format('M Y').'–'.$end->format('M Y');
     }
 }
