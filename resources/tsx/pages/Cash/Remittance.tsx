@@ -47,6 +47,10 @@ interface Props {
         lines: Line[];
         /** Technician fees are counted with the cash but belong to the technician (D13). */
         purpose_totals?: Record<PaymentPurpose, string>;
+        /** Bons the collector already paid out of this cash — paid by the cashier as part of receiving. */
+        bons?: { uuid: string; number: string; payee_name: string; purpose: string; amount: string; status: string }[];
+        bons_total?: string;
+        cash_to_hand_over?: string;
     };
     can: { receive: boolean; repay_shortage: boolean; write_off_shortage: boolean };
     denominations: number[];
@@ -69,7 +73,7 @@ export default function CashRemittance({ remittance, can, denominations }: Props
     const counted = denominationTotal(counts);
     const usingCounter = counted > 0;
     const received = usingCounter ? counted : Number(data.received_cash || 0);
-    const variance = received - Number(remittance.expected.cash);
+    const variance = received - Number(remittance.cash_to_hand_over ?? remittance.expected.cash);
     const walletLines = remittance.lines.filter((line) => isWallet(line.method));
 
     transform((form) => ({
@@ -101,7 +105,7 @@ export default function CashRemittance({ remittance, can, denominations }: Props
 
             <div className="mb-6 grid gap-4 sm:grid-cols-4">
                 <Figure label="Cash collected (system)" value={remittance.expected.cash} />
-                <Figure label="Cash declared by collector" value={remittance.declared_cash} />
+                <Figure label={remittance.bons && remittance.bons.length > 0 ? 'Cash due after bons' : 'Cash declared by collector'} value={remittance.bons && remittance.bons.length > 0 ? (remittance.cash_to_hand_over ?? null) : remittance.declared_cash} />
                 <Figure label="Cash received" value={remittance.received_cash} />
                 <Figure
                     label="Difference"
@@ -109,6 +113,25 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                     tone={remittance.cash_variance !== null && Number(remittance.cash_variance) < 0 ? 'red' : 'slate'}
                 />
             </div>
+
+            {remittance.bons && remittance.bons.length > 0 && (
+                <Card className="mb-6">
+                    <CardBody className="text-sm text-slate-700">
+                        <strong>Bons already paid from these collections ({formatCurrency(remittance.bons_total ?? '0')}):</strong> receiving this handover pays them —
+                        count only the remaining cash (declared: {formatCurrency(remittance.declared_cash)}).
+                        <ul className="mt-1 list-disc pl-5">
+                            {remittance.bons.map((bon) => (
+                                <li key={bon.uuid}>
+                                    <Link href={`/vouchers/${bon.uuid}`} className="font-medium text-blue-700 hover:underline">
+                                        {bon.number}
+                                    </Link>{' '}
+                                    — {bon.payee_name}: {formatCurrency(bon.amount)} ({bon.status})
+                                </li>
+                            ))}
+                        </ul>
+                    </CardBody>
+                </Card>
+            )}
 
             {remittance.purpose_totals && Number(remittance.purpose_totals.technician_fee) > 0 && (
                 <Card className="mb-6">

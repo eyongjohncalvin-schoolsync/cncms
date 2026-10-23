@@ -126,9 +126,8 @@ const settingsNavItem = { href: '/settings/company', labelKey: 'common.settings'
 const branchesNavItem = { href: '/branches', labelKey: 'common.branches', icon: IconBuildingCommunity, accent: 'slate' as const };
 
 // Resources (P&L dashboard) — ExpenditurePolicy::viewDashboard →
-// `expenditures.dashboard`. Agents can still record expenditures via
-// /resources/expenditures/create (that's `expenditures.create`), but the
-// dashboard landing page itself is `expenditures.dashboard`.
+// `expenditures.dashboard`. Nobody records an expense directly any more:
+// every cash-out is a bon (docs/plans/expenditures-and-spending-controls.md, E1).
 const resourcesNavItem = { href: '/resources', labelKey: 'common.resources', icon: IconReportMoney, accent: 'pink' as const };
 
 // Audit Log — AuditLogPolicy::viewAny → `audit.view`.

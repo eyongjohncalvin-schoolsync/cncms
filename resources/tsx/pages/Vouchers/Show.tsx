@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import { IconPrinter } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { InvestorLayout } from '@/layouts/InvestorLayout';
@@ -32,13 +32,25 @@ interface Props {
         returned_amount: string | null;
         settled_by_name: string | null;
         settlement_note: string | null;
+        category_uuid: string | null;
+        from_collections: boolean;
+        remittance: { uuid: string; number: string } | null;
+        has_receipt: boolean;
+        expenditures: { uuid: string; amount: string; spent_at: string | null; source: string; status: string }[];
         approvals: { name: string | null; decision: 'approved' | 'rejected'; note: string | null; decided_at: string | null }[];
         stakeholders: { name: string; approved: boolean }[];
     };
-    can: { decide: boolean; cancel: boolean; pay: boolean; settle: boolean };
+    can: { decide: boolean; cancel: boolean; pay: boolean; settle: boolean; correct: boolean };
     pay_accounts: { uuid: string; name: string; balance: string }[];
+    categories: { uuid: string; name: string }[];
     is_investor: boolean;
 }
+
+const TIER_REASON_LABELS: Record<string, string> = {
+    above_single_limit: 'Above the single-bon limit',
+    above_daily_limit: 'Takes today’s payouts above the daily limit',
+    above_monthly_cap: 'Takes this month’s spending above the monthly cap',
+};
 
 const when = (value: string | null) => (value ? new Date(value).toLocaleString() : '—');
 
@@ -47,7 +59,7 @@ const when = (value: string | null) => (value ? new Date(value).toLocaleString()
  * (docs/plans/cash-controls.md, wave 5): who asked, who approved, who paid
  * from where, who received it, and the printable signed copy.
  */
-export default function VoucherShow({ voucher, can, pay_accounts, is_investor }: Props) {
+export default function VoucherShow({ voucher, can, pay_accounts, categories, is_investor }: Props) {
     const content = (
         <>
             <Head title={voucher.number} />
@@ -88,6 +100,47 @@ export default function VoucherShow({ voucher, can, pay_accounts, is_investor }:
                         </dd>
                         <dt className="text-slate-500">Needed on</dt>
                         <dd className="text-slate-900">{voucher.needed_on}</dd>
+                        {voucher.from_collections && (
+                            <>
+                                <dt className="text-slate-500">Paid from</dt>
+                                <dd className="text-slate-900">
+                                    The requester&apos;s own collections — settled at their cash handover
+                                    {voucher.remittance && (
+                                        <>
+                                            {' '}
+                                            (
+                                            <Link href={`/cash/remittances/${voucher.remittance.uuid}`} className="text-blue-700 hover:underline">
+                                                {voucher.remittance.number}
+                                            </Link>
+                                            )
+                                        </>
+                                    )}
+                                </dd>
+                            </>
+                        )}
+                        {voucher.has_receipt && (
+                            <>
+                                <dt className="text-slate-500">Receipt photo</dt>
+                                <dd>
+                                    <a href={`/vouchers/${voucher.uuid}/files/receipt`} className="font-medium text-blue-700 hover:underline">
+                                        Open
+                                    </a>
+                                </dd>
+                            </>
+                        )}
+                        {voucher.expenditures.length > 0 && (
+                            <>
+                                <dt className="text-slate-500">Expenditures</dt>
+                                <dd className="flex flex-col gap-1">
+                                    {voucher.expenditures.map((row) => (
+                                        <Link key={row.uuid} href={`/resources/expenditures/${row.uuid}`} className="text-blue-700 hover:underline">
+                                            {row.spent_at} · {formatCurrency(row.amount)} {row.source === 'adjustment' ? '(correction)' : ''}
+                                            {row.status === 'void' ? ' — void' : ''}
+                                        </Link>
+                                    ))}
+                                </dd>
+                            </>
+                        )}
                         {voucher.has_attachment && (
                             <>
                                 <dt className="text-slate-500">Invoice / quote</dt>
@@ -109,7 +162,7 @@ export default function VoucherShow({ voucher, can, pay_accounts, is_investor }:
                 <CardBody className="flex flex-col gap-3 text-sm">
                     {voucher.approval_tier === 'stakeholders' ? (
                         <div className="rounded-lg bg-amber-50 p-3 text-amber-800">
-                            {voucher.tier_reasons.includes('above_single_limit') ? 'Above the single-voucher limit' : 'Takes the day above the daily payout limit'} —{' '}
+                            {voucher.tier_reasons.map((reason) => TIER_REASON_LABELS[reason] ?? reason).join('; ') || 'Above the company’s limits'} —{' '}
                             {voucher.approval_mode === 'all' ? 'every stakeholder must approve.' : 'the owner must approve.'}
                             {voucher.stakeholders.length > 0 && (
                                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -194,9 +247,20 @@ export default function VoucherShow({ voucher, can, pay_accounts, is_investor }:
                                     Must be justified by {voucher.settle_due_on}
                                     {voucher.overdue_settlement ? ' — overdue.' : '.'}
                                 </p>
-                                {can.settle && <SettleForm uuid={voucher.uuid} amount={voucher.amount} />}
+                                {can.settle && <SettleForm uuid={voucher.uuid} amount={voucher.amount} needsCategory={!voucher.category_uuid} categories={categories} />}
                             </>
                         )}
+                    </CardBody>
+                </Card>
+            )}
+
+            {can.correct && (
+                <Card className="mb-6" id="correct">
+                    <CardHeader>
+                        <h3 className="text-sm font-semibold text-slate-900">Correct this bon</h3>
+                    </CardHeader>
+                    <CardBody>
+                        <CorrectForm uuid={voucher.uuid} />
                     </CardBody>
                 </Card>
             )}
@@ -307,8 +371,39 @@ function SignedCopyForm({ uuid }: { uuid: string }) {
     );
 }
 
-function SettleForm({ uuid, amount }: { uuid: string; amount: string }) {
-    const { data, setData, post, processing, errors } = useForm({ spent_amount: '', returned_amount: '', note: '' });
+/**
+ * Correct a paid bon (docs/plans/expenditures-and-spending-controls.md,
+ * item 9) — nothing in the past changes: money returned goes back into the
+ * till with a negative entry this month; an underpayment raises a new bon.
+ */
+function CorrectForm({ uuid }: { uuid: string }) {
+    const { data, setData, post, processing, errors, reset } = useForm<{ outcome: 'returned' | 'underpaid'; amount: string; reason: string }>({ outcome: 'returned', amount: '', reason: '' });
+
+    return (
+        <form
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+                e.preventDefault();
+                post(`/vouchers/${uuid}/correct`, { preserveScroll: true, onSuccess: () => reset() });
+            }}
+        >
+            <SelectInput id="outcome" label="What happened" value={data.outcome} onChange={(e) => setData('outcome', e.target.value as 'returned' | 'underpaid')}>
+                <option value="returned">Money came back — it goes into my till</option>
+                <option value="underpaid">The payee is owed more — raise a new bon</option>
+            </SelectInput>
+            <div className="grid gap-3 sm:grid-cols-2">
+                <TextInput id="correct_amount" label="Amount (FCFA)" type="number" min="0" value={data.amount} onChange={(e) => setData('amount', e.target.value)} error={errors.amount} required />
+                <TextInput id="correct_reason" label="Reason" value={data.reason} onChange={(e) => setData('reason', e.target.value)} error={errors.reason} required />
+            </div>
+            <Button type="submit" variant="warning" disabled={processing}>
+                Record the correction
+            </Button>
+        </form>
+    );
+}
+
+function SettleForm({ uuid, amount, needsCategory, categories }: { uuid: string; amount: string; needsCategory: boolean; categories: { uuid: string; name: string }[] }) {
+    const { data, setData, post, processing, errors } = useForm({ spent_amount: '', returned_amount: '', note: '', category_uuid: '' });
     const total = Number(data.spent_amount || 0) + Number(data.returned_amount || 0);
 
     return (
@@ -326,6 +421,16 @@ function SettleForm({ uuid, amount }: { uuid: string; amount: string }) {
             <p className={`text-xs ${total === Number(amount) ? 'text-green-700' : 'text-amber-700'}`}>
                 {formatCurrency(total)} of {formatCurrency(amount)} accounted for.
             </p>
+            {needsCategory && (
+                <SelectInput id="settle_category" label="Expense category of what was spent" value={data.category_uuid} onChange={(e) => setData('category_uuid', e.target.value)} error={errors.category_uuid}>
+                    <option value="">Choose…</option>
+                    {categories.map((category) => (
+                        <option key={category.uuid} value={category.uuid}>
+                            {category.name}
+                        </option>
+                    ))}
+                </SelectInput>
+            )}
             <TextInput id="settle_note" label="Note" value={data.note} onChange={(e) => setData('note', e.target.value)} />
             <Button type="submit" disabled={processing}>
                 Settle the advance

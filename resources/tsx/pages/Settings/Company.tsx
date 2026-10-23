@@ -47,7 +47,8 @@ const EMPTY_COMPANY: Company = {
     reconnection_fine: '2000',
     arrears_second_approval_threshold: '20000',
     voucher_approval_limit: '50000',
-    voucher_daily_limit: null,
+    voucher_daily_limit: '100000',
+    monthly_spending_cap: null,
     remittance_deadline_hours: 24,
     advance_settlement_days: 7,
     rccm_number: null,
@@ -422,7 +423,24 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                         className="rounded-xl px-4 py-3"
                                                     />
                                                     <p className="mt-2 text-xs text-slate-500">
-                                                        Once the day&apos;s vouchers reach this total, any further voucher that day needs every investor&apos;s approval.
+                                                        Counted by the day bons are paid (100,000 by default). Once the day&apos;s payouts reach this total, any further bon that day needs every investor&apos;s approval.
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <TextInput
+                                                        id="monthly_spending_cap"
+                                                        name="monthly_spending_cap"
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        label="Monthly spending cap (FCFA)"
+                                                        defaultValue={values.monthly_spending_cap ?? ''}
+                                                        error={errors.monthly_spending_cap}
+                                                        placeholder="No cap"
+                                                        className="rounded-xl px-4 py-3"
+                                                    />
+                                                    <p className="mt-2 text-xs text-slate-500">
+                                                        Everything spent this month plus approved bons not yet paid. A bon that would go over it needs every investor&apos;s approval (the owner when there are none). Salaries, rent and suppliers count too.
                                                     </p>
                                                 </div>
                                                 <div>
