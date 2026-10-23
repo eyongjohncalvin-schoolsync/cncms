@@ -100,3 +100,12 @@ Short-lived branch → `main` + `preview`. Tests only on `cncms_testing`, one
 ## Out of scope
 
 Per-branch budgets and caps (E10), expense approvals outside the bon engine.
+
+## Status
+
+Built on branch `expenditure-controls` (not merged). Items 1–12 done; tenant
+migrations `2026_10_22_195204_add_expenditure_controls` and
+`2026_10_22_195206_grant_budgets_manage_permission`; new permission
+`budgets.manage`; scheduled `expenditures:close-months` (daily 00:30 WAT,
+closes the previous month from the 5th). The owner must set the monthly cap
+(Settings → Cash controls) and the budgets (Resources → Budgets).
