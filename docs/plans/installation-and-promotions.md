@@ -205,7 +205,29 @@ rejected registration stays in the collector's remittance (payments carry
 the till before any of it is paid back. Months paid upfront cannot be
 corrected at activation (they are money already taken) — reject instead.
 
+## Relocation and re-installation fees
+
+### Status (2026-10-23, branch `relocation-fees`, not merged)
+
+Built on the installation charge model: `customer_charges.kind` is now
+`installation | relocation | reinstallation`. Their money keeps
+`payments.purpose = installation` (a one-off service charge linked by
+`customer_charge_id`), so billing, arrears, credit, disconnection, the
+remittance and old mobile builds needed no change; the charge kind names the
+receipt ("Relocation receipt", "Re-installation receipt") and splits reports
+(`by_purpose.relocation` / `reinstallation`, and a "one-off charges" block next
+to installation income). Customer page: "Relocation & re-installation" card
+with **Relocate** (new address, zone through the same branch-fenced lookup as
+a customer edit; from/to kept on the charge) and **Re-install**. Default fees:
+`companies.relocation_fee` / `reinstallation_fee` on Settings → Installation
+offers (empty = no default). A fee below the default, or 0 (waiver), needs a
+reason and admin/owner approval, maker ≠ checker (D8). No free months. One
+open charge per kind. Permissions reuse `installations.manage` /
+`installations.approve` (Relocate also needs `customers.update`; taking money
+now needs `payments.create`). Routes are `not-impersonating:money`. API
+customer resource: `installation_balance` is installation only; new read-only
+`one_off_charges`. Bills print each kind as its own line.
+
 ## Out of scope / later
 
-Relocation and re-installation fees (same charge model, kind `relocation`),
 "pay 6 get 1" advance-payment promos, SMS/WhatsApp promo-ending notices.
