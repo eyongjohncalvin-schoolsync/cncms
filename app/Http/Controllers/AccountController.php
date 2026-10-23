@@ -53,6 +53,9 @@ class AccountController extends Controller
             'sessions' => $this->account->webSessions($user, $request->session()->getId()),
             'devices' => $this->account->devices($user),
             'isImpersonating' => Impersonation::active(),
+            // Which shell to render: the landlord's /landlord/account or the
+            // workspace's /account (same page, same actions).
+            'area' => $request->routeIs('landlord.*') ? 'landlord' : 'workspace',
         ]);
     }
 
