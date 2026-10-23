@@ -7,6 +7,7 @@ use App\Models\PaymentReceipt;
 use App\Models\PersonalAccessToken;
 use App\Models\Report;
 use App\Models\Role;
+use App\Models\User;
 use App\Policies\PaymentReceiptPolicy;
 use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
@@ -43,6 +44,15 @@ class AppServiceProvider extends ServiceProvider
         // App\Models\PersonalAccessToken for the full reasoning) —
         // point Sanctum at the connection-pinned model.
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
+        // A passive (deactivated) user's token stops authenticating at once,
+        // even one that survived the token purge in
+        // AccountSecurityService::deactivate() — the API counterpart of the
+        // web EnsureAccountIsActive middleware.
+        Sanctum::authenticateAccessTokensUsing(
+            static fn (PersonalAccessToken $token, bool $isValid): bool => $isValid
+                && (! $token->tokenable instanceof User || $token->tokenable->isActive()),
+        );
 
         // App\Models\Report is not a real Eloquent model (no `reports`
         // table) — see its class doc for why this is registered explicitly

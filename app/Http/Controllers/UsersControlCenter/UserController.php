@@ -12,6 +12,7 @@ use App\Models\Role;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Repositories\Contracts\BranchRepositoryInterface;
+use App\Services\AccountSecurityService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
@@ -179,11 +180,16 @@ class UserController extends Controller
         return $branch->id;
     }
 
-    public function deactivate(TenantUser $tenantUser): RedirectResponse
+    /**
+     * Makes the user passive and signs them out of every browser and phone
+     * at once (AccountSecurityService::deactivate()), not just at their next
+     * sign-in.
+     */
+    public function deactivate(TenantUser $tenantUser, AccountSecurityService $account): RedirectResponse
     {
         $this->authorize('deactivate', TenantUser::class);
 
-        $tenantUser->user->update(['status' => 'passive']);
+        $account->deactivate($tenantUser->user);
 
         return redirect()->route('users.index')->with('success', 'User deactivated.');
     }

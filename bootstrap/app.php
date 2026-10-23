@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\BlockDuringImpersonation;
+use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\EnsureLandlord;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RecordImpersonatedActions;
@@ -35,6 +36,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             ResolveLocale::class,
             HandleInertiaRequests::class,
+            // Ends an open session whose user has been deactivated, before
+            // anything else (including the impersonation log) sees it.
+            EnsureAccountIsActive::class,
             RecordImpersonatedActions::class,
         ]);
 
