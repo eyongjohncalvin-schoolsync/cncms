@@ -10,19 +10,19 @@ use Illuminate\Support\Facades\DB;
 class TenantDatabaseSeeder extends Seeder
 {
     /**
-     * Seed a freshly provisioned tenant schema with reference/lookup data.
+     * Seed a freshly provisioned tenant schema with GENERIC reference data.
      *
      * This is the class referenced by config/tenancy.php's `seeder_parameters`, so it
-     * runs against the tenant's own schema (search_path already scoped by tenancy) when
-     * `php artisan tenants:seed` executes.
+     * runs against the tenant's own schema (search_path already scoped by tenancy) for
+     * every new workspace — self-service registrations and landlord "Add Tenant" alike.
      *
-     * Only reference data is seeded here: zones, expense categories, and the single
-     * company record. Transactional data (customers, payments, manuscripts, etc.) is
-     * intentionally out of scope for this pass.
+     * Nothing operator-specific belongs here: a new company enters its own zones,
+     * contact and MoMo details. It used to seed SWECOM's 29 Kumba zones and SWECOM's
+     * company details into every workspace; those now live only in
+     * SwecomReferenceDataSeeder (dev/test setup for the swecom tenant).
      */
     public function run(): void
     {
-        $this->seedZones();
         $this->seedExpenseCategories();
         $this->seedCompany();
 
@@ -33,37 +33,10 @@ class TenantDatabaseSeeder extends Seeder
         $this->call(DefaultRolesSeeder::class);
     }
 
-    private function seedZones(): void
-    {
-        // Full zone list — all 29 zones belong to KUMBA 3.
-        $names = [
-            'THR01 (3/CORNERS)', 'TR 03', 'AR01(JUNCTION)', 'AR02(HANS)', 'AR03(SEC)',
-            'AR04', 'AR 05 (BELMONT)', 'GARE 1', 'LR R01 (LADUMA ROAD)', 'LR R02',
-            'M R01 (DODO)', 'M R02', 'M R03 (OIL MILL)', 'M R04 (JERUME)', 'MA R01',
-            'MA R02(ELDER)', 'T R01', 'T R02 (BAPTIST)', 'T R03 (BENJI)', 'T R04 (weldering)',
-            'T R05(BELTHA)', 'T R06(UNCLE ETA)', 'T R07(school)', 'TRANSMITTER', 'MAHOLE 6',
-            'NDIFANG', 'BI', 'TANCHA SCHOOL', 'BANGA FARM',
-        ];
-
-        $now = now();
-        $branchId = $this->mainBranchId();
-
-        DB::table('zones')->insert(array_map(static fn (string $name): array => [
-            'branch_id' => $branchId,
-            'name' => $name,
-            'town' => 'KUMBA 3',
-            'created_at' => $now,
-            'updated_at' => $now,
-        ], $names));
-    }
-
     /**
-     * `zones.branch_id` is NOT NULL (see
-     * database/migrations/tenant/2026_08_24_160010_add_branch_id_to_zones_table.php),
-     * and the "Main Branch" row this seeder's zones/company belong to is
-     * seeded by the branches table's own creation migration
-     * (2026_08_24_160000_create_branches_table.php), which always runs
-     * before seeding in the tenant provisioning pipeline.
+     * The "Main Branch" row is seeded by the branches table's own creation
+     * migration (2026_08_24_160000_create_branches_table.php), which always
+     * runs before seeding in the tenant provisioning pipeline.
      */
     private function mainBranchId(): int
     {
@@ -100,19 +73,25 @@ class TenantDatabaseSeeder extends Seeder
         ));
     }
 
+    /**
+     * The single company row, named after the workspace and otherwise blank:
+     * the new company fills in its own details (registration form, then
+     * Settings → Company). `location` and `phone` are NOT NULL columns, so
+     * they start as empty strings.
+     */
     private function seedCompany(): void
     {
         $now = now();
 
         DB::table('companies')->insert([
             'branch_id' => $this->mainBranchId(),
-            'name' => 'SWECOM PLC',
-            'location' => '3/CORNERS',
-            'email' => 'shalomtech@gmail.com',
-            'phone' => '676876509/672528022',
+            'name' => mb_substr((string) (tenant()?->name ?: 'My Company'), 0, 50),
+            'location' => '',
+            'email' => null,
+            'phone' => '',
             'tech_number' => null,
-            'momo_number' => '676876509/672528022',
-            'momo_name' => 'MUNGWAN HANS/KELVIN MEKUME',
+            'momo_number' => null,
+            'momo_name' => null,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
