@@ -239,6 +239,16 @@
             </tbody>
         </table>
     @endif
+    @foreach ($one_off_balances ?? [] as $oneOff)
+        <table class="mb-breakdown">
+            <tbody>
+                <tr>
+                    <td class="mb-desc">{{ $oneOff['label'] }} (separate — not in the total due)</td>
+                    <td class="mb-num">{{ number_format((float) $oneOff['amount'], 2) }}</td>
+                </tr>
+            </tbody>
+        </table>
+    @endforeach
 
     <div class="mb-fine-note">
         Late payment triggers disconnection. Reconnection requires the outstanding balance plus a

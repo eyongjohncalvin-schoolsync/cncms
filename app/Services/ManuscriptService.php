@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerCharge;
 use App\Models\Manuscript;
 use App\Models\Zone;
 use App\Repositories\Contracts\ManuscriptRepositoryInterface;
@@ -181,7 +182,7 @@ class ManuscriptService
         $manuscript = $this->resolveManuscript($customer, $period);
         $company = Company::cached();
 
-        return $this->buildBillData($customer, $manuscript, $period, $company, $company?->logoDataUri(), CustomerChargeService::openInstallationBalance($customer));
+        return $this->buildBillData($customer, $manuscript, $period, $company, $company?->logoDataUri(), CustomerChargeService::openBalancesByKind([$customer->id])[$customer->id] ?? []);
     }
 
     /**
@@ -223,9 +224,10 @@ class ManuscriptService
                 ->mapWithKeys(fn (Customer $customer): array => [$customer->id => $customer->latestManuscript]);
         }
 
-        // One query for the whole batch — the installation balance printed
-        // as its own line (docs/plans/installation-and-promotions.md).
-        $installationBalances = CustomerChargeService::openInstallationBalances($customers->pluck('id')->all());
+        // One query for the whole batch — the installation, relocation and
+        // re-installation balances, each printed as its own line
+        // (docs/plans/installation-and-promotions.md).
+        $chargeBalances = CustomerChargeService::openBalancesByKind($customers->pluck('id')->all());
 
         $bills = [];
 
@@ -236,7 +238,7 @@ class ManuscriptService
                 continue;
             }
 
-            $bills[] = $this->buildBillData($customer, $manuscript, $period, $company, $logoDataUri, $installationBalances[$customer->id] ?? '0.00');
+            $bills[] = $this->buildBillData($customer, $manuscript, $period, $company, $logoDataUri, $chargeBalances[$customer->id] ?? []);
         }
 
         return $bills;
@@ -339,8 +341,10 @@ class ManuscriptService
      * builds account_code/bill_number/period_label/deadline so all three
      * callers (and therefore both the single-print flow and the bulk grid)
      * render identically shaped data.
+     *
+     * @param  array<string, string>  $chargeBalances  one-off charge kind => balance still owed
      */
-    private function buildBillData(Customer $customer, Manuscript $manuscript, ?string $period, ?Company $company, ?string $logoDataUri, string $installationBalance = '0.00'): array
+    private function buildBillData(Customer $customer, Manuscript $manuscript, ?string $period, ?Company $company, ?string $logoDataUri, array $chargeBalances = []): array
     {
         $customer->loadMissing('zone');
 
@@ -367,7 +371,13 @@ class ManuscriptService
             'logo_data_uri' => $logoDataUri,
             // Unpaid installation fee — printed as its own line, NEVER
             // added to total_bill or arrears (D1). '0.00' = nothing owed.
-            'installation_balance' => $installationBalance,
+            'installation_balance' => $chargeBalances[CustomerCharge::KIND_INSTALLATION] ?? '0.00',
+            // Relocation / re-installation fees still owed — the same rule:
+            // one line each, never in the total, never arrears.
+            'one_off_balances' => array_values(array_map(
+                fn (string $kind): array => ['label' => CustomerCharge::KIND_LABELS[$kind].' balance', 'amount' => $chargeBalances[$kind]],
+                array_values(array_filter(CustomerCharge::SERVICE_KINDS, fn (string $kind): bool => isset($chargeBalances[$kind]))),
+            )),
         ];
     }
 

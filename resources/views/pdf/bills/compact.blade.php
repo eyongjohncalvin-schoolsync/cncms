@@ -184,6 +184,14 @@
             </tr>
         </table>
     @endif
+    @foreach ($one_off_balances ?? [] as $oneOff)
+        <table class="kc-money">
+            <tr>
+                <td class="kc-mlabel">{{ $oneOff['label'] }} (not in total)</td>
+                <td class="kc-mval">{{ number_format((float) $oneOff['amount'], 2) }}</td>
+            </tr>
+        </table>
+    @endforeach
 
     <div class="kc-warning">
         Reconnection fine: {{ number_format((float) ($company?->reconnection_fine ?? 0), 2) }} FCFA.

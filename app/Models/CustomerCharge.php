@@ -148,6 +148,21 @@ class CustomerCharge extends Model
         return $this->belongsTo(Zone::class, 'to_zone_id');
     }
 
+    /**
+     * A SQL condition true for a payment toward a charge of this kind —
+     * for reports that split one-off income by kind inside one aggregate
+     * query (`sum(...) filter (where …)`). $kind is one of KINDS, never
+     * user input.
+     */
+    public static function paymentOfKindSql(string $kind, string $payments = 'payments'): string
+    {
+        if (! in_array($kind, self::KINDS, true)) {
+            throw new \InvalidArgumentException("Unknown charge kind {$kind}.");
+        }
+
+        return "{$payments}.purpose = 'installation' and {$payments}.customer_charge_id in (select customer_charges.id from customer_charges where customer_charges.kind = '{$kind}')";
+    }
+
     /** "Installation", "Relocation" or "Re-installation". */
     public function kindLabel(): string
     {

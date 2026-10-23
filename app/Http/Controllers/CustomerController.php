@@ -33,6 +33,7 @@ use App\Services\CustomerChargeService;
 use App\Services\CustomerCoverageService;
 use App\Services\CustomerImportService;
 use App\Services\CustomerInstallationService;
+use App\Services\CustomerRelocationService;
 use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
 use App\Services\FieldInstallationService;
@@ -705,6 +706,9 @@ class CustomerController extends Controller
             // Installation fees (docs/plans/installation-and-promotions.md):
             // a separate balance, never part of the bill's total or arrears.
             'installation' => $this->shapeInstallation($customer),
+            // Relocation and re-installation fees — the same separate
+            // balance, with the "Relocate" / "Re-install" actions.
+            'one_off_charges' => $this->shapeOneOffCharges($customer),
             // Free months and the coverage line ("TV free until Dec ·
             // paid until Mar · first bill Apr") — installation phase 2.
             'free_months' => $this->shapeFreeMonths($customer),
@@ -811,50 +815,103 @@ class CustomerController extends Controller
 
         return [
             'balance' => CustomerChargeService::openInstallationBalance($customer),
-            'charges' => $charges->map(fn (CustomerCharge $charge): array => [
-                'uuid' => $charge->uuid,
-                'amount' => (string) $charge->amount,
-                'paid' => $charge->paidAmount(),
-                'balance' => $charge->balance(),
-                'recordable' => $charge->recordableAmount(),
-                'status' => $charge->status,
-                'reason' => $charge->reason,
-                'requested_by_name' => $charge->requestedBy?->name,
-                'created_at' => $charge->created_at?->toIso8601String(),
-                'waiver_status' => $charge->waiver_status,
-                'waiver_reason' => $charge->waiver_reason,
-                'waiver_requested_by_name' => $charge->waiverRequestedBy?->name,
-                'waiver_decided_by_name' => $charge->waiverDecidedBy?->name,
-                'waiver_rejection_reason' => $charge->waiver_rejection_reason,
-                'waived_amount' => $charge->waived_amount !== null ? (string) $charge->waived_amount : null,
-                // Phase 2: offer, fee-override approval (D8), refund (D9).
-                'offer_name' => $charge->offer?->name,
-                'standard_amount' => $charge->standard_amount !== null ? (string) $charge->standard_amount : null,
-                'approval_status' => $charge->approval_status,
-                'approval_rejection_reason' => $charge->approval_rejection_reason,
-                'refund_status' => $charge->refund_status,
-                'refund_amount' => $charge->refund_amount !== null ? (string) $charge->refund_amount : null,
-                'refund_reason' => $charge->refund_reason,
-                'refund_requested_by_name' => $charge->refundRequestedBy?->name,
-                'refund_decided_by_name' => $charge->refundDecidedBy?->name,
-                'refund_rejection_reason' => $charge->refund_rejection_reason,
-                'refund_voucher_number' => $charge->refundVoucher?->number,
-                'refund_voucher_status' => $charge->refundVoucher?->status,
-                'can' => [
-                    'record_payment' => $user->can('recordPayment', $charge),
-                    'request_waiver' => $user->can('requestWaiver', $charge),
-                    'decide_waiver' => $user->can('approveWaiver', $charge),
-                    'decide_fee' => $user->can('approveFee', $charge),
-                    'request_refund' => $user->can('requestRefund', $charge),
-                    'decide_refund' => $user->can('approveRefund', $charge),
-                ],
-            ])->values()->all(),
+            'charges' => $charges->map(fn (CustomerCharge $charge): array => $this->shapeCharge($charge))->values()->all(),
             'can_create' => $user->can('create', CustomerCharge::class) && ! $customer->trashed(),
             // Customers from before installation fees: "not applicable",
             // never "unpaid" (phase 2, item 9).
             'applicable' => $charges->isNotEmpty() || $customer->connected_on !== null,
             'connected_on' => $customer->connected_on?->toDateString(),
             'billing_starts_period' => $customer->billing_starts_period,
+        ];
+    }
+
+    /**
+     * The customer page's relocation and re-installation fees (the same
+     * charge model as installation, another kind): every such charge with
+     * its balance, the "Relocate" / "Re-install" permissions, the
+     * company's default fees and the zones a relocation may move to.
+     *
+     * @return array{balance: string, charges: list<array<string, mixed>>, can_relocate: bool, can_reinstall: bool, can_record_payment: bool, default_fees: array{relocation: ?string, reinstallation: ?string}, zones: array<int, array{uuid: string, name: string, town: string}>}
+     */
+    private function shapeOneOffCharges(Customer $customer): array
+    {
+        $user = request()->user();
+        $charges = app(CustomerChargeService::class)->forCustomer($customer, CustomerCharge::SERVICE_KINDS);
+        $active = ! $customer->trashed();
+        $canRelocate = $active && $user->can('relocate', CustomerCharge::class);
+
+        return [
+            'balance' => array_reduce(
+                CustomerChargeService::openBalancesByKind([$customer->id], CustomerCharge::SERVICE_KINDS)[$customer->id] ?? [],
+                fn (string $sum, string $balance): string => bcadd($sum, $balance, 2),
+                '0.00',
+            ),
+            'charges' => $charges->map(fn (CustomerCharge $charge): array => $this->shapeCharge($charge))->values()->all(),
+            'can_relocate' => $canRelocate,
+            'can_reinstall' => $active && $user->can('reinstall', CustomerCharge::class),
+            'can_record_payment' => $this->context->can('payments.create'),
+            'default_fees' => [
+                'relocation' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_RELOCATION),
+                'reinstallation' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_REINSTALLATION),
+            ],
+            'zones' => $canRelocate ? $this->zonesForSelect() : [],
+        ];
+    }
+
+    /**
+     * One charge row on the customer page — any kind.
+     *
+     * @return array<string, mixed>
+     */
+    private function shapeCharge(CustomerCharge $charge): array
+    {
+        $user = request()->user();
+
+        return [
+            'uuid' => $charge->uuid,
+            'kind' => $charge->kind,
+            'kind_label' => $charge->kindLabel(),
+            // Relocation: where the customer moved from and to.
+            'from_zone_name' => $charge->fromZone?->name,
+            'to_zone_name' => $charge->toZone?->name,
+            'from_location' => $charge->from_location,
+            'to_location' => $charge->to_location,
+            'note' => $charge->note,
+            'amount' => (string) $charge->amount,
+            'paid' => $charge->paidAmount(),
+            'balance' => $charge->balance(),
+            'recordable' => $charge->recordableAmount(),
+            'status' => $charge->status,
+            'reason' => $charge->reason,
+            'requested_by_name' => $charge->requestedBy?->name,
+            'created_at' => $charge->created_at?->toIso8601String(),
+            'waiver_status' => $charge->waiver_status,
+            'waiver_reason' => $charge->waiver_reason,
+            'waiver_requested_by_name' => $charge->waiverRequestedBy?->name,
+            'waiver_decided_by_name' => $charge->waiverDecidedBy?->name,
+            'waiver_rejection_reason' => $charge->waiver_rejection_reason,
+            'waived_amount' => $charge->waived_amount !== null ? (string) $charge->waived_amount : null,
+            // Phase 2: offer, fee-override approval (D8), refund (D9).
+            'offer_name' => $charge->offer?->name,
+            'standard_amount' => $charge->standard_amount !== null ? (string) $charge->standard_amount : null,
+            'approval_status' => $charge->approval_status,
+            'approval_rejection_reason' => $charge->approval_rejection_reason,
+            'refund_status' => $charge->refund_status,
+            'refund_amount' => $charge->refund_amount !== null ? (string) $charge->refund_amount : null,
+            'refund_reason' => $charge->refund_reason,
+            'refund_requested_by_name' => $charge->refundRequestedBy?->name,
+            'refund_decided_by_name' => $charge->refundDecidedBy?->name,
+            'refund_rejection_reason' => $charge->refund_rejection_reason,
+            'refund_voucher_number' => $charge->refundVoucher?->number,
+            'refund_voucher_status' => $charge->refundVoucher?->status,
+            'can' => [
+                'record_payment' => $user->can('recordPayment', $charge),
+                'request_waiver' => $user->can('requestWaiver', $charge),
+                'decide_waiver' => $user->can('approveWaiver', $charge),
+                'decide_fee' => $user->can('approveFee', $charge),
+                'request_refund' => $user->can('requestRefund', $charge),
+                'decide_refund' => $user->can('approveRefund', $charge),
+            ],
         ];
     }
 
