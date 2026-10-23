@@ -158,6 +158,11 @@ class CustomerInstallationTest extends TestCase
         $this->assertSame('Mar 2027', $installation['paid_until_label']);
         $this->assertSame('2027-04', $installation['first_bill']);
 
+        // The customer page's coverage line, before any run.
+        $this->get("/customers/{$customer->uuid}")->assertOk()->assertInertia(fn ($page) => $page
+            ->where('customer.coverage.label', 'TV Service free until Dec 2026 · paid until Mar 2027 · first bill Apr 2027')
+            ->where('customer.free_months.grants.0.status', FreeMonthGrant::STATUS_APPROVED));
+
         foreach (['2026-11', '2026-12', '2027-01', '2027-02', '2027-03'] as $period) {
             $this->assertSame('0.00', (string) $this->bill($customer, $period)->total_bill, "{$period}: nothing to pay");
         }

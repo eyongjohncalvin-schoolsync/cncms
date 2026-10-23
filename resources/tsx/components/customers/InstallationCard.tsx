@@ -32,7 +32,12 @@ const METHODS: { value: PaymentMethod; label: string }[] = [
     { value: 'bank', label: 'Bank' },
 ];
 
-type Dialog = { kind: 'create' } | { kind: 'pay'; charge: CustomerCharge } | { kind: 'waive'; charge: CustomerCharge } | null;
+type Dialog =
+    | { kind: 'create' }
+    | { kind: 'pay'; charge: CustomerCharge }
+    | { kind: 'waive'; charge: CustomerCharge }
+    | { kind: 'refund'; charge: CustomerCharge }
+    | null;
 
 export function InstallationCard({ customerUuid, installation }: { customerUuid: string; installation: CustomerInstallation }) {
     const [dialog, setDialog] = useState<Dialog>(null);
@@ -64,12 +69,22 @@ export function InstallationCard({ customerUuid, installation }: { customerUuid:
 
             {installation.charges.length === 0 ? (
                 <div className="p-4">
-                    <EmptyState title="No installation fee on file" />
+                    {installation.applicable === false ? (
+                        <EmptyState title="Not applicable" description="Customer from before installation fees were recorded." />
+                    ) : (
+                        <EmptyState title="No installation fee on file" />
+                    )}
                 </div>
             ) : (
                 <ul className="divide-y divide-slate-100">
                     {installation.charges.map((charge) => (
-                        <ChargeRow key={charge.uuid} charge={charge} onPay={() => setDialog({ kind: 'pay', charge })} onWaive={() => setDialog({ kind: 'waive', charge })} />
+                        <ChargeRow
+                            key={charge.uuid}
+                            charge={charge}
+                            onPay={() => setDialog({ kind: 'pay', charge })}
+                            onWaive={() => setDialog({ kind: 'waive', charge })}
+                            onRefund={() => setDialog({ kind: 'refund', charge })}
+                        />
                     ))}
                 </ul>
             )}
@@ -77,17 +92,19 @@ export function InstallationCard({ customerUuid, installation }: { customerUuid:
             <CreateChargeModal open={dialog?.kind === 'create'} onClose={close} customerUuid={customerUuid} />
             <PayModal charge={dialog?.kind === 'pay' ? dialog.charge : null} onClose={close} />
             <WaiverModal charge={dialog?.kind === 'waive' ? dialog.charge : null} onClose={close} />
+            <RefundModal charge={dialog?.kind === 'refund' ? dialog.charge : null} onClose={close} />
         </Card>
     );
 }
 
-function ChargeRow({ charge, onPay, onWaive }: { charge: CustomerCharge; onPay: () => void; onWaive: () => void }) {
-    const decide = (decision: 'approve' | 'reject') => {
-        const reason = decision === 'reject' ? window.prompt('Why is this waiver rejected? (optional)') : null;
+function ChargeRow({ charge, onPay, onWaive, onRefund }: { charge: CustomerCharge; onPay: () => void; onWaive: () => void; onRefund: () => void }) {
+    const decideOn = (what: 'waiver' | 'fee' | 'refund', decision: 'approve' | 'reject') => {
+        const reason = decision === 'reject' ? window.prompt(`Why is this ${what === 'fee' ? 'lower fee' : what} rejected? (optional)`) : null;
         if (decision === 'reject' && reason === null) return;
 
-        router.post(`/installation-charges/${charge.uuid}/waiver/${decision}`, decision === 'reject' ? { reason } : {}, { preserveScroll: true });
+        router.post(`/installation-charges/${charge.uuid}/${what}/${decision}`, decision === 'reject' ? { reason } : {}, { preserveScroll: true });
     };
+    const decide = (decision: 'approve' | 'reject') => decideOn('waiver', decision);
 
     return (
         <li className="flex flex-col gap-3 px-5 py-4 text-sm sm:flex-row sm:items-start sm:justify-between">
@@ -96,7 +113,26 @@ function ChargeRow({ charge, onPay, onWaive }: { charge: CustomerCharge; onPay: 
                     <span className="font-semibold text-slate-900">Fee {formatCurrency(charge.amount)}</span>
                     <Badge tone={STATUS[charge.status].tone}>{STATUS[charge.status].label}</Badge>
                     {charge.waiver_status === 'pending' && <Badge tone="yellow">Waiver awaiting approval</Badge>}
+                    {charge.approval_status === 'pending' && <Badge tone="yellow">Lower fee awaiting approval</Badge>}
+                    {charge.refund_status === 'pending' && <Badge tone="yellow">Refund awaiting approval</Badge>}
+                    {charge.offer_name && <span className="text-xs text-slate-500">Offer: {charge.offer_name}</span>}
                 </div>
+                {charge.standard_amount && charge.standard_amount !== charge.amount && (
+                    <p className="text-xs text-slate-500">
+                        Offer fee {formatCurrency(charge.standard_amount)}
+                        {charge.approval_status === 'rejected' && ` — lower fee rejected${charge.approval_rejection_reason ? `: ${charge.approval_rejection_reason}` : ''}`}
+                    </p>
+                )}
+                {charge.refund_status && (
+                    <p className="text-xs text-slate-500">
+                        Refund {charge.refund_status} {charge.refund_amount ? formatCurrency(charge.refund_amount) : ''}
+                        {charge.refund_requested_by_name ? ` (asked by ${charge.refund_requested_by_name}` : ''}
+                        {charge.refund_decided_by_name ? `, decided by ${charge.refund_decided_by_name})` : charge.refund_requested_by_name ? ')' : ''}
+                        {charge.refund_reason ? ` — ${charge.refund_reason}` : ''}
+                        {charge.refund_voucher_number ? ` · Bon ${charge.refund_voucher_number} (${charge.refund_voucher_status})` : ''}
+                        {charge.refund_rejection_reason ? ` · Rejected: ${charge.refund_rejection_reason}` : ''}
+                    </p>
+                )}
                 <p className="text-slate-600">
                     Paid {formatCurrency(charge.paid)} · Balance {formatCurrency(charge.balance)}
                     {charge.waived_amount !== null && ` · Waived ${formatCurrency(charge.waived_amount)}`}
@@ -133,6 +169,31 @@ function ChargeRow({ charge, onPay, onWaive }: { charge: CustomerCharge; onPay: 
                             Approve waiver
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => decide('reject')}>
+                            Reject
+                        </Button>
+                    </>
+                )}
+                {charge.can.decide_fee && (
+                    <>
+                        <Button type="button" variant="warning" onClick={() => decideOn('fee', 'approve')}>
+                            Approve lower fee
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => decideOn('fee', 'reject')}>
+                            Reject
+                        </Button>
+                    </>
+                )}
+                {charge.can.request_refund && (
+                    <Button type="button" variant="ghost" onClick={onRefund}>
+                        Refund installation
+                    </Button>
+                )}
+                {charge.can.decide_refund && (
+                    <>
+                        <Button type="button" variant="warning" onClick={() => decideOn('refund', 'approve')}>
+                            Approve refund
+                        </Button>
+                        <Button type="button" variant="ghost" onClick={() => decideOn('refund', 'reject')}>
                             Reject
                         </Button>
                     </>
@@ -258,6 +319,57 @@ function WaiverModal({ charge, onClose }: { charge: CustomerCharge | null; onClo
                         </Button>
                         <Button type="submit" disabled={processing}>
                             Request waiver
+                        </Button>
+                    </div>
+                </form>
+            )}
+        </Modal>
+    );
+}
+
+/** "Refund installation" (D9): non-refundable by default, so asked for with a reason and approved by someone else. */
+function RefundModal({ charge, onClose }: { charge: CustomerCharge | null; onClose: () => void }) {
+    const { data, setData, post, processing, errors, reset } = useForm({ amount: '', reason: '' });
+
+    const submit = (event: FormEvent) => {
+        event.preventDefault();
+        if (!charge) return;
+
+        post(`/installation-charges/${charge.uuid}/refund`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                reset();
+                onClose();
+            },
+        });
+    };
+
+    return (
+        <Modal open={charge !== null} onClose={onClose} title="Refund installation">
+            {charge && (
+                <form onSubmit={submit} className="flex flex-col gap-4">
+                    <p className="text-sm text-slate-600">
+                        The installation fee is not refundable by default. Once someone else approves, a bon pays the money out and the free months
+                        that came with the installation are forfeited.
+                    </p>
+                    <TextInput
+                        id="refund-amount"
+                        label={`Amount (at most ${formatCurrency(charge.paid)})`}
+                        type="number"
+                        min="1"
+                        max={charge.paid}
+                        required
+                        value={data.amount}
+                        onChange={(e) => setData('amount', e.target.value)}
+                        error={errors.amount}
+                    />
+                    <TextInput id="refund-reason" label="Reason" required value={data.reason} onChange={(e) => setData('reason', e.target.value)} error={errors.reason} />
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="secondary" onClick={onClose}>
+                            Cancel
+                        </Button>
+                        <Button type="submit" disabled={processing}>
+                            Request refund
                         </Button>
                     </div>
                 </form>

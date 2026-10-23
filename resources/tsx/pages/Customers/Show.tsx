@@ -38,6 +38,7 @@ import { CustomerStatusActions } from '@/components/customers/CustomerStatusActi
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { InstallationCard } from '@/components/customers/InstallationCard';
+import { FreeMonthsCard } from '@/components/customers/FreeMonthsCard';
 import { paymentPurposeLabel } from '@/lib/paymentPurpose';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { hasPermission } from '@/lib/permissions';
@@ -306,6 +307,13 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                 )}
             </div>
 
+            {/* Coverage line (installation phase 2): FREE vs PREPAID vs first bill. */}
+            {customer.coverage?.label && (
+                <div className="animate-fade-up mb-4 rounded-xl border border-emerald-100 bg-emerald-50/70 px-4 py-2.5 text-sm font-medium text-emerald-900">
+                    {customer.coverage.label}
+                </div>
+            )}
+
             {/* Stat Callouts */}
             <div className="animate-fade-up mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" style={{ animationDelay: '0.05s' }}>
                 <StatCard label="Monthly Bill" value={formattedBill} icon={<IconCash size={20} stroke={1.75} />} tone="blue" />
@@ -503,6 +511,14 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
             {customer.installation && (
                 <div className="animate-fade-up mt-6" style={{ animationDelay: '0.14s' }}>
                     <InstallationCard customerUuid={customer.uuid} installation={customer.installation} />
+                </div>
+            )}
+
+            {/* Free months (installation offer / compensation) and the
+                coverage line — installation phase 2. */}
+            {customer.free_months && (
+                <div className="animate-fade-up mt-6" style={{ animationDelay: '0.145s' }}>
+                    <FreeMonthsCard customerUuid={customer.uuid} freeMonths={customer.free_months} coverage={customer.coverage} />
                 </div>
             )}
 
