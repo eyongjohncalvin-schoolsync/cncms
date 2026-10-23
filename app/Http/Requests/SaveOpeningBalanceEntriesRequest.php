@@ -28,6 +28,8 @@ class SaveOpeningBalanceEntriesRequest extends FormRequest
             'rows.*.arrears' => ['nullable', 'numeric', 'min:0', "max:{$maxAmount}", 'decimal:0,2'],
             'rows.*.advance_amount' => ['nullable', 'numeric', 'min:0', "max:{$maxAmount}", 'decimal:0,2'],
             'rows.*.advance_months' => ['nullable', 'integer', 'min:0', 'max:'.OpeningBalanceService::MAX_ADVANCE_MONTHS],
+            // Installation phase 2: free months still to run at go-live (zero-value).
+            'rows.*.free_months' => ['nullable', 'integer', 'min:0', 'max:12'],
             'rows.*.note' => ['nullable', 'string', 'max:500'],
         ];
     }
@@ -56,7 +58,7 @@ class SaveOpeningBalanceEntriesRequest extends FormRequest
     }
 
     /**
-     * @return list<array{customer_uuid: string, arrears: ?string, advance_amount: ?string, advance_months: ?int, note: ?string}>
+     * @return list<array{customer_uuid: string, arrears: ?string, advance_amount: ?string, advance_months: ?int, free_months: ?int, note: ?string}>
      */
     public function rows(): array
     {
@@ -65,6 +67,7 @@ class SaveOpeningBalanceEntriesRequest extends FormRequest
             'arrears' => isset($row['arrears']) ? (string) $row['arrears'] : null,
             'advance_amount' => isset($row['advance_amount']) ? (string) $row['advance_amount'] : null,
             'advance_months' => isset($row['advance_months']) ? (int) $row['advance_months'] : null,
+            'free_months' => isset($row['free_months']) ? (int) $row['free_months'] : null,
             'note' => isset($row['note']) && trim((string) $row['note']) !== '' ? trim((string) $row['note']) : null,
         ], $this->validated('rows'));
     }

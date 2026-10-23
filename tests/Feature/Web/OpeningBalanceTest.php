@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Web;
 
 use App\Models\Customer;
+use App\Models\FreeMonthGrant;
 use App\Models\Manuscript;
 use App\Models\Notification;
 use App\Models\OpeningBalanceBatch;
@@ -316,6 +317,30 @@ class OpeningBalanceTest extends TestCase
 
         $this->post("/opening-balances/{$batch->uuid}/reopen")->assertSessionHasErrors('batch');
         $this->assertSame('approved', $batch->refresh()->status);
+    }
+
+    /**
+     * Installation phase 2, item 9: a customer mid-promo at go-live keeps
+     * their remaining free months — zero-value (no credit on the starting
+     * balance), from the go-live month; reopening takes them back.
+     */
+    public function test_free_months_left_at_go_live_become_a_grant_not_credit(): void
+    {
+        [$customer] = $this->newCustomers(1);
+        $batch = $this->submittedWith([['customer_uuid' => $customer->uuid, 'arrears' => '0', 'free_months' => 2]]);
+        $this->assertSame(2, (int) $batch->entries()->value('free_months'));
+
+        $this->actingAsSeededUser('kelvin@shalomtech.dev');
+        $this->post("/opening-balances/{$batch->uuid}/approve")->assertSessionHas('success');
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame(FreeMonthGrant::REASON_OPENING_BALANCE, $grant->reason);
+        $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->status);
+        $this->assertSame($this->goLive, $grant->start_period);
+        $this->assertSame('0.00', (string) Manuscript::query()->where('customer_id', $customer->id)->value('credit'));
+
+        $this->post("/opening-balances/{$batch->uuid}/reopen")->assertSessionHas('success');
+        $this->assertSame(0, FreeMonthGrant::query()->where('customer_id', $customer->id)->count());
     }
 
     public function test_a_draft_can_be_discarded_but_not_once_submitted(): void

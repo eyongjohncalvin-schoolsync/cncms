@@ -6,6 +6,8 @@ import type {
     DisconnectCustomerRequestBody,
     DisconnectCustomerResponse,
     EligibleForDisconnectionResponse,
+    InstallationOptionsResponse,
+    InstallationPreviewResponse,
     ReconnectCustomerRequestBody,
     ReconnectCustomerResponse,
     UpdateCustomerRequestBody,
@@ -111,6 +113,29 @@ export async function disconnectCustomer(
  */
 export async function fetchEligibleForDisconnection(): Promise<EligibleForDisconnectionResponse> {
     const { data } = await apiClient.get<EligibleForDisconnectionResponse>('/customers/eligible-for-disconnection');
+
+    return data;
+}
+
+/**
+ * GET /api/v1/customers/installation-options — the offers and what this
+ * user may do in Add Customer's "Installation & first payment" section
+ * (installation phase 2). Online-only like createCustomer().
+ */
+export async function fetchInstallationOptions(): Promise<InstallationOptionsResponse> {
+    const { data } = await apiClient.get<InstallationOptionsResponse>('/customers/installation-options');
+
+    return data;
+}
+
+/**
+ * POST /api/v1/customers/installation-preview — the server's live line
+ * ("Collect now: 17,500 · TV free Nov–Dec · first bill Jan 2027"), the
+ * advance amount, what needs approval and possible duplicates. Writes
+ * nothing; the server computes every amount.
+ */
+export async function previewInstallation(body: Partial<CreateCustomerRequestBody>): Promise<InstallationPreviewResponse> {
+    const { data } = await apiClient.post<InstallationPreviewResponse>('/customers/installation-preview', body);
 
     return data;
 }

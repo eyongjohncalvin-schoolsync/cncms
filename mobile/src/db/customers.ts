@@ -2,6 +2,7 @@ import { getDatabase } from './database';
 import type { LocalCustomer } from '../types/db';
 import type { CustomerServiceApi, SyncPullCustomer } from '../types/api';
 import { nowIso } from '../utils/format';
+import type { PromoState } from '../utils/installation';
 
 /**
  * `LocalCustomer.services` is a JSON-encoded string (SQLite has no native
@@ -26,6 +27,32 @@ export function parseLocalCustomerServices(customer: Pick<LocalCustomer, 'servic
     }
 }
 
+/** The promo state a pulled customer carries (installation phase 2). */
+function promoOf(customer: SyncPullCustomer): PromoState {
+    return {
+        billing_starts_period: customer.billing_starts_period ?? null,
+        is_free: customer.is_free ?? false,
+        prepaid_months_remaining: customer.prepaid_months_remaining ?? 0,
+        free_months: customer.free_months ?? [],
+        service_paid_months: customer.service_paid_months ?? [],
+    };
+}
+
+/** `LocalCustomer.promo` parsed — null for a row cached before the column existed or a malformed value. */
+export function parseLocalCustomerPromo(customer: Pick<LocalCustomer, 'promo'>): PromoState | null {
+    if (!customer.promo) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(customer.promo);
+
+        return parsed && typeof parsed === 'object' ? (parsed as PromoState) : null;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * `customers` is a read-only cache, fully replaced/merged from pull()'s
  * changes.customers.upserted only — never locally edited. See
@@ -42,8 +69,8 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
     await db.withTransactionAsync(async () => {
         for (const customer of customers) {
             await db.runAsync(
-                `INSERT INTO customers (uuid, name, phone, bill, location, level, status, zone_uuid, cached_at, total_arrears, credit, services)
-                 VALUES ($uuid, $name, $phone, $bill, $location, $level, $status, $zone_uuid, $cached_at, $total_arrears, $credit, $services)
+                `INSERT INTO customers (uuid, name, phone, bill, location, level, status, zone_uuid, cached_at, total_arrears, credit, services, promo)
+                 VALUES ($uuid, $name, $phone, $bill, $location, $level, $status, $zone_uuid, $cached_at, $total_arrears, $credit, $services, $promo)
                  ON CONFLICT(uuid) DO UPDATE SET
                     name = excluded.name,
                     phone = excluded.phone,
@@ -55,7 +82,8 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
                     cached_at = excluded.cached_at,
                     total_arrears = excluded.total_arrears,
                     credit = excluded.credit,
-                    services = excluded.services`,
+                    services = excluded.services,
+                    promo = excluded.promo`,
                 {
                     $uuid: customer.uuid,
                     $name: customer.name,
@@ -69,6 +97,7 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
                     $total_arrears: customer.total_arrears === null || customer.total_arrears === undefined ? null : Number(customer.total_arrears),
                     $credit: customer.credit === null || customer.credit === undefined ? null : Number(customer.credit),
                     $services: JSON.stringify(customer.services ?? []),
+                    $promo: JSON.stringify(promoOf(customer)),
                 },
             );
         }

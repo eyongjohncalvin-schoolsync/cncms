@@ -179,7 +179,10 @@ class InstallationChargeTest extends TestCase
 
         $this->assertSame('installation', $snapshot['purpose']);
         $this->assertSame('INSTALLATION RECEIPT', $snapshot['title']);
-        $this->assertEquals(['fee' => '15000.00', 'paid' => '6000.00', 'balance' => '9000.00', 'status' => 'open'], $snapshot['installation']);
+        $this->assertEquals(['fee' => '15000.00', 'paid' => '6000.00', 'balance' => '9000.00', 'status' => 'open'], array_intersect_key($snapshot['installation'], array_flip(['fee', 'paid', 'balance', 'status'])));
+        // Phase 2 (D11): no free months on this customer, nothing to print.
+        $this->assertSame([], $snapshot['installation']['services']);
+        $this->assertNull($snapshot['installation']['first_bill']);
         // Not subscription money: no billing months, no bill balance.
         $this->assertSame([], $snapshot['payment']['periods']);
         $this->assertNull($snapshot['balance']);

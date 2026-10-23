@@ -4,9 +4,15 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\DataTransferObjects\InstallationData;
+use App\Http\Middleware\BlockDuringImpersonation;
 use App\Models\Customer;
+use App\Models\Payment;
+use App\Support\Impersonation;
+use App\Support\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreCustomerRequest extends FormRequest
 {
@@ -53,6 +59,66 @@ class StoreCustomerRequest extends FormRequest
             'services.*.service_uuid' => ['required_with:services', 'uuid', 'exists:services,uuid'],
             'services.*.service_variant_uuid' => ['nullable', 'uuid', 'exists:service_variants,uuid'],
             'services.*.price' => ['required_with:services', 'numeric', 'gte:0', 'max:999999999.99', 'decimal:0,2'],
+            ...self::installationRules(),
         ];
+    }
+
+    /**
+     * The "Installation & first payment" section of the add-customer form
+     * (docs/plans/installation-and-promotions.md, phase 2) — every field
+     * optional, so the xlsx import (which reuses rules()) is unaffected.
+     * App\Services\CustomerInstallationService checks how they fit together.
+     *
+     * @return array<string, mixed>
+     */
+    public static function installationRules(): array
+    {
+        return [
+            'connected_on' => ['nullable', 'date_format:Y-m-d'],
+            'installation_offer_uuid' => ['nullable', 'uuid'],
+            'installation_fee' => ['nullable', 'numeric', 'min:0', 'max:99999999.99', 'decimal:0,2'],
+            'installation_paid' => ['nullable', 'numeric', 'min:0', 'max:99999999.99', 'decimal:0,2'],
+            'installation_reason' => ['nullable', 'string', 'max:500'],
+            // Per service ticked (revision D15): free months (a consecutive
+            // run from free_from) and months paid upfront that follow them.
+            'service_plans' => ['nullable', 'array'],
+            'service_plans.*.service_uuid' => ['required', 'uuid'],
+            'service_plans.*.free_from' => ['nullable', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+            'service_plans.*.free_months' => ['nullable', 'integer', 'min:0', 'max:36'],
+            'service_plans.*.paid_months' => ['nullable', 'integer', 'min:0', 'max:24'],
+            ...Payment::methodRules(),
+        ];
+    }
+
+    /**
+     * Picking an offer / fee / free months is `installations.manage`; months
+     * paid upfront are a payment (`payments.create`); and no money is taken while
+     * a landlord impersonates (E9).
+     *
+     * @return array<int, \Closure>
+     */
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            $context = app(TenantContext::class);
+            $installation = InstallationData::fromArray($this->all());
+
+            $touchesInstallation = $installation->offerUuid !== null || $installation->fee !== null
+                || bccomp($installation->paidNow, '0', 2) > 0 || $installation->choosesFreeMonths();
+
+            if ($touchesInstallation && ! $context->can('installations.manage')) {
+                $validator->errors()->add('installation_offer_uuid', 'You may not set an installation fee or free months.');
+            }
+
+            if ($installation->paysUpfront() && ! $context->can('payments.create')) {
+                $validator->errors()->add('service_plans', 'You may not record payments.');
+            }
+
+            $takesMoney = bccomp($installation->paidNow, '0', 2) > 0 || $installation->paysUpfront();
+
+            if ($takesMoney && Impersonation::active()) {
+                $validator->errors()->add('installation_paid', BlockDuringImpersonation::MONEY_MESSAGE);
+            }
+        }];
     }
 }

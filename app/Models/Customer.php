@@ -31,7 +31,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * App\Services\CustomerService::archive()/restore() — deliberately NOT in
  * Fillable, so a customer edit form can never touch them.
  */
-#[Fillable(['zone_id', 'name', 'location', 'bill', 'others', 'phone', 'email', 'preferred_channel', 'description', 'level', 'status', 'status_reason', 'status_note', 'status_changed_at', 'prepaid_paused'])]
+#[Fillable(['zone_id', 'name', 'location', 'bill', 'others', 'phone', 'email', 'preferred_channel', 'description', 'level', 'status', 'status_reason', 'status_note', 'status_changed_at', 'prepaid_paused', 'connected_on', 'billing_starts_period'])]
 #[RouteKey('uuid')]
 class Customer extends Model
 {
@@ -45,6 +45,7 @@ class Customer extends Model
             'status_changed_at' => 'datetime',
             'prepaid_paused' => 'boolean',
             'deleted_at' => 'datetime',
+            'connected_on' => 'date:Y-m-d',
         ];
     }
 
@@ -77,6 +78,15 @@ class Customer extends Model
     public function charges(): HasMany
     {
         return $this->hasMany(CustomerCharge::class);
+    }
+
+    /**
+     * Free months (installation offer, compensation, carried in at
+     * go-live) — see App\Models\FreeMonthGrant.
+     */
+    public function freeMonthGrants(): HasMany
+    {
+        return $this->hasMany(FreeMonthGrant::class);
     }
 
     public function manuscripts(): HasMany

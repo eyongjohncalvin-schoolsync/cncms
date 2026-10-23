@@ -10,10 +10,13 @@ use App\Models\AuditLog;
 use App\Models\Branch;
 use App\Models\CommandRun;
 use App\Models\Customer;
+use App\Models\CustomerCharge;
 use App\Models\Expenditure;
+use App\Models\FreeMonthGrant;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
+use App\Models\User;
 use App\Models\Zone;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
@@ -508,9 +511,98 @@ class ReportService
             // doc comment for why baking the role decision into the cached
             // value itself would leak one role's payload into another's.
             'pnl' => $this->resourcesDashboard->dashboard($period),
+            // Installation phase 2, item 10: installations by offer,
+            // installation income, the cost of free months as foregone
+            // revenue (never income), customers on promo, promos ending
+            // soon, and who gave grants / waivers.
+            'installations' => $this->installationsAndPromotions($period, $start, $end, $branchId, $zoneId),
         ];
 
         return $payload;
+    }
+
+    /**
+     * @return array{by_offer: list<array{offer: string, count: int, fees: string}>, installation_income: string, promo_cost: string, customers_on_promo: int, ending_soon: list<array{customer: string, service: string, ends: string}>, grants_by_user: list<array{user: string, requested: int, approved: int, waivers_approved: int}>}
+     */
+    private function installationsAndPromotions(string $period, Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    {
+        $charges = fn () => $this->fenceZones(CustomerCharge::query()
+            ->join('customers', 'customers.id', '=', 'customer_charges.customer_id')
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId);
+
+        $byOffer = $charges()
+            ->leftJoin('installation_offers', 'installation_offers.id', '=', 'customer_charges.installation_offer_id')
+            ->where('customer_charges.kind', CustomerCharge::KIND_INSTALLATION)
+            ->whereBetween('customer_charges.created_at', [$start, $end])
+            ->groupBy('installation_offers.name')
+            ->selectRaw("coalesce(installation_offers.name, 'No offer') as offer, count(*) as count, coalesce(sum(customer_charges.amount), 0) as fees")
+            ->orderBy('offer')
+            ->get()
+            ->map(fn ($row): array => ['offer' => (string) $row->offer, 'count' => (int) $row->count, 'fees' => bcadd((string) $row->fees, '0', 2)])
+            ->all();
+
+        $income = $this->fenceZones(Payment::query()
+            ->join('customers', 'customers.id', '=', 'payments.customer_id')
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId)
+            ->where('payments.purpose', Payment::PURPOSE_INSTALLATION)
+            ->where('payments.verification_status', 'verified')
+            ->whereBetween('payments.created_at', [$start, $end])
+            ->sum('payments.amount');
+
+        $manuscripts = fn () => $this->fenceZones(Manuscript::query()
+            ->join('customers', 'customers.id', '=', 'manuscripts.customer_id')
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId)
+            ->where('manuscripts.period', $period)
+            ->where('manuscripts.free_value', '>', 0);
+
+        $grants = fn () => $this->fenceZones(FreeMonthGrant::query()
+            ->join('customers', 'customers.id', '=', 'free_month_grants.customer_id')
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId);
+
+        $nextPeriod = Carbon::createFromFormat('!Y-m', $period)->addMonthNoOverflow()->format('Y-m');
+
+        $endingSoon = $grants()
+            ->leftJoin('services', 'services.id', '=', 'free_month_grants.service_id')
+            ->where('free_month_grants.status', FreeMonthGrant::STATUS_APPROVED)
+            ->whereNotNull('free_month_grants.start_period')
+            ->get(['customers.name as customer_name', 'services.name as service_name', 'free_month_grants.start_period', 'free_month_grants.months', 'free_month_grants.status'])
+            ->map(fn (FreeMonthGrant $grant): array => [
+                'customer' => (string) $grant->customer_name,
+                'service' => (string) ($grant->service_name ?? 'All services'),
+                'ends' => (string) $grant->endPeriod(),
+            ])
+            ->filter(fn (array $row): bool => in_array($row['ends'], [$period, $nextPeriod], true))
+            ->sortBy('ends')
+            ->values()
+            ->all();
+
+        $users = User::query()->pluck('name', 'id');
+        $byUser = [];
+        $count = function (string $column, string $key, $query) use (&$byUser, $users): void {
+            foreach ($query->groupBy($column)->selectRaw("{$column} as user_id, count(*) as n")->get() as $row) {
+                if ($row->user_id === null) {
+                    continue;
+                }
+                $name = (string) ($users[$row->user_id] ?? "User #{$row->user_id}");
+                $byUser[$name] ??= ['user' => $name, 'requested' => 0, 'approved' => 0, 'waivers_approved' => 0];
+                $byUser[$name][$key] += (int) $row->n;
+            }
+        };
+
+        $count('free_month_grants.requested_by', 'requested', $grants()->whereBetween('free_month_grants.created_at', [$start, $end]));
+        $count('free_month_grants.decided_by', 'approved', $grants()->whereIn('free_month_grants.status', [FreeMonthGrant::STATUS_APPROVED, FreeMonthGrant::STATUS_AWAITING_INSTALLATION_PAYMENT])->whereBetween('free_month_grants.decided_at', [$start, $end]));
+        $count('customer_charges.waiver_decided_by', 'waivers_approved', $charges()->where('customer_charges.waiver_status', CustomerCharge::WAIVER_APPROVED)->whereBetween('customer_charges.waiver_decided_at', [$start, $end]));
+
+        ksort($byUser);
+
+        return [
+            'by_offer' => $byOffer,
+            'installation_income' => bcadd((string) $income, '0', 2),
+            'promo_cost' => bcadd((string) $manuscripts()->sum('manuscripts.free_value'), '0', 2),
+            'customers_on_promo' => $manuscripts()->distinct()->count('manuscripts.customer_id'),
+            'ending_soon' => $endingSoon,
+            'grants_by_user' => array_values($byUser),
+        ];
     }
 
     /**

@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\RejectInstallationFeeRequest;
+use App\Http\Requests\RejectInstallationRefundRequest;
 use App\Http\Requests\RejectInstallationWaiverRequest;
+use App\Http\Requests\RequestInstallationRefundRequest;
 use App\Http\Requests\RequestInstallationWaiverRequest;
 use App\Http\Requests\StoreCustomerChargeRequest;
 use App\Http\Requests\StoreInstallationPaymentRequest;
@@ -74,5 +77,51 @@ class CustomerChargeController extends Controller
         $this->charges->rejectWaiver($customerCharge, $request->user(), $request->validated('reason'));
 
         return back()->with('success', 'Waiver rejected.');
+    }
+
+    /** A fee below the offer's (phase 2, D8). */
+    public function approveFee(Request $request, CustomerCharge $customerCharge): RedirectResponse
+    {
+        $this->authorize('approveFee', $customerCharge);
+
+        $this->charges->approveFee($customerCharge, $request->user());
+
+        return back()->with('success', 'Installation fee approved.');
+    }
+
+    public function rejectFee(RejectInstallationFeeRequest $request, CustomerCharge $customerCharge): RedirectResponse
+    {
+        $this->charges->rejectFee($customerCharge, $request->user(), $request->validated('reason'));
+
+        return back()->with('success', 'Lower fee rejected — the offer\'s fee applies.');
+    }
+
+    /** "Refund installation" (D9). */
+    public function requestRefund(RequestInstallationRefundRequest $request, CustomerCharge $customerCharge): RedirectResponse
+    {
+        $this->charges->requestRefund(
+            $customerCharge,
+            number_format((float) $request->validated('amount'), 2, '.', ''),
+            $request->validated('reason'),
+            $request->user(),
+        );
+
+        return back()->with('success', 'Refund requested. Someone else must approve it.');
+    }
+
+    public function approveRefund(Request $request, CustomerCharge $customerCharge): RedirectResponse
+    {
+        $this->authorize('approveRefund', $customerCharge);
+
+        $charge = $this->charges->approveRefund($customerCharge, $request->user());
+
+        return back()->with('success', "Refund approved — bon {$charge->refundVoucher?->number} pays it out. The installation's unused free months are forfeited.");
+    }
+
+    public function rejectRefund(RejectInstallationRefundRequest $request, CustomerCharge $customerCharge): RedirectResponse
+    {
+        $this->charges->rejectRefund($customerCharge, $request->user(), $request->validated('reason'));
+
+        return back()->with('success', 'Refund rejected.');
     }
 }

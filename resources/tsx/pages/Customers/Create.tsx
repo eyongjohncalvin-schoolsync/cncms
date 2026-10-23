@@ -1,4 +1,4 @@
-import { FormEvent } from 'react';
+import { FormEvent, useState } from 'react';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { IconUserPlus, IconUser, IconMapPin, IconWallet, IconPhone, IconGauge, IconFileText, IconArrowLeft } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -9,29 +9,41 @@ import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ServicesPicker } from '@/components/customers/ServicesPicker';
 import { ReceiptDeliveryFields } from '@/components/customers/ReceiptDeliveryFields';
-import type { CustomerLevel, CustomerServiceSelectionForm, ServiceCatalogueEntry, Zone, PreferredChannel } from '@/types';
+import {
+    InstallationSection,
+    initialInstallationValues,
+    type InstallationFormValues,
+    type InstallationOptions,
+} from '@/components/customers/InstallationSection';
+import type { CustomerLevel, CustomerServiceSelectionForm, InstallationPreview, ServiceCatalogueEntry, Zone, PreferredChannel } from '@/types';
 
 interface CustomersCreateProps {
     zones: Zone[];
     service_catalogue: ServiceCatalogueEntry[];
+    installation: InstallationOptions;
 }
 
 const levelOptions: CustomerLevel[] = ['normal', 'Vip', 'Operator'];
 
-export default function CustomersCreate({ zones, service_catalogue }: CustomersCreateProps) {
+export default function CustomersCreate({ zones, service_catalogue, installation }: CustomersCreateProps) {
     const defaultService = service_catalogue.find((s) => s.is_default);
+    const [duplicates, setDuplicates] = useState<InstallationPreview['duplicates']>([]);
+    const [notADuplicate, setNotADuplicate] = useState(false);
 
-    const { data, setData, post, processing, errors } = useForm<{
-        name: string;
-        zone_uuid: string;
-        phone: string;
-        email: string;
-        preferred_channel: PreferredChannel;
-        location: string;
-        level: CustomerLevel;
-        description: string;
-        services: CustomerServiceSelectionForm[];
-    }>({
+    const { data, setData, post, processing, errors } = useForm<
+        {
+            name: string;
+            zone_uuid: string;
+            phone: string;
+            email: string;
+            preferred_channel: PreferredChannel;
+            location: string;
+            level: CustomerLevel;
+            description: string;
+            services: CustomerServiceSelectionForm[];
+        } & InstallationFormValues
+    >({
+        ...initialInstallationValues(installation),
         name: '',
         zone_uuid: '',
         phone: '',
@@ -234,6 +246,35 @@ export default function CustomersCreate({ zones, service_catalogue }: CustomersC
                         </CardBody>
                     </Card>
 
+                    <InstallationSection
+                        options={installation}
+                        values={data}
+                        onChange={(key, value) => setData(key, value as never)}
+                        services={data.services}
+                        catalogue={service_catalogue}
+                        name={data.name}
+                        phone={data.phone}
+                        errors={errors as Partial<Record<string, string>>}
+                        onDuplicatesChange={(found) => {
+                            setDuplicates(found);
+                            if (found.length === 0) {
+                                setNotADuplicate(false);
+                            }
+                        }}
+                    />
+
+                    {duplicates.length > 0 && (
+                        <label className="flex items-center gap-2 rounded-xl border border-amber-200 bg-white p-4 text-sm text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={notADuplicate}
+                                onChange={(e) => setNotADuplicate(e.target.checked)}
+                                className="h-4 w-4 rounded border-slate-300"
+                            />
+                            I checked — this is a different person (a new installation).
+                        </label>
+                    )}
+
                     {/* Action Bar */}
                     <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                         <Link
@@ -251,7 +292,7 @@ export default function CustomersCreate({ zones, service_catalogue }: CustomersC
                             </Link>
                             <Button
                                 type="submit"
-                                disabled={processing}
+                                disabled={processing || (duplicates.length > 0 && !notADuplicate)}
                                 className="w-full rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 sm:w-auto"
                             >
                                 {processing && <LoadingSpinner className="mr-2 text-white" />}

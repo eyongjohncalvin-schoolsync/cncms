@@ -31,6 +31,20 @@ Never touch the live `cncms` database.
 | D13 | **Reconnection fine = technician motivation fee.** Not company income, never part of the bill, arrears or disconnection — **silent**. Recorded only for the audit trail and the customer's receipt. The agent hands it to the cashier with the day's cash; the cashier pays the technician and that payout is recorded. |
 | D14 | **Past fines** (which were wrongly credited to customers' subscriptions) are left as they are; the fix applies from now on. |
 
+## Phase 2 revision — owner decisions (2026-10-23)
+
+After seeing the first Phase 2 build, the owner simplified how months are chosen.
+These supersede D4 (automatic "join month not billed") and the offer-driven form.
+
+| # | Decision |
+|---|---|
+| D15 | **Months are chosen explicitly per service at registration.** For each service ticked (TV, Internet, …) the form offers ☐ **Free months** — month chips starting from the installation month — and ☐ **Paid upfront** — a number of months that follow straight after the free months, at that service's own price. Each service gets its own timeline: free → paid → billed. |
+| D16 | The **installation month is ticked as free by default**, with a hint/tooltip to add more. The user's choice settles whether the installation month is free (untick it and it is billed). Free months are one **consecutive** run starting at the installation month or later. Max 3 free months (company setting) unless an admin/owner approves more; reason + approver recorded. |
+| D17 | Free months chosen at registration apply **only if installation is fully paid at registration**, or an admin/owner approves them (replaces D3's "wait until paid"). |
+| D18 | When a service's free and paid months end, the customer is **billed exactly like every other customer** — same ledger, same pay-ahead rule (business-rules step 5). There is **no separate month-by-month rule** for new customers. |
+| D19 | **Installation offers stay as presets**: picking one ticks the boxes (fee, free months per service), which the user can still change (changes beyond the preset need approval as in D8). |
+| D20 | **Compensation months** (D12) are added to the chosen service's timeline after its existing free/paid months, so prepaid value is never lost. |
+
 ## Bugs this fixes
 
 - **Reconnection fine credited back to the customer.** `CustomerStatusService::reconnectOne()`
@@ -126,6 +140,30 @@ Never touch the live `cncms` database.
     ending soon, grants/waivers by user.
 11. **Duplicate guard:** warn on matching phone/name when creating a customer;
     offers apply to new installations only.
+
+### Phase 2 status (2026-10-23, branch `installation-phase-2`, not merged)
+
+Built: items 1–11, reworked for D15–D20. Free months are stateless —
+`App\Support\Billing\FreeMonthPlan` derives every month from approved
+`free_month_grants` (a calendar window per service) and
+`customers.billing_starts_period` (now simply the installation month: nothing
+before it is billed). Months paid upfront are per service:
+`payments.service_months` buys them at each service's price, and
+`manuscripts.service_prepaid` carries the counters. A free month or a frozen
+month uses none, so N paid months cover N billed months of that service.
+`FreeMonthPlan::timelines()` walks free → paid → billed per service for the
+preview, the coverage line and the installation receipt. Once a service's
+months end, every customer is on the same ledger and pay-ahead rule (D18).
+Free months chosen at registration apply at once only when the installation
+is fully paid then, they are within the cap and they are within the offer
+preset. Otherwise they wait for admin/owner approval (D16/D17/D19), and paying
+the fee later does not start them. Compensation goes after each service's free
+and paid months (D20), one grant row per service.
+
+Deviations: a third grant reason, `opening_balance`, and a `cancelled` status
+(refund forfeits). The duplicate guard warns (web + mobile require a tick) but
+the server never blocks, for older app builds. Owner to set: Settings →
+Installation offers (presets).
 
 ## Phase 3 — offline field installations (agents)
 

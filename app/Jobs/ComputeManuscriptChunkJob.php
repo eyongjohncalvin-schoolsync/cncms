@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Models\Customer;
 use App\Services\ManuscriptCalculator;
+use App\Support\Billing\FreeMonthPlan;
 use App\Support\ScheduledTasks\ManuscriptChunkDataResolver;
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
@@ -69,6 +70,9 @@ class ComputeManuscriptChunkJob implements ShouldQueue
 
         $customers = Customer::query()->whereIn('id', $this->customerIds)->get()->keyBy('id');
 
+        // Free months & first billed month (installation phase 2).
+        $freeMonthPlans = FreeMonthPlan::forCustomers($customers);
+
         $customerResults = [];
         $customersProcessed = 0;
         $frozenCustomers = 0;
@@ -94,6 +98,7 @@ class ComputeManuscriptChunkJob implements ShouldQueue
                     $previousManuscriptsByCustomer->get($customer->id),
                     $eligibleVerifiedPaymentsByCustomer->get($customer->id, new Collection),
                     $eligibleAdjustmentsByCustomer->get($customer->id, new Collection),
+                    freeMonths: $freeMonthPlans[$customer->id] ?? null,
                 );
 
                 $attributes = $result->toManuscriptAttributes();

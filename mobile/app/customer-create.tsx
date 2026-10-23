@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { useAuth } from '../src/auth/AuthContext';
-import { createCustomer } from '../src/api/customers';
+import { createCustomer, fetchInstallationOptions } from '../src/api/customers';
+import { DuplicateWarning, InstallationFields } from '../src/components/customers/InstallationFields';
+import { initialInstallationState, toRequestFields, type InstallationFormState } from '../src/utils/installation';
 import { fetchZones, type ZoneApi } from '../src/api/zones';
 import { fetchServiceCatalogue } from '../src/api/services';
 import { extractErrorMessage, isNetworkError } from '../src/api/client';
@@ -16,7 +18,7 @@ import { ServicesPicker } from '../src/components/customers/ServicesPicker';
 import { ReceiptDeliveryFields } from '../src/components/customers/ReceiptDeliveryFields';
 import { colors } from '../src/theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../src/theme/tokens';
-import type { CustomerServiceSelection, PreferredChannel, ServiceCatalogueApi } from '../src/types/api';
+import type { CustomerServiceSelection, InstallationOptionsResponse, InstallationPreviewApi, PreferredChannel, ServiceCatalogueApi } from '../src/types/api';
 
 type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting';
 
@@ -83,6 +85,11 @@ export default function CustomerCreateScreen() {
     const [zoneUuid, setZoneUuid] = useState<string | null>(null);
     const [services, setServices] = useState<CustomerServiceSelection[]>([]);
     const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+    // Installation & first payment (installation phase 2).
+    const [installationOptions, setInstallationOptions] = useState<InstallationOptionsResponse['data'] | null>(null);
+    const [installation, setInstallation] = useState<InstallationFormState | null>(null);
+    const [duplicates, setDuplicates] = useState<InstallationPreviewApi['duplicates']>([]);
+    const [notADuplicate, setNotADuplicate] = useState(false);
 
     function load() {
         if (!getSyncState().isOnline) {
@@ -93,10 +100,30 @@ export default function CustomerCreateScreen() {
         setPhase('loading');
         setErrorMessage(null);
 
-        Promise.all([fetchZones(), fetchServiceCatalogue()])
-            .then(([zonesResponse, catalogueResponse]) => {
+        Promise.all([
+            fetchZones(),
+            fetchServiceCatalogue(),
+            // An older server has no installation section — the form then
+            // simply doesn't show one.
+            fetchInstallationOptions().catch((error) => {
+                if (isNetworkError(error)) {
+                    throw error;
+                }
+
+                return null;
+            }),
+        ])
+            .then(([zonesResponse, catalogueResponse, installationResponse]) => {
                 setZones(zonesResponse.data);
                 setCatalogue(catalogueResponse.data);
+
+                if (installationResponse) {
+                    const options = installationResponse.data;
+                    setInstallationOptions(options);
+                    setInstallation(
+                        initialInstallationState(options.today, options.can_manage ? (options.offers.find((o) => o.is_default)?.uuid ?? null) : null),
+                    );
+                }
 
                 const defaultService = catalogueResponse.data.find((s) => s.is_default);
                 setServices(
@@ -160,10 +187,17 @@ export default function CustomerCreateScreen() {
             return;
         }
 
+        if (duplicates.length > 0 && !notADuplicate) {
+            Alert.alert('Possible duplicate', 'This may be an existing customer. Check the list and confirm it is a different person.');
+
+            return;
+        }
+
         setPhase('submitting');
 
         try {
-            await createCustomer({
+            const response = await createCustomer({
+                ...(installation ? toRequestFields(installation) : {}),
                 zone_uuid: zoneUuid as string,
                 name: name.trim(),
                 phone: phone.trim(),
@@ -178,7 +212,10 @@ export default function CustomerCreateScreen() {
             // (including this one) sooner than the next natural sync tick.
             void syncManager.syncNow('manual');
 
-            Alert.alert('Customer added', `${name.trim()} has been added.`, [
+            const receipts = (response.payments ?? []).map((p) => p.receipt_number).filter(Boolean);
+            const coverage = response.data.coverage?.label;
+
+            Alert.alert('Customer added', [`${name.trim()} has been added.`, coverage, receipts.length > 0 ? `Receipts: ${receipts.join(', ')}` : null].filter(Boolean).join('\n'), [
                 { text: 'OK', onPress: () => router.back() },
             ]);
         } catch (error) {
@@ -200,6 +237,13 @@ export default function CustomerCreateScreen() {
                     location: fieldErrors.location?.[0],
                     email: fieldErrors.email?.[0],
                     services: firstServicesError(fieldErrors) ?? prev.services,
+                    connected_on: fieldErrors.connected_on?.[0],
+                    installation_offer_uuid: fieldErrors.installation_offer_uuid?.[0],
+                    installation_fee: fieldErrors.installation_fee?.[0],
+                    installation_paid: fieldErrors.installation_paid?.[0],
+                    installation_reason: fieldErrors.installation_reason?.[0],
+                    service_plans: Object.entries(fieldErrors).find(([key]) => key.startsWith('service_plans'))?.[1]?.[0],
+                    method_reference: fieldErrors.method_reference?.[0],
                 }));
             }
 
@@ -358,6 +402,28 @@ export default function CustomerCreateScreen() {
                     error={errors.services}
                 />
             </Card>
+
+            {installationOptions && installation && (
+                <InstallationFields
+                    options={installationOptions}
+                    state={installation}
+                    onChange={setInstallation}
+                    services={services}
+                    catalogue={catalogue}
+                    name={name}
+                    phone={phone}
+                    errors={errors}
+                    onPreview={(preview) => {
+                        const found = preview?.duplicates ?? [];
+                        setDuplicates(found);
+                        if (found.length === 0) {
+                            setNotADuplicate(false);
+                        }
+                    }}
+                />
+            )}
+
+            <DuplicateWarning duplicates={duplicates} confirmed={notADuplicate} onConfirm={setNotADuplicate} />
 
             <Button
                 title={submitting ? 'Adding…' : 'Add Customer'}

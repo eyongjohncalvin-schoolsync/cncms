@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
-#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'period', 'command_run_id', 'opening_balance_batch_id', 'sent_log'])]
+#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'free_value', 'service_prepaid', 'period', 'command_run_id', 'opening_balance_batch_id', 'sent_log'])]
 #[RouteKey('uuid')]
 class Manuscript extends Model
 {
@@ -45,6 +45,8 @@ class Manuscript extends Model
             'total_bill' => 'decimal:2',
             'prepaid_months_remaining' => 'integer',
             'prepaid_rate' => 'decimal:2',
+            'free_value' => 'decimal:2',
+            'service_prepaid' => 'array',
             'sent_log' => 'array',
             // `date:Y-m-d`, not bare `date`: the bare cast serializes to a
             // full ISO-8601 datetime ("2026-12-29T00:00:00.000000Z") in
@@ -73,6 +75,13 @@ class Manuscript extends Model
      */
     public function expiryLabel(): string
     {
+        // Free months (installation phase 2): a month where nothing was
+        // charged because every service was free reads FREE — never
+        // PREPAID, which is money the customer paid.
+        if ($this->isFreeMonth()) {
+            return 'FREE';
+        }
+
         if ($this->payment_expiration !== null) {
             return $this->payment_expiration->format('M y');
         }
@@ -89,6 +98,16 @@ class Manuscript extends Model
         }
 
         return '-';
+    }
+
+    /**
+     * Nothing charged this month because of free months (every service
+     * free): free_value > 0 and the month's charge (`bill`) is 0.
+     */
+    public function isFreeMonth(): bool
+    {
+        return bccomp((string) ($this->free_value ?? '0'), '0', 2) > 0
+            && bccomp((string) $this->bill, '0', 2) === 0;
     }
 
     /**

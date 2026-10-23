@@ -10,6 +10,7 @@ use App\Models\Role;
 use App\Policies\PaymentReceiptPolicy;
 use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
+use App\Services\FreeMonthGrantService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
@@ -27,7 +28,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // One instance per request/job: the add-customer flow defers the
+        // manuscript recalculation that grant changes trigger until the
+        // whole save is done (FreeMonthGrantService::deferRecalculation()).
+        $this->app->scoped(FreeMonthGrantService::class);
     }
 
     /**

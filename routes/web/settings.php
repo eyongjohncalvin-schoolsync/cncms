@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\SettingsBillPrintingController;
 use App\Http\Controllers\SettingsCommandRunController;
 use App\Http\Controllers\SettingsCompanyController;
+use App\Http\Controllers\SettingsInstallationOfferController;
 use App\Http\Controllers\SettingsLocaleController;
 use App\Http\Controllers\SettingsNotificationController;
 use App\Http\Controllers\SettingsServiceController;
@@ -86,3 +87,12 @@ Route::post('settings/services/{service}/variants', [SettingsServiceController::
 Route::patch('settings/services/{service}/variants/{variant}', [SettingsServiceController::class, 'updateVariant'])->name('settings.services.variants.update');
 Route::delete('settings/services/{service}/variants/{variant}', [SettingsServiceController::class, 'destroyVariant'])->name('settings.services.variants.destroy');
 Route::post('settings/services/{service}/variants/{variant}/apply-price', [SettingsServiceController::class, 'applyVariantPrice'])->name('settings.services.variants.apply-price');
+
+// Installation offers (docs/plans/installation-and-promotions.md, phase 2):
+// fee + free months per service, and the cap on free months per grant.
+// `installations.offers` via InstallationOfferPolicy.
+Route::get('settings/installation-offers', [SettingsInstallationOfferController::class, 'index'])->name('settings.installation-offers.index');
+Route::post('settings/installation-offers', [SettingsInstallationOfferController::class, 'store'])->name('settings.installation-offers.store');
+Route::patch('settings/installation-offers/cap', [SettingsInstallationOfferController::class, 'updateCap'])->name('settings.installation-offers.cap');
+Route::patch('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'update'])->name('settings.installation-offers.update');
+Route::delete('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'destroy'])->name('settings.installation-offers.destroy');

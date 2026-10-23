@@ -26,7 +26,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { DailyReport, MonthlyReport, PageProps, ReportData, ReportDelta, ReportIncomeByPurpose, ReportTier, WeeklyReport } from '@/types';
+import type { DailyReport, MonthlyReport, PageProps, ReportData, ReportDelta, ReportIncomeByPurpose, ReportInstallations, ReportTier, WeeklyReport } from '@/types';
 
 interface ReportsIndexProps {
     tier: ReportTier;
@@ -617,6 +617,8 @@ function MonthlyView({ report }: { report: MonthlyReport }) {
                 />
             </div>
 
+            {report.installations && <InstallationsReport data={report.installations} />}
+
             {report.billing_ledger === null && (
                 <EmptyState
                     title="Billing run not yet executed for this period"
@@ -743,5 +745,90 @@ function MonthlyView({ report }: { report: MonthlyReport }) {
                 </Card>
             )}
         </div>
+    );
+}
+
+/**
+ * Installations & promotions (docs/plans/installation-and-promotions.md,
+ * phase 2, item 10). Promo cost is foregone revenue — what the free months
+ * would have been billed — never income.
+ */
+function InstallationsReport({ data }: { data: ReportInstallations }) {
+    return (
+        <Card className="animate-fade-up" style={{ animationDelay: '110ms' }}>
+            <CardHeader>
+                <h2 className="text-sm font-semibold text-slate-900">Installations &amp; promotions</h2>
+            </CardHeader>
+            <CardBody className="flex flex-col gap-4 text-sm">
+                <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div>
+                        <dt className="text-slate-500">Installation income</dt>
+                        <dd className="font-medium text-slate-900">{formatCurrency(data.installation_income)}</dd>
+                    </div>
+                    <div>
+                        <dt className="text-slate-500">Promo cost (foregone revenue)</dt>
+                        <dd className="font-medium text-slate-900">{formatCurrency(data.promo_cost)}</dd>
+                    </div>
+                    <div>
+                        <dt className="text-slate-500">Customers on free months</dt>
+                        <dd className="font-medium text-slate-900">{data.customers_on_promo.toLocaleString()}</dd>
+                    </div>
+                </dl>
+
+                <div>
+                    <h3 className="mb-1 font-medium text-slate-700">Installations this month, by offer</h3>
+                    {data.by_offer.length === 0 ? (
+                        <p className="text-slate-500">None.</p>
+                    ) : (
+                        <ul className="space-y-0.5">
+                            {data.by_offer.map((row) => (
+                                <li key={row.offer} className="flex justify-between gap-2">
+                                    <span>{row.offer}</span>
+                                    <span className="tabular-nums text-slate-600">
+                                        {row.count} · {formatCurrency(row.fees)}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+
+                <div>
+                    <h3 className="mb-1 font-medium text-slate-700">Free months ending this month or next</h3>
+                    {data.ending_soon.length === 0 ? (
+                        <p className="text-slate-500">None.</p>
+                    ) : (
+                        <ul className="space-y-0.5">
+                            {data.ending_soon.map((row, index) => (
+                                <li key={`${row.customer}-${index}`} className="flex justify-between gap-2">
+                                    <span>
+                                        {row.customer} — {row.service}
+                                    </span>
+                                    <span className="text-slate-600">ends {row.ends}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+
+                <div>
+                    <h3 className="mb-1 font-medium text-slate-700">Free months and waivers by person</h3>
+                    {data.grants_by_user.length === 0 ? (
+                        <p className="text-slate-500">None.</p>
+                    ) : (
+                        <ul className="space-y-0.5">
+                            {data.grants_by_user.map((row) => (
+                                <li key={row.user} className="flex justify-between gap-2">
+                                    <span>{row.user}</span>
+                                    <span className="text-slate-600">
+                                        asked {row.requested} · approved {row.approved} · waivers {row.waivers_approved}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            </CardBody>
+        </Card>
     );
 }

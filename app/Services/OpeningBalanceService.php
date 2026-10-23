@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Customer;
+use App\Models\FreeMonthGrant;
 use App\Models\Manuscript;
 use App\Models\OpeningBalanceBatch;
 use App\Models\OpeningBalanceEntry;
@@ -109,7 +110,7 @@ class OpeningBalanceService
      * figures are all blank removes that customer's entry ("not entered
      * yet"); zeros are a real entry ("nothing owed").
      *
-     * @param  list<array{customer_uuid: string, arrears: ?string, advance_amount: ?string, advance_months: ?int, note: ?string}>  $rows
+     * @param  list<array{customer_uuid: string, arrears: ?string, advance_amount: ?string, advance_months: ?int, free_months?: ?int, note: ?string}>  $rows
      * @return array{saved: int, removed: int}
      */
     public function saveEntries(OpeningBalanceBatch $batch, array $rows): array
@@ -131,7 +132,7 @@ class OpeningBalanceService
         DB::transaction(function () use ($batch, $rows, $eligible, &$saved, &$removed): void {
             foreach ($rows as $row) {
                 $customer = $eligible->get($row['customer_uuid']);
-                $isBlank = $row['arrears'] === null && $row['advance_amount'] === null && $row['advance_months'] === null;
+                $isBlank = $row['arrears'] === null && $row['advance_amount'] === null && $row['advance_months'] === null && ($row['free_months'] ?? null) === null;
 
                 if ($isBlank) {
                     $removed += OpeningBalanceEntry::query()
@@ -148,6 +149,7 @@ class OpeningBalanceService
                         'arrears' => $row['arrears'] ?? '0',
                         'advance_amount' => $row['advance_amount'] ?? '0',
                         'advance_months' => $row['advance_months'] ?? 0,
+                        'free_months' => $row['free_months'] ?? 0,
                         'note' => $row['note'] ?? null,
                     ],
                 );
@@ -217,6 +219,13 @@ class OpeningBalanceService
                     'opening_balance_batch_id' => $batch->id,
                     ...self::manuscriptAttributes($entry, (string) $entry->customer->bill, $baselinePeriod),
                 ]);
+
+                // Mid-promo at go-live (installation phase 2): the free months
+                // still to run, from the go-live month — zero-value, never
+                // locked into the starting balance.
+                if ((int) $entry->free_months > 0) {
+                    app(FreeMonthGrantService::class)->carryInAtGoLive($entry->customer, (int) $entry->free_months, $batch->go_live_period, $actor);
+                }
             }
 
             $batch->update([
@@ -280,6 +289,13 @@ class OpeningBalanceService
 
             // Model deletes (not a bulk query) so each removal is audited.
             $batch->manuscripts()->get()->each->delete();
+
+            // …and the free months approval carried in for these customers.
+            FreeMonthGrant::query()
+                ->where('reason', FreeMonthGrant::REASON_OPENING_BALANCE)
+                ->whereIn('customer_id', $batch->entries()->pluck('customer_id'))
+                ->get()
+                ->each->delete();
 
             $batch->update([
                 'status' => 'draft',

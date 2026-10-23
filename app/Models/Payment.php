@@ -31,6 +31,9 @@ use LogicException;
     // callers (PaymentService, CustomerStatusService, CustomerChargeService),
     // never accepted from a payment form.
     'purpose', 'customer_charge_id',
+    // Installation phase 2 (D15): a "paid upfront" payment's months per
+    // service, each at that service's locked price — [{service_id, months, rate}].
+    'service_months',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model
@@ -157,6 +160,7 @@ class Payment extends Model
             'credit' => 'decimal:2',
             'prepaid_rate' => 'decimal:2',
             'clear_arrears_first' => 'boolean',
+            'service_months' => 'array',
             'expiration_date' => 'date',
             'processed_at' => 'datetime',
             'collected_at' => 'datetime',

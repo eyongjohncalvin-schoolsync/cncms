@@ -12,7 +12,14 @@ export function prepaidCoverageLabel(m: {
     payment_expiration: string | null;
     prepaid_months_remaining?: number | null;
     period: string;
+    /** Installation phase 2: what the free services would have cost — FREE, never PREPAID. */
+    free_value?: string | null;
+    bill?: string | null;
 }): string {
+    if (Number(m.free_value ?? 0) > 0 && Number(m.bill ?? 1) === 0) {
+        return 'FREE';
+    }
+
     if (m.payment_expiration) {
         return formatMonthYear(m.payment_expiration);
     }

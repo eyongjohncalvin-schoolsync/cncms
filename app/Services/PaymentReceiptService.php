@@ -342,6 +342,9 @@ class PaymentReceiptService
             'qr-notice',
             // Installation receipt: fee, paid so far, balance.
             ...(isset($snapshot['installation']) ? ['fee', 'paid', 'balance'] : []),
+            // …plus its free months, advance and first bill lines (D11).
+            ...array_fill(0, count($snapshot['installation']['services'] ?? []) + count($snapshot['installation']['waiting'] ?? []), 'service'),
+            $snapshot['installation']['first_bill_label'] ?? null,
         ]));
 
         return ($narrow ? 82 : 98)
@@ -515,11 +518,25 @@ class PaymentReceiptService
             return null;
         }
 
+        // D11: no bill slips for free months — the free period, any advance
+        // and the first bill month are printed on the installation receipt.
+        $coverage = app(CustomerCoverageService::class)->summarize($charge->customer);
+
         return [
             'fee' => bcadd((string) $charge->amount, '0', 2),
             'paid' => $charge->paidAmount(),
             'balance' => $charge->balance(),
             'status' => $charge->status,
+            // Each service's free and paid periods and its first billed month.
+            'services' => array_values(array_map(fn (array $timeline): array => [
+                'service' => $timeline['service'],
+                'free' => $timeline['free_from'] !== null ? CustomerCoverageService::range($timeline['free_from'], (string) $timeline['free_until']) : null,
+                'paid' => $timeline['paid_from'] !== null ? CustomerCoverageService::range($timeline['paid_from'], (string) $timeline['paid_until']) : null,
+                'first_billed' => $timeline['first_billed'] !== null ? CustomerCoverageService::monthLabel($timeline['first_billed']) : null,
+            ], array_filter($coverage['services'], fn (array $timeline): bool => $timeline['free_from'] !== null || $timeline['paid_from'] !== null))),
+            'waiting' => $coverage['waiting'],
+            'first_bill' => $coverage['first_bill'],
+            'first_bill_label' => $coverage['first_bill'] !== null ? CustomerCoverageService::monthLabel($coverage['first_bill']) : null,
         ];
     }
 

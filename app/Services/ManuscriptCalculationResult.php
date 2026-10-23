@@ -29,11 +29,11 @@ final readonly class ManuscriptCalculationResult
      *                                                       `processed_period` (period-attributed eligibility marker —
      *                                                       see App\Services\ManuscriptCalculator's class doc).
      * @param  Collection<int, ArrearsAdjustment>  $processedAdjustments  Arrears adjustments whose
-     *                                                       amount was factored into this calculation and that should
-     *                                                       be stamped the same way — see
-     *                                                       App\Services\ManuscriptCalculator's class doc for why,
-     *                                                       unlike $processedPayments, this is populated even in the
-     *                                                       frozen branches.
+     *                                                                    amount was factored into this calculation and that should
+     *                                                                    be stamped the same way — see
+     *                                                                    App\Services\ManuscriptCalculator's class doc for why,
+     *                                                                    unlike $processedPayments, this is populated even in the
+     *                                                                    frozen branches.
      */
     public function __construct(
         public string $bill,
@@ -56,6 +56,13 @@ final readonly class ManuscriptCalculationResult
         // window.
         public int $prepaidMonthsRemaining = 0,
         public ?string $prepaidRate = null,
+        // Free months (docs/plans/installation-and-promotions.md): what the
+        // services free this month would have cost — foregone revenue for
+        // reports and the register's FREE label, never part of the ledger.
+        public string $freeValue = '0.00',
+        // Months paid upfront per service still to come (D15):
+        // service id => ['months' => n, 'rate' => locked price].
+        public array $servicePrepaid = [],
     ) {}
 
     /**
@@ -71,6 +78,27 @@ final readonly class ManuscriptCalculationResult
             'payment_expiration' => $this->paymentExpiration,
             'prepaid_months_remaining' => $this->prepaidMonthsRemaining,
             'prepaid_rate' => $this->prepaidRate,
+            'free_value' => $this->freeValue,
+            'service_prepaid' => $this->servicePrepaidForStorage(),
         ];
+    }
+
+    /**
+     * Only services with months left; null when there are none (keeps
+     * every ordinary row's column empty).
+     *
+     * @return array<string, array{months: int, rate: string}>|null
+     */
+    private function servicePrepaidForStorage(): ?array
+    {
+        $rows = [];
+
+        foreach ($this->servicePrepaid as $serviceId => $state) {
+            if (($state['months'] ?? 0) > 0) {
+                $rows[(string) $serviceId] = ['months' => (int) $state['months'], 'rate' => (string) $state['rate']];
+            }
+        }
+
+        return $rows === [] ? null : $rows;
     }
 }

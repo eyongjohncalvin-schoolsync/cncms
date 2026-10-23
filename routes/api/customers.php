@@ -14,6 +14,12 @@ use Illuminate\Support\Facades\Route;
 // see CustomerController::eligibleForDisconnection()'s doc comment.
 Route::get('customers/eligible-for-disconnection', [CustomerController::class, 'eligibleForDisconnection']);
 
+// The add-customer screen's "Installation & first payment" section
+// (installation phase 2) — offers and the live preview. Literal segments,
+// so registered ahead of the apiResource like the route above.
+Route::get('customers/installation-options', [CustomerController::class, 'installationOptions']);
+Route::post('customers/installation-preview', [CustomerController::class, 'installationPreview']);
+
 // Named with an 'api.' prefix so these don't collide with the web
 // panel's identically-shaped route names — see routes/web/customers.php.
 Route::apiResource('customers', CustomerController::class)->names('api.customers');

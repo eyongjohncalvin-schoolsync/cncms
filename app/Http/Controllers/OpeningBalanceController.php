@@ -200,7 +200,7 @@ class OpeningBalanceController extends Controller
     }
 
     /**
-     * @return array{arrears: string, advance_amount: string, advance_months: int, note: ?string}|null
+     * @return array{arrears: string, advance_amount: string, advance_months: int, free_months: int, note: ?string}|null
      */
     private function shapeEntry(?OpeningBalanceEntry $entry): ?array
     {
@@ -212,6 +212,7 @@ class OpeningBalanceController extends Controller
             'arrears' => (string) $entry->arrears,
             'advance_amount' => (string) $entry->advance_amount,
             'advance_months' => (int) $entry->advance_months,
+            'free_months' => (int) $entry->free_months,
             'note' => $entry->note,
         ];
     }
