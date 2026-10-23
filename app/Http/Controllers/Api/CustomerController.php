@@ -100,13 +100,17 @@ class CustomerController extends Controller
      */
     public function installationOptions(): JsonResponse
     {
-        $this->authorize('create', Customer::class);
+        // Office roles add customers online; a field agent registers them
+        // offline (installation phase 3) and caches these on the phone.
+        abort_unless($this->context->can('customers.create') || $this->context->can('installations.field'), 403);
 
         return response()->json(['data' => [
             'offers' => app(InstallationOfferService::class)->availableForForm(),
             'max_free_months' => FreeMonthGrantService::maxMonths(),
             'can_manage' => $this->context->can('installations.manage'),
             'can_take_payment' => $this->context->can('payments.create'),
+            // May register customers offline (own zone, pending activation).
+            'can_register_in_field' => $this->context->can('installations.field'),
             'today' => BusinessTimezone::today(),
         ]]);
     }

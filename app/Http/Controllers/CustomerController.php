@@ -21,7 +21,9 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerCharge;
 use App\Models\CustomerSubscription;
+use App\Models\FieldInstallation;
 use App\Models\FreeMonthGrant;
+use App\Models\InstallationOffer;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\ServiceVariant;
@@ -33,9 +35,11 @@ use App\Services\CustomerImportService;
 use App\Services\CustomerInstallationService;
 use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
+use App\Services\FieldInstallationService;
 use App\Services\FreeMonthGrantService;
 use App\Services\InstallationOfferService;
 use App\Services\InvoiceService;
+use App\Services\ManuscriptRunLockService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
 use App\Support\BusinessTimezone;
@@ -81,13 +85,18 @@ class CustomerController extends Controller
         // disconnected/suspended. When on, the list shows ONLY archived
         // customers, each with a Restore action.
         $archived = $request->boolean('archived');
+        // ?pending_activation=1: field registrations awaiting the office
+        // (installation phase 3) — the activation queue.
+        $pendingActivation = ! $archived && $request->boolean('pending_activation');
 
         $filters = $request->only(['zone_uuid', 'status', 'level', 'search']);
 
-        $paginator = $this->customers->list([...$filters, 'archived' => $archived], 15);
+        $paginator = $this->customers->list([...$filters, 'archived' => $archived, 'pending_activation' => $pendingActivation], 15);
 
         return Inertia::render('Customers/Index', [
             'archived_view' => $archived,
+            'pending_activation_view' => $pendingActivation,
+            'pending_activation_count' => app(FieldInstallationService::class)->pendingCount(),
             'customers' => [
                 'data' => collect($paginator->items())
                     ->map(fn (Customer $customer) => $this->shapeCustomer($customer))
@@ -558,6 +567,8 @@ class CustomerController extends Controller
             'others' => $customer->others,
             'level' => $customer->level,
             'status' => $customer->status,
+            // "pending" = registered in the field, awaiting the office (phase 3).
+            'activation_status' => $customer->activation_status,
             'status_reason' => $customer->status_reason,
             'status_note' => $customer->status_note,
             'location' => $customer->location,
@@ -698,6 +709,9 @@ class CustomerController extends Controller
             // paid until Mar · first bill Apr") — installation phase 2.
             'free_months' => $this->shapeFreeMonths($customer),
             'coverage' => app(CustomerCoverageService::class)->summarize($customer),
+            // A customer an agent registered in the field (phase 3): what
+            // they proposed, the office's decision, and the activation form.
+            'field_installation' => $this->shapeFieldInstallation($customer),
             // Gates the "Export full record" control in the page header
             // (docs/plans/customer-record-export.md) — a full unredacted
             // data dump, seeded super/admin only. The frontend also has the
@@ -705,6 +719,82 @@ class CustomerController extends Controller
             // other `can_*` Show props (e.g. Payments/Show's
             // can_issue_receipt) for consistency.
             'can_export_record' => $this->context->can('customers.export_record'),
+        ];
+    }
+
+    /**
+     * The customer page's field registration block (installation phase 3),
+     * null for a customer added at the office.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function shapeFieldInstallation(Customer $customer): ?array
+    {
+        $field = FieldInstallation::query()
+            ->with(['submittedBy', 'decidedBy', 'refundVoucher', 'payments.receipt'])
+            ->where('customer_id', $customer->id)
+            ->latest('id')
+            ->first();
+
+        if ($field === null) {
+            return null;
+        }
+
+        $user = request()->user();
+        $proposal = $field->proposal;
+        $services = Service::query()->pluck('name', 'uuid');
+        $offers = app(InstallationOfferService::class)->availableForForm();
+        $offerName = ($proposal['installation_offer_uuid'] ?? null) !== null
+            ? InstallationOffer::query()->where('uuid', $proposal['installation_offer_uuid'])->value('name')
+            : null;
+        $currentPeriod = app(ManuscriptRunLockService::class)->currentPeriod();
+        $connectedOn = (string) ($proposal['connected_on'] ?? $customer->connected_on?->toDateString() ?? BusinessTimezone::today());
+        $installationMonth = max(substr(min($connectedOn, BusinessTimezone::today()), 0, 7), $currentPeriod);
+
+        return [
+            'uuid' => $field->uuid,
+            'status' => $field->status,
+            'submitted_by_name' => $field->submittedBy?->name,
+            'collected_at' => $field->collected_at?->toIso8601String(),
+            'synced_at' => $field->created_at?->toIso8601String(),
+            'decided_by_name' => $field->decidedBy?->name,
+            'decided_at' => $field->decided_at?->toIso8601String(),
+            'decision_note' => $field->decision_note,
+            'corrections' => $field->corrections,
+            'possible_duplicates' => $field->possible_duplicates ?? [],
+            'refund_voucher_number' => $field->refundVoucher?->number,
+            'refund_voucher_status' => $field->refundVoucher?->status,
+            'proposal' => [
+                'offer_uuid' => $proposal['installation_offer_uuid'] ?? null,
+                'offer_name' => $offerName,
+                'fee' => $proposal['installation_fee'] ?? null,
+                'paid' => $proposal['installation_paid'] ?? '0.00',
+                'reason' => $proposal['installation_reason'] ?? null,
+                'connected_on' => $proposal['connected_on'] ?? null,
+                'service_plans' => array_map(fn (array $row): array => [
+                    'service_uuid' => $row['service_uuid'],
+                    'service_name' => (string) ($services[$row['service_uuid']] ?? 'Service'),
+                    'free_from' => $row['free_from'] ?? null,
+                    'free_months' => (int) ($row['free_months'] ?? 0),
+                    'paid_months' => (int) ($row['paid_months'] ?? 0),
+                ], $proposal['service_plans'] ?? []),
+            ],
+            'payments' => $field->payments->map(fn (Payment $payment): array => [
+                'uuid' => $payment->uuid,
+                'amount' => (string) $payment->amount,
+                'purpose' => $payment->purpose,
+                'verification_status' => $payment->verification_status,
+                'receipt_number' => $payment->receipt?->receipt_number,
+            ])->values()->all(),
+            'can_decide' => $user->can('activate', $field),
+            // The activation form's choices and starting values.
+            'form' => [
+                'zones' => $this->zonesForSelect(),
+                'offers' => $offers,
+                'max_free_months' => FreeMonthGrantService::maxMonths(),
+                'installation_month' => $installationMonth,
+                'today' => BusinessTimezone::today(),
+            ],
         ];
     }
 

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\CustomerChargeController;
+use App\Http\Controllers\FieldInstallationController;
 use App\Http\Controllers\FreeMonthGrantController;
 use Illuminate\Support\Facades\Route;
 
@@ -28,4 +29,9 @@ Route::middleware('not-impersonating:money')->group(function () {
     Route::post('customers/{customer}/free-months', [FreeMonthGrantController::class, 'store'])->name('free-months.store');
     Route::post('free-months/{freeMonthGrant}/approve', [FreeMonthGrantController::class, 'approve'])->name('free-months.approve');
     Route::post('free-months/{freeMonthGrant}/reject', [FreeMonthGrantController::class, 'reject'])->name('free-months.reject');
+
+    // Phase 3: field registrations awaiting the office — activate (billing
+    // starts) or reject (payments rejected, refund bon, customer archived).
+    Route::post('field-installations/{fieldInstallation}/activate', [FieldInstallationController::class, 'activate'])->name('field-installations.activate');
+    Route::post('field-installations/{fieldInstallation}/reject', [FieldInstallationController::class, 'reject'])->name('field-installations.reject');
 });

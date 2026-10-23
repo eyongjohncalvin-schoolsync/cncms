@@ -162,7 +162,15 @@ class PaymentService
         }
 
         if ($data->receiptNumber !== null) {
-            return $this->createWithFieldReceipt($customer, $data, $attributes);
+            $payment = $this->createWithFieldReceipt($customer, $data, $attributes);
+
+            // A verified instalment with a field receipt (an offline field
+            // installation, phase 3) may settle its charge too.
+            if ($payment->verification_status === 'verified') {
+                $payment->customerCharge?->refreshStatus();
+            }
+
+            return $payment;
         }
 
         $payment = $this->payments->create($customer->id, $attributes);

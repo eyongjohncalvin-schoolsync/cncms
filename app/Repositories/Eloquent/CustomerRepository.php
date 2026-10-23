@@ -24,6 +24,7 @@ class CustomerRepository implements CustomerRepositoryInterface
                 fn ($query) => $query->onlyTrashed()->with('archivedBy'),
             )
             ->with('zone')
+            ->when(! empty($filters['pending_activation']), fn ($query) => $query->pendingActivation())
             // Drives the "Archive customer" vs "Delete row" choice on the
             // list without an N+1 — one EXISTS subquery per relation per row.
             ->withExists(['payments', 'manuscripts', 'messages'])

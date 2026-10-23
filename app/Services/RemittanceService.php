@@ -51,7 +51,10 @@ class RemittanceService
 
         return Payment::query()
             ->where('recorded_by', $collector->id)
-            ->where('verification_status', '!=', 'rejected')
+            // Money taken with a field registration the office rejected
+            // (installation phase 3) is still handed over: receipts were
+            // issued, and its refund is paid out through a bon.
+            ->where(fn ($query) => $query->where('verification_status', '!=', 'rejected')->orWhereNotNull('field_installation_id'))
             ->whereDoesntHave('remittanceLine')
             ->when($start !== null, fn ($query) => $query->whereDate('created_at', '>=', $start));
     }
