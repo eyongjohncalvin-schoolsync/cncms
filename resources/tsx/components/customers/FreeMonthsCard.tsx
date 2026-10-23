@@ -146,8 +146,8 @@ function CompensationModal({
         <Modal open={open} onClose={onClose} title="Give free months (compensation)">
             <form onSubmit={submit} className="flex flex-col gap-4">
                 <p className="text-sm text-slate-600">
-                    For poor service. Someone else with approval rights must confirm. They start next month (after any free months already running), and
-                    paid months are kept for afterwards.
+                    For poor service. Someone else with approval rights must confirm. Each service&apos;s months are added after its existing free and
+                    paid months, so nothing already paid is lost.
                 </p>
                 <TextInput
                     id="free-months"

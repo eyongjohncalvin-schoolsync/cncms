@@ -93,7 +93,17 @@ final class ManuscriptPreRunReviewService
         // nothing to cover and is never flagged.
         $plans = FreeMonthPlan::forCustomers($candidates);
         $charges = $candidates->mapWithKeys(fn (Customer $customer): array => [
-            $customer->id => ($plans[$customer->id] ?? FreeMonthPlan::none())->charge($period, $this->normalize((string) $customer->bill)),
+            $customer->id => ($plans[$customer->id] ?? FreeMonthPlan::none())->charge(
+                $period,
+                $this->normalize((string) $customer->bill),
+                // Services still covered by months paid upfront (D15).
+                collect((array) ($customer->latestManuscript?->service_prepaid ?? []))
+                    ->filter(fn (array $row): bool => (int) ($row['months'] ?? 0) > 0)
+                    ->keys()
+                    ->map(fn (int|string $serviceId): int => (int) $serviceId)
+                    ->values()
+                    ->all(),
+            ),
         ]);
 
         $flagged = $candidates

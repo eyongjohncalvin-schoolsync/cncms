@@ -143,17 +143,27 @@ These supersede D4 (automatic "join month not billed") and the offer-driven form
 
 ### Phase 2 status (2026-10-23, branch `installation-phase-2`, not merged)
 
-Built: items 1–11. Free months are stateless — `App\Support\Billing\FreeMonthPlan`
-derives every month from approved `free_month_grants` (calendar windows per
-service) + `customers.billing_starts_period`; nothing is counted down on the
-manuscript, so reruns/publish/unpublish/forward recalculation stay consistent.
-New installations are billed month by month (first bill = exactly one month);
-customers from before phase 2 keep the original ledger. Deviations: a third
-grant reason `opening_balance` and a `cancelled` status (refund forfeits); a
-grant for only some services on a customer who still has paid months starts
-after those paid months (so a paid month is never spent on a half-free month);
-the duplicate guard warns (web + mobile require a tick) but the server never
-blocks, for older app builds. Owner to set: Settings → Installation offers.
+Built: items 1–11, reworked for D15–D20. Free months are stateless —
+`App\Support\Billing\FreeMonthPlan` derives every month from approved
+`free_month_grants` (a calendar window per service) and
+`customers.billing_starts_period` (now simply the installation month: nothing
+before it is billed). Months paid upfront are per service:
+`payments.service_months` buys them at each service's price, and
+`manuscripts.service_prepaid` carries the counters. A free month or a frozen
+month uses none, so N paid months cover N billed months of that service.
+`FreeMonthPlan::timelines()` walks free → paid → billed per service for the
+preview, the coverage line and the installation receipt. Once a service's
+months end, every customer is on the same ledger and pay-ahead rule (D18).
+Free months chosen at registration apply at once only when the installation
+is fully paid then, they are within the cap and they are within the offer
+preset. Otherwise they wait for admin/owner approval (D16/D17/D19), and paying
+the fee later does not start them. Compensation goes after each service's free
+and paid months (D20), one grant row per service.
+
+Deviations: a third grant reason, `opening_balance`, and a `cancelled` status
+(refund forfeits). The duplicate guard warns (web + mobile require a tick) but
+the server never blocks, for older app builds. Owner to set: Settings →
+Installation offers (presets).
 
 ## Phase 3 — offline field installations (agents)
 
