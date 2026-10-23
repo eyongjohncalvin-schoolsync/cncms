@@ -156,6 +156,20 @@ enum Permission: string
      * (installations.manage); setting them is admin/owner (D8).
      */
     case InstallationsOffers = 'installations.offers';
+    /**
+     * Register a customer in the field, offline, with the installation (and
+     * months paid upfront) money and field receipts (phase 3, D10). Only in
+     * the agent's own zone; the customer waits as "pending activation"
+     * until the office activates it. Seeded to agent.
+     */
+    case InstallationsField = 'installations.field';
+    /**
+     * Activate or reject a field registration ("Pending activation"):
+     * confirm or correct zone, free months and connection date, or reject
+     * it (payments rejected, receipts voided, refund bon raised, customer
+     * archived). Seeded to manager and admin.
+     */
+    case InstallationsActivate = 'installations.activate';
 
     // ---- Opening balances (onboarding) -----------------------
     /** See the opening-balances screen and its batches. */

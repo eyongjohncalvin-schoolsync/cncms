@@ -9,6 +9,7 @@ use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -36,6 +37,9 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Customer extends Model
 {
     use Auditable, HasUuid, ScopesRouteBindingToBranch, SoftDeletes;
+
+    /** customers.activation_status of a field registration awaiting the office (phase 3). */
+    public const string ACTIVATION_PENDING = 'pending';
 
     protected function casts(): array
     {
@@ -87,6 +91,45 @@ class Customer extends Model
     public function freeMonthGrants(): HasMany
     {
         return $this->hasMany(FreeMonthGrant::class);
+    }
+
+    /**
+     * The field registration this customer came from, when an agent
+     * registered them offline (installation phase 3) — see
+     * App\Models\FieldInstallation.
+     */
+    public function fieldInstallation(): HasOne
+    {
+        return $this->hasOne(FieldInstallation::class)->latestOfMany();
+    }
+
+    /**
+     * Registered in the field and not activated by the office yet: never
+     * billed, no register rows, bills, reminders or eligibility (phase 3).
+     */
+    public function isPendingActivation(): bool
+    {
+        return $this->activation_status === self::ACTIVATION_PENDING;
+    }
+
+    /**
+     * Customers the billing run, the pre-run review and the disconnection
+     * scan look at — everyone except field registrations awaiting
+     * activation.
+     *
+     * @param  Builder<Customer>  $query
+     */
+    public function scopeActivated(Builder $query): void
+    {
+        $query->whereNull($query->qualifyColumn('activation_status'));
+    }
+
+    /**
+     * @param  Builder<Customer>  $query
+     */
+    public function scopePendingActivation(Builder $query): void
+    {
+        $query->where($query->qualifyColumn('activation_status'), self::ACTIVATION_PENDING);
     }
 
     public function manuscripts(): HasMany
