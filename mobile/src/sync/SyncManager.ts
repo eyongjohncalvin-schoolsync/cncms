@@ -35,6 +35,16 @@ import { refreshNotificationsState } from '../notifications/notificationStore';
 import { clearLastSyncAt, getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
 import { patchSyncState } from './syncStore';
 import { syncReceiptStock } from '../fieldReceipts/receiptStock';
+import {
+    applyInstallationDecisions,
+    getFailedInstallationsCount,
+    getQueuedInstallations,
+    getQueuedInstallationsCount,
+    markInstallationFailed,
+    markInstallationSynced,
+} from '../db/installations';
+import { refreshFormData } from '../db/formCache';
+import { OLD_SERVER_MESSAGE, serverAcceptsInstallations, type FieldInstallationItem } from '../utils/fieldInstallation';
 import type { SyncPushBonRequestItem, SyncPushComplaintItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
 
 /**
@@ -71,6 +81,7 @@ class SyncManagerImpl {
     private appStateSub: { remove: () => void } | null = null;
     private netInfoUnsub: (() => void) | null = null;
     private categoriesRefreshedThisSession = false;
+    private formCacheRefreshedThisSession = false;
 
     start(): void {
         if (this.started) {
@@ -163,19 +174,29 @@ class SyncManagerImpl {
     }
 
     async refreshQueuedCounts(): Promise<void> {
-        const [queuedPayments, queuedExpenditures, queuedComplaints, failedPayments, failedExpenditures, failedComplaints] =
-            await Promise.all([
-                getQueuedPaymentsCount(),
-                getQueuedExpendituresCount(),
-                getQueuedComplaintsCount(),
-                getFailedPaymentsCount(),
-                getFailedExpendituresCount(),
-                getFailedComplaintsCount(),
-            ]);
+        const [
+            queuedPayments,
+            queuedExpenditures,
+            queuedComplaints,
+            queuedInstallations,
+            failedPayments,
+            failedExpenditures,
+            failedComplaints,
+            failedInstallations,
+        ] = await Promise.all([
+            getQueuedPaymentsCount(),
+            getQueuedExpendituresCount(),
+            getQueuedComplaintsCount(),
+            getQueuedInstallationsCount(),
+            getFailedPaymentsCount(),
+            getFailedExpendituresCount(),
+            getFailedComplaintsCount(),
+            getFailedInstallationsCount(),
+        ]);
 
         patchSyncState({
-            queuedCount: queuedPayments + queuedExpenditures + queuedComplaints,
-            failedCount: failedPayments + failedExpenditures + failedComplaints,
+            queuedCount: queuedPayments + queuedExpenditures + queuedComplaints + queuedInstallations,
+            failedCount: failedPayments + failedExpenditures + failedComplaints + failedInstallations,
         });
     }
 
@@ -192,6 +213,7 @@ class SyncManagerImpl {
             await this.uploadPendingReceipts();
             await this.flushPendingAcknowledgements();
             await this.refreshReceiptStock();
+            await this.refreshFormCache();
 
             this.retryAttempt = 0;
 
@@ -294,18 +316,21 @@ class SyncManagerImpl {
     }
 
     private async push(): Promise<void> {
-        const [queuedPayments, queuedExpenditures, queuedComplaints] = await Promise.all([
+        const [queuedPayments, queuedExpenditures, queuedComplaints, queuedInstallations] = await Promise.all([
             getQueuedPayments(),
             getQueuedExpenditures(),
             getQueuedComplaints(),
+            getQueuedInstallations(),
         ]);
 
-        if (queuedPayments.length === 0 && queuedExpenditures.length === 0 && queuedComplaints.length === 0) {
+        const total = queuedPayments.length + queuedExpenditures.length + queuedComplaints.length + queuedInstallations.length;
+
+        if (total === 0) {
             return;
         }
 
         patchSyncState({
-            syncingProgress: { done: 0, total: queuedPayments.length + queuedExpenditures.length + queuedComplaints.length },
+            syncingProgress: { done: 0, total },
         });
 
         const deviceId = await getOrCreateDeviceId();
@@ -357,11 +382,27 @@ class SyncManagerImpl {
             created_at: complaint.created_at,
         }));
 
+        // Customers registered in the field, offline (installation phase 3)
+        // — the server applies them before payments, so a payment recorded
+        // for one of them in the same push finds the customer.
+        const installationItems: FieldInstallationItem[] = queuedInstallations.map((row) => JSON.parse(row.payload) as FieldInstallationItem);
+
         const response = await pushChanges({
             device_id: deviceId,
             last_sync_at: lastSyncAt,
-            changes: { payments: paymentItems, bon_requests: bonRequestItems, complaints: complaintItems },
+            changes: {
+                payments: paymentItems,
+                bon_requests: bonRequestItems,
+                complaints: complaintItems,
+                ...(installationItems.length > 0 ? { installations: installationItems } : {}),
+            },
         });
+
+        // An older server silently drops the channel: keep the
+        // registrations on the phone (retried every sync) and say why.
+        if (installationItems.length > 0 && !serverAcceptsInstallations(response.results)) {
+            await Promise.all(installationItems.map((item) => markInstallationFailed(item.local_uuid, OLD_SERVER_MESSAGE)));
+        }
 
         await Promise.all([
             ...response.results.payments.map((result) =>
@@ -379,12 +420,21 @@ class SyncManagerImpl {
                     ? markComplaintSynced(result.local_uuid, result.server_uuid)
                     : markComplaintFailed(result.local_uuid, result.error ?? 'Sync failed'),
             ),
+            ...(response.results.installations ?? []).map((result) =>
+                result.status === 'synced'
+                    ? markInstallationSynced(result.local_uuid, result.activation, result.possible_duplicate)
+                    : markInstallationFailed(result.local_uuid, result.error ?? 'Sync failed'),
+            ),
         ]);
 
         patchSyncState({
             syncingProgress: {
-                done: response.results.payments.length + (response.results.bon_requests ?? []).length + response.results.complaints.length,
-                total: queuedPayments.length + queuedExpenditures.length + queuedComplaints.length,
+                done:
+                    response.results.payments.length +
+                    (response.results.bon_requests ?? []).length +
+                    response.results.complaints.length +
+                    (response.results.installations ?? []).length,
+                total,
             },
         });
     }
@@ -397,6 +447,8 @@ class SyncManagerImpl {
         await deleteCustomers(response.changes.customers.deleted);
         await applyVerificationUpdates(response.changes.payments.verified, 'verified');
         await applyVerificationUpdates(response.changes.payments.rejected, 'rejected');
+        // The office's decision on this user's field registrations (phase 3).
+        await applyInstallationDecisions(response.changes.installations ?? []);
 
         // in-app-notifications.md section 6 / complaint-desk.md section 7 —
         // `items` (this user's recent feed) and `emergency` (every
@@ -448,6 +500,25 @@ class SyncManagerImpl {
 
         if (anyConfirmed) {
             await refreshNotificationsState();
+        }
+    }
+
+    /**
+     * Installation phase 3: caches zones, the service catalogue and the
+     * installation options so Add Customer works offline. Once per session
+     * (the form refreshes them itself whenever it opens online); best
+     * effort, never fails the sync.
+     */
+    private async refreshFormCache(): Promise<void> {
+        if (this.formCacheRefreshedThisSession) {
+            return;
+        }
+
+        try {
+            await refreshFormData();
+            this.formCacheRefreshedThisSession = true;
+        } catch {
+            // Swallowed deliberately — retried on the next sync.
         }
     }
 

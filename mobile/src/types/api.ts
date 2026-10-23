@@ -11,6 +11,7 @@
  * verification notes in the phase-1 report.
  */
 import type { InstallationRequestFields } from '../utils/installation';
+import type { FieldInstallationItem } from '../utils/fieldInstallation';
 
 // ---------------------------------------------------------------------------
 // Auth — app/Http/Controllers/Api/AuthController.php
@@ -215,7 +216,26 @@ export interface SyncPushRequestBody {
         bon_requests?: SyncPushBonRequestItem[];
         expenditures?: SyncPushExpenditureItem[];
         complaints?: SyncPushComplaintItem[];
+        /** Customers registered in the field, offline (installation phase 3). */
+        installations?: FieldInstallationItem[];
     };
+}
+
+/** One `results.installations[]` entry — `server_uuid` is the customer's uuid. */
+export interface SyncPushInstallationResult extends SyncPushResultItem {
+    activation?: 'pending' | 'activated' | 'rejected';
+    possible_duplicate?: boolean;
+}
+
+/** `changes.installations[]` on the pull — the office's decision on this user's registrations. */
+export interface SyncPullInstallationDecision {
+    local_uuid: string;
+    customer_uuid: string | null;
+    customer_name: string | null;
+    status: 'pending' | 'activated' | 'rejected';
+    reason: string | null;
+    possible_duplicate: boolean;
+    decided_at: string | null;
 }
 
 export interface SyncPushResultItem {
@@ -236,6 +256,8 @@ export interface SyncPushResponse {
         bon_requests?: SyncPushResultItem[];
         expenditures: SyncPushResultItem[];
         complaints: SyncPushResultItem[];
+        /** Absent on servers older than installation phase 3. */
+        installations?: SyncPushInstallationResult[];
     };
     errors: Array<{ entity_type: string; local_uuid: string | null; message: string }>;
 }
@@ -290,6 +312,8 @@ export interface SyncPullCustomer {
      * still to come. Absent from older servers.
      */
     billing_starts_period?: string | null;
+    /** 'pending' = registered in the field, awaiting the office (phase 3). */
+    activation_status?: 'pending' | null;
     is_free?: boolean;
     prepaid_months_remaining?: number;
     service_paid_months?: { service: string; months: number }[];
@@ -353,6 +377,8 @@ export interface SyncPullResponse {
             rejected: SyncPullChangedPayment[];
         };
         notifications: SyncPullNotifications;
+        /** Absent on servers older than installation phase 3. */
+        installations?: SyncPullInstallationDecision[];
     };
 }
 
@@ -538,6 +564,8 @@ export interface InstallationOptionsResponse {
         max_free_months: number;
         can_manage: boolean;
         can_take_payment: boolean;
+        /** May register customers offline in their own zone (phase 3); absent on older servers. */
+        can_register_in_field?: boolean;
         today: string;
     };
 }

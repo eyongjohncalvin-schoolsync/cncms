@@ -165,7 +165,9 @@ export default function CustomersScreen() {
     // customer-create.tsx directly (a deep link, a stale bookmark) still
     // re-checks and shows its own "Not authorized" card, same defensive
     // pattern as every other permission-gated entry point in this app.
-    const canAddCustomer = can('customers.create');
+    // A field agent registers customers (offline too) with
+    // installations.field (installation phase 3).
+    const canAddCustomer = can('customers.create') || can('installations.field');
 
     const [customers, setCustomers] = useState<LocalCustomer[]>([]);
     const [loading, setLoading] = useState(true);

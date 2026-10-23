@@ -4,6 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { Card } from '../src/components/ui/Card';
 import { Badge } from '../src/components/ui/Badge';
 import { Button } from '../src/components/ui/Button';
+import { FieldRegistrationsList } from '../src/components/customers/FieldRegistrationsList';
 import { getQueuedPayments } from '../src/db/payments';
 import { getQueuedExpenditures } from '../src/db/expenditures';
 import { getAllCustomers } from '../src/db/customers';
@@ -159,6 +160,9 @@ export default function SyncStatusScreen() {
                     ))}
                 </View>
             ) : null}
+
+            {/* Installation phase 3: field registrations and the office's decision. */}
+            <FieldRegistrationsList />
 
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Pending</Text>

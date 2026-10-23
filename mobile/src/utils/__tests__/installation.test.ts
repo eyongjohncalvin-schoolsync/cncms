@@ -101,3 +101,10 @@ test('promoLabel: FREE, PREPAID and per-service paid months told apart', () => {
     assert.equal(promoLabel({ free_months: [{ service: 'TV', from: '2026-08', until: '2026-09' }] }, '2026-11'), null);
     assert.equal(promoLabel(null, '2026-11'), null);
 });
+
+test('promoLabel: a field registration awaiting the office is not billed', () => {
+    assert.equal(
+        promoLabel({ activation_status: 'pending', free_months: [{ service: 'TV', from: '2026-10', until: '2026-11' }] }, '2026-10'),
+        'PENDING ACTIVATION · not billed until the office activates',
+    );
+});
