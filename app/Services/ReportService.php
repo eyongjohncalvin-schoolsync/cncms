@@ -232,6 +232,7 @@ class ReportService
     private function expendituresForDay(Carbon $day): array
     {
         $row = Expenditure::query()
+            ->counted()
             ->whereDate('spent_at', $day->toDateString())
             ->selectRaw('count(*) as count, coalesce(sum(amount), 0) as total')
             ->first();

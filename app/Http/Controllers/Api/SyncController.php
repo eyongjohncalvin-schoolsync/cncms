@@ -57,7 +57,7 @@ class SyncController extends Controller
         $this->authorizeSync();
 
         $validated = $request->validate([
-            'entity_type' => ['required', 'string', 'in:payment,expenditure'],
+            'entity_type' => ['required', 'string', 'in:payment,voucher,expenditure'],
             'entity_uuid' => ['required', 'uuid'],
             'receipt' => ['required', 'image', 'max:2048'],
         ]);
@@ -66,6 +66,7 @@ class SyncController extends Controller
             $validated['entity_type'],
             $validated['entity_uuid'],
             $request->file('receipt'),
+            $request->user(),
         );
 
         return response()->json($result);

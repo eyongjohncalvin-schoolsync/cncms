@@ -8,6 +8,7 @@ use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
 use App\Models\User;
+use App\Support\BusinessTimezone;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -33,7 +34,7 @@ class CashBookService
 
     public function today(): string
     {
-        return now()->toDateString();
+        return BusinessTimezone::today();
     }
 
     /** The cashier's own till, created the first time they need it. */

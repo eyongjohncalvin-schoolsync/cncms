@@ -4,32 +4,40 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\DataTransferObjects\ExpenditureData;
-use App\Http\Requests\StoreExpenditureRequest;
+use App\Exports\ExpendituresExport;
+use App\Http\Requests\ReopenExpenditureMonthRequest;
 use App\Http\Requests\StoreExpenseCategoryRequest;
 use App\Http\Requests\UpdateExpenditureRequest;
 use App\Http\Requests\UpdateExpenseCategoryRequest;
+use App\Http\Requests\VoidExpenditureRequest;
+use App\Models\AuditLog;
 use App\Models\Expenditure;
+use App\Models\ExpenditureMonth;
 use App\Models\ExpenseCategory;
+use App\Models\User;
+use App\Services\ExpenditureMonthService;
 use App\Services\ExpenditureService;
 use App\Services\ExpenseCategoryService;
 use App\Services\ResourcesDashboardService;
+use App\Services\SpendingControlService;
+use App\Support\BusinessTimezone;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Web (session-auth, Inertia) counterpart of Api\ExpenditureController,
- * Api\ExpenseCategoryController and Api\ResourcesDashboardController — same
- * ExpenditureService/ExpenseCategoryService/ResourcesDashboardService,
- * same FormRequests/Policies, just rendering Inertia pages and
- * redirecting-with-flash instead of returning JSON. See PaymentController's
- * class doc for why web controllers never call the JSON /api/v1/*
- * endpoints. Kept as a single controller (rather than split like the Api
- * namespace) per this module's task spec — dashboard + expenditures +
- * categories are one cohesive "Resources" admin area from the web panel's
- * point of view.
+ * Resources: the P&L dashboard, expenditures and categories (web, Inertia).
+ *
+ * Expenditures follow docs/plans/expenditures-and-spending-controls.md:
+ * nothing is recorded here any more (E1 — every cash-out is a bon); the
+ * index is one month at a time (the current Cameroon month by default,
+ * past months as a read-only archive once closed) with a spending header
+ * (spent, cap, budget, income, net); the detail page shows the history and
+ * lets admin/owner re-categorise or void (legacy rows) with a reason in an
+ * open month; the owner closes and reopens months.
  */
 class ResourceController extends Controller
 {
@@ -37,6 +45,8 @@ class ResourceController extends Controller
         private readonly ExpenditureService $expenditures,
         private readonly ExpenseCategoryService $categories,
         private readonly ResourcesDashboardService $dashboard,
+        private readonly SpendingControlService $spending,
+        private readonly ExpenditureMonthService $months,
     ) {}
 
     public function dashboard(Request $request): Response
@@ -47,27 +57,31 @@ class ResourceController extends Controller
 
         $data = $this->dashboard->dashboard($period !== null ? (string) $period : null);
 
-        return Inertia::render('Resources/Dashboard', $data);
+        return Inertia::render('Resources/Dashboard', [
+            ...$data,
+            // Cap, budget warnings and the deficit indicator (items 5–6).
+            'spending' => $this->spending->summary($data['period']),
+        ]);
     }
 
     public function expenditures(Request $request): Response
     {
         $this->authorize('viewAny', Expenditure::class);
 
-        $perPage = (int) $request->integer('per_page', 20);
-
-        $filters = $request->only(['category_uuid', 'from', 'to']);
-
-        $expenditures = $this->expenditures->list($filters, $perPage);
-
-        $raw = $expenditures->toArray();
+        $filters = $this->indexFilters($request);
+        $month = $filters['month'];
+        $paginator = $this->expenditures->list($filters, (int) $request->integer('per_page', 25));
+        $raw = $paginator->toArray();
+        $monthRow = $this->months->find($month);
 
         return Inertia::render('Resources/Expenditures/Index', [
+            'month' => $month,
+            'current_month' => BusinessTimezone::currentPeriod(),
+            'month_status' => $this->shapeMonth($month, $monthRow),
+            'months' => $this->archiveMonths(),
+            'summary' => $this->spending->summary($month),
             'expenditures' => [
-                'data' => $expenditures->getCollection()
-                    ->map(fn (Expenditure $expenditure): array => $this->formatExpenditure($expenditure))
-                    ->values()
-                    ->all(),
+                'data' => $paginator->getCollection()->map(fn (Expenditure $expenditure): array => $this->formatExpenditure($expenditure))->values()->all(),
                 'links' => $raw['links'],
                 'meta' => [
                     'current_page' => $raw['current_page'],
@@ -77,44 +91,105 @@ class ResourceController extends Controller
                 ],
             ],
             'filters' => [
+                'month' => $month,
                 'category_uuid' => $filters['category_uuid'] ?? null,
-                'from' => $filters['from'] ?? null,
-                'to' => $filters['to'] ?? null,
+                'source' => $filters['source'] ?? null,
+                'status' => $filters['status'] ?? null,
+                'user_uuid' => $filters['user_uuid'] ?? null,
             ],
-            'categories' => $this->activeCategoryOptions(),
+            'categories' => $this->categoryOptions(),
+            'recorders' => $this->recordersFor($month),
+            'can' => [
+                'manage_months' => $request->user()->can('manageMonths', Expenditure::class),
+                'manage_budgets' => $request->user()->can('manageBudgets', Expenditure::class),
+            ],
         ]);
     }
 
-    public function createExpenditure(): Response
+    public function exportExpenditures(Request $request): BinaryFileResponse
     {
-        $this->authorize('create', Expenditure::class);
+        $this->authorize('viewAny', Expenditure::class);
 
-        return Inertia::render('Resources/Expenditures/Create', [
-            'categories' => $this->activeCategoryOptions(),
-        ]);
+        $filters = $this->indexFilters($request);
+
+        return Excel::download(
+            new ExpendituresExport($filters['month'], $this->expenditures->all($filters)),
+            "expenditures-{$filters['month']}.xlsx",
+        );
     }
 
-    public function storeExpenditure(StoreExpenditureRequest $request): RedirectResponse
+    public function showExpenditure(Request $request, Expenditure $expenditure): Response
     {
-        $this->expenditures->create(ExpenditureData::fromArray($request->validated()), $request->user()->id);
+        $this->authorize('view', $expenditure);
 
-        return redirect()->route('resources.expenditures.index')->with('success', 'Expenditure recorded successfully.');
+        $expenditure->load(['category', 'user', 'voucher', 'corrects', 'voidedBy']);
+        $user = $request->user();
+        $open = ! $this->months->isClosed($expenditure->period());
+        $voucher = $expenditure->voucher;
+
+        return Inertia::render('Resources/Expenditures/Show', [
+            'expenditure' => [
+                ...$this->formatExpenditure($expenditure),
+                'category_uuid' => $expenditure->category?->uuid,
+                'void_reason' => $expenditure->void_reason,
+                'voided_by_name' => $expenditure->voidedBy?->name,
+                'voided_at' => $expenditure->voided_at?->toIso8601String(),
+                'corrects' => $expenditure->corrects ? ['uuid' => $expenditure->corrects->uuid, 'spent_at' => $expenditure->corrects->spent_at?->toDateString()] : null,
+                'corrections' => $voucher
+                    ? Expenditure::query()->where('voucher_id', $voucher->id)->whereKeyNot($expenditure->id)->orderBy('id')->get()
+                        ->map(fn (Expenditure $row): array => ['uuid' => $row->uuid, 'amount' => (string) $row->amount, 'spent_at' => $row->spent_at?->toDateString(), 'source' => $row->source, 'description' => $row->description])
+                        ->values()->all()
+                    : [],
+            ],
+            'voucher' => $voucher ? [
+                'uuid' => $voucher->uuid,
+                'number' => $voucher->number,
+                'status' => $voucher->status,
+                'payee_name' => $voucher->payee_name,
+                'received_by_name' => $voucher->received_by_name,
+                'amount' => (string) $voucher->amount,
+            ] : null,
+            'month_closed' => ! $open,
+            'history' => $this->history($expenditure),
+            'categories' => $this->categoryOptions(),
+            'can' => [
+                'update' => $open && ! $expenditure->isVoid() && $user->can('update', $expenditure),
+                'void' => $open && ! $expenditure->isVoid() && $user->can('void', $expenditure),
+                'correct' => $voucher !== null && $user->can('correct', $voucher),
+            ],
+        ]);
     }
 
     public function updateExpenditure(UpdateExpenditureRequest $request, Expenditure $expenditure): RedirectResponse
     {
-        $this->expenditures->update($expenditure, ExpenditureData::fromArray($request->validated()));
+        $validated = $request->validated();
+
+        $this->expenditures->edit($expenditure, collect($validated)->except('reason')->all(), $validated['reason']);
 
         return back()->with('success', 'Expenditure updated.');
     }
 
-    public function destroyExpenditure(Expenditure $expenditure): RedirectResponse
+    public function voidExpenditure(VoidExpenditureRequest $request, Expenditure $expenditure): RedirectResponse
     {
-        $this->authorize('delete', $expenditure);
+        $this->expenditures->void($expenditure, $request->user(), $request->validated('reason'));
 
-        $this->expenditures->delete($expenditure);
+        return back()->with('success', 'Expenditure voided. It stays on record but no longer counts.');
+    }
 
-        return redirect()->route('resources.expenditures.index')->with('success', 'Expenditure deleted.');
+    public function closeMonth(Request $request, string $period): RedirectResponse
+    {
+        $this->authorize('manageMonths', Expenditure::class);
+
+        $this->months->close($period, $request->user());
+
+        return back()->with('success', $this->months->label($period).' closed.');
+    }
+
+    public function reopenMonth(ReopenExpenditureMonthRequest $request, string $period): RedirectResponse
+    {
+        $this->months->reopen($period, $request->user(), $request->validated('reason'));
+
+        return back()->with('success', $this->months->label($period).' reopened. Close it again once the fix is in.');
     }
 
     public function categories(): Response
@@ -158,14 +233,120 @@ class ResourceController extends Controller
     }
 
     /**
-     * @return array<int, array{uuid: string, name: string}>
+     * @return array{month: string, category_uuid?: string, source?: string, status?: string, user_uuid?: string}
      */
-    private function activeCategoryOptions(): array
+    private function indexFilters(Request $request): array
     {
-        return $this->categories->list(true)
-            ->map(fn (ExpenseCategory $category): array => ['uuid' => $category->uuid, 'name' => $category->name])
+        $month = (string) $request->query('month', '');
+
+        return array_filter([
+            'month' => BusinessTimezone::isValidPeriod($month) ? $month : BusinessTimezone::currentPeriod(),
+            'category_uuid' => $request->query('category_uuid'),
+            'source' => $request->query('source'),
+            'status' => $request->query('status'),
+            'user_uuid' => $request->query('user_uuid'),
+        ], fn ($value): bool => is_string($value) && $value !== '');
+    }
+
+    /**
+     * @return array{closed: bool, closed_at: ?string, closed_by_name: ?string, reopened_at: ?string, reopened_by_name: ?string, reopen_reason: ?string, can_close: bool}
+     */
+    private function shapeMonth(string $month, ?ExpenditureMonth $row): array
+    {
+        return [
+            'closed' => (bool) $row?->isClosed(),
+            'closed_at' => $row?->closed_at?->toIso8601String(),
+            'closed_by_name' => $row?->closed_at !== null ? ($row->closedBy?->name ?? 'Automatic close') : null,
+            'reopened_at' => $row?->reopened_at?->toIso8601String(),
+            'reopened_by_name' => $row?->reopenedBy?->name,
+            'reopen_reason' => $row?->reopen_reason,
+            'can_close' => ! $row?->isClosed() && $month < BusinessTimezone::currentPeriod(),
+        ];
+    }
+
+    /**
+     * Months with spending or a close record, newest first, plus the
+     * current month — the month picker / archive.
+     *
+     * @return list<array{month: string, closed: bool}>
+     */
+    private function archiveMonths(): array
+    {
+        $withSpending = Expenditure::query()->selectRaw("distinct to_char(spent_at, 'YYYY-MM') as month")->pluck('month');
+        $closed = ExpenditureMonth::query()->pluck('closed_at', 'period');
+
+        return $withSpending->merge($closed->keys())->push(BusinessTimezone::currentPeriod())
+            ->unique()->sortDesc()->take(36)->values()
+            ->map(fn (string $month): array => ['month' => $month, 'closed' => ($closed[$month] ?? null) !== null])
+            ->all();
+    }
+
+    /**
+     * @return list<array{uuid: string, name: string}>
+     */
+    private function recordersFor(string $month): array
+    {
+        [$from, $to] = BusinessTimezone::periodDates($month);
+        $ids = Expenditure::query()->whereBetween('spent_at', [$from, $to])->distinct()->pluck('user_id');
+
+        return User::query()->whereIn('id', $ids)->orderBy('name')->get(['uuid', 'name'])
+            ->map(fn (User $user): array => ['uuid' => $user->uuid, 'name' => $user->name])->values()->all();
+    }
+
+    /**
+     * Every category, inactive ones included — a past month may hold
+     * spending in a category since deactivated.
+     *
+     * @return list<array{uuid: string, name: string, is_active: bool}>
+     */
+    private function categoryOptions(): array
+    {
+        return $this->categories->list()
+            ->map(fn (ExpenseCategory $category): array => ['uuid' => $category->uuid, 'name' => $category->name, 'is_active' => (bool) $category->is_active])
             ->values()
             ->all();
+    }
+
+    /**
+     * The expenditure's audit trail as a timeline: who changed what, when,
+     * and why (edit_reason / void_reason travel with each change).
+     *
+     * @return list<array{action: string, at: ?string, user_name: ?string, impersonator_name: ?string, changes: list<array{field: string, from: mixed, to: mixed}>, reason: ?string}>
+     */
+    private function history(Expenditure $expenditure): array
+    {
+        $logs = AuditLog::query()->with(['user', 'impersonator'])
+            ->where('table_name', 'expenditures')
+            ->where('record_id', $expenditure->id)
+            ->orderBy('created_at')->orderBy('id')
+            ->get();
+
+        $categoryNames = ExpenseCategory::query()->pluck('name', 'id');
+        $tracked = ['category_id' => 'Category', 'description' => 'Description', 'notes' => 'Notes', 'status' => 'Status', 'amount' => 'Amount'];
+
+        return $logs->map(function (AuditLog $log) use ($categoryNames, $tracked): array {
+            $old = $log->old_values ?? [];
+            $new = $log->new_values ?? [];
+            $changes = [];
+
+            if ($log->action === 'update') {
+                foreach ($tracked as $field => $label) {
+                    if (($old[$field] ?? null) != ($new[$field] ?? null)) {
+                        $display = fn ($value) => $field === 'category_id' ? ($categoryNames[$value] ?? $value) : $value;
+                        $changes[] = ['field' => $label, 'from' => $display($old[$field] ?? null), 'to' => $display($new[$field] ?? null)];
+                    }
+                }
+            }
+
+            return [
+                'action' => $log->action,
+                'at' => $log->created_at?->toIso8601String(),
+                'user_name' => $log->user?->name ?? 'System',
+                'impersonator_name' => $log->impersonator?->name,
+                'changes' => $changes,
+                'reason' => $log->action === 'update' ? (($new['status'] ?? null) === 'void' && ($old['status'] ?? null) !== 'void' ? ($new['void_reason'] ?? null) : ($new['edit_reason'] ?? null)) : null,
+            ];
+        })->values()->all();
     }
 
     /**
@@ -175,14 +356,17 @@ class ResourceController extends Controller
     {
         return [
             'uuid' => $expenditure->uuid,
-            'category_uuid' => $expenditure->category->uuid,
-            'category_name' => $expenditure->category->name,
+            'category_name' => $expenditure->category?->name,
             'amount' => (string) $expenditure->amount,
             'description' => $expenditure->description,
             'spent_at' => $expenditure->spent_at?->toDateString(),
             'notes' => $expenditure->notes,
-            'recorded_offline' => $expenditure->recorded_offline,
-            'recorded_by_name' => $expenditure->user->name,
+            'source' => $expenditure->source,
+            'status' => $expenditure->status,
+            'relates_to_period' => $expenditure->relates_to_period,
+            'recorded_offline' => (bool) $expenditure->recorded_offline,
+            'recorded_by_name' => $expenditure->user?->name,
+            'voucher' => $expenditure->voucher ? ['uuid' => $expenditure->voucher->uuid, 'number' => $expenditure->voucher->number] : null,
             'created_at' => $expenditure->created_at?->toIso8601String(),
         ];
     }

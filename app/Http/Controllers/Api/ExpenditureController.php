@@ -4,16 +4,20 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
-use App\DataTransferObjects\ExpenditureData;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreExpenditureRequest;
 use App\Http\Requests\UpdateExpenditureRequest;
+use App\Http\Requests\VoidExpenditureRequest;
 use App\Http\Resources\ExpenditureResource;
 use App\Models\Expenditure;
 use App\Services\ExpenditureService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Expenditures over the API (docs/plans/expenditures-and-spending-controls.md).
+ * There is no store: every cash-out is a bon (E1) — the mobile app requests
+ * one through sync. No destroy either: a legacy row is voided with a reason.
+ */
 class ExpenditureController extends Controller
 {
     public function __construct(
@@ -26,36 +30,24 @@ class ExpenditureController extends Controller
 
         $perPage = (int) $request->integer('per_page', 25);
 
-        $filters = $request->only(['category_uuid', 'from', 'to', 'user_uuid']);
+        $filters = $request->only(['month', 'category_uuid', 'from', 'to', 'user_uuid', 'source', 'status']);
 
-        $expenditures = $this->expenditures->list($filters, $perPage);
-
-        return ExpenditureResource::collection($expenditures)->response();
-    }
-
-    public function store(StoreExpenditureRequest $request): JsonResponse
-    {
-        $expenditure = $this->expenditures->create(
-            ExpenditureData::fromArray($request->validated()),
-            $request->user()->id,
-        );
-
-        return (new ExpenditureResource($expenditure))->response()->setStatusCode(201);
+        return ExpenditureResource::collection($this->expenditures->list($filters, $perPage))->response();
     }
 
     public function update(UpdateExpenditureRequest $request, Expenditure $expenditure): JsonResponse
     {
-        $expenditure = $this->expenditures->update($expenditure, ExpenditureData::fromArray($request->validated()));
+        $validated = $request->validated();
+
+        $expenditure = $this->expenditures->edit($expenditure, collect($validated)->except('reason')->all(), $validated['reason']);
 
         return (new ExpenditureResource($expenditure))->response();
     }
 
-    public function destroy(Expenditure $expenditure): JsonResponse
+    public function void(VoidExpenditureRequest $request, Expenditure $expenditure): JsonResponse
     {
-        $this->authorize('delete', $expenditure);
+        $expenditure = $this->expenditures->void($expenditure, $request->user(), $request->validated('reason'));
 
-        $this->expenditures->delete($expenditure);
-
-        return response()->json(['message' => 'Expenditure deleted']);
+        return (new ExpenditureResource($expenditure->load(['category', 'user'])))->response();
     }
 }

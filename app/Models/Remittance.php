@@ -25,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'expected_cash', 'expected_mtn', 'expected_orange', 'expected_bank',
     'declared_cash', 'declared_denominations', 'collector_note', 'submitted_at',
     'received_by', 'received_at', 'till_account_id', 'received_cash', 'received_denominations', 'cash_variance', 'receiver_note',
-    'shortage_status', 'shortage_settled_by', 'shortage_settled_at', 'shortage_note',
+    'shortage_status', 'shortage_settled_by', 'shortage_settled_at', 'shortage_note', 'bons_total',
 ])]
 #[RouteKey('uuid')]
 class Remittance extends Model
@@ -37,6 +37,7 @@ class Remittance extends Model
         return [
             'business_date' => 'date',
             'expected_cash' => 'decimal:2',
+            'bons_total' => 'decimal:2',
             'expected_mtn' => 'decimal:2',
             'expected_orange' => 'decimal:2',
             'expected_bank' => 'decimal:2',
@@ -54,6 +55,22 @@ class Remittance extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(RemittanceLine::class);
+    }
+
+    /**
+     * Approved bons the collector already paid out of these collections
+     * ("already spent from my collections") — paid by the cashier as part of
+     * receiving this handover.
+     */
+    public function bons(): HasMany
+    {
+        return $this->hasMany(Voucher::class);
+    }
+
+    /** The cash that should actually be in the drawer: collected cash minus the bons spent from it. */
+    public function cashToHandOver(): string
+    {
+        return bcsub((string) $this->expected_cash, (string) ($this->bons_total ?? '0'), 2);
     }
 
     public function till(): BelongsTo

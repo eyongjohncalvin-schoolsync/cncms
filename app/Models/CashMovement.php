@@ -56,6 +56,13 @@ class CashMovement extends Model
      */
     public const string KIND_TECHNICIAN_FEE_PAYOUT = 'technician_fee_payout';
 
+    /**
+     * Money that came back on a paid bon that was corrected
+     * (docs/plans/expenditures-and-spending-controls.md, item 9). Source:
+     * the App\Models\Voucher.
+     */
+    public const string KIND_BON_CORRECTION = 'bon_correction';
+
     protected function casts(): array
     {
         return [

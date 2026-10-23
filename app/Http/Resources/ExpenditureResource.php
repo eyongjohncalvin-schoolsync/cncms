@@ -27,6 +27,10 @@ class ExpenditureResource extends JsonResource
             'receipt_url' => $this->receipt_path ? Storage::disk('public')->url($this->receipt_path) : null,
             'notes' => $this->notes,
             'recorded_offline' => $this->recorded_offline,
+            'source' => $this->source,
+            'status' => $this->status,
+            'relates_to_period' => $this->relates_to_period,
+            'voucher' => $this->whenLoaded('voucher', fn () => $this->voucher ? ['uuid' => $this->voucher->uuid, 'number' => $this->voucher->number] : null),
             'recorded_by' => $this->whenLoaded('user', fn () => [
                 'uuid' => $this->user->uuid,
                 'name' => $this->user->name,

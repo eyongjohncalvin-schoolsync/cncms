@@ -90,6 +90,7 @@ return new class extends Migration
 
         Schema::create('expenditure_months', function (Blueprint $table) {
             $table->id();
+            $table->uuid('uuid')->unique()->default(DB::raw('gen_random_uuid()'));
             $table->string('period', 7)->unique();
             $table->timestampTz('closed_at')->nullable();
             $table->unsignedBigInteger('closed_by')->nullable();

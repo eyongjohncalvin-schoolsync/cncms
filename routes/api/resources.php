@@ -13,9 +13,12 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('resources')->group(function () {
     Route::get('dashboard', [ResourcesDashboardController::class, 'index']);
 
+    // No store / destroy (docs/plans/expenditures-and-spending-controls.md):
+    // every cash-out is a bon, and a legacy row is voided, never deleted.
     Route::apiResource('expenditures', ExpenditureController::class)
-        ->only(['index', 'store', 'update', 'destroy'])
+        ->only(['index', 'update'])
         ->names('api.resources.expenditures');
+    Route::post('expenditures/{expenditure}/void', [ExpenditureController::class, 'void'])->name('api.resources.expenditures.void');
 
     Route::apiResource('categories', ExpenseCategoryController::class)
         ->only(['index', 'store', 'update', 'destroy'])

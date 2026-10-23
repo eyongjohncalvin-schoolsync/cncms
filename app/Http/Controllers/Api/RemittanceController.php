@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Payment;
 use App\Models\Remittance;
+use App\Models\Voucher;
 use App\Services\CashBookService;
 use App\Services\RemittanceService;
 use Illuminate\Http\JsonResponse;
@@ -34,6 +35,18 @@ class RemittanceController extends Controller
             'totals' => $preview['totals'],
             'count' => $preview['payments']->count(),
             'oldest_at' => $preview['oldest_at'],
+            // Bons already paid out of these collections
+            // (docs/plans/expenditures-and-spending-controls.md, item 2): the
+            // cashier pays them at the handover, so the drawer should hold
+            // cash_to_hand_over, not totals.cash.
+            'bons' => $preview['bons']->map(fn (Voucher $bon): array => [
+                'uuid' => $bon->uuid,
+                'number' => $bon->number,
+                'payee_name' => $bon->payee_name,
+                'amount' => (string) $bon->amount,
+            ])->values()->all(),
+            'bons_total' => $preview['bons_total'],
+            'cash_to_hand_over' => $preview['cash_to_hand_over'],
             'payments' => $preview['payments']->map(fn (Payment $payment): array => [
                 'uuid' => $payment->uuid,
                 'customer_name' => $payment->customer?->name,

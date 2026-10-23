@@ -10,6 +10,8 @@ use App\Services\CashAlertService;
 use App\Services\ManuscriptService;
 use App\Services\PaymentService;
 use App\Services\ResourcesDashboardService;
+use App\Services\SpendingControlService;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -23,11 +25,12 @@ class DashboardController extends Controller
         private readonly PaymentService $payments,
         private readonly ArrearsAdjustmentService $arrearsAdjustments,
         private readonly CashAlertService $cashAlerts,
+        private readonly SpendingControlService $spending,
     ) {}
 
     public function index(Request $request): Response
     {
-        $period = (string) $request->query('period', now()->format('Y-m'));
+        $period = (string) $request->query('period', BusinessTimezone::currentPeriod());
 
         $summary = $this->manuscripts->summary(['period' => $period]);
 
@@ -81,6 +84,25 @@ class DashboardController extends Controller
             // open it (cash.view), and deferred so the dashboard never waits.
             'cash_alerts' => app(TenantContext::class)->can('cash.view')
                 ? Inertia::defer(fn (): int => array_sum($this->cashAlerts->counts()))
+                : null,
+            // Spending this month (docs/plans/expenditures-and-spending-controls.md,
+            // items 5–6): deficit, cap use, budget warnings — for whoever sees
+            // the P&L. Deferred like the cash alerts.
+            'spending' => app(TenantContext::class)->can('expenditures.dashboard')
+                ? Inertia::defer(function (): array {
+                    $summary = $this->spending->summary(BusinessTimezone::currentPeriod());
+
+                    return [
+                        'period' => $summary['period'],
+                        'spent' => $summary['spent'],
+                        'income' => $summary['income'],
+                        'net' => $summary['net'],
+                        'deficit' => $summary['deficit'],
+                        'cap' => $summary['cap'],
+                        'cap_pct' => $summary['cap_pct'],
+                        'budget_warnings' => $summary['budget_warnings'],
+                    ];
+                })
                 : null,
         ]);
     }

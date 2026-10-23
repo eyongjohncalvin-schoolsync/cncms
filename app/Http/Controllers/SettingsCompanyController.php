@@ -39,6 +39,7 @@ class SettingsCompanyController extends Controller
                 'arrears_second_approval_threshold' => (string) $company->arrears_second_approval_threshold,
                 'voucher_approval_limit' => $company->voucher_approval_limit !== null ? (string) $company->voucher_approval_limit : null,
                 'voucher_daily_limit' => $company->voucher_daily_limit !== null ? (string) $company->voucher_daily_limit : null,
+                'monthly_spending_cap' => $company->monthly_spending_cap !== null ? (string) $company->monthly_spending_cap : null,
                 'remittance_deadline_hours' => (int) $company->remittance_deadline_hours,
                 'advance_settlement_days' => (int) $company->advance_settlement_days,
                 'rccm_number' => $company->rccm_number,

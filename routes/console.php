@@ -42,3 +42,9 @@ Schedule::command('tasks:run-due')->everyFifteenMinutes()->withoutOverlapping()
 // cash alerts to managers, the owner and the investors.
 Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping()
     ->skip(fn () => MaintenanceMode::active() !== null);
+
+// Expenditure month close (docs/plans/expenditures-and-spending-controls.md,
+// E6): daily just after midnight Cameroon time; from the 5th it closes the
+// previous month once (App\Services\ExpenditureMonthService::closeDue()).
+Schedule::command('expenditures:close-months')->dailyAt('00:30')->timezone('Africa/Lagos')->withoutOverlapping()
+    ->skip(fn () => MaintenanceMode::active() !== null);
