@@ -35,6 +35,12 @@ class CustomerCoverageService
      */
     public function summarize(Customer $customer): array
     {
+        // A field registration awaiting the office: nothing is billed yet,
+        // its months are settled at activation (installation phase 3).
+        if ($customer->isPendingActivation()) {
+            return ['services' => [], 'free' => [], 'waiting' => [], 'paid_until' => null, 'first_bill' => null, 'label' => 'Pending activation — not billed until the office activates'];
+        }
+
         $plan = FreeMonthPlan::forCustomer($customer);
         $bill = bcadd((string) $customer->bill, '0', 2);
         $current = $this->lock->currentPeriod();

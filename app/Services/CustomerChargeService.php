@@ -82,12 +82,16 @@ class CustomerChargeService
      * Records an installation instalment. Never more than what is still
      * recordable (fee − verified − pending), so the charge can't be overpaid
      * into a credit.
+     *
+     * $field carries what an offline field installation adds (phase 3):
+     * the phone's local_uuid, collection time, device and the field receipt
+     * printed at collection. Its amount/purpose/charge are ignored.
      */
-    public function recordPayment(CustomerCharge $charge, string $amount, ?string $method, ?string $methodReference): Payment
+    public function recordPayment(CustomerCharge $charge, string $amount, ?string $method, ?string $methodReference, ?PaymentData $field = null): Payment
     {
         $charge->loadMissing('customer');
 
-        return DB::transaction(function () use ($charge, $amount, $method, $methodReference): Payment {
+        return DB::transaction(function () use ($charge, $amount, $method, $methodReference, $field): Payment {
             $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
 
             if (! $locked->isOpen()) {
@@ -110,6 +114,13 @@ class CustomerChargeService
                 methodReference: $methodReference,
                 purpose: Payment::PURPOSE_INSTALLATION,
                 customerChargeId: $locked->id,
+                recordedOffline: $field?->recordedOffline,
+                recordedByDevice: $field?->recordedByDevice,
+                localUuid: $field?->localUuid,
+                collectedAt: $field?->collectedAt,
+                receiptNumber: $field?->receiptNumber,
+                securityCode: $field?->securityCode,
+                receiptIssuedAt: $field?->receiptIssuedAt,
             ));
 
             $this->forgetCustomerCache($charge->customer);

@@ -320,7 +320,7 @@ class CustomerService
      * branch-fenced caller's cached copy is bounded by findOrFail()'s 60s
      * TTL instead, the same staleness tradeoff already accepted for list().
      */
-    private function forgetShowCache(string $uuid): void
+    public function forgetShowCache(string $uuid): void
     {
         foreach (['', ':trashed'] as $suffix) {
             Cache::forget("customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all').$suffix);

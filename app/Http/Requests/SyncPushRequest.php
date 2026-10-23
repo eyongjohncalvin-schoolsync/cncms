@@ -38,6 +38,34 @@ class SyncPushRequest extends FormRequest
 
             'changes' => ['nullable', 'array'],
 
+            // Customers registered in the field, offline (installation
+            // phase 3) — shape only; every rule is checked per item by
+            // App\Services\FieldInstallationService, so one bad
+            // registration fails alone. Every key is listed so validated()
+            // keeps it; the nested arrays come through whole.
+            'changes.installations' => ['nullable', 'array'],
+            'changes.installations.*.local_uuid' => ['required', 'uuid'],
+            'changes.installations.*.customer_uuid' => ['nullable'],
+            'changes.installations.*.created_at' => ['nullable'],
+            'changes.installations.*.zone_uuid' => ['nullable'],
+            'changes.installations.*.name' => ['nullable'],
+            'changes.installations.*.phone' => ['nullable'],
+            'changes.installations.*.location' => ['nullable'],
+            'changes.installations.*.email' => ['nullable'],
+            'changes.installations.*.preferred_channel' => ['nullable'],
+            'changes.installations.*.level' => ['nullable'],
+            'changes.installations.*.services' => ['nullable', 'array'],
+            'changes.installations.*.connected_on' => ['nullable'],
+            'changes.installations.*.installation_offer_uuid' => ['nullable'],
+            'changes.installations.*.installation_fee' => ['nullable'],
+            'changes.installations.*.installation_paid' => ['nullable'],
+            'changes.installations.*.installation_reason' => ['nullable'],
+            'changes.installations.*.service_plans' => ['nullable', 'array'],
+            'changes.installations.*.method' => ['nullable'],
+            'changes.installations.*.method_reference' => ['nullable'],
+            'changes.installations.*.installation_receipt' => ['nullable', 'array'],
+            'changes.installations.*.upfront_receipt' => ['nullable', 'array'],
+
             'changes.payments' => ['nullable', 'array'],
             'changes.payments.*.local_uuid' => ['required', 'uuid'],
             'changes.payments.*.customer_uuid' => ['required', 'string'],

@@ -187,12 +187,251 @@ class CustomerInstallationService
     }
 
     /**
+     * An offline field installation (phase 3, D10): the customer — with the
+     * uuid the phone gave it, which its field receipts are signed with — the
+     * installation charge and the money taken in the field, each payment
+     * with the receipt the phone printed, in ONE transaction. The customer
+     * waits as "pending activation": no billing start, no free months, no
+     * rows; the office settles those at activation (activatePending()).
+     *
+     * The plan is checked as in create() except what the office settles at
+     * activation: an offer that expired while the phone was offline still
+     * applies, a reason for anything needing approval is not required yet,
+     * and a connection date ahead of the server's clock (a phone's clock)
+     * is read as today.
+     *
+     * @param  PaymentData  $field  the phone's device and collection time, shared by both payments
+     * @param  ?PaymentData  $installationReceipt  local_uuid + field receipt of the installation payment
+     * @param  ?PaymentData  $upfrontReceipt  local_uuid + field receipt of the months paid upfront
+     * @return array{customer: Customer, payments: list<Payment>, charge: ?CustomerCharge, upfront_amount: string}
+     */
+    public function createPending(
+        CustomerData $customerData,
+        InstallationData $installation,
+        string $customerUuid,
+        PaymentData $field,
+        ?PaymentData $installationReceipt,
+        ?PaymentData $upfrontReceipt,
+        User $actor,
+    ): array {
+        // Only the money is settled now; the free months chosen on the phone
+        // wait in the registration's proposal for the office (a month may
+        // even have passed before the phone synced).
+        $moneyOnly = new InstallationData(
+            offerUuid: $installation->offerUuid,
+            fee: $installation->fee,
+            paidNow: $installation->paidNow,
+            servicePlans: array_map(fn (array $row): array => [...$row, 'free_from' => null, 'free_months' => 0], $installation->servicePlans ?? []),
+            connectedOn: $installation->connectedOn,
+            reason: $installation->reason,
+            method: $installation->method,
+            methodReference: $installation->methodReference,
+        );
+
+        $plan = $this->planFor($customerData->services ?? [], $moneyOnly, field: true);
+
+        return DB::transaction(function () use ($customerData, $installation, $customerUuid, $field, $installationReceipt, $upfrontReceipt, $actor, $plan): array {
+            $customer = $this->customers->create($customerData);
+            $customer->forceFill([
+                'uuid' => $customerUuid,
+                'connected_on' => $plan['connected_on'],
+                'billing_starts_period' => null,
+                'activation_status' => Customer::ACTIVATION_PENDING,
+            ])->save();
+
+            $offer = $plan['offer'];
+            $charge = null;
+            $payments = [];
+
+            if ($plan['charge_amount'] !== null) {
+                $charge = $this->charges->open($customer, $plan['charge_amount'], $installation->reason ?? ($offer !== null ? "Installation — {$offer->name}" : 'Installation'), $actor);
+                $charge->update([
+                    'standard_amount' => $plan['standard_fee'],
+                    'installation_offer_id' => $offer?->id,
+                    'approval_status' => $plan['fee_needs_approval'] ? CustomerCharge::DECISION_PENDING : null,
+                ]);
+
+                if ($plan['waiver_needed']) {
+                    $this->charges->requestWaiver($charge, $installation->reason ?? 'Installation fee waived in the field', $actor);
+                }
+            }
+
+            if ($plan['service_months'] !== []) {
+                $payments[] = $this->payments->createForCustomer($customer, new PaymentData(
+                    customerUuid: $customer->uuid,
+                    amount: $plan['upfront_amount'],
+                    frequency: 'months',
+                    months: max(array_column($plan['service_months'], 'months')),
+                    recordedOffline: true,
+                    recordedByDevice: $field->recordedByDevice,
+                    localUuid: $upfrontReceipt?->localUuid,
+                    collectedAt: $field->collectedAt,
+                    method: $installation->method,
+                    methodReference: $installation->methodReference,
+                    receiptNumber: $upfrontReceipt?->receiptNumber,
+                    securityCode: $upfrontReceipt?->securityCode,
+                    receiptIssuedAt: $upfrontReceipt?->receiptIssuedAt,
+                    serviceMonths: $plan['service_months'],
+                ));
+            }
+
+            if ($charge !== null && bccomp($installation->paidNow, '0', 2) > 0) {
+                $payments[] = $this->charges->recordPayment($charge->fresh(), $installation->paidNow, $installation->method, $installation->methodReference, new PaymentData(
+                    recordedOffline: true,
+                    recordedByDevice: $field->recordedByDevice,
+                    localUuid: $installationReceipt?->localUuid,
+                    collectedAt: $field->collectedAt,
+                    receiptNumber: $installationReceipt?->receiptNumber,
+                    securityCode: $installationReceipt?->securityCode,
+                    receiptIssuedAt: $installationReceipt?->receiptIssuedAt,
+                ));
+            }
+
+            return [
+                'customer' => $customer->fresh(['zone', 'subscriptions.service', 'subscriptions.serviceVariant']),
+                'payments' => $payments,
+                'charge' => $charge?->fresh(),
+                'upfront_amount' => $plan['upfront_amount'],
+            ];
+        });
+    }
+
+    /**
+     * Activates a field registration (phase 3): the office's confirmed or
+     * corrected offer, free months per service and connection date are
+     * applied exactly as if the customer had been added at the office —
+     * same approval rules (D16/D17/D19: free months apply at once only if
+     * the installation was fully paid at registration, within the cap and
+     * the offer), the billing start is the installation month, and any month
+     * already generated gets this customer's row (Option X, as in create()).
+     *
+     * The money is what was taken in the field: the fee charged and paid,
+     * and the months paid upfront per service, are kept as recorded — only
+     * free months, offer and connection date can be corrected.
+     *
+     * @return array{customer: Customer, grants: Collection<int, FreeMonthGrant>, installation_month: string}
+     */
+    public function activatePending(Customer $customer, InstallationData $installation, User $actor): array
+    {
+        $customer->loadMissing('subscriptions.service', 'subscriptions.serviceVariant');
+
+        $services = $customer->subscriptions
+            ->map(fn ($row): CustomerServiceSelection => new CustomerServiceSelection(
+                serviceUuid: (string) $row->service->uuid,
+                price: (string) $row->price,
+                serviceVariantUuid: $row->serviceVariant?->uuid,
+            ))
+            ->values()
+            ->all();
+
+        $charge = CustomerCharge::query()
+            ->where('customer_id', $customer->id)
+            ->where('kind', CustomerCharge::KIND_INSTALLATION)
+            ->latest('id')
+            ->first();
+
+        // Months paid upfront as recorded in the field (per service uuid).
+        $paidMonths = [];
+        $serviceUuids = Service::query()->pluck('uuid', 'id');
+
+        $upfront = Payment::query()
+            ->where('customer_id', $customer->id)
+            ->whereNotNull('service_months')
+            ->where('verification_status', '!=', 'rejected')
+            ->get();
+
+        foreach ($upfront as $payment) {
+            foreach ((array) $payment->service_months as $row) {
+                $uuid = (string) ($serviceUuids[(int) $row['service_id']] ?? '');
+                $paidMonths[$uuid] = ($paidMonths[$uuid] ?? 0) + (int) $row['months'];
+            }
+        }
+
+        // A registration that synced or was activated after its month closed
+        // cannot be backdated: its free run starts at the installation month
+        // at the earliest.
+        $connectedOn = min($installation->connectedOn ?? $customer->connected_on?->toDateString() ?? BusinessTimezone::today(), BusinessTimezone::today());
+        $installationMonth = max(BusinessTimezone::periodOf(Carbon::parse($connectedOn, BusinessTimezone::WAT)), $this->lock->currentPeriod());
+        $plans = [];
+
+        foreach ($services as $selection) {
+            if ($selection->serviceVariantUuid !== null) {
+                continue;
+            }
+
+            $chosen = $installation->servicePlans[$selection->serviceUuid] ?? null;
+            $plans[$selection->serviceUuid] = [
+                'free_from' => isset($chosen['free_from']) ? max((string) $chosen['free_from'], $installationMonth) : null,
+                'free_months' => (int) ($chosen['free_months'] ?? 0),
+                // Settled by the money, not by the form: the upfront months
+                // are already a payment, so planFor() must not count them
+                // as a new one (paid_months 0) — they reach the timeline
+                // through the recorded payment.
+                'paid_months' => 0,
+            ];
+        }
+
+        // Fee and amount paid at registration: what the charge records.
+        $paidAtRegistration = $charge !== null
+            ? bcadd((string) Payment::query()
+                ->where('customer_charge_id', $charge->id)
+                ->whereNotNull('field_installation_id')
+                ->where('verification_status', '!=', 'rejected')
+                ->sum('amount'), '0', 2)
+            : '0';
+
+        $plan = $this->planFor($services, new InstallationData(
+            offerUuid: $installation->offerUuid,
+            paidNow: $paidAtRegistration,
+            servicePlans: $plans,
+            connectedOn: $connectedOn,
+            reason: $installation->reason,
+        ), field: true, activation: true, charge: $charge);
+
+        return DB::transaction(function () use ($customer, $installation, $actor, $plan, $charge): array {
+            return $this->grants->deferRecalculation(function () use ($customer, $installation, $actor, $plan, $charge): array {
+                $customer->forceFill([
+                    'connected_on' => $plan['connected_on'],
+                    'billing_starts_period' => $plan['installation_month'],
+                    'activation_status' => null,
+                ])->save();
+
+                if ($charge !== null && $plan['offer'] !== null && $charge->installation_offer_id !== $plan['offer']->id) {
+                    $charge->update(['installation_offer_id' => $plan['offer']->id, 'standard_amount' => $charge->standard_amount ?? $plan['standard_fee']]);
+                }
+
+                $grants = $this->grants->createInstallationGrants(
+                    $customer,
+                    $charge,
+                    $plan['offer'],
+                    $plan['free_by_service_id'],
+                    $plan['free_needs_approval'],
+                    $actor,
+                    $plan['free_needs_approval'] ? $installation->reason : null,
+                );
+
+                // The installation month (or later ones) may already be
+                // generated: write this customer's rows now (Option X).
+                $this->grants->recalculateFrom($customer, $plan['installation_month']);
+                $customer->touch();
+
+                return ['customer' => $customer, 'grants' => $grants, 'installation_month' => $plan['installation_month']];
+            });
+        });
+    }
+
+    /**
      * Resolves and checks the section, and works out what it means.
+     *
+     * `$field` relaxes what the office settles later for an offline field
+     * installation (see createPending()). `$activation` works from the
+     * `$charge` recorded in the field: its fee was settled there, so the
+     * offer's fee is not compared with it again.
      *
      * @param  list<CustomerServiceSelection>  $services
      * @return array{offer: ?InstallationOffer, standard_fee: ?string, charge_amount: ?string, fee_needs_approval: bool, waiver_needed: bool, free_by_service_id: array<int, array{from: string, months: int}>, free_needs_approval: bool, service_months: list<array{service_id: int, months: int, rate: string}>, upfront_amount: string, connected_on: string, installation_month: string, summary: array<string, mixed>}
      */
-    private function planFor(array $services, InstallationData $installation): array
+    private function planFor(array $services, InstallationData $installation, bool $field = false, bool $activation = false, ?CustomerCharge $charge = null): array
     {
         $today = BusinessTimezone::today();
         $offer = null;
@@ -200,7 +439,7 @@ class CustomerInstallationService
         if ($installation->offerUuid !== null) {
             $offer = InstallationOffer::query()->with('serviceMonths')->where('uuid', $installation->offerUuid)->first();
 
-            if ($offer === null || ! $offer->isAvailable($today)) {
+            if ($offer === null || (! $field && ! $offer->isAvailable($today))) {
                 throw ValidationException::withMessages(['installation_offer_uuid' => 'This installation offer is not available.']);
             }
         }
@@ -232,22 +471,38 @@ class CustomerInstallationService
         $connectedOn = $installation->connectedOn ?? $today;
 
         if ($connectedOn > $today) {
-            throw ValidationException::withMessages(['connected_on' => 'The connection date cannot be in the future.']);
+            // A phone's clock may run ahead of the server's.
+            if (! $field) {
+                throw ValidationException::withMessages(['connected_on' => 'The connection date cannot be in the future.']);
+            }
+
+            $connectedOn = $today;
         }
 
         $installationMonth = max(BusinessTimezone::periodOf(Carbon::parse($connectedOn, BusinessTimezone::WAT)), $this->lock->currentPeriod());
 
-        // Fee: the offer's unless overridden.
-        $standardFee = $offer !== null ? bcadd((string) $offer->fee, '0', 2) : null;
-        $fee = $installation->fee !== null ? bcadd($installation->fee, '0', 2) : ($standardFee ?? '0.00');
+        if ($activation) {
+            // Activating a field registration: the fee was settled in the
+            // field — what the charge records stands (an offer picked now
+            // only presets free months).
+            $standardFee = $charge?->standard_amount !== null ? bcadd((string) $charge->standard_amount, '0', 2) : null;
+            $chargeAmount = $charge !== null ? bcadd((string) $charge->amount, '0', 2) : null;
+            $waiverNeeded = $charge?->waiver_status !== null;
+            $feeNeedsApproval = $charge?->approval_status !== null;
+        } else {
+            // Fee: the offer's unless overridden.
+            $standardFee = $offer !== null ? bcadd((string) $offer->fee, '0', 2) : null;
+            $fee = $installation->fee !== null ? bcadd($installation->fee, '0', 2) : ($standardFee ?? '0.00');
 
-        if (bccomp($fee, '0', 2) < 0) {
-            throw ValidationException::withMessages(['installation_fee' => 'The installation fee cannot be negative.']);
+            if (bccomp($fee, '0', 2) < 0) {
+                throw ValidationException::withMessages(['installation_fee' => 'The installation fee cannot be negative.']);
+            }
+
+            $waiverNeeded = $standardFee !== null && bccomp($standardFee, '0', 2) > 0 && bccomp($fee, '0', 2) === 0;
+            $feeNeedsApproval = ! $waiverNeeded && $standardFee !== null && bccomp($fee, $standardFee, 2) < 0;
+            $chargeAmount = $waiverNeeded ? $standardFee : (bccomp($fee, '0', 2) > 0 ? $fee : null);
         }
 
-        $waiverNeeded = $standardFee !== null && bccomp($standardFee, '0', 2) > 0 && bccomp($fee, '0', 2) === 0;
-        $feeNeedsApproval = ! $waiverNeeded && $standardFee !== null && bccomp($fee, $standardFee, 2) < 0;
-        $chargeAmount = $waiverNeeded ? $standardFee : (bccomp($fee, '0', 2) > 0 ? $fee : null);
         $paidNow = bcadd($installation->paidNow, '0', 2);
 
         if (bccomp($paidNow, $chargeAmount ?? '0', 2) > 0) {
@@ -323,7 +578,8 @@ class CustomerInstallationService
             $beyondOffer ? 'Free months beyond the offer' : null,
         ]));
 
-        if ($needsApproval !== [] && $installation->reason === null) {
+        // A field registration's reason is the office's to give, at activation.
+        if ($needsApproval !== [] && $installation->reason === null && ($activation || ! $field)) {
             throw ValidationException::withMessages(['installation_reason' => 'Give the reason for '.mb_strtolower(implode(', ', $needsApproval)).' — it needs approval.']);
         }
 

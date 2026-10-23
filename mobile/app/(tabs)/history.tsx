@@ -4,6 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { EmptyState } from '../../src/components/ui/EmptyState';
 import { Badge, type BadgeTone } from '../../src/components/ui/Badge';
 import { getRecentPayments } from '../../src/db/payments';
+import { FieldRegistrationsList } from '../../src/components/customers/FieldRegistrationsList';
 import { getAllCustomers } from '../../src/db/customers';
 import { subscribeSyncState } from '../../src/sync/syncStore';
 import {
@@ -78,6 +79,9 @@ export default function HistoryScreen() {
     if (loaded && payments.length === 0) {
         return (
             <View style={styles.flex}>
+                <View style={styles.registrations}>
+                    <FieldRegistrationsList limit={5} />
+                </View>
                 <EmptyState
                     title="My Recorded Payments"
                     subtitle="Payments you record will show up here, newest first, with their verification status."
@@ -115,6 +119,12 @@ export default function HistoryScreen() {
                     data={filtered}
                     keyExtractor={(item) => item.local_uuid}
                     contentContainerStyle={styles.listContent}
+                    // Customers registered in the field (installation phase 3).
+                    ListHeaderComponent={
+                        <View style={styles.registrations}>
+                            <FieldRegistrationsList limit={5} />
+                        </View>
+                    }
                     renderItem={({ item }) => {
                         const isRejected = item.verification_status === 'rejected';
                         const isExpanded = expandedLocalUuid === item.local_uuid;
@@ -162,6 +172,7 @@ export default function HistoryScreen() {
 
 const styles = StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
+    registrations: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
     filterRow: {
         flexDirection: 'row',
         gap: spacing.sm,

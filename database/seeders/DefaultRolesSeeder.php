@@ -160,6 +160,7 @@ class DefaultRolesSeeder extends Seeder
             Permission::ArrearsApprove->value,
 
             Permission::InstallationsManage->value,
+            Permission::InstallationsActivate->value,
 
             Permission::OpeningBalancesView->value,
             Permission::OpeningBalancesEnter->value,
@@ -214,6 +215,8 @@ class DefaultRolesSeeder extends Seeder
 
             Permission::CashRemit->value,
             Permission::VouchersRequest->value,
+
+            Permission::InstallationsField->value,
 
             Permission::CompanyView->value,
         ];

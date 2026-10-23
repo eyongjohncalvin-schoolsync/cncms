@@ -11,6 +11,7 @@ use App\Models\Complaint;
 use App\Models\Customer;
 use App\Models\CustomerSubscription;
 use App\Models\Expenditure;
+use App\Models\FieldInstallation;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\SyncQueue;
@@ -59,8 +60,20 @@ class SyncService
     {
         $this->registerDevice($actor, $deviceId);
 
-        $results = ['payments' => [], 'bon_requests' => [], 'expenditures' => [], 'complaints' => []];
+        $results = ['installations' => [], 'payments' => [], 'bon_requests' => [], 'expenditures' => [], 'complaints' => []];
         $errors = [];
+
+        // Field installations first (installation phase 3): a payment the
+        // agent recorded offline for a customer registered offline in the
+        // same batch needs that customer to exist.
+        foreach ($changes['installations'] ?? [] as $item) {
+            [$entry, $error] = $this->pushInstallation($item, $deviceId, $actor);
+            $results['installations'][] = $entry;
+
+            if ($error !== null) {
+                $errors[] = $error;
+            }
+        }
 
         $paymentLookups = $this->paymentPushLookups($changes['payments'] ?? []);
 
@@ -140,6 +153,10 @@ class SyncService
                     'verified' => $this->changedPayments('verified', $sinceAt),
                     'rejected' => $this->changedPayments('rejected', $sinceAt),
                 ],
+                // The office's decision on this user's own field
+                // registrations (installation phase 3): pending, activated
+                // or rejected with its reason.
+                'installations' => $this->changedInstallations($sinceAt, $actor),
                 // in-app-notifications.md section 6 / complaint-desk.md
                 // section 7: piggybacks on this existing pull cycle rather
                 // than a second real-time channel. Delegates entirely to
@@ -418,6 +435,65 @@ class SyncService
     }
 
     /**
+     * A customer registered in the field, offline (installation phase 3,
+     * D10) — App\Services\FieldInstallationService::register(). Idempotent
+     * on local_uuid; needs `installations.field` and the agent's own zone; a
+     * refusal fails only this item. `server_uuid` is the customer's uuid
+     * (the one the phone generated), `activation` where the office is with
+     * it and `possible_duplicate` whether the office was warned.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array{0: array<string, mixed>, 1: ?array<string, mixed>}
+     */
+    private function pushInstallation(array $item, string $deviceId, User $actor): array
+    {
+        $localUuid = $item['local_uuid'] ?? null;
+
+        try {
+            $result = app(FieldInstallationService::class)->register($item, $deviceId, $actor);
+            $installation = $result['installation'];
+
+            if (! $result['replayed']) {
+                $this->recordSyncQueue($deviceId, 'installation', $installation->customer?->uuid, $localUuid, $item, 'synced');
+            }
+
+            return [
+                [
+                    'local_uuid' => $localUuid,
+                    'server_uuid' => $installation->customer?->uuid,
+                    'status' => 'synced',
+                    'activation' => $installation->status,
+                    'possible_duplicate' => ! empty($installation->possible_duplicates),
+                    'payments' => $installation->payments()->get(['uuid', 'local_uuid', 'purpose', 'amount', 'verification_status'])
+                        ->map(fn (Payment $payment): array => [
+                            'uuid' => $payment->uuid,
+                            'local_uuid' => $payment->local_uuid,
+                            'purpose' => $payment->purpose,
+                            'amount' => (string) $payment->amount,
+                            'verification_status' => $payment->verification_status,
+                        ])
+                        ->values()
+                        ->all(),
+                ],
+                null,
+            ];
+        } catch (Throwable $e) {
+            $message = $this->errorMessage($e);
+
+            $this->recordSyncQueue($deviceId, 'installation', null, $localUuid, $item, 'failed', $message);
+
+            if (! $e instanceof ValidationException) {
+                report($e);
+            }
+
+            return [
+                ['local_uuid' => $localUuid, 'status' => 'failed', 'error' => $message],
+                ['entity_type' => 'installation', 'local_uuid' => $localUuid, 'message' => $message],
+            ];
+        }
+    }
+
+    /**
      * A bon request from the phone ("Request a bon",
      * docs/plans/expenditures-and-spending-controls.md item 2): queued
      * offline, created here by App\Services\VoucherService::request() as a
@@ -663,6 +739,8 @@ class SyncService
                     'price' => $row->price,
                 ])->values()->all(),
                 'billing_starts_period' => $customer->billing_starts_period,
+                // "pending" = registered in the field, not activated yet.
+                'activation_status' => $customer->activation_status,
                 // FREE (not PREPAID): the latest bill's month was free.
                 'is_free' => $customer->latestManuscript !== null
                     && bccomp((string) $customer->latestManuscript->free_value, '0', 2) > 0
@@ -679,6 +757,32 @@ class SyncService
                     'until' => $window['end'],
                 ], ($plans[$customer->id] ?? FreeMonthPlan::none())->windowsFrom($currentPeriod)),
             ])
+            ->all();
+    }
+
+    /**
+     * This user's own field registrations that changed since $sinceAt.
+     *
+     * @return list<array{local_uuid: string, customer_uuid: ?string, customer_name: ?string, status: string, reason: ?string, possible_duplicate: bool, decided_at: ?string}>
+     */
+    private function changedInstallations(?Carbon $sinceAt, User $actor): array
+    {
+        return FieldInstallation::query()
+            ->with('customer:id,uuid,name,deleted_at')
+            ->where('submitted_by', $actor->id)
+            ->when($sinceAt, fn ($query) => $query->where('updated_at', '>=', $sinceAt))
+            ->orderBy('id')
+            ->get()
+            ->map(fn (FieldInstallation $installation): array => [
+                'local_uuid' => $installation->local_uuid,
+                'customer_uuid' => $installation->customer?->uuid,
+                'customer_name' => $installation->customer?->name,
+                'status' => $installation->status,
+                'reason' => $installation->status === FieldInstallation::STATUS_REJECTED ? $installation->decision_note : null,
+                'possible_duplicate' => ! empty($installation->possible_duplicates),
+                'decided_at' => $installation->decided_at?->toIso8601String(),
+            ])
+            ->values()
             ->all();
     }
 

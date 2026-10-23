@@ -184,6 +184,8 @@ export function formatPeriod(period: string): string {
 }
 
 export interface PromoState {
+    /** 'pending' = registered in the field, not activated by the office yet (phase 3). */
+    activation_status?: 'pending' | null;
     billing_starts_period?: string | null;
     is_free?: boolean;
     prepaid_months_remaining?: number;
@@ -200,6 +202,11 @@ export interface PromoState {
 export function promoLabel(promo: PromoState | null | undefined, currentPeriod: string): string | null {
     if (!promo) {
         return null;
+    }
+
+    // A field registration is not billed until the office activates it.
+    if (promo.activation_status === 'pending') {
+        return 'PENDING ACTIVATION · not billed until the office activates';
     }
 
     const parts: string[] = [];

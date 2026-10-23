@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Models\Customer;
 use App\Services\ArrearsAdjustmentService;
 use App\Services\CashAlertService;
+use App\Services\FieldInstallationService;
 use App\Services\ManuscriptService;
 use App\Services\PaymentService;
 use App\Services\ResourcesDashboardService;
@@ -78,6 +79,9 @@ class DashboardController extends Controller
                 // convention of showing the same raw count to every
                 // dashboard viewer regardless of who can actually act on it.
                 'pending_arrears_adjustments' => $this->arrearsAdjustments->dashboard()['pending_approval'],
+                // Customers registered in the field awaiting the office
+                // (installation phase 3) — links to the activation queue.
+                'pending_activations' => app(FieldInstallationService::class)->pendingCount(),
             ],
             // Cash controls (docs/plans/cash-controls.md): how many things
             // need a look on the Cash alerts page — only for those who can

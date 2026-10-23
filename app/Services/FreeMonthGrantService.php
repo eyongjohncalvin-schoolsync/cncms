@@ -340,6 +340,12 @@ class FreeMonthGrantService
      */
     public function recalculateFrom(Customer $customer, string $from): void
     {
+        // A field registration awaiting activation has no rows to write:
+        // activation recalculates it (installation phase 3).
+        if ($customer->isPendingActivation()) {
+            return;
+        }
+
         $from = max($from, $this->lock->currentPeriod());
 
         if ($this->deferred !== null) {

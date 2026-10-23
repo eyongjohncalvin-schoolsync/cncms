@@ -202,7 +202,7 @@ class ManuscriptCalculate extends Command
         $errors = 0;
         $errorDetails = [];
 
-        Customer::query()->chunkById(200, function ($customers) use (
+        Customer::query()->activated()->chunkById(200, function ($customers) use (
             $period,
             $commandRun,
             &$customersProcessed,

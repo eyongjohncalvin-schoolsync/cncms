@@ -24,6 +24,7 @@ class CustomerRepository implements CustomerRepositoryInterface
                 fn ($query) => $query->onlyTrashed()->with('archivedBy'),
             )
             ->with('zone')
+            ->when(! empty($filters['pending_activation']), fn ($query) => $query->pendingActivation())
             // Drives the "Archive customer" vs "Delete row" choice on the
             // list without an N+1 — one EXISTS subquery per relation per row.
             ->withExists(['payments', 'manuscripts', 'messages'])
@@ -120,6 +121,9 @@ class CustomerRepository implements CustomerRepositoryInterface
         return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
             ->with(['zone', 'latestManuscript'])
             ->where('status', 'active')
+            // Field registrations awaiting activation are never billed,
+            // so never at risk and never eligible (installation phase 3).
+            ->activated()
             ->when($zoneId, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
             ->orderBy('name')
             ->get();

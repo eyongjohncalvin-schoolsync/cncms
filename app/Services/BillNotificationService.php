@@ -47,7 +47,8 @@ final class BillNotificationService
      */
     public function composeMessage(Customer $customer, ?Manuscript $manuscript = null): ?string
     {
-        if ($customer->status !== 'active') {
+        // A field registration awaiting activation is never billed (phase 3).
+        if ($customer->status !== 'active' || $customer->isPendingActivation()) {
             return null;
         }
 

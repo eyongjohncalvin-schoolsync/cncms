@@ -3,6 +3,7 @@ import type { LocalCustomer } from '../types/db';
 import type { CustomerServiceApi, SyncPullCustomer } from '../types/api';
 import { nowIso } from '../utils/format';
 import type { PromoState } from '../utils/installation';
+import { isPossibleDuplicate } from '../utils/fieldInstallation';
 
 /**
  * `LocalCustomer.services` is a JSON-encoded string (SQLite has no native
@@ -30,6 +31,7 @@ export function parseLocalCustomerServices(customer: Pick<LocalCustomer, 'servic
 /** The promo state a pulled customer carries (installation phase 2). */
 function promoOf(customer: SyncPullCustomer): PromoState {
     return {
+        activation_status: customer.activation_status ?? null,
         billing_starts_period: customer.billing_starts_period ?? null,
         is_free: customer.is_free ?? false,
         prepaid_months_remaining: customer.prepaid_months_remaining ?? 0,
@@ -180,4 +182,19 @@ export async function getZoneSnapshot(): Promise<ZoneSnapshot> {
         arrearsTotal: row?.arrears_total ?? 0,
         disconnectedCount: row?.disconnected_count ?? 0,
     };
+}
+
+/**
+ * Cached customers who may be the same person as a field registration
+ * (installation phase 3) — the phone's own check while offline; the server
+ * checks again at sync and flags it for the office.
+ */
+export async function findLocalDuplicates(name: string, phone: string): Promise<Array<{ uuid: string; name: string; phone: string | null; zone: string | null; status: string }>> {
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<Pick<LocalCustomer, 'uuid' | 'name' | 'phone' | 'status'>>('SELECT uuid, name, phone, status FROM customers');
+
+    return rows
+        .filter((row) => isPossibleDuplicate(row, name, phone))
+        .slice(0, 5)
+        .map((row) => ({ uuid: row.uuid, name: row.name, phone: row.phone, zone: null, status: row.status }));
 }

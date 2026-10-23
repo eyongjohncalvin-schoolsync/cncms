@@ -169,4 +169,34 @@ export interface LocalNotification {
     cached_at: string;
 }
 
-export type SyncMetaKey = 'last_sync_at' | 'device_id' | 'agent_zone_uuid';
+
+/**
+ * A customer registered in the field, offline (installation phase 3) — the
+ * `installations` table doubles as outbox and history, keyed by the
+ * registration's local_uuid. `payload` is the JSON-encoded sync item
+ * (FieldInstallationItem); `activation` is the office's decision once
+ * synced, from the pull.
+ */
+export interface LocalInstallation {
+    local_uuid: string;
+    customer_uuid: string;
+    name: string;
+    phone: string | null;
+    collect_now: number;
+    payload: string;
+    sync_status: 'queued' | 'failed' | 'synced';
+    sync_error: string | null;
+    sync_attempts: number;
+    activation: 'pending' | 'activated' | 'rejected' | null;
+    decision_reason: string | null;
+    possible_duplicate: number;
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * `cache_*` — what the offline add-customer form needs (installation phase
+ * 3): zones, the service catalogue and the installation options, refreshed
+ * on sync and whenever the form opens online. JSON-encoded API payloads.
+ */
+export type SyncMetaKey = 'last_sync_at' | 'device_id' | 'agent_zone_uuid' | 'cache_zones' | 'cache_service_catalogue' | 'cache_installation_options';

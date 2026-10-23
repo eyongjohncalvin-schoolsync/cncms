@@ -165,6 +165,30 @@ CREATE TABLE IF NOT EXISTS receipt_numbers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_receipt_numbers_owner_status ON receipt_numbers(owner_user_uuid, status);
+
+-- Installation phase 3 (docs/plans/installation-and-promotions.md, D10): a
+-- customer registered in the field, offline -- outbox and history, same
+-- convention as 'complaints'. payload = the JSON-encoded sync item;
+-- activation = the office's decision (pending/activated/rejected), from
+-- the pull.
+CREATE TABLE IF NOT EXISTS installations (
+    local_uuid          TEXT PRIMARY KEY NOT NULL,
+    customer_uuid       TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    phone               TEXT,
+    collect_now         REAL NOT NULL DEFAULT 0,
+    payload             TEXT NOT NULL,
+    sync_status         TEXT NOT NULL DEFAULT 'queued',
+    sync_error          TEXT,
+    sync_attempts       INTEGER NOT NULL DEFAULT 0,
+    activation          TEXT,
+    decision_reason     TEXT,
+    possible_duplicate  INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_installations_sync_status ON installations(sync_status);
 `;
 
 /**

@@ -20,6 +20,7 @@ import {
     type InstallationFormState,
     type ServicePlan,
 } from '../../utils/installation';
+import { collectNowCents, installationPaidCents, servicePrices, upfrontCents } from '../../utils/fieldInstallation';
 import type { CustomerServiceSelection, InstallationOptionsResponse, InstallationPreviewApi, ServiceCatalogueApi } from '../../types/api';
 
 type Options = InstallationOptionsResponse['data'];
@@ -33,7 +34,12 @@ const CHIP_COUNT = 6;
  * installation month, that month ticked by default, one consecutive run)
  * and ☐ Paid upfront (months after the free ones, at that service's price),
  * each service's timeline free → paid → billed, the first billed month and
- * the total to collect now, from the server's live preview. Online-only.
+ * the total to collect now, from the server's live preview.
+ *
+ * `offline` (installation phase 3): a field agent registering a customer
+ * without a connection — no live preview; the phone works out what to
+ * collect itself, and the office confirms the free months and the first
+ * bill when it activates the customer.
  */
 export function InstallationFields({
     options,
@@ -45,6 +51,7 @@ export function InstallationFields({
     phone,
     errors,
     onPreview,
+    offline = false,
 }: {
     options: Options;
     state: InstallationFormState;
@@ -55,6 +62,7 @@ export function InstallationFields({
     phone: string;
     errors: Record<string, string | undefined>;
     onPreview: (preview: InstallationPreviewApi | null) => void;
+    offline?: boolean;
 }) {
     const [preview, setPreview] = useState<InstallationPreviewApi | null>(null);
     const [previewError, setPreviewError] = useState<string | null>(null);
@@ -80,6 +88,10 @@ export function InstallationFields({
     const body = JSON.stringify({ name, phone, services, ...toRequestFields(state) });
 
     useEffect(() => {
+        if (offline) {
+            return;
+        }
+
         const request = ++latest.current;
         const timer = setTimeout(() => {
             previewInstallation(JSON.parse(body))
@@ -100,7 +112,7 @@ export function InstallationFields({
 
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [body]);
+    }, [body, offline]);
 
     const needsReason = (preview?.needs_approval.length ?? 0) > 0;
 
@@ -114,7 +126,7 @@ export function InstallationFields({
 
             <TextInput label="Connected on (YYYY-MM-DD)" value={state.connectedOn} onChangeText={(text) => set({ connectedOn: text })} error={errors.connected_on} />
 
-            {options.can_manage && (
+            {(options.can_manage || offline) && (
                 <>
                     <Text style={styles.label}>Installation offer (preset)</Text>
                     <View style={styles.chips}>
@@ -210,7 +222,13 @@ export function InstallationFields({
                                         </View>
                                         {plan.paid_months > 0 && (
                                             <TextInput
-                                                label={`Months paid upfront${timeline ? ` (${Number(timeline.paid_amount).toLocaleString()} FCFA)` : ''}`}
+                                                label={`Months paid upfront${
+                                                    timeline
+                                                        ? ` (${Number(timeline.paid_amount).toLocaleString()} FCFA)`
+                                                        : offline
+                                                          ? ` (${((plan.paid_months * (servicePrices(services)[service.uuid] ?? 0)) / 100).toLocaleString()} FCFA)`
+                                                          : ''
+                                                }`}
                                                 value={String(plan.paid_months)}
                                                 keyboardType="numeric"
                                                 onChangeText={(text) => setPlan({ ...plan, paid_months: Math.max(0, Math.min(24, Number(text) || 0)) })}
@@ -232,8 +250,13 @@ export function InstallationFields({
                 </>
             )}
 
-            {(needsReason || state.reason !== '') && (
-                <TextInput label="Reason (needs admin/owner approval)" value={state.reason} onChangeText={(text) => set({ reason: text })} error={errors.installation_reason} />
+            {(needsReason || state.reason !== '' || offline) && (
+                <TextInput
+                    label={offline ? 'Note for the office (optional)' : 'Reason (needs admin/owner approval)'}
+                    value={state.reason}
+                    onChangeText={(text) => set({ reason: text })}
+                    error={errors.installation_reason}
+                />
             )}
 
             {takesMoney(state) && (
@@ -262,6 +285,23 @@ export function InstallationFields({
                 </>
             )}
 
+            {offline ? (
+                <View style={styles.preview}>
+                    <Text style={styles.previewLine}>
+                        Collect now: {(collectNowCents(state.paidNow, services, state.servicePlans) / 100).toLocaleString()} FCFA
+                    </Text>
+                    {upfrontCents(services, state.servicePlans) > 0 ? (
+                        <Text style={styles.hint}>
+                            Installation {(installationPaidCents(state.paidNow) / 100).toLocaleString()} + {(upfrontCents(services, state.servicePlans) / 100).toLocaleString()}{' '}
+                            FCFA paid upfront
+                        </Text>
+                    ) : null}
+                    <Text style={styles.hint}>
+                        Registered offline: the customer is not billed until the office checks the zone, free months and connection date and
+                        activates them. A receipt is printed for each amount collected.
+                    </Text>
+                </View>
+            ) : (
             <View style={styles.preview}>
                 {previewError ? <Text style={styles.error}>{previewError}</Text> : null}
                 {!previewError && preview ? (
@@ -278,6 +318,7 @@ export function InstallationFields({
                 ) : null}
                 {!previewError && !preview ? <Text style={styles.hint}>Working out the first bill…</Text> : null}
             </View>
+            )}
         </Card>
     );
 }
