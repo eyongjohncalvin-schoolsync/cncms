@@ -85,6 +85,9 @@ class TenantProvisioningDefaultsTest extends TestCase
             $this->assertNull($company->momo_number);
             $this->assertNull($company->momo_name);
         } finally {
+            // The membership row references the user, so it goes first.
+            tenancy()->initialize($this->tenant);
+            DB::connection('tenant')->table('tenant_users')->where('user_id', $owner->id)->delete();
             tenancy()->end();
             DB::connection('pgsql')->table('tenant_user_index')->where('user_id', $owner->id)->delete();
             $owner->delete();
