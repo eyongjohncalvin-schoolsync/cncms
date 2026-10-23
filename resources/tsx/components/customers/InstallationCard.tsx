@@ -25,7 +25,7 @@ const STATUS: Record<CustomerChargeStatus, { label: string; tone: 'slate' | 'gre
     refunded: { label: 'Refunded', tone: 'slate' },
 };
 
-const METHODS: { value: PaymentMethod; label: string }[] = [
+export const METHODS: { value: PaymentMethod; label: string }[] = [
     { value: 'cash', label: 'Cash' },
     { value: 'mtn_momo', label: 'MTN MoMo' },
     { value: 'orange_money', label: 'Orange Money' },
@@ -97,7 +97,7 @@ export function InstallationCard({ customerUuid, installation }: { customerUuid:
     );
 }
 
-function ChargeRow({ charge, onPay, onWaive, onRefund }: { charge: CustomerCharge; onPay: () => void; onWaive: () => void; onRefund: () => void }) {
+export function ChargeRow({ charge, onPay, onWaive, onRefund }: { charge: CustomerCharge; onPay: () => void; onWaive: () => void; onRefund: () => void }) {
     const decideOn = (what: 'waiver' | 'fee' | 'refund', decision: 'approve' | 'reject') => {
         const reason = decision === 'reject' ? window.prompt(`Why is this ${what === 'fee' ? 'lower fee' : what} rejected? (optional)`) : null;
         if (decision === 'reject' && reason === null) return;
@@ -110,16 +110,24 @@ function ChargeRow({ charge, onPay, onWaive, onRefund }: { charge: CustomerCharg
         <li className="flex flex-col gap-3 px-5 py-4 text-sm sm:flex-row sm:items-start sm:justify-between">
             <div className="flex flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-slate-900">Fee {formatCurrency(charge.amount)}</span>
+                    <span className="font-semibold text-slate-900">{charge.kind && charge.kind !== 'installation' ? `${charge.kind_label} fee` : 'Fee'} {formatCurrency(charge.amount)}</span>
                     <Badge tone={STATUS[charge.status].tone}>{STATUS[charge.status].label}</Badge>
                     {charge.waiver_status === 'pending' && <Badge tone="yellow">Waiver awaiting approval</Badge>}
                     {charge.approval_status === 'pending' && <Badge tone="yellow">Lower fee awaiting approval</Badge>}
                     {charge.refund_status === 'pending' && <Badge tone="yellow">Refund awaiting approval</Badge>}
                     {charge.offer_name && <span className="text-xs text-slate-500">Offer: {charge.offer_name}</span>}
                 </div>
+                {charge.kind === 'relocation' && (
+                    <p className="text-xs text-slate-500">
+                        Moved from {charge.from_location ?? ''}
+                        {charge.from_zone_name ? ` (${charge.from_zone_name})` : ''} to {charge.to_location ?? ''}
+                        {charge.to_zone_name ? ` (${charge.to_zone_name})` : ''}
+                    </p>
+                )}
+                {charge.note && <p className="text-xs text-slate-500">Note: {charge.note}</p>}
                 {charge.standard_amount && charge.standard_amount !== charge.amount && (
                     <p className="text-xs text-slate-500">
-                        Offer fee {formatCurrency(charge.standard_amount)}
+                        {charge.kind && charge.kind !== 'installation' ? 'Standard fee' : 'Offer fee'} {formatCurrency(charge.standard_amount)}
                         {charge.approval_status === 'rejected' && ` — lower fee rejected${charge.approval_rejection_reason ? `: ${charge.approval_rejection_reason}` : ''}`}
                     </p>
                 )}
@@ -185,7 +193,7 @@ function ChargeRow({ charge, onPay, onWaive, onRefund }: { charge: CustomerCharg
                 )}
                 {charge.can.request_refund && (
                     <Button type="button" variant="ghost" onClick={onRefund}>
-                        Refund installation
+                        Refund {charge.kind && charge.kind !== 'installation' ? (charge.kind_label ?? '').toLowerCase() : 'installation'}
                     </Button>
                 )}
                 {charge.can.decide_refund && (
@@ -236,7 +244,7 @@ function CreateChargeModal({ open, onClose, customerUuid }: { open: boolean; onC
     );
 }
 
-function PayModal({ charge, onClose }: { charge: CustomerCharge | null; onClose: () => void }) {
+export function PayModal({ charge, onClose }: { charge: CustomerCharge | null; onClose: () => void }) {
     const { data, setData, post, processing, errors, reset } = useForm<{ amount: string; method: PaymentMethod; method_reference: string }>({
         amount: '',
         method: 'cash',
@@ -257,11 +265,11 @@ function PayModal({ charge, onClose }: { charge: CustomerCharge | null; onClose:
     };
 
     return (
-        <Modal open={charge !== null} onClose={onClose} title="Record installation payment">
+        <Modal open={charge !== null} onClose={onClose} title={`Record ${chargeLabel(charge)} payment`}>
             {charge && (
                 <form onSubmit={submit} className="flex flex-col gap-4">
                     <p className="text-sm text-slate-600">
-                        Up to {formatCurrency(charge.recordable)} can still be recorded. This money pays the installation fee only — it never becomes
+                        Up to {formatCurrency(charge.recordable)} can still be recorded. This money pays the {chargeLabel(charge)} fee only — it never becomes
                         subscription credit.
                     </p>
                     <TextInput id="pay-amount" label="Amount (FCFA)" type="number" min="1" step="0.01" max={charge.recordable} required value={data.amount} onChange={(e) => setData('amount', e.target.value)} error={errors.amount} />
@@ -289,7 +297,7 @@ function PayModal({ charge, onClose }: { charge: CustomerCharge | null; onClose:
     );
 }
 
-function WaiverModal({ charge, onClose }: { charge: CustomerCharge | null; onClose: () => void }) {
+export function WaiverModal({ charge, onClose }: { charge: CustomerCharge | null; onClose: () => void }) {
     const { data, setData, post, processing, errors, reset } = useForm({ reason: '' });
 
     const submit = (event: FormEvent) => {
@@ -306,7 +314,7 @@ function WaiverModal({ charge, onClose }: { charge: CustomerCharge | null; onClo
     };
 
     return (
-        <Modal open={charge !== null} onClose={onClose} title="Request installation waiver">
+        <Modal open={charge !== null} onClose={onClose} title={`Request ${chargeLabel(charge)} waiver`}>
             {charge && (
                 <form onSubmit={submit} className="flex flex-col gap-4">
                     <p className="text-sm text-slate-600">
@@ -328,7 +336,7 @@ function WaiverModal({ charge, onClose }: { charge: CustomerCharge | null; onClo
 }
 
 /** "Refund installation" (D9): non-refundable by default, so asked for with a reason and approved by someone else. */
-function RefundModal({ charge, onClose }: { charge: CustomerCharge | null; onClose: () => void }) {
+export function RefundModal({ charge, onClose }: { charge: CustomerCharge | null; onClose: () => void }) {
     const { data, setData, post, processing, errors, reset } = useForm({ amount: '', reason: '' });
 
     const submit = (event: FormEvent) => {
@@ -345,12 +353,12 @@ function RefundModal({ charge, onClose }: { charge: CustomerCharge | null; onClo
     };
 
     return (
-        <Modal open={charge !== null} onClose={onClose} title="Refund installation">
+        <Modal open={charge !== null} onClose={onClose} title={`Refund ${chargeLabel(charge)}`}>
             {charge && (
                 <form onSubmit={submit} className="flex flex-col gap-4">
                     <p className="text-sm text-slate-600">
-                        The installation fee is not refundable by default. Once someone else approves, a bon pays the money out and the free months
-                        that came with the installation are forfeited.
+                        The {chargeLabel(charge)} fee is not refundable by default. Once someone else approves, a bon pays the money out
+                        {charge?.kind === 'installation' || !charge?.kind ? ' and the free months that came with the installation are forfeited' : ''}.
                     </p>
                     <TextInput
                         id="refund-amount"
@@ -376,4 +384,9 @@ function RefundModal({ charge, onClose }: { charge: CustomerCharge | null; onClo
             )}
         </Modal>
     );
+}
+
+/** "installation", "relocation" or "re-installation" — for modal titles and copy. */
+function chargeLabel(charge: CustomerCharge | null): string {
+    return charge?.kind && charge.kind !== 'installation' ? (charge.kind_label ?? charge.kind).toLowerCase() : 'installation';
 }

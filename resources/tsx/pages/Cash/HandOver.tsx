@@ -107,7 +107,7 @@ export default function CashHandOver({ payments, totals, purpose_totals, oldest_
                 <p className="-mt-3 mb-6 text-sm text-slate-600">
                     Includes <span className="font-semibold">{formatCurrency(purpose_totals.technician_fee)}</span> of technician motivation fees — hand
                     them over with the cash; the cashier pays the technician.
-                    {Number(purpose_totals.installation) > 0 && <> Installation fees: {formatCurrency(purpose_totals.installation)}.</>}
+                    {Number(purpose_totals.installation) > 0 && <> Installation, relocation &amp; re-installation fees: {formatCurrency(purpose_totals.installation)}.</>}
                 </p>
             )}
 
