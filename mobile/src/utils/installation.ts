@@ -1,11 +1,11 @@
 /**
  * Pure, dependency-free logic for the "Installation & first payment" section
  * of Add Customer and for the promo state the sync pull carries
- * (docs/plans/installation-and-promotions.md, phase 2) — kept apart from the
- * screens so plain Node tests can exercise it. The server
- * (App\Services\CustomerInstallationService) stays the source of truth for
- * every amount; this only shapes what the form sends and what the screens
- * say.
+ * (docs/plans/installation-and-promotions.md, phase 2 + revision D15–D19) —
+ * kept apart from the screens so plain Node tests can exercise it. The
+ * server (App\Services\CustomerInstallationService) stays the source of
+ * truth for every amount; this only shapes what the form sends and what the
+ * screens say.
  */
 
 export interface OfferMonths {
@@ -19,6 +19,14 @@ export interface InstallationOfferLike {
     months: OfferMonths[];
 }
 
+/** One ticked service's choice (D15): free months from a month, then months paid upfront. */
+export interface ServicePlan {
+    service_uuid: string;
+    free_from: string | null;
+    free_months: number;
+    paid_months: number;
+}
+
 export interface InstallationFormState {
     connectedOn: string;
     offerUuid: string | null;
@@ -26,9 +34,7 @@ export interface InstallationFormState {
     fee: string;
     /** '' = nothing paid now. */
     paidNow: string;
-    /** null = the offer's months. */
-    freeMonths: OfferMonths[] | null;
-    advanceMonths: number;
+    servicePlans: ServicePlan[];
     reason: string;
     method: 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
     methodReference: string;
@@ -41,8 +47,7 @@ export interface InstallationRequestFields {
     installation_fee: string | null;
     installation_paid: string | null;
     installation_reason: string | null;
-    free_months: OfferMonths[] | null;
-    advance_months: number;
+    service_plans: ServicePlan[];
     method: InstallationFormState['method'];
     method_reference: string | null;
 }
@@ -53,42 +58,86 @@ export function initialInstallationState(today: string, defaultOfferUuid: string
         offerUuid: defaultOfferUuid,
         fee: '',
         paidNow: '',
-        freeMonths: null,
-        advanceMonths: 0,
+        servicePlans: [],
         reason: '',
         method: 'cash',
         methodReference: '',
     };
 }
 
-/** Free months shown for a ticked service: the edited value, else the offer's, else 0. */
-export function freeMonthsFor(offer: InstallationOfferLike | null, edited: OfferMonths[] | null, serviceUuid: string): number {
-    const row = edited?.find((m) => m.service_uuid === serviceUuid);
+/** "2026-10" + n months → "YYYY-MM". */
+export function addMonths(period: string, n: number): string {
+    const [y, m] = period.split('-').map(Number);
+    const total = y * 12 + (m - 1) + n;
 
-    if (row) {
-        return row.months;
-    }
+    return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`;
+}
 
-    return offer?.months.find((m) => m.service_uuid === serviceUuid)?.months ?? 0;
+function monthIndex(from: string, period: string): number {
+    const [fy, fm] = from.split('-').map(Number);
+    const [y, m] = period.split('-').map(Number);
+
+    return (y - fy) * 12 + (m - fm);
+}
+
+/** The installation month: when the customer was connected, never a month already past. */
+export function installationMonth(connectedOn: string, today: string): string {
+    const connected = (connectedOn || today).slice(0, 7);
+    const current = today.slice(0, 7);
+
+    return connected > current ? connected : current;
+}
+
+/** A newly ticked service starts with the offer's months, else the installation month free (D16). */
+export function defaultPlan(serviceUuid: string, firstMonth: string, offer: InstallationOfferLike | null): ServicePlan {
+    const preset = offer?.months.find((m) => m.service_uuid === serviceUuid)?.months;
+    const months = offer ? (preset ?? 0) : 1;
+
+    return { service_uuid: serviceUuid, free_from: months > 0 ? firstMonth : null, free_months: months, paid_months: 0 };
+}
+
+/** One plan per ticked service, keeping what was already chosen. */
+export function syncPlans(plans: ServicePlan[], tickedServiceUuids: string[], firstMonth: string, offer: InstallationOfferLike | null): ServicePlan[] {
+    return tickedServiceUuids.map((uuid) => plans.find((p) => p.service_uuid === uuid) ?? defaultPlan(uuid, firstMonth, offer));
 }
 
 /**
- * Sets one service's free months, materialising the offer's months for the
- * other ticked services so the server sees the whole picture.
+ * Tapping a month chip keeps the free months one consecutive run (D16):
+ * extend the run to the month, cut it there, or start it there.
  */
-export function withFreeMonths(
-    offer: InstallationOfferLike | null,
-    edited: OfferMonths[] | null,
-    tickedServiceUuids: string[],
-    serviceUuid: string,
-    months: number,
-): OfferMonths[] {
-    const clamped = Number.isFinite(months) && months > 0 ? Math.floor(months) : 0;
+export function toggleFreeMonth(plan: ServicePlan, month: string, firstMonth: string): ServicePlan {
+    const start = plan.free_from ?? firstMonth;
 
-    return tickedServiceUuids.map((uuid) => ({
-        service_uuid: uuid,
-        months: uuid === serviceUuid ? clamped : freeMonthsFor(offer, edited, uuid),
-    }));
+    if (plan.free_months === 0) {
+        return { ...plan, free_from: month, free_months: 1 };
+    }
+
+    const offset = monthIndex(start, month);
+
+    if (offset < 0) {
+        return { ...plan, free_from: month, free_months: plan.free_months - offset };
+    }
+
+    if (offset >= plan.free_months) {
+        return { ...plan, free_months: offset + 1 };
+    }
+
+    if (offset === 0) {
+        return plan.free_months === 1 ? { ...plan, free_from: null, free_months: 0 } : { ...plan, free_from: addMonths(start, 1), free_months: plan.free_months - 1 };
+    }
+
+    return { ...plan, free_months: offset };
+}
+
+/** Whether month is one of the plan's free months. */
+export function isFreeMonth(plan: ServicePlan, month: string): boolean {
+    if (plan.free_months === 0 || plan.free_from === null) {
+        return false;
+    }
+
+    const offset = monthIndex(plan.free_from, month);
+
+    return offset >= 0 && offset < plan.free_months;
 }
 
 function blankToNull(value: string): string | null {
@@ -98,24 +147,25 @@ function blankToNull(value: string): string | null {
 }
 
 export function toRequestFields(state: InstallationFormState): InstallationRequestFields {
-    const advance = Number.isFinite(state.advanceMonths) && state.advanceMonths > 0 ? Math.floor(state.advanceMonths) : 0;
-
     return {
         connected_on: blankToNull(state.connectedOn),
         installation_offer_uuid: state.offerUuid,
         installation_fee: blankToNull(state.fee),
         installation_paid: blankToNull(state.paidNow),
         installation_reason: blankToNull(state.reason),
-        free_months: state.freeMonths,
-        advance_months: advance,
+        service_plans: state.servicePlans.map((p) => ({
+            ...p,
+            free_months: Math.max(0, Math.floor(p.free_months) || 0),
+            paid_months: Math.max(0, Math.floor(p.paid_months) || 0),
+        })),
         method: state.method,
         method_reference: blankToNull(state.methodReference),
     };
 }
 
-/** Whether this save takes money (installation paid now or an advance). */
+/** Whether this save takes money (installation paid now or months paid upfront). */
 export function takesMoney(state: InstallationFormState): boolean {
-    return Number(state.paidNow) > 0 || state.advanceMonths > 0;
+    return Number(state.paidNow) > 0 || state.servicePlans.some((p) => p.paid_months > 0);
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -137,14 +187,15 @@ export interface PromoState {
     billing_starts_period?: string | null;
     is_free?: boolean;
     prepaid_months_remaining?: number;
+    service_paid_months?: { service: string; months: number }[];
     free_months?: { service: string; from: string; until: string }[];
 }
 
 /**
  * The offline customer screens' line: "FREE · TV free until Dec 2026",
- * "PREPAID · 3 months left", "First bill Nov 2026" — FREE and PREPAID are
- * kept apart (a free month is not money the customer paid). Null when
- * there is nothing to say.
+ * "PREPAID · 3 months left", "TV: 2 months paid upfront left" — FREE and
+ * PREPAID are kept apart (a free month is not money the customer paid).
+ * Null when there is nothing to say.
  */
 export function promoLabel(promo: PromoState | null | undefined, currentPeriod: string): string | null {
     if (!promo) {
@@ -165,8 +216,10 @@ export function promoLabel(promo: PromoState | null | undefined, currentPeriod: 
         }
     }
 
-    if (promo.billing_starts_period && promo.billing_starts_period > currentPeriod) {
-        parts.push(`First billed month ${formatPeriod(promo.billing_starts_period)}`);
+    for (const paid of promo.service_paid_months ?? []) {
+        if (paid.months > 0) {
+            parts.push(`${paid.service}: ${paid.months} month${paid.months === 1 ? '' : 's'} paid upfront left`);
+        }
     }
 
     return parts.length === 0 ? null : parts.join(' · ');

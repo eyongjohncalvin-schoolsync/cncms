@@ -34,6 +34,7 @@ function promoOf(customer: SyncPullCustomer): PromoState {
         is_free: customer.is_free ?? false,
         prepaid_months_remaining: customer.prepaid_months_remaining ?? 0,
         free_months: customer.free_months ?? [],
+        service_paid_months: customer.service_paid_months ?? [],
     };
 }
 

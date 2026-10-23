@@ -242,8 +242,7 @@ export default function CustomerCreateScreen() {
                     installation_fee: fieldErrors.installation_fee?.[0],
                     installation_paid: fieldErrors.installation_paid?.[0],
                     installation_reason: fieldErrors.installation_reason?.[0],
-                    free_months: fieldErrors.free_months?.[0],
-                    advance_months: fieldErrors.advance_months?.[0],
+                    service_plans: Object.entries(fieldErrors).find(([key]) => key.startsWith('service_plans'))?.[1]?.[0],
                     method_reference: fieldErrors.method_reference?.[0],
                 }));
             }

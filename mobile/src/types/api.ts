@@ -292,6 +292,7 @@ export interface SyncPullCustomer {
     billing_starts_period?: string | null;
     is_free?: boolean;
     prepaid_months_remaining?: number;
+    service_paid_months?: { service: string; months: number }[];
     free_months?: { service: string; from: string; until: string }[];
 }
 
@@ -541,15 +542,28 @@ export interface InstallationOptionsResponse {
     };
 }
 
+/** One service's timeline — free → paid → billed (revision D15). */
+export interface ServiceTimelineApi {
+    service_uuid: string;
+    service: string;
+    price: string;
+    paid_amount: string;
+    free_from: string | null;
+    free_until: string | null;
+    paid_from: string | null;
+    paid_until: string | null;
+    first_billed: string | null;
+}
+
 export interface InstallationPreviewApi {
     bill: string;
     fee: string;
     paid_now: string;
     installation_balance: string;
-    billing_starts: string;
-    billing_starts_label: string;
-    free: { service: string; months: number; from_label: string | null; until_label: string | null; waiting: boolean }[];
-    advance: { months: number; amount: string; from_label: string | null; until_label: string | null } | null;
+    installation_month: string;
+    installation_month_label: string;
+    services: ServiceTimelineApi[];
+    upfront_amount: string;
     first_bill: string | null;
     first_bill_label: string | null;
     collect_now: string;
