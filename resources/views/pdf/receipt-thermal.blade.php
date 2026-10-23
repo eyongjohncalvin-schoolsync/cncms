@@ -116,6 +116,18 @@
             <tr><td class="k">Install fee</td><td class="v">{{ $money($installation['fee']) }}</td></tr>
             <tr><td class="k">Paid so far</td><td class="v">{{ $money($installation['paid']) }}</td></tr>
             <tr><td class="k">Balance</td><td class="v">{{ (float) $installation['balance'] > 0 ? $money($installation['balance']) : (($installation['status'] ?? '') === 'waived' ? 'Rest waived' : 'Fully paid') }}</td></tr>
+            @foreach(($installation['free'] ?? []) as $window)
+                <tr><td class="k">Free {{ $window['service'] }}</td><td class="v">{{ $window['from_label'] }}–{{ $window['until_label'] }}</td></tr>
+            @endforeach
+            @foreach(($installation['waiting'] ?? []) as $waiting)
+                <tr><td class="k">Free {{ $waiting['service'] }}</td><td class="v">{{ $waiting['months'] }} mo {{ $waiting['status'] === 'pending_approval' ? '(approval)' : 'after fee' }}</td></tr>
+            @endforeach
+            @if(!empty($installation['paid_until_label']))
+                <tr><td class="k">Paid until</td><td class="v">{{ $installation['paid_until_label'] }}</td></tr>
+            @endif
+            @if(!empty($installation['first_bill_label']))
+                <tr><td class="k">First bill</td><td class="v">{{ $installation['first_bill_label'] }}</td></tr>
+            @endif
         @endif
         @if($balance)
             @if((float) $balance['remaining'] > 0)

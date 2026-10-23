@@ -265,6 +265,49 @@ final readonly class FreeMonthPlan
     }
 
     /**
+     * Walks the months from $fromPeriod on: months with nothing charged are
+     * skipped, $prepaidMonths charged months are covered by paid months,
+     * and the first charged month left is the first bill.
+     *
+     * @return array{paid_from: ?string, paid_until: ?string, first_bill: ?string}
+     */
+    public function coverage(string $fromPeriod, string $fullBill, int $prepaidMonths): array
+    {
+        $paidFrom = null;
+        $paidUntil = null;
+        $period = $fromPeriod;
+
+        for ($guard = 0; $guard < 600; $guard++, $period = FreeMonthGrant::addMonths($period, 1)) {
+            if (bccomp($this->charge($period, $fullBill), '0', self::SCALE) <= 0) {
+                continue;
+            }
+
+            if ($prepaidMonths > 0) {
+                $prepaidMonths--;
+                $paidFrom ??= $period;
+                $paidUntil = $period;
+
+                continue;
+            }
+
+            return ['paid_from' => $paidFrom, 'paid_until' => $paidUntil, 'first_bill' => $period];
+        }
+
+        return ['paid_from' => $paidFrom, 'paid_until' => $paidUntil, 'first_bill' => null];
+    }
+
+    /**
+     * Each free window with its first and last month, per service id (null
+     * = every service), from $fromPeriod on.
+     *
+     * @return list<array{service_id: ?int, start: string, end: string}>
+     */
+    public function windowsFrom(string $fromPeriod): array
+    {
+        return array_values(array_filter($this->windows, fn (array $window): bool => $window['end'] >= $fromPeriod));
+    }
+
+    /**
      * The last month any service is free, or null when there are no grants.
      */
     public function lastFreePeriod(): ?string

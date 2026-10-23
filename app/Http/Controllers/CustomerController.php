@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\DataTransferObjects\CustomerData;
+use App\DataTransferObjects\InstallationData;
 use App\Exports\CustomerImportTemplateExport;
 use App\Http\Requests\ArchiveCustomerRequest;
 use App\Http\Requests\BulkUpdateCustomerBillRequest;
 use App\Http\Requests\DisconnectCustomerRequest;
 use App\Http\Requests\ImportCustomersRequest;
+use App\Http\Requests\PreviewCustomerInstallationRequest;
 use App\Http\Requests\ReconnectCustomerRequest;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\SuspendCustomerRequest;
@@ -19,18 +21,24 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerCharge;
 use App\Models\CustomerSubscription;
+use App\Models\FreeMonthGrant;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\ServiceVariant;
 use App\Models\Zone;
 use App\Services\ArrearsAdjustmentService;
 use App\Services\CustomerChargeService;
+use App\Services\CustomerCoverageService;
 use App\Services\CustomerImportService;
+use App\Services\CustomerInstallationService;
 use App\Services\CustomerService;
 use App\Services\CustomerStatusService;
+use App\Services\FreeMonthGrantService;
+use App\Services\InstallationOfferService;
 use App\Services\InvoiceService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -109,14 +117,57 @@ class CustomerController extends Controller
         return Inertia::render('Customers/Create', [
             'zones' => $this->zonesForSelect(),
             'service_catalogue' => $this->serviceCatalogue(),
+            // "Installation & first payment" (docs/plans/installation-and-promotions.md, phase 2).
+            'installation' => [
+                'offers' => app(InstallationOfferService::class)->availableForForm(),
+                'max_free_months' => FreeMonthGrantService::maxMonths(),
+                'can_manage' => $this->context->can('installations.manage'),
+                'can_take_payment' => $this->context->can('payments.create'),
+                'today' => BusinessTimezone::today(),
+            ],
         ]);
     }
 
+    /**
+     * One save, one transaction (installation phase 2, item 5): the
+     * customer, the installation charge and payment, an optional advance
+     * and the free months — see App\Services\CustomerInstallationService.
+     * With money taken the office lands on the new customer's page, where
+     * each payment's receipt is.
+     */
     public function store(StoreCustomerRequest $request): RedirectResponse
     {
-        $this->customers->create(CustomerData::fromArray($request->validated()));
+        $installation = InstallationData::fromArray($request->validated());
 
-        return redirect()->route('customers.index')->with('success', 'Customer created.');
+        $result = app(CustomerInstallationService::class)->create(CustomerData::fromArray($request->validated()), $installation, $request->user());
+
+        if ($installation->isEmpty()) {
+            return redirect()->route('customers.index')->with('success', 'Customer created.');
+        }
+
+        return redirect()->route('customers.show', $result['customer'])->with('success', 'Customer created.'.($result['payments'] !== [] ? ' Receipts issued for '.count($result['payments']).' payment(s).' : ''));
+    }
+
+    /**
+     * POST /customers/installation-preview — the add-customer form's live
+     * line ("Collect now: 17,500 · TV free Nov–Dec · first bill Jan 2027"),
+     * the advance amount, what needs approval and possible duplicates.
+     * Writes nothing.
+     */
+    public function previewInstallation(PreviewCustomerInstallationRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        try {
+            return response()->json(app(CustomerInstallationService::class)->preview(
+                CustomerData::fromArray(['services' => $validated['services'] ?? []])->services ?? [],
+                InstallationData::fromArray($validated),
+                $validated['name'] ?? null,
+                $validated['phone'] ?? null,
+            ));
+        } catch (ValidationException $e) {
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+        }
     }
 
     /**
@@ -642,6 +693,10 @@ class CustomerController extends Controller
             // Installation fees (docs/plans/installation-and-promotions.md):
             // a separate balance, never part of the bill's total or arrears.
             'installation' => $this->shapeInstallation($customer),
+            // Free months and the coverage line ("TV free until Dec ·
+            // paid until Mar · first bill Apr") — installation phase 2.
+            'free_months' => $this->shapeFreeMonths($customer),
+            'coverage' => app(CustomerCoverageService::class)->summarize($customer),
             // Gates the "Export full record" control in the page header
             // (docs/plans/customer-record-export.md) — a full unredacted
             // data dump, seeded super/admin only. The frontend also has the
@@ -681,13 +736,81 @@ class CustomerController extends Controller
                 'waiver_decided_by_name' => $charge->waiverDecidedBy?->name,
                 'waiver_rejection_reason' => $charge->waiver_rejection_reason,
                 'waived_amount' => $charge->waived_amount !== null ? (string) $charge->waived_amount : null,
+                // Phase 2: offer, fee-override approval (D8), refund (D9).
+                'offer_name' => $charge->offer?->name,
+                'standard_amount' => $charge->standard_amount !== null ? (string) $charge->standard_amount : null,
+                'approval_status' => $charge->approval_status,
+                'approval_rejection_reason' => $charge->approval_rejection_reason,
+                'refund_status' => $charge->refund_status,
+                'refund_amount' => $charge->refund_amount !== null ? (string) $charge->refund_amount : null,
+                'refund_reason' => $charge->refund_reason,
+                'refund_requested_by_name' => $charge->refundRequestedBy?->name,
+                'refund_decided_by_name' => $charge->refundDecidedBy?->name,
+                'refund_rejection_reason' => $charge->refund_rejection_reason,
+                'refund_voucher_number' => $charge->refundVoucher?->number,
+                'refund_voucher_status' => $charge->refundVoucher?->status,
                 'can' => [
                     'record_payment' => $user->can('recordPayment', $charge),
                     'request_waiver' => $user->can('requestWaiver', $charge),
                     'decide_waiver' => $user->can('approveWaiver', $charge),
+                    'decide_fee' => $user->can('approveFee', $charge),
+                    'request_refund' => $user->can('requestRefund', $charge),
+                    'decide_refund' => $user->can('approveRefund', $charge),
                 ],
             ])->values()->all(),
             'can_create' => $user->can('create', CustomerCharge::class) && ! $customer->trashed(),
+            // Customers from before installation fees: "not applicable",
+            // never "unpaid" (phase 2, item 9).
+            'applicable' => $charges->isNotEmpty() || $customer->connected_on !== null,
+            'connected_on' => $customer->connected_on?->toDateString(),
+            'billing_starts_period' => $customer->billing_starts_period,
+        ];
+    }
+
+    /**
+     * The customer page's free months: every request with its status, and
+     * what the viewer may do (phase 2, D12).
+     *
+     * @return array{grants: list<array<string, mixed>>, can_request: bool, max_months: int, services: list<array{uuid: string, name: string}>}
+     */
+    private function shapeFreeMonths(Customer $customer): array
+    {
+        $user = request()->user();
+
+        $grants = FreeMonthGrant::query()
+            ->with(['service', 'requestedBy', 'decidedBy'])
+            ->where('customer_id', $customer->id)
+            ->latest('id')
+            ->get();
+
+        return [
+            'grants' => $grants->map(fn (FreeMonthGrant $grant): array => [
+                'uuid' => $grant->uuid,
+                'group_uuid' => $grant->group_uuid,
+                'service' => $grant->service?->name ?? 'All services',
+                'months' => (int) $grant->months,
+                'reason' => $grant->reason,
+                'reason_label' => FreeMonthGrant::REASON_LABELS[$grant->reason] ?? $grant->reason,
+                'note' => $grant->note,
+                'status' => $grant->status,
+                'start_period' => $grant->start_period,
+                'end_period' => $grant->endPeriod(),
+                'requested_by_name' => $grant->requestedBy?->name,
+                'decided_by_name' => $grant->decidedBy?->name,
+                'rejection_reason' => $grant->rejection_reason,
+                'cancel_reason' => $grant->cancel_reason,
+                'created_at' => $grant->created_at?->toIso8601String(),
+                'can' => [
+                    'decide' => $user->can('approve', $grant),
+                ],
+            ])->values()->all(),
+            'can_request' => $user->can('create', FreeMonthGrant::class) && ! $customer->trashed(),
+            'max_months' => FreeMonthGrantService::maxMonths(),
+            'services' => $customer->subscriptions
+                ->filter(fn (CustomerSubscription $row): bool => $row->service_variant_id === null)
+                ->map(fn (CustomerSubscription $row): array => ['uuid' => (string) $row->service?->uuid, 'name' => (string) $row->service?->name])
+                ->values()
+                ->all(),
         ];
     }
 

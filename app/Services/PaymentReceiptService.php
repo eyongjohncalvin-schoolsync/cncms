@@ -342,6 +342,10 @@ class PaymentReceiptService
             'qr-notice',
             // Installation receipt: fee, paid so far, balance.
             ...(isset($snapshot['installation']) ? ['fee', 'paid', 'balance'] : []),
+            // …plus its free months, advance and first bill lines (D11).
+            ...array_fill(0, count($snapshot['installation']['free'] ?? []) + count($snapshot['installation']['waiting'] ?? []), 'free'),
+            $snapshot['installation']['paid_until_label'] ?? null,
+            $snapshot['installation']['first_bill_label'] ?? null,
         ]));
 
         return ($narrow ? 82 : 98)
@@ -515,11 +519,24 @@ class PaymentReceiptService
             return null;
         }
 
+        // D11: no bill slips for free months — the free period, any advance
+        // and the first bill month are printed on the installation receipt.
+        $coverage = app(CustomerCoverageService::class)->summarize($charge->customer);
+
         return [
             'fee' => bcadd((string) $charge->amount, '0', 2),
             'paid' => $charge->paidAmount(),
             'balance' => $charge->balance(),
             'status' => $charge->status,
+            'free' => array_map(fn (array $window): array => [
+                ...$window,
+                'from_label' => CustomerCoverageService::monthLabel($window['from']),
+                'until_label' => CustomerCoverageService::monthLabel($window['until']),
+            ], $coverage['free']),
+            'waiting' => $coverage['waiting'],
+            'paid_until_label' => $coverage['paid_until'] !== null ? CustomerCoverageService::monthLabel($coverage['paid_until']) : null,
+            'first_bill' => $coverage['first_bill'],
+            'first_bill_label' => $coverage['first_bill'] !== null ? CustomerCoverageService::monthLabel($coverage['first_bill']) : null,
         ];
     }
 

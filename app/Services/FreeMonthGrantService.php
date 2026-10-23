@@ -52,10 +52,51 @@ use Illuminate\Validation\ValidationException;
  */
 class FreeMonthGrantService
 {
+    /**
+     * While deferRecalculation() runs: customer id => [customer, earliest
+     * month to recompute from].
+     *
+     * @var array<int, array{customer: Customer, from: string}>|null
+     */
+    private ?array $deferred = null;
+
     public function __construct(
         private readonly CustomerManuscriptRecalculationService $recalculation,
         private readonly ManuscriptRunLockService $lock,
     ) {}
+
+    /**
+     * Runs $callback, collecting the manuscript recalculations it asks for
+     * and running each customer's once at the end — the add-customer save
+     * records a charge, grants and payments in one go and must recompute
+     * the generated months once, after all of them.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    public function deferRecalculation(callable $callback): mixed
+    {
+        if ($this->deferred !== null) {
+            return $callback();
+        }
+
+        $this->deferred = [];
+
+        try {
+            $result = $callback();
+            $pending = $this->deferred;
+        } finally {
+            $this->deferred = null;
+        }
+
+        foreach ($pending as $entry) {
+            $this->recalculateFrom($entry['customer'], $entry['from']);
+        }
+
+        return $result;
+    }
 
     /** The company's cap on free months per grant (D8, default 3). */
     public static function maxMonths(): int
@@ -354,6 +395,13 @@ class FreeMonthGrantService
     public function recalculateFrom(Customer $customer, string $from): void
     {
         $from = max($from, $this->lock->currentPeriod());
+
+        if ($this->deferred !== null) {
+            $earlier = $this->deferred[$customer->id]['from'] ?? null;
+            $this->deferred[$customer->id] = ['customer' => $customer, 'from' => $earlier === null ? $from : min($earlier, $from)];
+
+            return;
+        }
 
         $periods = Manuscript::query()->where('period', '>=', $from)->distinct()->pluck('period')
             ->merge(CommandRun::query()

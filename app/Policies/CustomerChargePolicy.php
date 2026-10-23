@@ -52,4 +52,41 @@ class CustomerChargePolicy
     {
         return $this->approveWaiver($user, $charge);
     }
+
+    /**
+     * A fee below the offer's (phase 2, D8) — approved by someone other than
+     * whoever entered it (the owner excepted).
+     */
+    public function approveFee(User $user, CustomerCharge $charge): bool
+    {
+        return $charge->hasPendingFeeApproval()
+            && $this->context->can('installations.approve')
+            && ($user->id !== $charge->requested_by || $this->context->isSuper());
+    }
+
+    public function rejectFee(User $user, CustomerCharge $charge): bool
+    {
+        return $this->approveFee($user, $charge);
+    }
+
+    /** "Refund installation" (D9): asked for by the office, with a reason. */
+    public function requestRefund(User $user, CustomerCharge $charge): bool
+    {
+        return in_array($charge->status, [CustomerCharge::STATUS_OPEN, CustomerCharge::STATUS_PAID], true)
+            && ! $charge->hasPendingRefund()
+            && bccomp($charge->paidAmount(), '0', 2) > 0
+            && $this->context->can('installations.manage');
+    }
+
+    public function approveRefund(User $user, CustomerCharge $charge): bool
+    {
+        return $charge->hasPendingRefund()
+            && $this->context->can('installations.approve')
+            && ($user->id !== $charge->refund_requested_by || $this->context->isSuper());
+    }
+
+    public function rejectRefund(User $user, CustomerCharge $charge): bool
+    {
+        return $this->approveRefund($user, $charge);
+    }
 }

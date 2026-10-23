@@ -7,8 +7,10 @@ namespace App\Services;
 use App\DataTransferObjects\PaymentData;
 use App\Models\Customer;
 use App\Models\CustomerCharge;
+use App\Models\ExpenseCategory;
 use App\Models\Payment;
 use App\Models\User;
+use App\Models\Voucher;
 use App\Support\TenantContext;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -38,6 +40,9 @@ use Illuminate\Validation\ValidationException;
  */
 class CustomerChargeService
 {
+    /** The expense category installation refund bons are booked under. */
+    public const string REFUND_CATEGORY = 'Customer refunds';
+
     public function __construct(
         private readonly PaymentService $payments,
     ) {}
@@ -188,6 +193,152 @@ class CustomerChargeService
     }
 
     /**
+     * Approves a fee below the offer's (D8). The charge may now become paid
+     * — and its free months start — once its payments cover it.
+     */
+    public function approveFee(CustomerCharge $charge, User $actor): CustomerCharge
+    {
+        return DB::transaction(function () use ($charge, $actor): CustomerCharge {
+            $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
+
+            if (! $locked->hasPendingFeeApproval()) {
+                throw ValidationException::withMessages(['fee' => 'This installation fee is not waiting for approval.']);
+            }
+
+            $locked->update(['approval_status' => CustomerCharge::DECISION_APPROVED, 'approved_by' => $actor->id, 'approved_at' => now()]);
+            $locked->refreshStatus();
+            $this->forgetCustomerCache($locked->customer);
+
+            return $locked->fresh();
+        });
+    }
+
+    /**
+     * Rejects a fee below the offer's: the offer's fee (standard_amount)
+     * applies instead.
+     */
+    public function rejectFee(CustomerCharge $charge, User $actor, ?string $reason): CustomerCharge
+    {
+        return DB::transaction(function () use ($charge, $actor, $reason): CustomerCharge {
+            $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
+
+            if (! $locked->hasPendingFeeApproval()) {
+                throw ValidationException::withMessages(['fee' => 'This installation fee is not waiting for approval.']);
+            }
+
+            $locked->update([
+                'amount' => $locked->standard_amount ?? $locked->amount,
+                'approval_status' => CustomerCharge::DECISION_REJECTED,
+                'approval_rejection_reason' => $reason,
+                'approved_by' => $actor->id,
+                'approved_at' => now(),
+            ]);
+            $locked->refreshStatus();
+            $this->forgetCustomerCache($locked->customer);
+
+            return $locked->fresh();
+        });
+    }
+
+    /**
+     * "Refund installation" (D9) — non-refundable by default, so it is asked
+     * for with a reason and approved by someone else. At most what was paid.
+     */
+    public function requestRefund(CustomerCharge $charge, string $amount, string $reason, User $actor): CustomerCharge
+    {
+        return DB::transaction(function () use ($charge, $amount, $reason, $actor): CustomerCharge {
+            $locked = CustomerCharge::query()->whereKey($charge->id)->lockForUpdate()->firstOrFail();
+
+            if (! in_array($locked->status, [CustomerCharge::STATUS_OPEN, CustomerCharge::STATUS_PAID], true) || $locked->hasPendingRefund()) {
+                throw ValidationException::withMessages(['amount' => 'This installation fee cannot be refunded.']);
+            }
+
+            $paid = $locked->paidAmount();
+
+            if (bccomp($amount, '0', 2) <= 0 || bccomp($amount, $paid, 2) > 0) {
+                throw ValidationException::withMessages(['amount' => 'A refund is more than 0 and at most what was paid ('.number_format((float) $paid, 0, '.', ' ').' FCFA).']);
+            }
+
+            $locked->update([
+                'refund_status' => CustomerCharge::DECISION_PENDING,
+                'refund_amount' => $amount,
+                'refund_reason' => $reason,
+                'refund_requested_by' => $actor->id,
+                'refund_requested_at' => now(),
+                'refund_decided_by' => null,
+                'refund_decided_at' => null,
+                'refund_rejection_reason' => null,
+            ]);
+
+            $this->forgetCustomerCache($locked->customer);
+
+            return $locked;
+        });
+    }
+
+    /**
+     * Approves a refund: the charge becomes `refunded`, its unused free
+     * months are forfeited, and a bon (voucher) is raised to pay the money
+     * out — bons are the only way money leaves the company. The approver
+     * also approves the bon when the bon rules allow them to.
+     */
+    public function approveRefund(CustomerCharge $charge, User $actor): CustomerCharge
+    {
+        return DB::transaction(function () use ($charge, $actor): CustomerCharge {
+            $locked = CustomerCharge::query()->with('customer')->whereKey($charge->id)->lockForUpdate()->firstOrFail();
+
+            if (! $locked->hasPendingRefund()) {
+                throw ValidationException::withMessages(['refund' => 'There is no refund waiting for approval on this fee.']);
+            }
+
+            $requester = User::query()->find($locked->refund_requested_by) ?? $actor;
+            $category = ExpenseCategory::query()->firstOrCreate(['name' => self::REFUND_CATEGORY], ['icon' => 'ti-receipt-refund', 'is_active' => true]);
+            $vouchers = app(VoucherService::class);
+
+            $voucher = $vouchers->request([
+                'kind' => Voucher::KIND_EXPENSE,
+                'payee_name' => (string) $locked->customer->name,
+                'purpose' => "Installation refund — {$locked->customer->name} ({$locked->customer->accountCode()}): {$locked->refund_reason}",
+                'category_uuid' => $category->uuid,
+                'amount' => (string) $locked->refund_amount,
+            ], $requester);
+
+            if ($vouchers->canDecide($voucher, $actor, app(TenantContext::class))) {
+                $vouchers->approve($voucher, $actor, 'Installation refund approved');
+            }
+
+            $locked->update([
+                'status' => CustomerCharge::STATUS_REFUNDED,
+                'refund_status' => CustomerCharge::DECISION_APPROVED,
+                'refund_decided_by' => $actor->id,
+                'refund_decided_at' => now(),
+                'refund_voucher_id' => $voucher->id,
+            ]);
+
+            app(FreeMonthGrantService::class)->forfeitForCharge($locked, 'Installation refunded');
+            $this->forgetCustomerCache($locked->customer);
+
+            return $locked->fresh();
+        });
+    }
+
+    public function rejectRefund(CustomerCharge $charge, User $actor, ?string $reason): CustomerCharge
+    {
+        if (! $charge->hasPendingRefund()) {
+            throw ValidationException::withMessages(['refund' => 'There is no refund waiting for approval on this fee.']);
+        }
+
+        $charge->update([
+            'refund_status' => CustomerCharge::DECISION_REJECTED,
+            'refund_decided_by' => $actor->id,
+            'refund_decided_at' => now(),
+            'refund_rejection_reason' => $reason,
+        ]);
+
+        return $charge;
+    }
+
+    /**
      * The customer's installation charges, newest first, each with its
      * live balance — for the customer page and the API.
      *
@@ -196,7 +347,7 @@ class CustomerChargeService
     public function forCustomer(Customer $customer): Collection
     {
         return CustomerCharge::query()
-            ->with(['requestedBy', 'waiverRequestedBy', 'waiverDecidedBy'])
+            ->with(['requestedBy', 'waiverRequestedBy', 'waiverDecidedBy', 'offer', 'refundRequestedBy', 'refundDecidedBy', 'refundVoucher'])
             ->where('customer_id', $customer->id)
             ->where('kind', CustomerCharge::KIND_INSTALLATION)
             ->latest('id')

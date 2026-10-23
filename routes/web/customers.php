@@ -11,6 +11,8 @@ Route::get('customers', [CustomerController::class, 'index'])->name('customers.i
 Route::get('customers/create', [CustomerController::class, 'create'])->name('customers.create');
 Route::post('customers', [CustomerController::class, 'store'])->name('customers.store');
 Route::post('customers/import', [CustomerController::class, 'import'])->name('customers.import');
+// The add-customer form's live installation preview (installation phase 2) — writes nothing.
+Route::post('customers/installation-preview', [CustomerController::class, 'previewInstallation'])->name('customers.installation-preview');
 // Bulk bill-rate adjustment tool (App\Services\CustomerService::
 // bulkUpdateBill()/previewBulkBillUpdate()) — the annual price-adjustment
 // workflow on Customers/Index.tsx, distinct from and additive to the
