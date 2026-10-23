@@ -108,54 +108,47 @@ class ResourceTest extends TestCase
                 ->has('categories'));
     }
 
-    public function test_an_agent_can_record_an_expenditure(): void
+    /**
+     * E1 (docs/plans/expenditures-and-spending-controls.md): there is no
+     * direct "Record expense" any more — every cash-out is a bon.
+     */
+    public function test_expenditures_can_no_longer_be_recorded_directly(): void
     {
         $category = ExpenseCategoryFactory::new()->create();
 
-        $this->actingAsRole('agent');
+        foreach (['agent', 'super'] as $role) {
+            $this->actingAsRole($role);
 
-        $response = $this->post('/resources/expenditures', [
-            'category_uuid' => $category->uuid,
-            'amount' => 1500,
-            'spent_at' => now()->toDateString(),
-            'description' => 'Fuel',
-        ]);
+            $this->post('/resources/expenditures', [
+                'category_uuid' => $category->uuid,
+                'amount' => 1500,
+                'spent_at' => now()->toDateString(),
+                'description' => 'Fuel',
+            ])->assertStatus(405);
 
-        $response->assertRedirect('/resources/expenditures');
-        $this->assertDatabaseHas('expenditures', [
-            'category_id' => $category->id,
-            'amount' => 1500,
-        ]);
+            $this->get('/resources/expenditures/create')->assertNotFound();
+        }
+
+        $this->assertDatabaseMissing('expenditures', ['category_id' => $category->id]);
     }
 
-    public function test_a_worker_cannot_record_an_expenditure(): void
+    public function test_an_expenditure_is_voided_with_a_reason_never_deleted(): void
     {
         $category = ExpenseCategoryFactory::new()->create();
-
-        $this->actingAsRole('worker');
-
-        $response = $this->post('/resources/expenditures', [
-            'category_uuid' => $category->uuid,
-            'amount' => 1500,
-            'spent_at' => now()->toDateString(),
-        ]);
-
-        $response->assertStatus(403);
-    }
-
-    public function test_a_manager_cannot_delete_an_expenditure_but_super_can(): void
-    {
-        $category = ExpenseCategoryFactory::new()->create();
-        $expenditure = ExpenditureFactory::new()->create(['category_id' => $category->id, 'user_id' => $this->seededUserId()]);
-
-        $this->actingAsRole('manager');
-        $this->delete("/resources/expenditures/{$expenditure->uuid}")->assertStatus(403);
+        $patience = User::query()->where('email', 'patience@shalomtech.dev')->firstOrFail();
+        $expenditure = ExpenditureFactory::new()->create(['category_id' => $category->id, 'user_id' => $patience->id, 'spent_at' => now()->toDateString()]);
 
         $this->actingAsRole('super');
-        $response = $this->delete("/resources/expenditures/{$expenditure->uuid}");
+        $this->delete("/resources/expenditures/{$expenditure->uuid}")->assertStatus(405);
 
-        $response->assertRedirect('/resources/expenditures');
-        $this->assertDatabaseMissing('expenditures', ['id' => $expenditure->id]);
+        $this->actingAsRole('manager');
+        $this->post("/resources/expenditures/{$expenditure->uuid}/void", ['reason' => 'Duplicate'])->assertForbidden();
+
+        $this->actingAsRole('admin');
+        $this->post("/resources/expenditures/{$expenditure->uuid}/void", [])->assertSessionHasErrors('reason');
+        $this->post("/resources/expenditures/{$expenditure->uuid}/void", ['reason' => 'Duplicate'])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('expenditures', ['id' => $expenditure->id, 'status' => 'void', 'void_reason' => 'Duplicate']);
     }
 
     public function test_categories_page_renders_and_only_admin_can_create_one(): void

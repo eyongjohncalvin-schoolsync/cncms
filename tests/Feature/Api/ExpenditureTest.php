@@ -11,7 +11,6 @@ use Database\Factories\ExpenseCategoryFactory;
 use Database\Factories\PaymentFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -67,6 +66,16 @@ class ExpenditureTest extends TestCase
         return User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail()->id;
     }
 
+    /**
+     * Someone other than the acting owner — E7: whoever recorded an
+     * expenditure may never edit or void it, so edit tests use a row
+     * recorded by another (already-committed) seeded user.
+     */
+    private function otherUserId(): int
+    {
+        return User::query()->where('email', 'patience@shalomtech.dev')->firstOrFail()->id;
+    }
+
     public function test_index_lists_expenditures_filtered_by_category(): void
     {
         $userId = $this->seededUserId();
@@ -87,126 +96,85 @@ class ExpenditureTest extends TestCase
         $this->assertSame($category->uuid, $data[0]['category_uuid']);
     }
 
-    public function test_super_can_record_an_expenditure_which_resolves_the_category_uuid(): void
+    /**
+     * E1 (docs/plans/expenditures-and-spending-controls.md): every cash-out
+     * goes through a bon, so the API no longer records an expenditure
+     * directly — for any role.
+     */
+    public function test_the_api_no_longer_records_expenditures_directly(): void
     {
         $category = ExpenseCategoryFactory::new()->create();
-        $token = $this->tokenForRole('super');
 
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/resources/expenditures', [
-                'category_uuid' => $category->uuid,
-                'amount' => 1500,
-                'description' => 'Fuel for zone rounds',
-                'spent_at' => now()->toDateString(),
-            ]);
+        foreach (['super', 'agent', 'worker'] as $role) {
+            $token = $this->tokenForRole($role);
 
-        $response->assertCreated()
-            ->assertJsonPath('data.category_uuid', $category->uuid)
-            ->assertJsonPath('data.amount', '1500.00');
+            $this->withHeader('Authorization', "Bearer {$token}")
+                ->postJson('/api/v1/resources/expenditures', [
+                    'category_uuid' => $category->uuid,
+                    'amount' => 1500,
+                    'spent_at' => now()->toDateString(),
+                ])
+                ->assertStatus(405);
+        }
+
+        $this->assertDatabaseMissing('expenditures', ['category_id' => $category->id]);
     }
 
-    public function test_agent_can_record_an_expenditure(): void
-    {
-        $category = ExpenseCategoryFactory::new()->create();
-        $token = $this->tokenForRole('agent');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/resources/expenditures', [
-                'category_uuid' => $category->uuid,
-                'amount' => 2000,
-                'spent_at' => now()->toDateString(),
-            ]);
-
-        $response->assertCreated();
-    }
-
-    public function test_worker_cannot_record_an_expenditure(): void
-    {
-        $category = ExpenseCategoryFactory::new()->create();
-        $token = $this->tokenForRole('worker');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/resources/expenditures', [
-                'category_uuid' => $category->uuid,
-                'amount' => 2000,
-                'spent_at' => now()->toDateString(),
-            ]);
-
-        $response->assertStatus(403);
-    }
-
-    public function test_store_fails_validation_for_zero_amount(): void
-    {
-        $category = ExpenseCategoryFactory::new()->create();
-        $token = $this->tokenForRole('super');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/resources/expenditures', [
-                'category_uuid' => $category->uuid,
-                'amount' => 0,
-                'spent_at' => now()->toDateString(),
-            ]);
-
-        $response->assertStatus(422)->assertJsonValidationErrors(['amount']);
-    }
-
-    public function test_store_fails_for_an_unknown_category_uuid(): void
-    {
-        $token = $this->tokenForRole('super');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/resources/expenditures', [
-                'category_uuid' => (string) Str::uuid(),
-                'amount' => 1000,
-                'spent_at' => now()->toDateString(),
-            ]);
-
-        $response->assertStatus(422)->assertJsonValidationErrors(['category_uuid']);
-    }
-
-    public function test_manager_can_update_but_not_delete_an_expenditure(): void
+    public function test_manager_can_neither_edit_nor_void_an_expenditure(): void
     {
         $category = ExpenseCategoryFactory::new()->create();
         $expenditure = ExpenditureFactory::new()->create([
             'category_id' => $category->id,
-            'user_id' => $this->seededUserId(),
+            'user_id' => $this->otherUserId(),
             'amount' => 1000,
         ]);
 
         $token = $this->tokenForRole('manager');
 
-        $updateResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->patchJson("/api/v1/resources/expenditures/{$expenditure->uuid}", ['amount' => 2000]);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/resources/expenditures/{$expenditure->uuid}", ['description' => 'x', 'reason' => 'typo'])
+            ->assertStatus(403);
 
-        $updateResponse->assertStatus(403);
-
-        $deleteResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->deleteJson("/api/v1/resources/expenditures/{$expenditure->uuid}");
-
-        $deleteResponse->assertStatus(403);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/resources/expenditures/{$expenditure->uuid}/void", ['reason' => 'duplicate'])
+            ->assertStatus(403);
     }
 
-    public function test_super_can_update_and_delete_an_expenditure(): void
+    public function test_super_edits_the_wording_with_a_reason_and_voids_instead_of_deleting(): void
     {
         $category = ExpenseCategoryFactory::new()->create();
+        $other = ExpenseCategoryFactory::new()->create();
         $expenditure = ExpenditureFactory::new()->create([
             'category_id' => $category->id,
-            'user_id' => $this->seededUserId(),
+            'user_id' => $this->otherUserId(),
             'amount' => 1000,
+            'spent_at' => now()->toDateString(),
         ]);
 
         $token = $this->tokenForRole('super');
 
-        $updateResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->patchJson("/api/v1/resources/expenditures/{$expenditure->uuid}", ['amount' => 2500]);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/resources/expenditures/{$expenditure->uuid}", ['description' => 'Fixed'])
+            ->assertStatus(422)->assertJsonValidationErrors(['reason']);
 
-        $updateResponse->assertOk()->assertJsonPath('data.amount', '2500.00');
+        // The amount is never edited here — it is silently ignored.
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/resources/expenditures/{$expenditure->uuid}", ['category_uuid' => $other->uuid, 'description' => '', 'amount' => 2500, 'reason' => 'Wrong category'])
+            ->assertOk()
+            ->assertJsonPath('data.amount', '1000.00')
+            ->assertJsonPath('data.category_uuid', $other->uuid)
+            ->assertJsonPath('data.description', null);
 
-        $deleteResponse = $this->withHeader('Authorization', "Bearer {$token}")
-            ->deleteJson("/api/v1/resources/expenditures/{$expenditure->uuid}");
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->deleteJson("/api/v1/resources/expenditures/{$expenditure->uuid}")
+            ->assertStatus(405);
 
-        $deleteResponse->assertOk()->assertJson(['message' => 'Expenditure deleted']);
-        $this->assertDatabaseMissing('expenditures', ['id' => $expenditure->id]);
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/v1/resources/expenditures/{$expenditure->uuid}/void", ['reason' => 'Recorded twice'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'void');
+
+        $this->assertDatabaseHas('expenditures', ['id' => $expenditure->id, 'status' => 'void', 'void_reason' => 'Recorded twice']);
     }
 
     public function test_dashboard_requires_super_admin_or_manager_role(): void

@@ -10,6 +10,7 @@ use App\Models\Expenditure;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\User;
+use App\Models\Voucher;
 use App\Services\NotificationService;
 use Database\Factories\AgentFactory;
 use Database\Factories\CustomerFactory;
@@ -699,11 +700,14 @@ class SyncTest extends TestCase
         $this->assertNotEmpty($firstEntry['server_uuid']);
         $this->assertSame($firstEntry['server_uuid'], $secondEntry['server_uuid']);
 
+        // E1 (docs/plans/expenditures-and-spending-controls.md): an older
+        // build's expenditure item becomes ONE pending bon request.
         $this->assertSame(
             1,
-            Expenditure::query()->where('local_uuid', $localUuid)->count(),
-            'A retried push with the same local_uuid must not create a second expenditure row.'
+            Voucher::query()->where('local_uuid', $localUuid)->count(),
+            'A retried push with the same local_uuid must not create a second bon.'
         );
+        $this->assertSame(0, Expenditure::query()->where('local_uuid', $localUuid)->count());
     }
 
     public function test_push_expenditure_is_synced(): void
@@ -737,11 +741,15 @@ class SyncTest extends TestCase
         $this->assertSame('synced', $entry['status']);
         $this->assertNotEmpty($entry['server_uuid']);
 
-        $this->assertDatabaseHas('expenditures', [
-            'uuid' => $entry['server_uuid'],
-            'recorded_offline' => true,
-            'recorded_by_device' => 'device-exp-1',
-        ]);
+        // Never recorded as spent directly any more: it waits for approval as
+        // a bon by this agent, with nothing dropped.
+        $voucher = Voucher::query()->where('uuid', $entry['server_uuid'])->firstOrFail();
+        $this->assertSame('pending', $voucher->status);
+        $this->assertSame('1500.00', (string) $voucher->amount);
+        $this->assertSame($category->id, $voucher->expense_category_id);
+        $this->assertSame('device-exp-1', $voucher->recorded_by_device);
+        $this->assertStringContainsString('Fuel for zone rounds', $voucher->purpose);
+        $this->assertDatabaseMissing('expenditures', ['local_uuid' => $localUuid]);
     }
 
     public function test_pull_with_null_since_returns_all_customers(): void

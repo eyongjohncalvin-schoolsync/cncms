@@ -632,6 +632,8 @@ export interface Company {
     /** Cash controls (docs/plans/cash-controls.md): a voucher above this — or one taking the day's payouts above the daily limit — needs every investor's approval. Null = no limit. */
     voucher_approval_limit: string | null;
     voucher_daily_limit: string | null;
+    /** docs/plans/expenditures-and-spending-controls.md (E2): above this month's committed spend, every investor approves. Null = no cap. */
+    monthly_spending_cap: string | null;
     /** Hours a collector may hold cash before the "not handed over" alert. */
     remittance_deadline_hours: number;
     /** Days a cash advance may stay unjustified before it is flagged. */
@@ -807,17 +809,45 @@ export interface ExpenseCategory {
     sort_order: number;
 }
 
+/** docs/plans/expenditures-and-spending-controls.md: every row comes from a bon, a correction, or is legacy. */
+export type ExpenditureSource = 'voucher' | 'legacy' | 'adjustment';
+
 export interface Expenditure {
     uuid: string;
-    category_uuid: string;
-    category_name: string;
+    category_name: string | null;
     amount: string;
     description: string | null;
     spent_at: string;
     notes: string | null;
+    source: ExpenditureSource;
+    status: 'active' | 'void';
+    relates_to_period: string | null;
     recorded_offline: boolean;
-    recorded_by_name: string;
+    recorded_by_name: string | null;
+    voucher: { uuid: string; number: string } | null;
     created_at: string;
+}
+
+/** App\Services\SpendingControlService::summary() — one month's spending picture. */
+export interface SpendingSummary {
+    period: string;
+    spent: string;
+    committed: string;
+    cap: string | null;
+    cap_pct: number | null;
+    income: string;
+    net: string;
+    deficit: boolean;
+    budget_total: string;
+    budget_warnings: number;
+    categories: {
+        uuid: string;
+        name: string;
+        amount: string;
+        budget: string | null;
+        pct: number | null;
+        level: 'ok' | 'amber' | 'red';
+    }[];
 }
 
 export interface DashboardIncome {

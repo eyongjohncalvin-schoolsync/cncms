@@ -50,7 +50,7 @@ class ExpenditureMonthService
      */
     public function close(string $period, ?User $actor = null): ExpenditureMonth
     {
-        if ($period >= BusinessTimezone::currentPeriod()) {
+        if (! BusinessTimezone::isValidPeriod($period) || $period >= BusinessTimezone::currentPeriod()) {
             throw ValidationException::withMessages(['period' => 'Only a month that has ended can be closed.']);
         }
 
@@ -71,10 +71,10 @@ class ExpenditureMonthService
 
     public function reopen(string $period, User $owner, string $reason): ExpenditureMonth
     {
-        $month = ExpenditureMonth::query()->where('period', $period)->first();
+        $month = BusinessTimezone::isValidPeriod($period) ? ExpenditureMonth::query()->where('period', $period)->first() : null;
 
         if ($month === null || ! $month->isClosed()) {
-            throw ValidationException::withMessages(['reason' => "{$this->label($period)} is not closed."]);
+            throw ValidationException::withMessages(['reason' => "{$period} is not a closed month."]);
         }
 
         $month->update([

@@ -14,12 +14,12 @@ Route::get('resources', [ResourceController::class, 'dashboard'])->name('resourc
 // budgets. Writes are refused while a landlord impersonates (E9).
 Route::get('resources/expenditures', [ResourceController::class, 'expenditures'])->name('resources.expenditures.index');
 Route::get('resources/expenditures/export', [ResourceController::class, 'exportExpenditures'])->name('resources.expenditures.export');
-Route::get('resources/expenditures/{expenditure}', [ResourceController::class, 'showExpenditure'])->name('resources.expenditures.show');
+Route::get('resources/expenditures/{expenditure}', [ResourceController::class, 'showExpenditure'])->whereUuid('expenditure')->name('resources.expenditures.show');
 Route::get('resources/budgets', [BudgetController::class, 'index'])->name('resources.budgets.index');
 
 Route::middleware('not-impersonating:money')->group(function () {
-    Route::patch('resources/expenditures/{expenditure}', [ResourceController::class, 'updateExpenditure'])->name('resources.expenditures.update');
-    Route::post('resources/expenditures/{expenditure}/void', [ResourceController::class, 'voidExpenditure'])->name('resources.expenditures.void');
+    Route::patch('resources/expenditures/{expenditure}', [ResourceController::class, 'updateExpenditure'])->whereUuid('expenditure')->name('resources.expenditures.update');
+    Route::post('resources/expenditures/{expenditure}/void', [ResourceController::class, 'voidExpenditure'])->whereUuid('expenditure')->name('resources.expenditures.void');
     Route::post('resources/expenditure-months/{period}/close', [ResourceController::class, 'closeMonth'])->where('period', '\d{4}-\d{2}')->name('resources.expenditure-months.close');
     Route::post('resources/expenditure-months/{period}/reopen', [ResourceController::class, 'reopenMonth'])->where('period', '\d{4}-\d{2}')->name('resources.expenditure-months.reopen');
     Route::put('resources/budgets', [BudgetController::class, 'update'])->name('resources.budgets.update');
