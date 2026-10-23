@@ -105,7 +105,9 @@
     @if (! empty($collections_cash_received['by_purpose']))
         <p class="hint">
             Verified, by purpose: subscriptions {{ number_format((float) $collections_cash_received['by_purpose']['subscription'], 2) }}
-            &nbsp;|&nbsp; installations {{ number_format((float) $collections_cash_received['by_purpose']['installation'], 2) }}.
+            &nbsp;|&nbsp; installations {{ number_format((float) $collections_cash_received['by_purpose']['installation'], 2) }}
+            &nbsp;|&nbsp; relocations {{ number_format((float) ($collections_cash_received['by_purpose']['relocation'] ?? 0), 2) }}
+            &nbsp;|&nbsp; re-installations {{ number_format((float) ($collections_cash_received['by_purpose']['reinstallation'] ?? 0), 2) }}.
             Technician fees are pass-through cash and are not income — see the cash book.
         </p>
     @endif
