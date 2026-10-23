@@ -11,7 +11,13 @@
             <td style="background:#1d4ed8; color:#ffffff; padding:20px 24px;">
                 <div style="font-size:13px; opacity:.85;">CNCMS</div>
                 <div style="font-size:20px; font-weight:bold; margin-top:4px;">
-                    {{ $isEmailChange ? 'Confirm your new email address' : 'Your sign-in code' }}
+                    @if ($isEmailChange)
+                        Confirm your new email address
+                    @elseif ($isPasswordReset ?? false)
+                        Reset your password
+                    @else
+                        Your sign-in code
+                    @endif
                 </div>
             </td>
         </tr>
@@ -19,7 +25,13 @@
             <td style="padding:20px 24px; font-size:15px; line-height:1.5;">
                 <p style="margin:0 0 12px;">Hello {{ $recipientName }},</p>
                 <p style="margin:0 0 16px;">
-                    {{ $isEmailChange ? 'Enter this code in CNCMS to make this address the email for your account:' : 'Enter this code in CNCMS to finish signing in:' }}
+                    @if ($isEmailChange)
+                        Enter this code in CNCMS to make this address the email for your account:
+                    @elseif ($isPasswordReset ?? false)
+                        Someone asked to reset the password for your CNCMS account. Enter this code in CNCMS to choose a new password:
+                    @else
+                        Enter this code in CNCMS to finish signing in:
+                    @endif
                 </p>
                 <p style="margin:0 0 16px; text-align:center; font-size:32px; font-weight:bold; letter-spacing:8px; font-family:monospace; background:#f8fafc; border-radius:8px; padding:12px;">{{ $code }}</p>
                 <p style="margin:0 0 12px; font-size:14px; color:#475569;">The code expires in {{ $expiresInMinutes }} minutes and works only once.</p>

@@ -29,6 +29,8 @@ class SecurityCode extends Model
 
     public const string PURPOSE_TWO_FACTOR = 'two_factor';
 
+    public const string PURPOSE_PASSWORD_RESET = 'password_reset';
+
     public const string PURPOSE_EMAIL_CHANGE = 'email_change';
 
     protected function casts(): array

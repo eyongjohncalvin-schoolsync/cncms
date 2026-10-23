@@ -42,6 +42,74 @@ class AccountSecurityService
     }
 
     /**
+     * "Forgot password?": emails a reset code to the account $identifier (a
+     * username or an email) names — but only for an active account. Callers
+     * answer the same way whatever happens here, so the form never reveals
+     * whether an account exists.
+     */
+    public function sendPasswordResetCode(string $identifier): void
+    {
+        $user = User::findForLogin($identifier);
+
+        if ($user?->isActive() && filled($user->email)) {
+            $this->codes->issue($user, SecurityCode::PURPOSE_PASSWORD_RESET);
+        }
+    }
+
+    /**
+     * Sets a new password once the emailed reset code matches, then signs
+     * the account out of every browser and device and sends a notice.
+     * Two-factor is left exactly as it was: the next sign-in still asks for
+     * the second factor. Returns false (and changes nothing) for an unknown
+     * or passive account or a wrong, expired or used code — callers show
+     * one generic message for all of those.
+     */
+    public function resetPassword(string $identifier, string $code, string $newPassword): bool
+    {
+        $user = User::findForLogin($identifier);
+
+        if (! $user?->isActive() || $this->codes->verify($user, SecurityCode::PURPOSE_PASSWORD_RESET, $code) === null) {
+            return false;
+        }
+
+        DB::connection('pgsql')->transaction(function () use ($user, $newPassword): void {
+            // Cast to 'hashed' on the User model.
+            $user->update(['password' => $newPassword]);
+
+            $this->signOutEverywhere($user);
+        });
+
+        $this->notify($user, SecurityNoticeMail::PASSWORD_RESET);
+
+        return true;
+    }
+
+    /**
+     * Deactivates the account (status `passive`) and, in the same
+     * transaction, ends every web session and revokes every device token,
+     * so the person is out immediately rather than only at their next
+     * sign-in. Every path that makes a user passive goes through here.
+     */
+    public function deactivate(User $user): void
+    {
+        DB::connection('pgsql')->transaction(function () use ($user): void {
+            $user->update(['status' => 'passive']);
+
+            $this->signOutEverywhere($user);
+        });
+    }
+
+    /**
+     * Ends every web session and revokes every device token of $user — the
+     * caller's own included (password reset, deactivation, support 2FA
+     * reset).
+     */
+    public function signOutEverywhere(User $user): void
+    {
+        $this->signOutOtherSessions($user);
+    }
+
+    /**
      * Emails a confirmation code to the NEW address. Nothing changes until
      * that code comes back (confirmEmailChange()).
      */

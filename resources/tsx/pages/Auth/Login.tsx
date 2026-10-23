@@ -1,4 +1,4 @@
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import { FormEvent } from 'react';
 import { IconBrandGoogle, IconMail } from '@tabler/icons-react';
 import { AuthLayout } from '@/layouts/AuthLayout';
@@ -6,8 +6,10 @@ import { TextInput } from '@/components/ui/TextInput';
 import { PasswordInput } from '@/components/ui/PasswordInput';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import type { PageProps } from '@/types';
 
 export default function Login() {
+    const { flash } = usePage<PageProps>().props;
     const { data, setData, post, processing, errors } = useForm({
         username: '',
         password: '',
@@ -25,6 +27,10 @@ export default function Login() {
                 <h2 className="font-display text-3xl text-slate-900">Welcome back</h2>
                 <p className="mt-1.5 text-sm text-slate-500">Sign in to your workspace to continue.</p>
             </div>
+
+            {flash.success && (
+                <div className="mb-5 rounded-md border-l-4 border-green-500 bg-green-50 px-4 py-3 text-sm text-green-800">{flash.success}</div>
+            )}
 
             <a
                 href="/auth/google/redirect"
@@ -59,6 +65,11 @@ export default function Login() {
                     error={errors.password}
                     className="py-2.5"
                 />
+                <div className="-mt-3 text-right">
+                    <Link href="/forgot-password" className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
+                        Forgot password?
+                    </Link>
+                </div>
                 <Button type="submit" disabled={processing} className="mt-2 w-full rounded-lg py-2.5 text-base font-semibold">
                     {processing ? (
                         <>

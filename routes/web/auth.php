@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\LoginCodeController;
+use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\TwoFactorChallengeController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,6 +23,16 @@ Route::middleware('guest')->group(function () {
     Route::post('login/code/verify', [LoginCodeController::class, 'verify'])
         ->middleware('throttle:security-code-verify')
         ->name('login-code.verify');
+
+    // "Forgot password?": a 6-digit reset code by email, then a new password.
+    Route::get('forgot-password', [PasswordResetController::class, 'create'])->name('password.request');
+    Route::post('forgot-password', [PasswordResetController::class, 'send'])
+        ->middleware('throttle:security-code-send')
+        ->name('password.email');
+    Route::post('reset-password', [PasswordResetController::class, 'reset'])
+        ->middleware('throttle:security-code-verify')
+        ->name('password.update');
+    Route::delete('forgot-password', [PasswordResetController::class, 'cancel'])->name('password.cancel');
     Route::delete('login/code', [LoginCodeController::class, 'reset'])->name('login-code.reset');
 
     // Second sign-in step for users with two-factor on. Still `guest`: the
