@@ -4,6 +4,7 @@ import { AppLayout } from '@/layouts/AppLayout';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Table, TableBody, TableHead, Td, Th } from '@/components/ui/Table';
+import { SelectInput } from '@/components/ui/SelectInput';
 import { TextInput } from '@/components/ui/TextInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 
@@ -42,7 +43,7 @@ type Overridable =
     | 'reinstallation_fee';
 
 interface BranchSettingsProps {
-    branch: { uuid: string; name: string; code: string | null } & Record<Overridable, string | null>;
+    branch: { uuid: string; name: string; code: string | null; sends_to_hq: 'off' | 'weekly' | 'monthly' } & Record<Overridable, string | null>;
     /** Headquarters' value for each field — what the branch uses when its own is empty. */
     headquarters: Record<Overridable, string | null>;
     can_manage_branches: boolean;
@@ -217,6 +218,13 @@ export default function BranchSettings({ branch, headquarters, can_manage_branch
                                 <p className="text-xs text-slate-500">
                                     A lower fee than headquarters' is allowed — towns with competition may charge less.
                                 </p>
+                                {can_manage_branches && (
+                                    <SelectInput id="sends_to_hq" name="sends_to_hq" label="Sends its money to headquarters" defaultValue={branch.sends_to_hq} error={errors.sends_to_hq}>
+                                        <option value="off">No schedule</option>
+                                        <option value="weekly">Every week</option>
+                                        <option value="monthly">Every month</option>
+                                    </SelectInput>
+                                )}
                             </CardBody>
                         </Card>
 

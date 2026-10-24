@@ -23,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Fillable([
     'name', 'code', 'location', 'phone', 'email', 'tech_number', 'momo_number', 'momo_name',
-    'reconnection_fine', 'relocation_fee', 'reinstallation_fee',
+    'reconnection_fine', 'relocation_fee', 'reinstallation_fee', 'sends_to_hq',
 ])]
 #[RouteKey('uuid')]
 class Branch extends Model
@@ -31,6 +31,9 @@ class Branch extends Model
     use Auditable, HasUuid;
 
     /** Company settings a branch may override; same column names on both tables. */
+    /** How often a branch sends its money to headquarters (branches v2 D6). */
+    public const array SENDS_TO_HQ = ['off', 'weekly', 'monthly'];
+
     public const array OVERRIDABLE = [
         'location', 'phone', 'email', 'tech_number', 'momo_number', 'momo_name',
         'reconnection_fine', 'relocation_fee', 'reinstallation_fee',

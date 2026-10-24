@@ -50,6 +50,7 @@ class BranchSettingsController extends Controller
                 'uuid' => $branch->uuid,
                 'name' => $branch->name,
                 'code' => $branch->code,
+                'sends_to_hq' => $branch->sends_to_hq,
                 ...collect(Branch::OVERRIDABLE)->mapWithKeys(fn (string $field): array => [$field => $branch->{$field} !== null ? (string) $branch->{$field} : null])->all(),
             ],
             // Shown as each field's placeholder: what the branch uses when the field is empty.

@@ -54,18 +54,21 @@ class CashBookService
     }
 
     /**
-     * The company wallet for a mobile-money method (mtn_momo / orange_money)
-     * — headquarters' until branches get their own wallets (branches v2 P5),
-     * so found whichever branch the caller works in.
+     * A branch's wallet for a mobile-money method (mtn_momo / orange_money) —
+     * each branch keeps its own money (branches v2 D3); headquarters' when no
+     * branch is given. Found whichever branch the caller works in, and created
+     * the first time a branch needs it.
      */
-    public function walletFor(string $paymentMethod): CashAccount
+    public function walletFor(string $paymentMethod, ?int $branchId = null): CashAccount
     {
         $provider = CashAccount::WALLET_PROVIDERS[$paymentMethod];
-        $headquartersId = Branch::headquartersId();
+        $branchId ??= Branch::headquartersId();
+        $branch = Branch::allMemoized()->get($branchId);
+        $name = $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet';
 
         return CashAccount::query()->withoutGlobalScope(BranchScope::class)->firstOrCreate(
-            ['kind' => CashAccount::KIND_MOBILE_MONEY, 'provider' => $provider, 'is_active' => true, 'branch_id' => $headquartersId],
-            ['name' => $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet'],
+            ['kind' => CashAccount::KIND_MOBILE_MONEY, 'provider' => $provider, 'is_active' => true, 'branch_id' => $branchId],
+            ['name' => $branch !== null && ! $branch->is_headquarters ? "{$name} — {$branch->name}" : $name],
         );
     }
 
@@ -147,6 +150,12 @@ class CashBookService
     {
         if ($from->is($to)) {
             throw ValidationException::withMessages(['to_account' => 'Choose a different account to move the money to.']);
+        }
+
+        // Branches v2: there is no joint account — money crosses branches only
+        // as a branch transfer the receiving branch confirms.
+        if ($from->branch_id !== $to->branch_id) {
+            throw ValidationException::withMessages(['to_account' => 'That account belongs to another branch — send a branch transfer instead.']);
         }
 
         if ($to->kind === CashAccount::KIND_BANK && ($reference === null || trim($reference) === '')) {

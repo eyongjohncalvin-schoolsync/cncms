@@ -64,6 +64,15 @@ class CashMovement extends Model
      */
     public const string KIND_BON_CORRECTION = 'bon_correction';
 
+    /**
+     * Money sent to, or received from, another branch (branches v2 §4.7).
+     * Source: the App\Models\BranchTransfer. Never income or expense.
+     */
+    public const string KIND_BRANCH_TRANSFER = 'branch_transfer';
+
+    /** A refused branch transfer coming back to the sender's account. Source: the App\Models\BranchTransfer. */
+    public const string KIND_BRANCH_TRANSFER_RETURN = 'branch_transfer_return';
+
     protected function casts(): array
     {
         return [

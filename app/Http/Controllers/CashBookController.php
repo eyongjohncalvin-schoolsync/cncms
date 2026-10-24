@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\Branch;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
 use App\Models\Remittance;
+use App\Models\Scopes\BranchScope;
 use App\Services\CashBookService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
@@ -56,6 +58,8 @@ class CashBookController extends Controller
                 'transfer' => $user->can('transfer', CashAccount::class),
                 'manage_accounts' => $user->can('create', CashAccount::class),
                 'reopen_day' => $this->context()->can('vouchers.approve'),
+                // Branches v2: money between branches, once there is more than one.
+                'branch_transfers' => $user->can('transfer', CashAccount::class) && Branch::allMemoized()->count() > 1,
             ],
             'accounts' => $accounts->map(fn (CashAccount $account): array => $this->shapeAccount($account, $balances, $closesToday))->values()->all(),
             'my_till' => $myTill ? $this->shapeAccount($myTill, $balances, $closesToday) : null,
@@ -133,9 +137,13 @@ class CashBookController extends Controller
             'account_number' => ['nullable', 'string', 'max:60'],
         ]);
 
+        // One wallet per operator per branch (branches v2 D3) — the new account
+        // joins the branch being worked in (CashBookService::createAccount()).
         if ($validated['kind'] === CashAccount::KIND_MOBILE_MONEY
-            && CashAccount::query()->where('kind', CashAccount::KIND_MOBILE_MONEY)->where('provider', $validated['provider'])->where('is_active', true)->exists()) {
-            return back()->withErrors(['provider' => 'There is already a wallet for this operator.']);
+            && CashAccount::query()->withoutGlobalScope(BranchScope::class)
+                ->where('kind', CashAccount::KIND_MOBILE_MONEY)->where('provider', $validated['provider'])->where('is_active', true)
+                ->where('branch_id', TenantContext::currentBranchId() ?? Branch::headquartersId())->exists()) {
+            return back()->withErrors(['provider' => 'This branch already has a wallet for this operator.']);
         }
 
         $this->cashBook->createAccount($validated['kind'], $validated['name'], $validated['provider'] ?? null, $validated['account_number'] ?? null);

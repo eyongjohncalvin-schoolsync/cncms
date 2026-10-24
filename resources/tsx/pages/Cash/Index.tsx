@@ -43,7 +43,7 @@ interface RemittanceRow {
 
 interface Props {
     today: string;
-    can: { view_all: boolean; receive: boolean; transfer: boolean; manage_accounts: boolean; reopen_day: boolean };
+    can: { view_all: boolean; receive: boolean; transfer: boolean; manage_accounts: boolean; reopen_day: boolean; branch_transfers: boolean };
     accounts: Account[];
     my_till: Account | null;
     transfer_targets: { uuid: string; name: string; kind: Account['kind'] }[];
@@ -85,6 +85,11 @@ export default function CashIndex({ today, can, accounts, my_till, transfer_targ
                     {(can.view_all || can.receive) && (
                         <Link href="/cash/technician-fees">
                             <Button variant="secondary">Technician fees</Button>
+                        </Link>
+                    )}
+                    {can.branch_transfers && (
+                        <Link href="/cash/branch-transfers">
+                            <Button variant="secondary">Branch transfers</Button>
                         </Link>
                     )}
                     {can.transfer && (

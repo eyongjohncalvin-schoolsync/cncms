@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Branch;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -36,6 +37,8 @@ class UpdateBranchSettingsRequest extends FormRequest
             'reconnection_fine' => $money,
             'relocation_fee' => $money,
             'reinstallation_fee' => $money,
+            // Headquarters' rule for the branch — never set by the branch itself.
+            'sends_to_hq' => ['sometimes', Rule::in(Branch::SENDS_TO_HQ), Rule::when(fn (): bool => ! $this->user()->can('update', $this->route('branch')), ['missing'])],
         ];
     }
 }

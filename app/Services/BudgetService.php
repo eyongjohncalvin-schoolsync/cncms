@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Branch;
 use App\Models\Budget;
 use App\Models\Company;
 use App\Models\Expenditure;
 use App\Models\ExpenseCategory;
+use App\Models\Scopes\BranchScope;
 use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -35,11 +39,13 @@ class BudgetService
     {
         $previous = BusinessTimezone::previousPeriod($period);
 
-        $budgets = Budget::query()->whereIn('period', [$period, $previous])->get()->groupBy('period');
+        // Branches v2: a branch view works on that branch's own budgets and spending; all branches = the company's.
+        $branchId = TenantContext::currentBranchId();
+        $budgets = $this->budgetsFor($branchId)->whereIn('period', [$period, $previous])->get()->groupBy('period');
         $current = ($budgets[$period] ?? collect())->pluck('amount', 'category_id');
         $prior = ($budgets[$previous] ?? collect())->pluck('amount', 'category_id');
-        $actuals = $this->actuals($period);
-        $priorActuals = $this->actuals($previous);
+        $actuals = $this->actuals($period, $branchId);
+        $priorActuals = $this->actuals($previous, $branchId);
 
         $categories = ExpenseCategory::query()
             ->where(fn ($query) => $query->where('is_active', true)->orWhereIn('id', $current->keys()->merge($actuals->keys())))
@@ -63,9 +69,11 @@ class BudgetService
             ];
         })->values()->all();
 
-        $cap = Company::cached()?->monthly_spending_cap;
+        // The monthly cap is a company ceiling (D10), shown on the company view only.
+        $cap = $branchId === null ? Company::cached()?->monthly_spending_cap : null;
 
         return [
+            'branch' => $branchId !== null ? Branch::allMemoized()->get($branchId)?->name : null,
             'month' => $period,
             'previous' => $previous,
             'closed' => $this->months->isClosed($period),
@@ -87,7 +95,9 @@ class BudgetService
 
         $ids = ExpenseCategory::query()->whereIn('uuid', array_keys($amountsByCategoryUuid))->pluck('id', 'uuid');
 
-        DB::transaction(function () use ($period, $amountsByCategoryUuid, $ids): void {
+        $branchId = TenantContext::currentBranchId();
+
+        DB::transaction(function () use ($period, $amountsByCategoryUuid, $ids, $branchId): void {
             foreach ($amountsByCategoryUuid as $uuid => $amount) {
                 $categoryId = $ids[$uuid] ?? null;
 
@@ -96,13 +106,13 @@ class BudgetService
                 }
 
                 if ($amount === null || $amount === '' || (float) $amount <= 0) {
-                    Budget::query()->where('period', $period)->where('category_id', $categoryId)->get()->each->delete();
+                    $this->budgetsFor($branchId)->where('period', $period)->where('category_id', $categoryId)->get()->each->delete();
 
                     continue;
                 }
 
                 Budget::query()->updateOrCreate(
-                    ['period' => $period, 'category_id' => $categoryId],
+                    ['period' => $period, 'category_id' => $categoryId, 'branch_id' => $branchId],
                     ['amount' => number_format((float) $amount, 2, '.', '')],
                 );
             }
@@ -117,11 +127,12 @@ class BudgetService
     {
         $this->months->assertOpen($period, 'month');
 
-        $existing = Budget::query()->where('period', $period)->pluck('category_id');
+        $branchId = TenantContext::currentBranchId();
+        $existing = $this->budgetsFor($branchId)->where('period', $period)->pluck('category_id');
         $copied = 0;
 
-        foreach (Budget::query()->where('period', BusinessTimezone::previousPeriod($period))->whereNotIn('category_id', $existing)->get() as $budget) {
-            Budget::query()->create(['period' => $period, 'category_id' => $budget->category_id, 'amount' => $budget->amount]);
+        foreach ($this->budgetsFor($branchId)->where('period', BusinessTimezone::previousPeriod($period))->whereNotIn('category_id', $existing)->get() as $budget) {
+            Budget::query()->create(['period' => $period, 'category_id' => $budget->category_id, 'amount' => $budget->amount, 'branch_id' => $branchId]);
             $copied++;
         }
 
@@ -129,13 +140,24 @@ class BudgetService
     }
 
     /**
+     * One branch's budgets, or the company's (null) — branches v2: a branch
+     * manager edits their branch's budgets, never the company's.
+     *
+     * @return Builder<Budget>
+     */
+    private function budgetsFor(?int $branchId): Builder
+    {
+        return $branchId === null ? Budget::query()->whereNull('branch_id') : Budget::query()->where('branch_id', $branchId);
+    }
+
+    /**
      * @return Collection<int, mixed> category id => total
      */
-    private function actuals(string $period): Collection
+    private function actuals(string $period, ?int $branchId): Collection
     {
         [$from, $to] = BusinessTimezone::periodDates($period);
 
-        return Expenditure::query()->counted()->whereBetween('spent_at', [$from, $to])
+        return Expenditure::query()->withoutGlobalScope(BranchScope::class)->when($branchId !== null, fn ($query) => $query->where('branch_id', $branchId))->counted()->whereBetween('spent_at', [$from, $to])
             ->groupBy('category_id')->selectRaw('category_id, sum(amount) as total')->pluck('total', 'category_id');
     }
 

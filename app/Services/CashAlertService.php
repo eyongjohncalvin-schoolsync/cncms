@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Branch;
+use App\Models\BranchTransfer;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
@@ -39,6 +41,9 @@ class CashAlertService
     /** A paid voucher still without its signed copy after this many days. */
     private const int MISSING_SIGNATURE_DAYS = 2;
 
+    /** Money sent between branches and not received after this many days. */
+    private const int TRANSFER_IN_TRANSIT_DAYS = 3;
+
     public function __construct(
         private readonly SpendingControlService $spending,
     ) {}
@@ -63,7 +68,67 @@ class CashAlertService
             $this->approvedVouchersUnpaid(),
             $this->vouchersWithoutSignedCopy(),
             $this->monthInDeficit(),
+            $this->branchTransfersInTransit(),
+            $this->branchesNotSendingToHeadquarters(),
         ], fn (?array $alert): bool => $alert !== null && $alert['items'] !== []));
+    }
+
+    /**
+     * Money sent between branches and not received after
+     * TRANSFER_IN_TRANSIT_DAYS (branches v2 §4.7) — the receiving branch must
+     * confirm it or refuse it. Each branch sees what it sent or receives.
+     */
+    private function branchTransfersInTransit(): array
+    {
+        return $this->alert('branch_transfers_in_transit', 'warning', 'Money in transit between branches', 'Sent more than '.self::TRANSFER_IN_TRANSIT_DAYS.' days ago and not yet received — the receiving branch must receive or refuse it.',
+            BranchTransfer::query()->visible()->with(['fromBranch:id,name', 'toBranch:id,name'])
+                ->where('status', BranchTransfer::STATUS_SENT)
+                ->where('sent_at', '<', now()->subDays(self::TRANSFER_IN_TRANSIT_DAYS))
+                ->get()
+                ->map(fn (BranchTransfer $transfer): array => [
+                    'label' => "{$transfer->number} — {$transfer->fromBranch?->name} → {$transfer->toBranch?->name}",
+                    'detail' => 'Sent '.$transfer->sent_at?->format('d M'),
+                    'amount' => (string) $transfer->amount,
+                    'link' => '/cash/branch-transfers',
+                ])->all());
+    }
+
+    /**
+     * A branch expected to send money to headquarters weekly or monthly
+     * (branches.sends_to_hq) that has not done so within that time — for
+     * headquarters only (not a fenced branch's own alert list).
+     */
+    private function branchesNotSendingToHeadquarters(): ?array
+    {
+        $headquartersId = Branch::headquartersId();
+
+        if ($headquartersId === null || (TenantContext::currentBranchId() !== null && TenantContext::currentBranchId() !== $headquartersId)) {
+            return null;
+        }
+
+        $expected = Branch::allMemoized()->filter(fn (Branch $branch): bool => ! $branch->is_headquarters && $branch->sends_to_hq !== 'off');
+
+        if ($expected->isEmpty()) {
+            return null;
+        }
+
+        $lastSent = BranchTransfer::query()->where('to_branch_id', $headquartersId)->where('status', '!=', BranchTransfer::STATUS_REJECTED)
+            ->whereIn('from_branch_id', $expected->keys())
+            ->groupBy('from_branch_id')->selectRaw('from_branch_id, max(sent_at) as last_sent')
+            ->pluck('last_sent', 'from_branch_id');
+
+        return $this->alert('branches_not_sending', 'warning', 'Branches that have not sent money to headquarters', 'Each of these branches is expected to send its money to headquarters on a schedule.',
+            $expected->filter(function (Branch $branch) use ($lastSent): bool {
+                $due = $branch->sends_to_hq === 'weekly' ? now()->subWeek() : now()->subMonth();
+                $last = $lastSent[$branch->id] ?? null;
+
+                return $last === null || Carbon::parse($last)->lt($due);
+            })->map(fn (Branch $branch): array => [
+                'label' => $branch->name,
+                'detail' => ($branch->sends_to_hq === 'weekly' ? 'Sends weekly' : 'Sends monthly').' · last sent '.(isset($lastSent[$branch->id]) ? Carbon::parse($lastSent[$branch->id])->format('d M') : 'never'),
+                'amount' => null,
+                'link' => '/cash/branch-transfers',
+            ])->values()->all());
     }
 
     /** @return array<string, int> key => item count, for the dashboard. */

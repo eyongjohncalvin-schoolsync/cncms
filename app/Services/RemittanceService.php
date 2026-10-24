@@ -192,7 +192,8 @@ class RemittanceService
 
                 $line->update(['wallet_confirmed' => true]);
 
-                $this->cashBook->record($this->cashBook->walletFor($line->method), 'in', (string) $line->amount, CashMovement::KIND_REMITTANCE_WALLET, $receiver, [
+                // The collector's branch's wallet (branches v2 D3: no joint account).
+                $this->cashBook->record($this->cashBook->walletFor($line->method, $locked->branch_id), 'in', (string) $line->amount, CashMovement::KIND_REMITTANCE_WALLET, $receiver, [
                     'document_number' => $locked->number,
                     'source' => $locked,
                     'reference' => $line->reference,

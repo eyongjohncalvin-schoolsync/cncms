@@ -10,6 +10,7 @@ use App\Models\AuditLog;
 use App\Models\BillBatchFile;
 use App\Models\Branch;
 use App\Models\BranchPrice;
+use App\Models\Budget;
 use App\Models\CashAccount;
 use App\Models\CashMovement;
 use App\Models\Company;
@@ -72,6 +73,8 @@ class BranchSpineTest extends TestCase
             // A person's history (where they worked, what they were paid):
             // branch nullable — HQ-level staff are fenced to none.
             StaffAssignment::class, StaffSalary::class,
+            // A company budget has no branch (null); a branch budget has one.
+            Budget::class,
         ];
 
         $checked = 0;

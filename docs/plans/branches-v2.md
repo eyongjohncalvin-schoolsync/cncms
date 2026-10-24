@@ -307,7 +307,7 @@ billing period lock, and identity (one login per person, across transfers).
 | **P2 Fence** ✅ | Global branch scope for fenced users; route binding; money-out, cash book, alerts/digests, complaints, arrears, audit log, exports, sync fenced; branch switcher; fence tests per module. *After P2 it is safe to fence staff to a branch.* |
 | **P3 Settings & prices** ✅ | `branch_settings`, `branch_prices`, resolvers, repricing, bills/receipts/messages per branch. Branch details on the Branches page. |
 | **P4 Staff & salaries** ✅ | `staff_assignments`, transfers, branch-manager hiring, `salary_grades`, `staff_salaries` with HQ approval. |
-| **P5 Money between branches** | Per-branch accounts on screens, `branch_transfers` (send/receive, in-transit flag), "sends to HQ" policy, branch budgets. Customer moves between branches. |
+| **P5 Money between branches** ✅ | Per-branch accounts on screens, `branch_transfers` (send/receive, in-transit flag), "sends to HQ" policy, branch budgets. Customer moves between branches. |
 | **P6 HQ reporting** | Branch comparison dashboard, `branch_period_totals` at close, investor per-branch view, alert routing per branch. |
 
 ## Sources

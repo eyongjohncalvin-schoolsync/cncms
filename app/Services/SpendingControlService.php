@@ -107,10 +107,9 @@ class SpendingControlService
     {
         [$from, $to] = BusinessTimezone::periodDates($period);
 
-        // Branches v2: a fenced viewer sees their own branch's spending and
-        // income — never company totals. The cap and budgets are company-wide
-        // (set by headquarters) until branch budgets exist, so they are left
-        // out of a branch view rather than compared with branch figures.
+        // Branches v2: a fenced viewer sees their own branch's spending,
+        // income and budgets — never company totals. The monthly cap is a
+        // company ceiling (D10), so it is left out of a branch view.
         $branchId = TenantContext::currentBranchId();
 
         $actuals = $this->forBranch(Expenditure::query(), $branchId)
@@ -120,7 +119,10 @@ class SpendingControlService
             ->selectRaw('category_id, sum(amount) as total')
             ->pluck('total', 'category_id');
 
-        $budgets = $branchId === null ? Budget::query()->where('period', $period)->pluck('amount', 'category_id') : collect();
+        // A branch's own budgets in a branch view (branches v2 P5); the company's otherwise.
+        $budgets = Budget::query()->where('period', $period)
+            ->when($branchId === null, fn ($query) => $query->whereNull('branch_id'), fn ($query) => $query->where('branch_id', $branchId))
+            ->pluck('amount', 'category_id');
 
         $categoryIds = $actuals->keys()->merge($budgets->keys())->unique()->values();
         $categories = ExpenseCategory::query()->whereIn('id', $categoryIds)->orderBy('sort_order')->orderBy('name')->get();
