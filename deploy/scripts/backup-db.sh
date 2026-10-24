@@ -16,14 +16,20 @@ FILE="${DEST}/cncms-${STAMP}.sql.gz"
 
 mkdir -p "$DEST"
 
-# Reads DB creds from the app .env so there's one source of truth.
+# Reads DB creds from the app .env with Laravel's own parser (phpdotenv) —
+# parse_ini_file() silently fails on ordinary Laravel .env lines and the
+# script then fell back to the wrong user with no password.
 cd "$APP_DIR"
-export PGPASSWORD="$(php -r '$e=parse_ini_file(".env"); echo $e["DB_PASSWORD"] ?? "";')"
-DB="$(php -r '$e=parse_ini_file(".env"); echo $e["DB_DATABASE"] ?? "cncms";')"
-USER="$(php -r '$e=parse_ini_file(".env"); echo $e["DB_USERNAME"] ?? "cncms";')"
-HOST="$(php -r '$e=parse_ini_file(".env"); echo $e["DB_HOST"] ?? "127.0.0.1";')"
+env_value() {
+  php -r 'require "vendor/autoload.php"; $e = Dotenv\Dotenv::createArrayBacked(getcwd())->load(); echo $e[$argv[1]] ?? $argv[2];' "$1" "$2"
+}
+export PGPASSWORD="$(env_value DB_PASSWORD '')"
+DB="$(env_value DB_DATABASE cncms)"
+USER="$(env_value DB_USERNAME cncms)"
+HOST="$(env_value DB_HOST 127.0.0.1)"
+PORT="$(env_value DB_PORT 5432)"
 
-pg_dump --no-owner --no-privileges -h "$HOST" -U "$USER" "$DB" | gzip -9 > "$FILE"
+pg_dump --no-owner --no-privileges -h "$HOST" -p "$PORT" -U "$USER" "$DB" | gzip -9 > "$FILE"
 unset PGPASSWORD
 
 # Prune
