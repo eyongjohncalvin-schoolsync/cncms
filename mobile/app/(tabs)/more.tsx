@@ -1,6 +1,10 @@
+import { useCallback, useSyncExternalStore } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useAuth } from '../../src/auth/AuthContext';
 import { Card } from '../../src/components/ui/Card';
+import { Badge } from '../../src/components/ui/Badge';
+import { getApprovalsState, refreshApprovalsCount, subscribeApprovalsState } from '../../src/sync/approvalsStore';
 import { colors } from '../../src/theme/colors';
 import { fontSize, spacing } from '../../src/theme/tokens';
 
@@ -9,6 +13,8 @@ interface MoreLink {
     subtitle: string;
     href: string;
     accentColor?: string;
+    /** Small count pill on the right (e.g. approvals waiting); hidden at 0. */
+    badgeCount?: number;
 }
 
 interface MoreSection {
@@ -36,8 +42,50 @@ interface MoreSection {
  */
 export default function MoreScreen() {
     const router = useRouter();
+    const { can } = useAuth();
+    const approvalsState = useSyncExternalStore(subscribeApprovalsState, getApprovalsState);
+    const canApproveExpenses = can('expenditures.approve') || can('expenditures.approve_large');
+
+    useFocusEffect(
+        useCallback(() => {
+            if (canApproveExpenses) {
+                void refreshApprovalsCount();
+            }
+        }, [canApproveExpenses]),
+    );
+
+    // Resources hub (expense controls, 2026-10): Expenses for everyone,
+    // Approvals only for someone who can approve.
+    const resourceLinks: MoreLink[] = [
+        {
+            title: 'Expenses',
+            subtitle: 'Your recorded expenses and their approval status',
+            href: '/resources',
+            accentColor: colors.accent.expense,
+        },
+        {
+            title: 'Record an expense',
+            subtitle: 'Amount, what for, receipt photo — works offline',
+            href: '/record-expense',
+            accentColor: colors.accent.expense,
+        },
+    ];
+
+    if (canApproveExpenses) {
+        resourceLinks.push({
+            title: 'Approvals',
+            subtitle: 'Expenses waiting for your approval',
+            href: '/approvals',
+            accentColor: colors.accent.expense,
+            badgeCount: approvalsState.count ?? 0,
+        });
+    }
 
     const sections: MoreSection[] = [
+        {
+            title: 'Resources',
+            links: resourceLinks,
+        },
         {
             title: 'Field tools',
             links: [
@@ -64,12 +112,6 @@ export default function MoreScreen() {
                     subtitle: 'Complaints you’ve submitted and their status',
                     href: '/complaints',
                     accentColor: colors.accent.complaint,
-                },
-                {
-                    title: 'Resources',
-                    subtitle: 'Your recorded expenditures',
-                    href: '/resources',
-                    accentColor: colors.accent.expense,
                 },
                 {
                     title: 'Reports',
@@ -115,8 +157,13 @@ export default function MoreScreen() {
                     <Text style={styles.sectionTitle}>{section.title}</Text>
                     {section.links.map((link) => (
                         <Card key={link.href} onPress={() => router.push(link.href as never)} accentColor={link.accentColor}>
-                            <Text style={styles.linkTitle}>{link.title}</Text>
-                            <Text style={styles.linkSubtitle}>{link.subtitle}</Text>
+                            <View style={styles.linkRow}>
+                                <View style={styles.linkText}>
+                                    <Text style={styles.linkTitle}>{link.title}</Text>
+                                    <Text style={styles.linkSubtitle}>{link.subtitle}</Text>
+                                </View>
+                                {link.badgeCount ? <Badge label={String(link.badgeCount)} tone="pending" /> : null}
+                            </View>
                         </Card>
                     ))}
                 </View>
@@ -131,6 +178,8 @@ const styles = StyleSheet.create({
     heading: { fontSize: fontSize.xl, fontWeight: '800', color: colors.textPrimary },
     section: { gap: spacing.sm },
     sectionTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+    linkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    linkText: { flexShrink: 1 },
     linkTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     linkSubtitle: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
 });

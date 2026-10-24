@@ -3,6 +3,7 @@ import type {
     AcknowledgeNotificationResponse,
     ExpenseCategoryListResponse,
     ReceiptEntityType,
+    ReceiptUploadMeta,
     SyncPullResponse,
     SyncPushRequestBody,
     SyncPushResponse,
@@ -54,10 +55,22 @@ export async function uploadReceipt(
     entityType: ReceiptEntityType,
     entityUuid: string,
     localUri: string,
+    meta: ReceiptUploadMeta = {},
 ): Promise<UploadReceiptResponse> {
     const formData = new FormData();
     formData.append('entity_type', entityType);
     formData.append('entity_uuid', entityUuid);
+
+    // Provenance for the controls (gallery photos and old capture times are
+    // flagged server-side) — only sent when known.
+    if (meta.source) {
+        formData.append('source', meta.source);
+    }
+
+    if (meta.captured_at) {
+        formData.append('captured_at', meta.captured_at);
+    }
+
     // React Native's FormData accepts this { uri, name, type } shape in
     // place of a Blob/File — the DOM FormData typings don't model it, hence
     // the cast.

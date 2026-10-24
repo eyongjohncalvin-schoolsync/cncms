@@ -76,10 +76,19 @@ export default function ResourcesDashboardPage({ period, income, expenses, pnl, 
                         </Link>
                     )}
                     <Link href="/resources/expenditures" className="flex-1 sm:flex-none">
-                        <Button variant="secondary" className="w-full sm:w-auto">View Expenditures</Button>
+                        <Button variant="secondary" className="w-full sm:w-auto">Expenses</Button>
+                    </Link>
+                    <Link href="/resources/approvals" className="flex-1 sm:flex-none">
+                        <Button variant="secondary" className="w-full sm:w-auto">Approvals</Button>
+                    </Link>
+                    <Link href="/resources/suppliers" className="flex-1 sm:flex-none">
+                        <Button variant="secondary" className="w-full sm:w-auto">Suppliers</Button>
+                    </Link>
+                    <Link href="/resources/settings" className="flex-1 sm:flex-none">
+                        <Button variant="secondary" className="w-full sm:w-auto">Budgets &amp; limits</Button>
                     </Link>
                     <Link href="/resources/expenditures/create" className="flex-1 sm:flex-none">
-                        <Button className="w-full sm:w-auto">Record Expense</Button>
+                        <Button className="w-full sm:w-auto">Record expense</Button>
                     </Link>
                 </div>
             </div>

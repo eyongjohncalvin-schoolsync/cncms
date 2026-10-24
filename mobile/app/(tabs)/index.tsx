@@ -7,6 +7,7 @@ import { countCustomers, getZoneSnapshot, type ZoneSnapshot } from '../../src/db
 import { getSyncState, subscribeSyncState } from '../../src/sync/syncStore';
 import { getQueuedExpendituresCount } from '../../src/db/expenditures';
 import { getNotificationsState, subscribeNotificationsState } from '../../src/notifications/notificationStore';
+import { getApprovalsState, refreshApprovalsCount, subscribeApprovalsState } from '../../src/sync/approvalsStore';
 import { Card } from '../../src/components/ui/Card';
 import { StatCard } from '../../src/components/ui/StatCard';
 import { Button } from '../../src/components/ui/Button';
@@ -16,9 +17,12 @@ import { fontSize, spacing } from '../../src/theme/tokens';
 import { formatFcfa } from '../../src/utils/format';
 
 export default function HomeScreen() {
-    const { user, role, logout } = useAuth();
+    const { user, role, logout, can } = useAuth();
     const router = useRouter();
     const notificationsState = useSyncExternalStore(subscribeNotificationsState, getNotificationsState);
+    const approvalsState = useSyncExternalStore(subscribeApprovalsState, getApprovalsState);
+    const canApproveExpenses = can('expenditures.approve') || can('expenditures.approve_large');
+    const approvalsWaiting = canApproveExpenses ? (approvalsState.count ?? 0) : 0;
 
     const [todayTotal, setTodayTotal] = useState<number | null>(null);
     const [customerCount, setCustomerCount] = useState<number | null>(null);
@@ -28,7 +32,12 @@ export default function HomeScreen() {
         void getTodayCollectionTotal().then(setTodayTotal);
         void countCustomers().then(setCustomerCount);
         void getZoneSnapshot().then(setZoneSnapshot);
-    }, []);
+
+        // Managers: how many expenses wait for them (online only, best-effort).
+        if (canApproveExpenses) {
+            void refreshApprovalsCount();
+        }
+    }, [canApproveExpenses]);
 
     useFocusEffect(refresh);
 
@@ -106,6 +115,25 @@ export default function HomeScreen() {
                 <Text style={styles.heroValue}>{todayTotal === null ? '—' : formatFcfa(todayTotal)}</Text>
                 <Text style={styles.heroHint}>From this device — renders instantly, even offline.</Text>
             </Card>
+
+            {/*
+              Expense controls (2026-10): only shown to someone who can
+              approve, and only while something is actually waiting — a calm
+              outlined card with the expense accent, not an alarm.
+            */}
+            {approvalsWaiting > 0 ? (
+                <Card onPress={() => router.push('/approvals')} accentColor={colors.accent.expense}>
+                    <View style={styles.notificationsRow}>
+                        <View style={styles.flexShrink}>
+                            <Text style={styles.linkTitle}>
+                                {approvalsWaiting} expense{approvalsWaiting === 1 ? '' : 's'} waiting for your approval
+                            </Text>
+                            <Text style={styles.linkSubtitle}>Tap to review, approve or reject</Text>
+                        </View>
+                        <Badge label={String(approvalsWaiting)} tone="pending" />
+                    </View>
+                </Card>
+            ) : null}
 
             {/*
               Zone-arrears card — mobile-app-react-native.md §4 calls for a
@@ -300,5 +328,6 @@ const styles = StyleSheet.create({
     sectionTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     notificationsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
     linkTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+    flexShrink: { flexShrink: 1 },
     linkSubtitle: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
 });

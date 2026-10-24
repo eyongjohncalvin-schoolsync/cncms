@@ -9,7 +9,18 @@ import { fontSize, radius, spacing } from '../../theme/tokens';
  * state in words too) per AAA-contrast/accessibility rules in
  * mobile-app-react-native.md §6.
  */
-export type BadgeTone = 'pending' | 'verified' | 'rejected' | 'offline' | 'syncing' | 'synced' | 'error' | 'neutral';
+export type BadgeTone =
+    | 'pending'
+    | 'verified'
+    | 'rejected'
+    | 'offline'
+    | 'syncing'
+    | 'synced'
+    | 'error'
+    | 'neutral'
+    /** Amber "needs something, not an error" — expense flags and
+     * "Waiting for receipt". Same verified amber pair as `offline`. */
+    | 'warning';
 
 interface BadgeProps {
     label: string;
@@ -25,6 +36,7 @@ const toneStyles: Record<BadgeTone, { bg: string; fg: string }> = {
     synced: { bg: colors.status.syncedBg, fg: colors.status.syncedFg },
     error: { bg: colors.status.errorBg, fg: colors.status.errorFg },
     neutral: { bg: colors.surfaceMuted, fg: colors.textSecondary },
+    warning: { bg: colors.status.offlineBg, fg: colors.status.offlineFg },
 };
 
 export function Badge({ label, tone = 'neutral' }: BadgeProps) {

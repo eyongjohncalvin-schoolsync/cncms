@@ -62,6 +62,17 @@ export interface LocalPayment {
     updated_at: string;
 }
 
+/**
+ * Receipt upload state for an expenditure's photo — 0 waiting to upload
+ * (or no photo at all), 1 uploaded, 2 refused by the server (e.g. the file
+ * is gone or not an image) so it is not retried forever. Unlike payments,
+ * `receipt_server_path` can't double as the "uploaded" marker: the server
+ * keeps expense photos private and returns no public URL for them.
+ */
+export type ReceiptUploadState = 0 | 1 | 2;
+
+export type ReceiptSource = 'camera' | 'gallery';
+
 export interface LocalExpenditure {
     local_uuid: string;
     server_uuid: string | null;
@@ -70,13 +81,35 @@ export interface LocalExpenditure {
     description: string | null;
     spent_at: string;
     notes: string | null;
+    /** Expense controls (2026-10). null on rows recorded before this existed. */
+    payment_method: PaymentMethod | null;
+    /** MoMo transaction ID for mtn_momo / orange_money. */
+    payment_ref: string | null;
+    supplier_uuid: string | null;
+    /** null = "Shared". */
+    service_uuid: string | null;
+    reference_no: string | null;
     receipt_local_uri: string | null;
     receipt_server_path: string | null;
+    receipt_source: ReceiptSource | null;
+    receipt_captured_at: string | null;
+    receipt_uploaded: ReceiptUploadState;
     sync_status: SyncStatus;
     sync_error: string | null;
     sync_attempts: number;
     created_at: string;
     updated_at: string;
+}
+
+/** Local cache of GET /resources/suppliers, so the picker works offline. */
+export interface LocalSupplier {
+    uuid: string;
+    name: string;
+    phone: string | null;
+    momo_number: string | null;
+    location: string | null;
+    status: 'pending' | 'active' | 'inactive';
+    cached_at: string;
 }
 
 export interface LocalExpenseCategory {
@@ -150,4 +183,16 @@ export interface LocalNotification {
     cached_at: string;
 }
 
-export type SyncMetaKey = 'last_sync_at' | 'device_id' | 'agent_zone_uuid';
+export type SyncMetaKey =
+    | 'last_sync_at'
+    | 'device_id'
+    | 'agent_zone_uuid'
+    /** JSON ExpenseLimitsApi — cached so Record Expense's hints work offline. */
+    | 'expense_limits'
+    /** JSON Array<{uuid,name}> — the "Service" picker on Record Expense. */
+    | 'expense_services'
+    /** JSON Record<server_uuid, ExpenditureApi> — last known server status
+     * of this user's own expenses, so History still shows it offline. */
+    | 'expense_server_status'
+    /** ISO time the expense reference data above was last refreshed. */
+    | 'expense_reference_refreshed_at';

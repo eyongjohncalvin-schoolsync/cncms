@@ -13,6 +13,8 @@
         "reports": "Rapports",
         "agent_app": "Appli agent",
         "resources": "Ressources",
+        "expenses": "Dépenses",
+        "approvals": "Approbations",
         "audit_log": "Journal d'audit",
         "arrears_adjustments": "Ajustements d'arriérés",
         "opening_balances": "Soldes d'ouverture",

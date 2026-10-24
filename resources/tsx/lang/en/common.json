@@ -13,6 +13,8 @@
         "reports": "Reports",
         "agent_app": "Agent App",
         "resources": "Resources",
+        "expenses": "Expenses",
+        "approvals": "Approvals",
         "audit_log": "Audit Log",
         "arrears_adjustments": "Arrears Adjustments",
         "opening_balances": "Opening Balances",

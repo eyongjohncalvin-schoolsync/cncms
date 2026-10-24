@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, FlatList, Image, Pressable, StyleSheet } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Card } from '../src/components/ui/Card';
 import { Badge, type BadgeTone } from '../src/components/ui/Badge';
+import { Button } from '../src/components/ui/Button';
 import { EmptyState } from '../src/components/ui/EmptyState';
+import { FlagChips } from '../src/components/expenses/FlagChips';
 import { getRecentExpenditures, getExpenditureTotalSince } from '../src/db/expenditures';
 import { getExpenseCategories } from '../src/db/categories';
-import { subscribeSyncState } from '../src/sync/syncStore';
+import { getCachedExpenseStatuses } from '../src/db/expenseReference';
+import { syncManager } from '../src/sync/SyncManager';
+import { getSyncState, subscribeSyncState } from '../src/sync/syncStore';
+import { expenseStatusDisplay } from '../src/utils/expenseControls';
+import type { ExpenditureApi } from '../src/types/api';
 import { glyphForCategoryIcon } from '../src/utils/categoryIcons';
 import {
     EXPENDITURE_PERIODS,
@@ -26,6 +32,18 @@ const SYNC_BADGE: Record<LocalExpenditure['sync_status'], { label: string; tone:
     synced: { label: 'Synced', tone: 'synced' },
     failed: { label: 'Sync failed', tone: 'error' },
 };
+
+/** Server status when known (online, or the last cached copy), else the
+ * local outbox state — so an unsynced expense still reads calmly. */
+function expenseRowBadge(
+    item: LocalExpenditure,
+    serverRows: Record<string, ExpenditureApi>,
+): { label: string; tone: BadgeTone } {
+    const server = item.server_uuid ? serverRows[item.server_uuid] : undefined;
+    const display = expenseStatusDisplay(server?.status);
+
+    return display ?? SYNC_BADGE[item.sync_status];
+}
 
 /**
  * Resources — this device's own recorded-expenditures history, a sibling of
@@ -48,26 +66,37 @@ const SYNC_BADGE: Record<LocalExpenditure['sync_status'], { label: string; tone:
  * "dashboard-ish" element on this screen, matching Home's "Today's
  * collection" hero card's own restraint.
  *
+ * Expense controls (2026-10): each row shows the SERVER status (Approved /
+ * Waiting for receipt / Waiting approval / Owner approval / Rejected / Void)
+ * plus its control flags, from GET /resources/expenditures?mine=1 when
+ * online — cached in sync_meta so the last known status still shows
+ * offline; an expense that hasn't synced yet keeps its calm local badge.
+ * Tapping a row opens app/expense/[localUuid].tsx.
+ *
  * Live-refreshes on every sync-state change (not just on screen focus),
  * same pattern already established by History/Notifications/Sync Status —
  * a queued row's sync_status can flip to synced from a background pull
  * while the agent is sitting on this exact screen.
  */
 export default function ResourcesScreen() {
+    const router = useRouter();
     const [expenditures, setExpenditures] = useState<LocalExpenditure[]>([]);
+    const [serverRows, setServerRows] = useState<Record<string, ExpenditureApi>>({});
     const [categories, setCategories] = useState<LocalExpenseCategory[]>([]);
     const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
     const [period, setPeriod] = useState<ExpenditurePeriod>('today');
     const [periodTotal, setPeriodTotal] = useState<number | null>(null);
-    const [expandedLocalUuid, setExpandedLocalUuid] = useState<string | null>(null);
     const [loaded, setLoaded] = useState(false);
 
     const refreshList = useCallback(() => {
-        void Promise.all([getRecentExpenditures(), getExpenseCategories()]).then(([rows, cats]) => {
-            setExpenditures(rows);
-            setCategories(cats);
-            setLoaded(true);
-        });
+        void Promise.all([getRecentExpenditures(), getExpenseCategories(), getCachedExpenseStatuses()]).then(
+            ([rows, cats, statuses]) => {
+                setExpenditures(rows);
+                setCategories(cats);
+                setServerRows(statuses);
+                setLoaded(true);
+            },
+        );
     }, []);
 
     const refreshTotal = useCallback((forPeriod: ExpenditurePeriod) => {
@@ -78,6 +107,11 @@ export default function ResourcesScreen() {
         useCallback(() => {
             refreshList();
             refreshTotal(period);
+
+            if (getSyncState().isOnline) {
+                // Fresh server statuses; lands via the sync-state subscription below.
+                void syncManager.refreshMyExpenseStatuses();
+            }
             // Deliberately re-runs whenever `period` changes too (not just
             // on focus transitions) — useFocusEffect re-invokes its
             // callback on any dependency change while the screen stays
@@ -111,8 +145,10 @@ export default function ResourcesScreen() {
         return (
             <View style={styles.flex}>
                 <EmptyState
-                    title="Resources"
-                    subtitle="Expenses you record will show up here, newest first, with their sync status."
+                    title="No expenses yet"
+                    subtitle="Expenses you record show up here, newest first, with their approval status."
+                    actionLabel="Record an expense"
+                    onAction={() => router.push('/record-expense')}
                 />
             </View>
         );
@@ -131,6 +167,8 @@ export default function ResourcesScreen() {
                     <Text style={styles.heroValue}>{periodTotal === null ? '—' : formatFcfa(periodTotal)}</Text>
                     <Text style={styles.heroHint}>From this device — renders instantly, even offline.</Text>
                 </Card>
+
+                <Button title="+ Record an expense" variant="secondary" onPress={() => router.push('/record-expense')} />
 
                 <View style={styles.periodRow}>
                     {EXPENDITURE_PERIODS.map((p) => {
@@ -186,13 +224,16 @@ export default function ResourcesScreen() {
                     contentContainerStyle={styles.listContent}
                     renderItem={({ item }) => {
                         const category = categoryMap.get(item.category_uuid);
-                        const isExpanded = expandedLocalUuid === item.local_uuid;
-                        const badge = SYNC_BADGE[item.sync_status];
+                        const badge = expenseRowBadge(item, serverRows);
+                        const server = item.server_uuid ? serverRows[item.server_uuid] : undefined;
+                        const waitingForReceipt = server?.status === 'pending_evidence';
 
                         return (
                             <Pressable
-                                onPress={() => setExpandedLocalUuid(isExpanded ? null : item.local_uuid)}
-                                style={styles.row}
+                                accessibilityRole="button"
+                                accessibilityLabel={`${category?.name ?? 'Expense'}, ${formatFcfa(item.amount)}, ${badge.label}`}
+                                onPress={() => router.push(`/expense/${item.local_uuid}`)}
+                                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                             >
                                 <View style={styles.rowTop}>
                                     <View style={styles.categoryGlyph}>
@@ -202,7 +243,7 @@ export default function ResourcesScreen() {
                                     </View>
                                     <View style={styles.rowMain}>
                                         <Text style={styles.categoryName} numberOfLines={1}>
-                                            {category?.name ?? 'Unknown category'}
+                                            {category?.name ?? server?.category_name ?? 'Unknown category'}
                                         </Text>
                                         <Text style={styles.rowMeta} numberOfLines={1}>
                                             {formatShortDate(item.spent_at)}
@@ -214,20 +255,17 @@ export default function ResourcesScreen() {
                                         <Badge label={badge.label} tone={badge.tone} />
                                     </View>
                                 </View>
-                                {isExpanded ? (
-                                    <View style={styles.detailBox}>
-                                        {item.description ? (
-                                            <>
-                                                <Text style={styles.detailLabel}>Description</Text>
-                                                <Text style={styles.detailText}>{item.description}</Text>
-                                            </>
-                                        ) : null}
-                                        {item.receipt_local_uri ? (
-                                            <Image source={{ uri: item.receipt_local_uri }} style={styles.receiptPreview} />
-                                        ) : (
-                                            <Text style={styles.detailHint}>No receipt photo attached.</Text>
-                                        )}
+                                {server && server.flags.length > 0 ? (
+                                    <View style={styles.flagsRow}>
+                                        <FlagChips flags={server.flags} limit={2} />
                                     </View>
+                                ) : null}
+                                {waitingForReceipt ? (
+                                    <Text style={styles.receiptNudge}>Tap to add the receipt photo</Text>
+                                ) : server?.status === 'rejected' && server.rejection_reason ? (
+                                    <Text style={styles.rejectedNote} numberOfLines={1}>
+                                        Rejected: {server.rejection_reason}
+                                    </Text>
                                 ) : null}
                             </Pressable>
                         );
@@ -303,7 +341,17 @@ const styles = StyleSheet.create({
         backgroundColor: colors.surface,
         marginBottom: spacing.sm,
     },
+    rowPressed: { opacity: 0.85 },
     rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+    flagsRow: { marginTop: spacing.sm, marginLeft: 40 + spacing.md },
+    receiptNudge: {
+        marginTop: spacing.sm,
+        marginLeft: 40 + spacing.md,
+        fontSize: fontSize.sm,
+        fontWeight: '700',
+        color: colors.status.offlineFg,
+    },
+    rejectedNote: { marginTop: spacing.sm, marginLeft: 40 + spacing.md, fontSize: fontSize.sm, color: colors.danger },
     categoryGlyph: {
         width: 40,
         height: 40,
@@ -318,23 +366,6 @@ const styles = StyleSheet.create({
     rowMeta: { fontSize: fontSize.xs, color: colors.textSecondary },
     rowEnd: { alignItems: 'flex-end', gap: spacing.xs },
     amount: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
-    detailBox: {
-        marginTop: spacing.sm,
-        paddingTop: spacing.sm,
-        borderTopWidth: 1,
-        borderTopColor: colors.border,
-        gap: spacing.xs,
-    },
-    detailLabel: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textSecondary },
-    detailText: { fontSize: fontSize.sm, color: colors.textPrimary },
-    detailHint: { fontSize: fontSize.sm, color: colors.textSecondary },
-    receiptPreview: {
-        width: '100%',
-        height: 180,
-        borderRadius: radius.md,
-        backgroundColor: colors.surfaceMuted,
-        marginTop: spacing.xs,
-    },
     emptyFiltered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
     emptyFilteredText: { fontSize: fontSize.md, color: colors.textSecondary },
 });

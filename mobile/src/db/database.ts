@@ -93,6 +93,19 @@ CREATE TABLE IF NOT EXISTS expenditures (
 
 CREATE INDEX IF NOT EXISTS idx_expenditures_sync_status ON expenditures(sync_status);
 
+-- Expense controls (2026-10): read-only cache of GET /resources/suppliers so
+-- Record Expense's supplier picker works offline. Replaced wholesale on
+-- each refresh (plus single upserts when the worker adds a new one online).
+CREATE TABLE IF NOT EXISTS suppliers (
+    uuid         TEXT PRIMARY KEY NOT NULL,
+    name         TEXT NOT NULL,
+    phone        TEXT,
+    momo_number  TEXT,
+    location     TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    cached_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS expense_categories (
     uuid        TEXT PRIMARY KEY NOT NULL,
     name        TEXT NOT NULL,
@@ -179,6 +192,17 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     // Resources (2026-10): how a payment was made + its MoMo reference.
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN method TEXT' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN momo_ref TEXT' },
+    // Expense controls (2026-10): how an expense was paid, who to, for
+    // which service, and the receipt photo's provenance + upload state
+    // (see ReceiptUploadState in src/types/db.ts).
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN payment_method TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN payment_ref TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN supplier_uuid TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN service_uuid TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN reference_no TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN receipt_source TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN receipt_captured_at TEXT' },
+    { table: 'expenditures', ddl: 'ALTER TABLE expenditures ADD COLUMN receipt_uploaded INTEGER NOT NULL DEFAULT 0' },
 ];
 
 /**

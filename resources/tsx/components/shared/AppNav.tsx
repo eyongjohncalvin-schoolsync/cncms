@@ -19,6 +19,8 @@ import {
     IconScale,
     IconBook2,
     IconSend,
+    IconChecklist,
+    IconReceipt2,
 } from '@tabler/icons-react';
 
 // CoreUI-style nav color coding: each item gets its own accent instead of a
@@ -127,6 +129,16 @@ const branchesNavItem = { href: '/branches', labelKey: 'common.branches', icon: 
 // dashboard landing page itself is `expenditures.dashboard`.
 const resourcesNavItem = { href: '/resources', labelKey: 'common.resources', icon: IconReportMoney, accent: 'pink' as const };
 
+// Expenses register — ExpenditurePolicy::viewAny → `expenditures.view`.
+// The variant entry for agents/workers who record and follow their
+// expenses but don't hold the P&L dashboard (`expenditures.dashboard`);
+// anyone with the dashboard reaches the register from Resources instead.
+const expensesNavItem = { href: '/resources/expenditures', labelKey: 'common.expenses', icon: IconReceipt2, accent: 'pink' as const };
+
+// Expense approvals inbox — ExpenditurePolicy::approve → `expenditures.approve`
+// (normal) or `expenditures.approve_large` (owner's second approval).
+const approvalsNavItem = { href: '/resources/approvals', labelKey: 'common.approvals', icon: IconChecklist, accent: 'pink' as const };
+
 // Audit Log — AuditLogPolicy::viewAny → `audit.view`.
 const auditNavItem = { href: '/audit/logs', labelKey: 'common.audit_log', icon: IconHistory, accent: 'cyan' as const };
 
@@ -197,6 +209,8 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(can('reports.view') ? [reportsNavItem] : []),
         ...(can('manuscripts.view') ? [agentAppNavItem] : []),
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
+        ...(can('expenditures.view') && !can('expenditures.dashboard') ? [expensesNavItem] : []),
+        ...(canAny('expenditures.approve', 'expenditures.approve_large') ? [approvalsNavItem] : []),
         ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
         ...(canAny('opening_balances.view', 'opening_balances.enter', 'opening_balances.approve') ? [openingBalancesNavItem] : []),
         ...(can('audit.view') ? [auditNavItem] : []),
@@ -232,6 +246,12 @@ export function AppNav({
 }) {
     const { t } = useTranslation();
     const visibleNavItems = buildVisibleNavItems(permissions);
+    // Nested destinations (/resources and /resources/approvals) both prefix-
+    // match the current path; only the most specific matching item is active.
+    const activeHref = visibleNavItems
+        .map((item) => item.href.split('?')[0])
+        .filter((itemPath) => currentPath === itemPath || currentPath.startsWith(`${itemPath}/`))
+        .sort((a, b) => b.length - a.length)[0];
 
     return (
         <>
@@ -260,7 +280,7 @@ export function AppNav({
                     const itemPath = item.href.split('?')[0];
                     const active = item.href === settingsNavItem.href
                         ? currentPath.startsWith('/settings')
-                        : currentPath.startsWith(itemPath);
+                        : currentPath.startsWith(itemPath) && (activeHref === undefined || activeHref === itemPath);
                     const accent = NAV_ACCENTS[item.accent];
 
                     return (

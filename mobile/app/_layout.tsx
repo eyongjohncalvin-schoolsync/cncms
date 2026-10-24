@@ -201,7 +201,17 @@ function RootNavigation() {
                 options={{ presentation: 'modal', headerShown: true, title: 'Change Password' }}
             />
             <Stack.Screen name="reports" options={{ presentation: 'modal', headerShown: true, title: 'Reports' }} />
-            <Stack.Screen name="resources" options={{ presentation: 'modal', headerShown: true, title: 'Resources' }} />
+            <Stack.Screen name="resources" options={{ presentation: 'modal', headerShown: true, title: 'Expenses' }} />
+            {/*
+              Expense controls (2026-10): one expense's detail (status,
+              flags, receipt, "Add receipt") opened from Expenses, and the
+              managers' Approvals inbox (online-only).
+            */}
+            <Stack.Screen
+                name="expense/[localUuid]"
+                options={{ presentation: 'modal', headerShown: true, title: 'Expense' }}
+            />
+            <Stack.Screen name="approvals" options={{ presentation: 'modal', headerShown: true, title: 'Approvals' }} />
             <Stack.Screen name="zones" options={{ presentation: 'modal', headerShown: true, title: 'Zones' }} />
             <Stack.Screen
                 name="agent-profile"

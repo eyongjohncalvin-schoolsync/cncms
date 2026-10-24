@@ -1,5 +1,6 @@
 import { getDatabase } from './database';
-import type { LocalExpenditure, SyncStatus } from '../types/db';
+import type { LocalExpenditure, PaymentMethod, ReceiptSource, ReceiptUploadState, SyncStatus } from '../types/db';
+import type { CategoryUsage } from '../utils/expenseControls';
 import { generateUuid } from '../utils/uuid';
 import { nowIso } from '../utils/format';
 
@@ -9,23 +10,45 @@ export interface NewLocalExpenditureInput {
     description?: string | null;
     spent_at: string;
     notes?: string | null;
+    payment_method?: PaymentMethod | null;
+    payment_ref?: string | null;
+    supplier_uuid?: string | null;
+    service_uuid?: string | null;
+    reference_no?: string | null;
     receipt_local_uri?: string | null;
+    receipt_source?: ReceiptSource | null;
+    receipt_captured_at?: string | null;
+}
+
+function blankToNull(value: string | null | undefined): string | null {
+    const trimmed = value?.trim() ?? '';
+
+    return trimmed === '' ? null : trimmed;
 }
 
 export async function insertLocalExpenditure(input: NewLocalExpenditureInput): Promise<LocalExpenditure> {
     const db = await getDatabase();
     const now = nowIso();
+    const receiptUri = input.receipt_local_uri ?? null;
 
     const row: LocalExpenditure = {
         local_uuid: generateUuid(),
         server_uuid: null,
         category_uuid: input.category_uuid,
         amount: input.amount,
-        description: input.description ?? null,
+        description: blankToNull(input.description),
         spent_at: input.spent_at,
-        notes: input.notes ?? null,
-        receipt_local_uri: input.receipt_local_uri ?? null,
+        notes: blankToNull(input.notes),
+        payment_method: input.payment_method ?? null,
+        payment_ref: blankToNull(input.payment_ref),
+        supplier_uuid: input.supplier_uuid ?? null,
+        service_uuid: input.service_uuid ?? null,
+        reference_no: blankToNull(input.reference_no),
+        receipt_local_uri: receiptUri,
         receipt_server_path: null,
+        receipt_source: receiptUri ? (input.receipt_source ?? 'camera') : null,
+        receipt_captured_at: receiptUri ? (input.receipt_captured_at ?? now) : null,
+        receipt_uploaded: 0,
         sync_status: 'queued',
         sync_error: null,
         sync_attempts: 0,
@@ -36,11 +59,13 @@ export async function insertLocalExpenditure(input: NewLocalExpenditureInput): P
     await db.runAsync(
         `INSERT INTO expenditures
             (local_uuid, server_uuid, category_uuid, amount, description, spent_at, notes,
-             receipt_local_uri, receipt_server_path, sync_status, sync_error, sync_attempts,
-             created_at, updated_at)
+             payment_method, payment_ref, supplier_uuid, service_uuid, reference_no,
+             receipt_local_uri, receipt_server_path, receipt_source, receipt_captured_at, receipt_uploaded,
+             sync_status, sync_error, sync_attempts, created_at, updated_at)
          VALUES ($local_uuid, $server_uuid, $category_uuid, $amount, $description, $spent_at, $notes,
-             $receipt_local_uri, $receipt_server_path, $sync_status, $sync_error, $sync_attempts,
-             $created_at, $updated_at)`,
+             $payment_method, $payment_ref, $supplier_uuid, $service_uuid, $reference_no,
+             $receipt_local_uri, $receipt_server_path, $receipt_source, $receipt_captured_at, $receipt_uploaded,
+             $sync_status, $sync_error, $sync_attempts, $created_at, $updated_at)`,
         {
             $local_uuid: row.local_uuid,
             $server_uuid: row.server_uuid,
@@ -49,8 +74,16 @@ export async function insertLocalExpenditure(input: NewLocalExpenditureInput): P
             $description: row.description,
             $spent_at: row.spent_at,
             $notes: row.notes,
+            $payment_method: row.payment_method,
+            $payment_ref: row.payment_ref,
+            $supplier_uuid: row.supplier_uuid,
+            $service_uuid: row.service_uuid,
+            $reference_no: row.reference_no,
             $receipt_local_uri: row.receipt_local_uri,
             $receipt_server_path: row.receipt_server_path,
+            $receipt_source: row.receipt_source,
+            $receipt_captured_at: row.receipt_captured_at,
+            $receipt_uploaded: row.receipt_uploaded,
             $sync_status: row.sync_status,
             $sync_error: row.sync_error,
             $sync_attempts: row.sync_attempts,
@@ -159,4 +192,86 @@ export async function getExpenditureTotalSince(startDateOnly: string): Promise<n
     );
 
     return row?.total ?? 0;
+}
+
+export async function getExpenditureByLocalUuid(localUuid: string): Promise<LocalExpenditure | null> {
+    const db = await getDatabase();
+
+    return db.getFirstAsync<LocalExpenditure>('SELECT * FROM expenditures WHERE local_uuid = ?', [localUuid]);
+}
+
+/** The most recently recorded expense — backs Record Expense's "Repeat
+ * last" chip (same category, amount, payer, supplier and service). */
+export async function getLastExpenditure(): Promise<LocalExpenditure | null> {
+    const db = await getDatabase();
+
+    return db.getFirstAsync<LocalExpenditure>('SELECT * FROM expenditures ORDER BY created_at DESC LIMIT 1');
+}
+
+/**
+ * How often (and how recently) this device has used each category over the
+ * last 90 days — Record Expense ranks its category tiles with this via
+ * rankCategoriesByUsage() so the usual ones sit first.
+ */
+export async function getCategoryUsage(sinceIso?: string): Promise<CategoryUsage[]> {
+    const db = await getDatabase();
+    const since = sinceIso ?? new Date(Date.now() - 90 * 86_400_000).toISOString();
+
+    return db.getAllAsync<CategoryUsage>(
+        `SELECT category_uuid, COUNT(*) as use_count, MAX(created_at) as last_used_at
+         FROM expenditures WHERE created_at >= ? GROUP BY category_uuid`,
+        [since],
+    );
+}
+
+/**
+ * Expenses that have synced (a real server_uuid exists to address the
+ * upload at) whose captured receipt photo hasn't reached the server yet.
+ * SyncManager.uploadPendingReceipts() sends these after each push/pull —
+ * the receipt is always a separate multipart request, never part of push.
+ */
+export async function getExpendituresAwaitingReceiptUpload(): Promise<LocalExpenditure[]> {
+    const db = await getDatabase();
+
+    return db.getAllAsync<LocalExpenditure>(
+        `SELECT * FROM expenditures
+         WHERE sync_status = 'synced' AND server_uuid IS NOT NULL
+           AND receipt_local_uri IS NOT NULL AND receipt_uploaded = 0
+         ORDER BY created_at ASC`,
+    );
+}
+
+/** Marks the photo as delivered (1) or permanently refused by the server (2). */
+export async function markExpenditureReceiptUploaded(
+    localUuid: string,
+    state: Exclude<ReceiptUploadState, 0> = 1,
+    serverPath: string | null = null,
+): Promise<void> {
+    const db = await getDatabase();
+
+    await db.runAsync(
+        `UPDATE expenditures SET receipt_uploaded = ?, receipt_server_path = COALESCE(?, receipt_server_path), updated_at = ?
+         WHERE local_uuid = ?`,
+        [state, serverPath, nowIso(), localUuid],
+    );
+}
+
+/**
+ * Attaches a receipt photo to an already-recorded expense ("Add receipt" on
+ * the expense detail screen). `uploaded` true when the screen already sent
+ * it straight to the server; false queues it for SyncManager.
+ */
+export async function setExpenditureReceipt(
+    localUuid: string,
+    receipt: { uri: string; source: ReceiptSource; capturedAt: string },
+    uploaded: boolean,
+): Promise<void> {
+    const db = await getDatabase();
+
+    await db.runAsync(
+        `UPDATE expenditures
+         SET receipt_local_uri = ?, receipt_source = ?, receipt_captured_at = ?, receipt_uploaded = ?, updated_at = ?
+         WHERE local_uuid = ?`,
+        [receipt.uri, receipt.source, receipt.capturedAt, uploaded ? 1 : 0, nowIso(), localUuid],
+    );
 }

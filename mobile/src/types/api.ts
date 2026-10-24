@@ -108,6 +108,17 @@ export interface SyncPushExpenditureItem {
     description?: string | null;
     spent_at: string;
     notes?: string | null;
+    /** Expense controls (2026-10): cash | mtn_momo | orange_money | bank. */
+    payment_method?: string | null;
+    /** MoMo transaction ID — a reused one fails that item server-side. */
+    payment_ref?: string | null;
+    supplier_uuid?: string | null;
+    /** null = "Shared" (not tied to one service). */
+    service_uuid?: string | null;
+    /** The supplier's own invoice/receipt number, if any. */
+    reference_no?: string | null;
+    /** Device time the expense was recorded (drives late-night/split flags). */
+    created_at?: string | null;
 }
 
 /**
@@ -283,8 +294,20 @@ export type ReceiptEntityType = 'payment' | 'expenditure';
  */
 export interface UploadReceiptResponse {
     message: string;
-    receipt_url: string;
+    /** Public URL for a payment receipt; null for an expenditure (its photo
+     * is private and served through the authorised receipt route). */
+    receipt_url: string | null;
+    /** Expenditure uploads only: the expense's status after the photo landed. */
+    status?: ExpenditureStatus;
 }
+
+/** Extra context sent alongside a receipt photo. */
+export interface ReceiptUploadMeta {
+    source?: ReceiptSource | null;
+    captured_at?: string | null;
+}
+
+export type ReceiptSource = 'camera' | 'gallery';
 
 /**
  * POST /api/v1/notifications/{uuid}/acknowledge —
@@ -636,6 +659,118 @@ export interface ExpenseCategoryApi {
 
 export interface ExpenseCategoryListResponse {
     data: ExpenseCategoryApi[];
+}
+
+// ---------------------------------------------------------------------------
+// Expense controls (2026-10) — App\Http\Controllers\Api\ExpenditureController,
+// App\Http\Resources\ExpenditureResource, App\Services\ExpenseControlService,
+// App\Http\Controllers\Api\SupplierController. Every recorded expense now
+// starts in a status decided server-side (auto-approved, waiting for its
+// receipt photo, or waiting for one/two approvers); the server never
+// rejects a push for control reasons, it holds or flags instead.
+// ---------------------------------------------------------------------------
+
+export type ExpenditureStatus =
+    | 'pending_evidence'
+    | 'pending_approval'
+    | 'pending_second_approval'
+    | 'approved'
+    | 'rejected'
+    | 'void';
+
+/** GET /resources/expense-limits — amounts are numeric strings. */
+export interface ExpenseLimitsApi {
+    auto_approve_below: string;
+    second_approval_above: string;
+    receipt_required_from: string;
+    supplier_required_from: string;
+    backdate_days: number;
+}
+
+export interface ExpenseLimitsResponse {
+    data: ExpenseLimitsApi;
+}
+
+export type SupplierStatus = 'pending' | 'active' | 'inactive';
+
+export interface SupplierApi {
+    uuid: string;
+    name: string;
+    phone: string | null;
+    momo_number: string | null;
+    location: string | null;
+    notes: string | null;
+    status: SupplierStatus;
+}
+
+export interface SupplierListResponse {
+    data: SupplierApi[];
+}
+
+export interface SupplierResponse {
+    data: SupplierApi;
+}
+
+export interface CreateSupplierPayload {
+    name: string;
+    phone?: string | null;
+    momo_number?: string | null;
+}
+
+export interface ExpenditureFlagApi {
+    key: string;
+    label: string;
+}
+
+export interface NamedRefApi {
+    uuid: string;
+    name: string;
+}
+
+/** App\Http\Resources\ExpenditureResource (API flavour). */
+export interface ExpenditureApi {
+    uuid: string;
+    category_uuid?: string;
+    category_name?: string;
+    /** Numeric string. */
+    amount: string;
+    description: string | null;
+    spent_at: string | null;
+    notes: string | null;
+    status: ExpenditureStatus;
+    auto_approved?: boolean;
+    flags: ExpenditureFlagApi[];
+    payment_method: string | null;
+    payment_ref: string | null;
+    reference_no?: string | null;
+    supplier: (NamedRefApi & { status?: SupplierStatus }) | null;
+    service: NamedRefApi | null;
+    has_receipt: boolean;
+    /** Authorised route — fetch with the Bearer token, never a public URL. */
+    receipt_url: string | null;
+    recorded_by: NamedRefApi | null;
+    first_approved_by?: NamedRefApi | null;
+    approved_by: NamedRefApi | null;
+    approved_at?: string | null;
+    rejected_by?: NamedRefApi | null;
+    rejection_reason: string | null;
+    voided_by?: NamedRefApi | null;
+    void_reason: string | null;
+    created_at: string | null;
+}
+
+export interface ExpenditureResponse {
+    data: ExpenditureApi;
+}
+
+export interface ExpenditureListResponse {
+    data: ExpenditureApi[];
+    meta?: {
+        current_page: number;
+        per_page: number;
+        total: number;
+        last_page: number;
+    };
 }
 
 // ---------------------------------------------------------------------------

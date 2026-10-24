@@ -721,6 +721,27 @@ export interface ExpenseCategory {
     sort_order: number;
 }
 
+export type ExpenditureStatus =
+    | 'pending_evidence'
+    | 'pending_approval'
+    | 'pending_second_approval'
+    | 'approved'
+    | 'rejected'
+    | 'void';
+
+export type ExpensePaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+
+export interface ExpenditureFlag {
+    key: string;
+    label: string;
+}
+
+export interface NamedRef {
+    uuid: string;
+    name: string;
+}
+
+/** App\Http\Resources\ExpenditureResource. */
 export interface Expenditure {
     uuid: string;
     category_uuid: string;
@@ -729,9 +750,42 @@ export interface Expenditure {
     description: string | null;
     spent_at: string;
     notes: string | null;
+    status: ExpenditureStatus;
+    auto_approved: boolean;
+    flags: ExpenditureFlag[];
+    payment_method: ExpensePaymentMethod | null;
+    payment_ref: string | null;
+    reference_no: string | null;
+    supplier: { uuid: string; name: string; status: SupplierStatus } | null;
+    service: NamedRef | null;
+    has_receipt: boolean;
+    receipt_url: string | null;
+    receipt_meta: Record<string, unknown> | null;
     recorded_offline: boolean;
-    recorded_by_name: string;
+    recorded_by: NamedRef | null;
+    first_approved_by: NamedRef | null;
+    first_approved_at: string | null;
+    approved_by: NamedRef | null;
+    approved_at: string | null;
+    rejected_by: NamedRef | null;
+    rejected_at: string | null;
+    rejection_reason: string | null;
+    voided_by: NamedRef | null;
+    voided_at: string | null;
+    void_reason: string | null;
+    recurring_period: string | null;
     created_at: string;
+}
+
+export type SupplierStatus = 'pending' | 'active' | 'inactive';
+
+/** ExpenseControlService::limits() — amounts as decimal strings. */
+export interface ExpenseLimits {
+    auto_approve_below: string;
+    second_approval_above: string;
+    receipt_required_from: string;
+    supplier_required_from: string;
+    backdate_days: number;
 }
 
 export interface DashboardIncome {
@@ -1044,4 +1098,66 @@ export interface AuditLogFilters {
     record_uuid?: string | null;
     from?: string | null;
     to?: string | null;
+}
+
+/** Cash desk (CashDeskService::accountRow()). */
+export type CashAccountType = 'till' | 'safe' | 'petty_cash' | 'bank' | 'mtn_momo' | 'orange_money';
+
+export interface CashAccount {
+    uuid: string;
+    type: CashAccountType;
+    name: string;
+    holder: NamedRef | null;
+    balance: string;
+    max_hold: string | null;
+    is_active: boolean;
+}
+
+export type CashHandoverStatus = 'pending' | 'confirmed' | 'short' | 'cancelled';
+
+/** CashDeskService::handoverRow() — `code` only on the giver's own pending ones. */
+export interface CashHandover {
+    uuid: string;
+    from: string | null;
+    to: string | null;
+    amount: string;
+    received_amount: string | null;
+    status: CashHandoverStatus;
+    note: string | null;
+    initiated_by: string | null;
+    initiated_at: string | null;
+    confirmed_at: string | null;
+    code: string | null;
+}
+
+export type CashCloseStatus = 'balanced' | 'pending' | 'approved' | 'rejected';
+
+/** CashDeskService::closeRow() — expected/variance hidden until counted. */
+export interface CashClose {
+    uuid: string;
+    account: string | null;
+    business_date: string | null;
+    counted: string;
+    expected: string | null;
+    variance: string | null;
+    denominations: Record<string, number> | null;
+    status: CashCloseStatus;
+    note: string | null;
+    closed_by: string | null;
+    decided_by: string | null;
+    decision_note: string | null;
+    needs_owner: boolean;
+}
+
+export interface CashLedgerEntry {
+    uuid: string;
+    type: string;
+    label: string;
+    direction: 'in' | 'out';
+    amount: string;
+    balance_after: string;
+    occurred_at: string | null;
+    recorded_by: string | null;
+    note: string | null;
+    reversed: boolean;
 }

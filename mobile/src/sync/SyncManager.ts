@@ -1,7 +1,10 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { acknowledgeNotification, fetchExpenseCategories, pullChanges, pushChanges, uploadReceipt } from '../api/sync';
+import axios from 'axios';
 import { isNetworkError, extractErrorMessage } from '../api/client';
+import { fetchExpenseLimits, fetchMyExpenditures, fetchSuppliers } from '../api/expenditures';
+import { fetchServiceCatalogue } from '../api/services';
 import { upsertExpenseCategories } from '../db/categories';
 import {
     getFailedPaymentsCount,
@@ -14,12 +17,22 @@ import {
     applyVerificationUpdates,
 } from '../db/payments';
 import {
+    getExpendituresAwaitingReceiptUpload,
     getFailedExpendituresCount,
     getQueuedExpenditures,
     getQueuedExpendituresCount,
     markExpenditureFailed,
+    markExpenditureReceiptUploaded,
     markExpenditureSynced,
 } from '../db/expenditures';
+import { replaceSuppliers } from '../db/suppliers';
+import {
+    getExpenseReferenceRefreshedAt,
+    mergeCachedExpenseStatuses,
+    setCachedExpenseLimits,
+    setCachedServices,
+    setExpenseReferenceRefreshedAt,
+} from '../db/expenseReference';
 import {
     getFailedComplaintsCount,
     getQueuedComplaints,
@@ -57,6 +70,23 @@ const RETRY_SCHEDULE_MS = [5_000, 15_000, 45_000, 120_000, 300_000];
 
 // Within the design doc's "5-10 min" periodic in-foreground window.
 const PERIODIC_INTERVAL_MS = 5 * 60 * 1000;
+
+// Expense limits / suppliers / services change rarely — refreshed at most
+// this often on the normal sync cadence (screens can force a refresh).
+const EXPENSE_REFERENCE_MAX_AGE_MS = 30 * 60 * 1000;
+
+/** A 4xx other than auth/timeout/rate-limit means the server looked at the
+ * photo and refused it (missing file, not an image, expense gone) —
+ * retrying the identical upload forever would never succeed. */
+function isPermanentUploadRefusal(error: unknown): boolean {
+    if (!axios.isAxiosError(error) || !error.response) {
+        return false;
+    }
+
+    const status = error.response.status;
+
+    return status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status);
+}
 
 class SyncManagerImpl {
     private started = false;
@@ -188,6 +218,7 @@ class SyncManagerImpl {
             await this.pull();
             await this.uploadPendingReceipts();
             await this.flushPendingAcknowledgements();
+            await this.refreshExpenseReferenceData();
 
             this.retryAttempt = 0;
 
@@ -326,6 +357,12 @@ class SyncManagerImpl {
             description: expenditure.description,
             spent_at: expenditure.spent_at,
             notes: expenditure.notes,
+            payment_method: expenditure.payment_method ?? null,
+            payment_ref: expenditure.payment_ref ?? null,
+            supplier_uuid: expenditure.supplier_uuid ?? null,
+            service_uuid: expenditure.service_uuid ?? null,
+            reference_no: expenditure.reference_no ?? null,
+            created_at: expenditure.created_at,
         }));
 
         // complaint-desk.md section 7 — third create-only sync entity type,
@@ -460,10 +497,98 @@ class SyncManagerImpl {
 
             try {
                 const result = await uploadReceipt('payment', payment.server_uuid, payment.receipt_local_uri);
-                await markPaymentReceiptUploaded(payment.local_uuid, result.receipt_url);
+                await markPaymentReceiptUploaded(payment.local_uuid, result.receipt_url ?? 'uploaded');
             } catch {
                 // Swallowed deliberately — see doc comment above.
             }
+        }
+
+        // Expense receipt photos (2026-10 fix: these used to be captured
+        // and never sent). Same rules as payments above — after the expense
+        // has its server_uuid, one request per photo, failures left queued
+        // (receipt_uploaded = 0) for the next cycle. An expense waiting in
+        // 'pending_evidence' moves on server-side as soon as this lands.
+        const pendingExpenses = await getExpendituresAwaitingReceiptUpload();
+        let anyExpenseReceiptUploaded = false;
+
+        for (const expenditure of pendingExpenses) {
+            if (!expenditure.server_uuid || !expenditure.receipt_local_uri) {
+                continue;
+            }
+
+            try {
+                await uploadReceipt('expenditure', expenditure.server_uuid, expenditure.receipt_local_uri, {
+                    source: expenditure.receipt_source ?? 'camera',
+                    captured_at: expenditure.receipt_captured_at,
+                });
+                await markExpenditureReceiptUploaded(expenditure.local_uuid, 1);
+                anyExpenseReceiptUploaded = true;
+            } catch (error) {
+                if (isPermanentUploadRefusal(error)) {
+                    await markExpenditureReceiptUploaded(expenditure.local_uuid, 2);
+                }
+                // Otherwise swallowed — still offline or a transient error;
+                // retried on the next sync cycle.
+            }
+        }
+
+        if (anyExpenseReceiptUploaded) {
+            await this.refreshMyExpenseStatuses();
+        }
+    }
+
+    /**
+     * Refreshes the offline caches Record Expense and Resources rely on:
+     * expense limits, suppliers, the service list and this user's own
+     * expense statuses. Throttled to EXPENSE_REFERENCE_MAX_AGE_MS unless
+     * `force`. Each piece is best-effort and independent — a role that
+     * can't list suppliers must not stop the limits from refreshing, and
+     * none of this may ever fail the sync cycle itself.
+     */
+    async refreshExpenseReferenceData(force = false): Promise<void> {
+        if (!this.isOnline) {
+            return;
+        }
+
+        if (!force) {
+            const last = await getExpenseReferenceRefreshedAt();
+
+            if (last && Date.now() - new Date(last).getTime() < EXPENSE_REFERENCE_MAX_AGE_MS) {
+                return;
+            }
+        }
+
+        const results = await Promise.allSettled([
+            fetchExpenseLimits().then((response) => setCachedExpenseLimits(response.data)),
+            fetchSuppliers().then((response) => replaceSuppliers(response.data)),
+            fetchServiceCatalogue().then((response) =>
+                setCachedServices(response.data.map((service) => ({ uuid: service.uuid, name: service.name }))),
+            ),
+            this.refreshMyExpenseStatuses().then((ok) => {
+                if (!ok) {
+                    throw new Error('Expense statuses not refreshed');
+                }
+            }),
+        ]);
+
+        if (results.some((result) => result.status === 'fulfilled')) {
+            await setExpenseReferenceRefreshedAt(new Date().toISOString());
+            // Nudge subscribers (Resources / Record Expense re-read their caches).
+            patchSyncState({});
+        }
+    }
+
+    /** Pulls the server-side status of this user's recent expenses into the
+     * local cache (History badges, detail screen). Never throws. */
+    async refreshMyExpenseStatuses(): Promise<boolean> {
+        try {
+            const response = await fetchMyExpenditures(50);
+            await mergeCachedExpenseStatuses(response.data);
+            patchSyncState({});
+
+            return true;
+        } catch {
+            return false;
         }
     }
 }
