@@ -10,11 +10,13 @@ use App\Http\Requests\UpdateTenantUserRequest;
 use App\Models\Agent;
 use App\Models\Branch;
 use App\Models\Role;
+use App\Models\SalaryGrade;
 use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Repositories\Contracts\BranchRepositoryInterface;
 use App\Services\AccountSecurityService;
+use App\Services\SalaryService;
 use App\Services\StaffAssignmentService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
@@ -45,6 +47,7 @@ class UserController extends Controller
         private readonly TenantContext $context,
         private readonly BranchRepositoryInterface $branches,
         private readonly StaffAssignmentService $assignments,
+        private readonly SalaryService $salaries,
     ) {}
 
     public function index(): Response
@@ -61,8 +64,19 @@ class UserController extends Controller
             ->with(['user', 'branch'])
             ->get();
 
+        // Branches v2 D8: salaries for whoever may set them — two queries for the whole list.
+        $canSetSalaries = $this->context->can('salaries.manage');
+        $salaries = $canSetSalaries ? $this->salaries->summaryFor($tenantUsers->pluck('user_id')->map(fn ($id): int => (int) $id)->all()) : [];
+
         return Inertia::render('UsersControlCenter/Users', [
+            'can_set_salaries' => $canSetSalaries,
+            'salary_grades' => $canSetSalaries
+                ? SalaryGrade::query()->where('is_active', true)->orderBy('min_amount')->get(['uuid', 'name', 'min_amount', 'max_amount'])
+                    ->map(fn (SalaryGrade $grade): array => ['uuid' => $grade->uuid, 'name' => $grade->name, 'min_amount' => (string) $grade->min_amount, 'max_amount' => (string) $grade->max_amount])
+                    ->values()->all()
+                : [],
             'users' => $tenantUsers->map(fn (TenantUser $tenantUser): array => [
+                'salary' => $salaries[(int) $tenantUser->user_id] ?? null,
                 'id' => $tenantUser->id,
                 'role' => $tenantUser->role,
                 'job_title' => $tenantUser->job_title,

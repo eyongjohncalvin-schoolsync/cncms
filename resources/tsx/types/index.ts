@@ -879,8 +879,24 @@ export interface PermissionOption {
 /** Area heading => its permissions, from App\Auth\Permission::byArea(). */
 export type PermissionsByArea = Record<string, PermissionOption[]>;
 
+/** A person's salary (branches v2 D8): the approved one, and any waiting for headquarters. */
+export interface StaffSalarySummary {
+    current: string | null;
+    grade: string | null;
+    pending: { uuid: string; amount: string } | null;
+}
+
+export interface SalaryGradeOption {
+    uuid: string;
+    name: string;
+    min_amount: string;
+    max_amount: string;
+}
+
 export interface TenantUserRow {
     id: number;
+    /** Present when the viewer may set salaries. */
+    salary?: StaffSalarySummary | null;
     /** A role name — a built-in (see `Role`) or a tenant custom role. */
     role: string;
     /** Purely descriptive label (e.g. "Recovery Coordinator") — separate from `role`, which drives permissions. */

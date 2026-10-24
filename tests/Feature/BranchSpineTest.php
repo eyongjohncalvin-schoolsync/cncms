@@ -71,7 +71,7 @@ class BranchSpineTest extends TestCase
             BranchPrice::class,
             // A person's history (where they worked, what they were paid):
             // branch nullable — HQ-level staff are fenced to none.
-            StaffAssignment::class,
+            StaffAssignment::class, StaffSalary::class,
         ];
 
         $checked = 0;

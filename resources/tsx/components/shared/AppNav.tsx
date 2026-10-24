@@ -227,7 +227,7 @@ export function buildVisibleNavItems(permissions: string[] = [], branchFenced = 
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(!can('branches.manage') && branchFenced && can('branches.settings') ? [myBranchNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),
-        ...(canAny('company.update', 'command_runs.view', 'services.manage') ? [settingsNavItem] : []),
+        ...(canAny('company.update', 'command_runs.view', 'services.manage', 'salaries.manage') ? [settingsNavItem] : []),
     ];
 }
 

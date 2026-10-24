@@ -142,6 +142,7 @@ class DefaultRolesSeeder extends Seeder
 
             Permission::BranchesView->value,
             Permission::BranchesSettings->value,
+            Permission::SalariesManage->value,
 
             Permission::ExpendituresView->value,
             Permission::ExpendituresCreate->value,

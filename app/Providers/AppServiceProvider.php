@@ -13,6 +13,7 @@ use App\Models\Zone;
 use App\Policies\PaymentReceiptPolicy;
 use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
+use App\Policies\SalaryPolicy;
 use App\Services\FreeMonthGrantService;
 use App\Support\BranchLookup;
 use App\Support\BranchPrices;
@@ -77,6 +78,10 @@ class AppServiceProvider extends ServiceProvider
         // is registered here explicitly alongside the others rather than left
         // to naming-convention discovery — see PaymentReceiptPolicy's docblock.
         Gate::policy(PaymentReceipt::class, PaymentReceiptPolicy::class);
+
+        // Branches v2 D8: salaries are not one model's policy — named gates.
+        Gate::define('salaries.setFor', [SalaryPolicy::class, 'setFor']);
+        Gate::define('salaries.manageScale', [SalaryPolicy::class, 'manageScale']);
 
         // Win 2 (perf): App\Models\Company::cached()'s per-request memo is
         // keyed by tenant id, but a long-lived worker that hops tenants (or
