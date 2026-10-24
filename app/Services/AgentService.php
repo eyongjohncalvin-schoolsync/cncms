@@ -28,7 +28,19 @@ class AgentService
     public function __construct(
         private readonly AgentRepositoryInterface $agents,
         private readonly ZoneRepositoryInterface $zones,
+        private readonly StaffAssignmentService $assignments,
     ) {}
+
+    /**
+     * Branches v2 (D7): an agent works in their zone's branch — a zone in
+     * another branch is a transfer, kept in the staff assignment history.
+     */
+    private function recordAssignment(Agent $agent): void
+    {
+        if ($agent->user_id !== null) {
+            $this->assignments->record((int) $agent->user_id, $agent->branch_id, 'agent', auth()->user());
+        }
+    }
 
     public function list(array $filters, int $perPage): LengthAwarePaginator
     {
@@ -85,6 +97,7 @@ class AgentService
         $agent = $this->agents->create($zoneId, $userId, $data);
 
         Cache::forget('agents:all');
+        $this->recordAssignment($agent);
 
         return $agent->load(['zone', 'user']);
     }
@@ -97,6 +110,7 @@ class AgentService
         $agent = $this->agents->update($agent, $data, $zoneId, $userId);
 
         Cache::forget('agents:all');
+        $this->recordAssignment($agent);
 
         return $agent->load(['zone', 'user']);
     }

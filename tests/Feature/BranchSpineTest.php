@@ -16,6 +16,8 @@ use App\Models\Company;
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\StaffAssignment;
+use App\Models\StaffSalary;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
@@ -67,6 +69,9 @@ class BranchSpineTest extends TestCase
             AuditLog::class, BillBatchFile::class,
             // A branch's own price list (settings), not data the branch owns.
             BranchPrice::class,
+            // A person's history (where they worked, what they were paid):
+            // branch nullable — HQ-level staff are fenced to none.
+            StaffAssignment::class,
         ];
 
         $checked = 0;

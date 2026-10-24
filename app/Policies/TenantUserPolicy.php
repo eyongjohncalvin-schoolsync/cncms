@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Agent;
+use App\Models\TenantUser;
 use App\Models\User;
 use App\Support\TenantContext;
 
@@ -14,6 +16,9 @@ use App\Support\TenantContext;
  * "SETTINGS [admin only]". Note this is stricter than most other tenant
  * policies (which allow everyone to view) — user management is not a
  * view-only-for-others page.
+ *
+ * Branches v2 (D7): someone fenced to a branch manages that branch's staff
+ * only — the staff fenced to it and the agents of its zones.
  */
 class TenantUserPolicy
 {
@@ -36,13 +41,27 @@ class TenantUserPolicy
         return $this->context->can('users.manage');
     }
 
-    public function update(User $user): bool
+    public function update(User $user, ?TenantUser $tenantUser = null): bool
     {
-        return $this->context->can('users.manage');
+        return $this->context->can('users.manage') && ($tenantUser === null || $this->worksInMyBranch($tenantUser));
     }
 
-    public function deactivate(User $user): bool
+    public function deactivate(User $user, ?TenantUser $tenantUser = null): bool
     {
-        return $this->context->can('users.manage');
+        return $this->context->can('users.manage') && ($tenantUser === null || $this->worksInMyBranch($tenantUser));
+    }
+
+    /**
+     * Unfenced: everyone. Fenced: staff fenced to my branch, and agents whose
+     * zone is in my branch (the Agent query is branch-scoped already).
+     */
+    public function worksInMyBranch(TenantUser $tenantUser): bool
+    {
+        if (! $this->context->isFenced()) {
+            return true;
+        }
+
+        return $tenantUser->branch_id === $this->context->branchId
+            || ($tenantUser->role === 'agent' && Agent::query()->where('user_id', $tenantUser->user_id)->exists());
     }
 }

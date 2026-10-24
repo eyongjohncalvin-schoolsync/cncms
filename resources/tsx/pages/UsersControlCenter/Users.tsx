@@ -48,12 +48,15 @@ export default function UsersControlCenterUsers({
     users,
     roles,
     branches,
+    fenced,
 }: {
     users: TenantUserRow[];
     roles: RoleOption[];
     branches: Branch[];
+    /** Branches v2: the viewer manages one branch — no branch moves, no investor grants. */
+    fenced: boolean;
 }) {
-    const showBranchControls = branches.length > 1;
+    const showBranchControls = !fenced && branches.length > 1;
     const [createOpen, setCreateOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<TenantUserRow | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -266,6 +269,7 @@ export default function UsersControlCenterUsers({
                                                 type="checkbox"
                                                 aria-label={`Investor — ${tenantUser.name}`}
                                                 checked={tenantUser.is_investor}
+                                                disabled={fenced}
                                                 onChange={(e) => toggleIsInvestor(tenantUser, e.target.checked)}
                                                 className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
                                             />
