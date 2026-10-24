@@ -26,6 +26,8 @@ use Inertia\Response;
  * seeded to super + admin). Structural rules — the `is_super` row is
  * read-only, `is_system` rows can't be deleted, a role's `name` is
  * immutable — live in the policy + the FormRequests, not scattered here.
+ * A custom role's `name` (key) is generated from its label on create
+ * (Role::generateUniqueName()); users only ever type the display name.
  *
  * The permission catalog (App\Auth\Permission) is closed: an update may
  * only toggle values that exist in it (UpdateRoleRequest rejects anything
@@ -77,9 +79,13 @@ class RoleController extends Controller
     {
         $this->authorize('create', Role::class);
 
+        $label = $request->validated('label');
+
+        // The key is always generated here from the display name — never
+        // taken from the request — and is immutable afterwards.
         $role = Role::query()->create([
-            'name' => $request->validated('name'),
-            'label' => $request->validated('label'),
+            'name' => Role::generateUniqueName($label),
+            'label' => $label,
             'description' => $request->validated('description'),
             'is_system' => false,
             'is_super' => false,

@@ -77,30 +77,167 @@ class RoleManagementTest extends TestCase
     // Create / clone
     // -----------------------------------------------------------------
 
-    public function test_admin_can_create_a_custom_role(): void
+    public function test_admin_can_create_a_custom_role_from_its_display_name_alone(): void
     {
         $this->actingAsRole('admin');
 
         $this->post('/users/roles', [
-            'name' => 'Recovery-Supervisor',
-            'label' => 'Recovery Supervisor',
-            'description' => 'Oversees field recovery',
-        ])->assertRedirect(route('users.roles.index'));
+            'label' => 'IT Technician',
+            'description' => 'Keeps the head-end and office IT running',
+        ])->assertSessionHasNoErrors()->assertRedirect(route('users.roles.index'));
 
         $this->assertDatabaseHas('roles', [
-            'name' => 'recovery-supervisor', // normalised to lowercase
-            'label' => 'Recovery Supervisor',
+            'name' => 'it_technician',
+            'label' => 'IT Technician',
+            'description' => 'Keeps the head-end and office IT running',
             'is_system' => false,
             'is_super' => false,
         ]);
     }
 
-    public function test_reserved_and_duplicate_names_are_rejected(): void
+    public function test_the_generated_key_is_an_ascii_underscore_slug(): void
     {
         $this->actingAsRole('admin');
 
-        $this->post('/users/roles', ['name' => 'admin', 'label' => 'X'])->assertSessionHasErrors('name');
-        $this->post('/users/roles', ['name' => 'Bad Name!', 'label' => 'X'])->assertSessionHasErrors('name');
+        $this->post('/users/roles', ['label' => '  Human Resource  '])->assertSessionHasNoErrors();
+        $this->post('/users/roles', ['label' => 'Secrétaire Générale'])->assertSessionHasNoErrors();
+        $this->post('/users/roles', ['label' => 'Base-Technician (Night)'])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('roles', ['name' => 'human_resource', 'label' => 'Human Resource']);
+        $this->assertDatabaseHas('roles', ['name' => 'secretaire_generale', 'label' => 'Secrétaire Générale']);
+        $this->assertDatabaseHas('roles', ['name' => 'base_technician_night']);
+    }
+
+    public function test_a_duplicate_display_name_gets_a_numbered_key(): void
+    {
+        $this->actingAsRole('admin');
+
+        $this->post('/users/roles', ['label' => 'Fiber Technician'])->assertSessionHasNoErrors();
+        $this->post('/users/roles', ['label' => 'Fiber Technician'])->assertSessionHasNoErrors();
+        $this->post('/users/roles', ['label' => 'fiber technician'])->assertSessionHasNoErrors();
+
+        $this->assertEqualsCanonicalizing(
+            ['fiber_technician', 'fiber_technician_2', 'fiber_technician_3'],
+            Role::query()->where('name', 'like', 'fiber_technician%')->pluck('name')->all(),
+        );
+    }
+
+    public function test_a_key_sent_by_the_client_is_ignored(): void
+    {
+        $this->actingAsRole('admin');
+
+        $this->post('/users/roles', [
+            'name' => 'hand_picked_key',
+            'label' => 'Collector',
+        ])->assertSessionHasNoErrors()->assertRedirect(route('users.roles.index'));
+
+        $this->assertDatabaseHas('roles', ['name' => 'collector', 'label' => 'Collector']);
+        $this->assertDatabaseMissing('roles', ['name' => 'hand_picked_key']);
+    }
+
+    public function test_a_client_cannot_overwrite_or_impersonate_a_system_role_by_sending_its_key(): void
+    {
+        $this->actingAsRole('admin');
+
+        $this->post('/users/roles', ['name' => 'super', 'label' => 'Storekeeper'])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('roles', ['name' => 'storekeeper', 'is_super' => false, 'is_system' => false]);
+        $this->assertSame(1, Role::query()->where('is_super', true)->count());
+    }
+
+    public function test_the_display_name_is_required(): void
+    {
+        $this->actingAsRole('admin');
+
+        $before = Role::query()->count();
+
+        $this->post('/users/roles', ['label' => ''])->assertSessionHasErrors('label');
+        $this->post('/users/roles', ['label' => '   '])->assertSessionHasErrors('label');
+        $this->post('/users/roles', ['name' => 'driver'])->assertSessionHasErrors('label');
+        $this->post('/users/roles', ['label' => str_repeat('a', 101)])->assertSessionHasErrors('label');
+
+        $this->assertSame($before, Role::query()->count());
+    }
+
+    public function test_a_system_role_key_can_never_be_generated(): void
+    {
+        $this->actingAsRole('admin');
+
+        foreach (['Super', 'Admin', 'Manager', 'Agent', 'Cashier', 'Worker'] as $label) {
+            $this->post('/users/roles', ['label' => $label])->assertSessionHasNoErrors();
+        }
+
+        foreach (Role::RESERVED_NAMES as $reserved) {
+            // The system row is untouched and the custom one got a suffix.
+            $this->assertSame(1, Role::query()->where('name', $reserved)->count());
+            $this->assertTrue(Role::query()->where('name', $reserved)->value('is_system'));
+            $this->assertDatabaseHas('roles', ['name' => "{$reserved}_2", 'is_system' => false, 'is_super' => false]);
+        }
+
+        $this->assertSame(1, Role::query()->where('is_super', true)->count());
+    }
+
+    public function test_a_reserved_key_is_skipped_even_if_its_system_row_is_missing(): void
+    {
+        Role::query()->where('name', 'cashier')->where('is_system', true)->delete();
+
+        $this->assertSame('cashier_2', Role::generateUniqueName('Cashier'));
+    }
+
+    public function test_a_long_display_name_is_cut_to_the_key_column_length(): void
+    {
+        $this->actingAsRole('admin');
+
+        $label = 'Senior Customer Service And Complaints Resolution Officer For Kumba';
+
+        $this->post('/users/roles', ['label' => $label])->assertSessionHasNoErrors();
+        $this->post('/users/roles', ['label' => $label])->assertSessionHasNoErrors();
+
+        $names = Role::query()->where('label', $label)->orderBy('id')->pluck('name')->all();
+
+        $this->assertCount(2, $names);
+        $this->assertSame('senior_customer_service_and_complaints_resolution', $names[0]);
+        $this->assertSame('senior_customer_service_and_complaints_resolutio_2', $names[1]);
+
+        foreach ($names as $name) {
+            $this->assertLessThanOrEqual(Role::NAME_MAX_LENGTH, strlen($name));
+        }
+    }
+
+    public function test_a_display_name_with_no_letters_or_digits_still_gets_a_key(): void
+    {
+        $this->assertMatchesRegularExpression('/^role(_\d+)?$/', Role::generateUniqueName('★ ★ ★'));
+    }
+
+    public function test_an_invalid_clone_source_is_a_validation_error_not_a_crash(): void
+    {
+        $this->actingAsRole('admin');
+
+        $this->post('/users/roles', ['label' => 'Driver', 'clone_from' => 'not-a-uuid'])
+            ->assertSessionHasErrors('clone_from');
+
+        $this->assertDatabaseMissing('roles', ['name' => 'driver']);
+    }
+
+    public function test_editing_a_custom_role_keeps_its_key(): void
+    {
+        $this->actingAsRole('admin');
+
+        $this->post('/users/roles', ['label' => 'Supervisor'])->assertSessionHasNoErrors();
+
+        $role = Role::query()->where('name', 'supervisor')->firstOrFail();
+
+        $this->patch("/users/roles/{$role->uuid}", [
+            'name' => 'renamed_key',
+            'label' => 'Zone Supervisor',
+            'permissions' => ['customers.view'],
+        ])->assertSessionHasNoErrors()->assertRedirect(route('users.roles.index'));
+
+        $role->refresh();
+        $this->assertSame('supervisor', $role->name);
+        $this->assertSame('Zone Supervisor', $role->label);
+        $this->assertDatabaseMissing('roles', ['name' => 'renamed_key']);
+        $this->assertDatabaseMissing('roles', ['name' => 'zone_supervisor']);
     }
 
     public function test_a_new_role_can_be_cloned_from_an_existing_one(): void
@@ -110,12 +247,11 @@ class RoleManagementTest extends TestCase
         $manager = Role::query()->where('name', 'manager')->firstOrFail();
 
         $this->post('/users/roles', [
-            'name' => 'manager-copy',
             'label' => 'Manager Copy',
             'clone_from' => $manager->uuid,
         ])->assertRedirect(route('users.roles.index'));
 
-        $copy = Role::query()->where('name', 'manager-copy')->firstOrFail();
+        $copy = Role::query()->where('name', 'manager_copy')->firstOrFail();
         $this->assertEqualsCanonicalizing(
             $manager->permissions()->pluck('permission')->all(),
             $copy->permissions()->pluck('permission')->all(),

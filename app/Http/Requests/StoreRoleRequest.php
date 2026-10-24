@@ -9,11 +9,12 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Create a custom tenant role (RBAC v2 Wave 3). `name` is the immutable
- * identity `tenant_users.role` will point at — lowercase, slug-ish, unique
- * within the tenant, and never one of the 5 reserved system names. `label`
- * is the free-text display name. `clone_from` optionally seeds the new
- * role's permission set from an existing role (by uuid).
+ * Create a custom tenant role (RBAC v2 Wave 3). Only the display name
+ * (`label`) is asked for: the immutable key `tenant_users.role` points at
+ * (`roles.name`) is generated on the server from it — see
+ * Role::generateUniqueName(). A `name` sent by the client is not validated
+ * and never used. `clone_from` optionally seeds the new role's permission
+ * set from an existing role (by uuid).
  */
 class StoreRoleRequest extends FormRequest
 {
@@ -22,39 +23,26 @@ class StoreRoleRequest extends FormRequest
         return $this->user()->can('roles.manage');
     }
 
-    protected function prepareForValidation(): void
-    {
-        if (is_string($this->input('name'))) {
-            $this->merge(['name' => mb_strtolower(trim($this->input('name')))]);
-        }
-    }
-
     /**
      * @return array<string, mixed>
      */
     public function rules(): array
     {
         return [
-            'name' => [
-                'required', 'string', 'max:50',
-                'regex:/^[a-z0-9][a-z0-9_-]*$/',
-                Rule::notIn(['super', 'admin', 'manager', 'agent', 'cashier', 'worker']),
-                // Tenant `roles` table (default connection is the tenant one
-                // inside this request) — rejects a collision with any system
-                // OR previously-created custom role.
-                Rule::unique('roles', 'name'),
-            ],
             'label' => ['required', 'string', 'max:100'],
             'description' => ['nullable', 'string', 'max:255'],
-            'clone_from' => ['nullable', 'string', Rule::exists('roles', 'uuid')],
+            'clone_from' => ['bail', 'nullable', 'string', 'uuid', Rule::exists('roles', 'uuid')],
         ];
     }
 
-    public function messages(): array
+    /**
+     * @return array<string, string>
+     */
+    public function attributes(): array
     {
         return [
-            'name.regex' => 'The role key may only contain lowercase letters, numbers, hyphens and underscores.',
-            'name.not_in' => 'That name is reserved for a built-in role.',
+            'label' => 'display name',
+            'clone_from' => 'role to copy from',
         ];
     }
 
@@ -64,7 +52,7 @@ class StoreRoleRequest extends FormRequest
      */
     public function cloneSource(): ?Role
     {
-        $uuid = $this->input('clone_from');
+        $uuid = $this->validated('clone_from');
 
         return $uuid ? Role::query()->where('uuid', $uuid)->first() : null;
     }

@@ -167,69 +167,164 @@ function PermissionRows({
     );
 }
 
+/** Common job titles at a cable-TV operator, offered as one-click display names. */
+const ROLE_LABEL_SUGGESTIONS = [
+    'IT Technician',
+    'Base Technician',
+    'Fiber Technician',
+    'Field Technician',
+    'Installer',
+    'Human Resource',
+    'Accountant',
+    'Secretary',
+    'Supervisor',
+    'Branch Manager',
+    'Customer Service',
+    'Collector',
+    'Storekeeper',
+    'Driver',
+];
+
+/** Keys of the built-in roles — mirrors App\Models\Role::RESERVED_NAMES. */
+const RESERVED_ROLE_NAMES = ['super', 'admin', 'manager', 'agent', 'cashier', 'worker'];
+
+const ROLE_NAME_MAX_LENGTH = 50;
+
+/**
+ * Preview of the key the server will generate (Role::generateUniqueName):
+ * ASCII slug with underscores, cut to 50 chars, `_2`, `_3`… when taken.
+ * Display only — the server is the source of truth and ignores any key
+ * the client sends.
+ */
+function previewRoleKey(label: string, takenNames: string[]): string {
+    const base =
+        label
+            .normalize('NFKD')
+            .replace(/[̀-ͯ]/g, '')
+            .replace(/@/g, '_at_')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'role';
+
+    const fit = (suffix: string) => {
+        const trimmed = base.slice(0, ROLE_NAME_MAX_LENGTH - suffix.length).replace(/_+$/, '');
+        return (trimmed || 'role') + suffix;
+    };
+
+    const taken = new Set([...RESERVED_ROLE_NAMES, ...takenNames]);
+    let candidate = fit('');
+    for (let counter = 2; taken.has(candidate); counter++) {
+        candidate = fit(`_${counter}`);
+    }
+
+    return candidate;
+}
+
 function AddRoleModal({ open, onClose, roles }: { open: boolean; onClose: () => void; roles: RoleMatrixRow[] }) {
     return (
         <Modal open={open} onClose={onClose} title="Add a custom role">
-            <Form action="/users/roles" method="post" resetOnSuccess onSuccess={onClose} className="flex flex-col gap-4">
-                {({ errors, processing }) => (
-                    <>
+            {/* Inside the Modal so the typed label resets every time it closes. */}
+            <AddRoleForm onClose={onClose} roles={roles} />
+        </Modal>
+    );
+}
+
+function AddRoleForm({ onClose, roles }: { onClose: () => void; roles: RoleMatrixRow[] }) {
+    const [label, setLabel] = useState('');
+
+    const existingLabels = useMemo(() => new Set(roles.map((r) => r.label.trim().toLowerCase())), [roles]);
+    const suggestions = ROLE_LABEL_SUGGESTIONS.filter((s) => !existingLabels.has(s.toLowerCase()));
+    const keyPreview = label.trim() === '' ? null : previewRoleKey(label, roles.map((r) => r.name));
+
+    return (
+        <Form action="/users/roles" method="post" onSuccess={onClose} className="flex flex-col gap-4">
+            {({ errors, processing }) => (
+                <>
+                    <div className="flex flex-col gap-2">
                         <TextInput
                             id="role_label"
                             name="label"
                             label="Display name"
-                            placeholder="e.g. Recovery Supervisor"
+                            placeholder="e.g. IT Technician"
+                            value={label}
+                            onChange={(e) => setLabel(e.target.value)}
+                            maxLength={100}
+                            autoComplete="off"
                             error={errors.label}
                             required
+                            aria-describedby={suggestions.length > 0 ? 'role_label_key role_label_suggestions' : 'role_label_key'}
                             className="rounded-lg px-3.5 py-2.5"
                         />
-                        <TextInput
-                            id="role_name"
-                            name="name"
-                            label="Key"
-                            placeholder="e.g. recovery-supervisor"
-                            hint="Lowercase letters, numbers, hyphens, underscores. Permanent once created."
-                            error={errors.name}
-                            required
-                            className="rounded-lg px-3.5 py-2.5"
-                        />
-                        <TextInput
-                            id="role_description"
-                            name="description"
-                            label="Description (optional)"
-                            error={errors.description}
-                            className="rounded-lg px-3.5 py-2.5"
-                        />
-                        <SelectInput
-                            id="role_clone_from"
-                            name="clone_from"
-                            label="Start from (optional)"
-                            defaultValue=""
-                            error={errors.clone_from}
-                            className="rounded-lg px-3.5 py-2.5"
-                        >
-                            <option value="">No permissions — start empty</option>
-                            {roles
-                                .filter((r) => !r.is_super)
-                                .map((r) => (
-                                    <option key={r.uuid} value={r.uuid}>
-                                        Copy from {r.label}
-                                    </option>
-                                ))}
-                        </SelectInput>
+                        <p id="role_label_key" className="text-xs text-slate-400" aria-live="polite">
+                            {keyPreview ? (
+                                <>
+                                    Key (automatic, permanent):{' '}
+                                    <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-600">{keyPreview}</code>
+                                </>
+                            ) : (
+                                'Pick a suggestion or type your own. The key is generated automatically.'
+                            )}
+                        </p>
+                        {suggestions.length > 0 && (
+                            <div id="role_label_suggestions" role="group" aria-label="Suggested display names" className="flex flex-wrap gap-1.5">
+                                {suggestions.map((suggestion) => {
+                                    const isPicked = suggestion === label.trim();
+                                    return (
+                                        <button
+                                            key={suggestion}
+                                            type="button"
+                                            onClick={() => setLabel(suggestion)}
+                                            aria-pressed={isPicked}
+                                            className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
+                                                isPicked
+                                                    ? 'bg-blue-50 text-blue-700 ring-blue-300'
+                                                    : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 hover:text-slate-800'
+                                            }`}
+                                        >
+                                            {suggestion}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    <TextInput
+                        id="role_description"
+                        name="description"
+                        label="Description (optional)"
+                        error={errors.description}
+                        className="rounded-lg px-3.5 py-2.5"
+                    />
+                    <SelectInput
+                        id="role_clone_from"
+                        name="clone_from"
+                        label="Start from (optional)"
+                        defaultValue=""
+                        error={errors.clone_from}
+                        className="rounded-lg px-3.5 py-2.5"
+                    >
+                        <option value="">No permissions — start empty</option>
+                        {roles
+                            .filter((r) => !r.is_super)
+                            .map((r) => (
+                                <option key={r.uuid} value={r.uuid}>
+                                    Copy from {r.label}
+                                </option>
+                            ))}
+                    </SelectInput>
 
-                        <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
-                            <Button type="button" variant="secondary" onClick={onClose}>
-                                Cancel
-                            </Button>
-                            <Button type="submit" disabled={processing} className="font-semibold">
-                                {processing && <LoadingSpinner className="mr-1.5 text-white" />}
-                                {processing ? 'Creating…' : 'Create role'}
-                            </Button>
-                        </div>
-                    </>
-                )}
-            </Form>
-        </Modal>
+                    <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+                        <Button type="button" variant="secondary" onClick={onClose}>
+                            Cancel
+                        </Button>
+                        <Button type="submit" disabled={processing} className="font-semibold">
+                            {processing && <LoadingSpinner className="mr-1.5 text-white" />}
+                            {processing ? 'Creating…' : 'Create role'}
+                        </Button>
+                    </div>
+                </>
+            )}
+        </Form>
     );
 }
 
@@ -271,7 +366,7 @@ function EditRoleModal({
                     <>
                         <div className="flex items-center gap-2 text-xs text-slate-500">
                             <Badge tone="slate">{role.name}</Badge>
-                            {role.is_system ? 'built-in role — key is permanent' : 'custom role'}
+                            {role.is_system ? 'built-in role — key is permanent' : 'custom role — key is permanent'}
                         </div>
 
                         <TextInput
