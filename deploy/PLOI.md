@@ -62,6 +62,19 @@ directory `/public`.
   - `QUEUE_CONNECTION=database`, `CACHE_STORE=database`, `SESSION_DRIVER=database`
   - `MAIL_*`: real SMTP. Receipts, voucher approvals, cash digests and
     maintenance notices all email.
+- **Keep the test suite off the server (one time, after the first deploy).**
+  `tests/` stays in Git — it guards every change — but production never needs
+  it (it is outside `/public`, holds no secrets, and `--no-dev` skips PHPUnit).
+  Sparse checkout makes every later `git pull` leave it out:
+
+  ```bash
+  cd {SITE_DIRECTORY}
+  git sparse-checkout init --no-cone
+  git sparse-checkout set '/*' '!/tests/' '!/phpunit.xml'
+  ls tests 2>/dev/null || echo "tests/ not on the server"
+  ```
+
+  Undo with `git sparse-checkout disable`.
 - **Deploy script** (site → Deploy script). Use Ploi's own variables as its
   editor names them:
 
