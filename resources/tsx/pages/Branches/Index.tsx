@@ -45,19 +45,29 @@ export default function BranchesIndex({ branches }: BranchesIndexProps) {
                         <TableBody>
                             {branches.data.map((branch) => (
                                 <tr key={branch.uuid} className="transition-colors hover:bg-slate-50/70">
-                                    <Td className="font-medium text-slate-900">{branch.name}</Td>
+                                    <Td className="font-medium text-slate-900">
+                                        {branch.name}
+                                        {branch.is_headquarters && (
+                                            <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">HQ</span>
+                                        )}
+                                    </Td>
                                     <Td>{branch.zone_count ?? 0}</Td>
                                     <Td>
                                         <Dropdown label={`Actions for ${branch.name}`}>
                                             <DropdownItem href={`/branches/${branch.uuid}/edit`}>Edit</DropdownItem>
-                                            <DropdownItem
-                                                href={`/branches/${branch.uuid}`}
-                                                method="delete"
-                                                onBefore={() => confirm('Delete this branch?')}
-                                                variant="danger"
-                                            >
-                                                Delete
-                                            </DropdownItem>
+                                            {!branch.is_headquarters && (
+                                                <DropdownItem href={`/branches/${branch.uuid}/settings`}>Details, fees &amp; prices</DropdownItem>
+                                            )}
+                                            {!branch.is_headquarters && (
+                                                <DropdownItem
+                                                    href={`/branches/${branch.uuid}`}
+                                                    method="delete"
+                                                    onBefore={() => confirm('Delete this branch?')}
+                                                    variant="danger"
+                                                >
+                                                    Delete
+                                                </DropdownItem>
+                                            )}
                                         </Dropdown>
                                     </Td>
                                 </tr>

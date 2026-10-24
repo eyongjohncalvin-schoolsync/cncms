@@ -273,7 +273,7 @@ class CustomerStatusService
     {
         $this->guardTransition($customer, 'active', ['disconnected', 'suspended']);
 
-        $fine = $this->reconnectionFine();
+        $fine = $this->reconnectionFine($customer);
         $hasArrearsPayment = $arrearsPayment !== null && bccomp($arrearsPayment, '0.00', 2) > 0;
 
         // Captured BEFORE updateStatus() below overwrites status/status_changed_at/
@@ -420,8 +420,9 @@ class CustomerStatusService
      * somehow missing — the migration's column default already covers the
      * normal case, this is just defense against an unseeded tenant.
      */
-    private function reconnectionFine(): string
+    private function reconnectionFine(Customer $customer): string
     {
-        return (string) (Company::cached()?->reconnection_fine ?? '2000.00');
+        // The customer's branch may set its own fine (branches v2 D4).
+        return (string) (Company::forBranch($customer->branch_id)?->reconnection_fine ?? '2000.00');
     }
 }

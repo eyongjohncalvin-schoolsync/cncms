@@ -64,6 +64,8 @@ class HandleInertiaRequests extends Middleware
                     // link; EnsureLandlord itself is the real server-side
                     // gate on the actual routes.
                     'is_landlord' => (bool) $user->is_landlord,
+                    // Branches v2: fenced to one branch (drives the "My branch" nav link).
+                    'branch_fenced' => (bool) $context?->isFenced(),
                     // Tenant-scoped Investor tier flag (tenant_users.is_investor)
                     // — see App\Policies\ReportPolicy::view()'s docblock and
                     // references/rbac-permissions.md section 7. Display hint

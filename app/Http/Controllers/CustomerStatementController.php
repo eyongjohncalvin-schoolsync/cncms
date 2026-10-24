@@ -66,7 +66,7 @@ class CustomerStatementController extends Controller
 
     private function render(Customer $customer, string $from, string $to): Response
     {
-        $company = Company::cached();
+        $company = Company::forBranch($customer->branch_id);
 
         return Pdf::loadView('pdf.statement', [
             ...$this->invoices->statement($customer, $from, $to),

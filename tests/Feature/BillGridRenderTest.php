@@ -247,6 +247,10 @@ class BillGridRenderTest extends TestCase
         $small = $this->customersWithManuscripts(2);
         $large = $this->customersWithManuscripts(6);
 
+        // Warm the per-process memos (company row, branch list) so the first
+        // measured run isn't charged their one-time load.
+        $countQueries($small, $period);
+
         $this->assertSame($countQueries($small, $period), $countQueries($large, $period));
         $this->assertSame($countQueries($small, null), $countQueries($large, null));
     }

@@ -851,8 +851,8 @@ class CustomerController extends Controller
             'can_reinstall' => $active && $user->can('reinstall', CustomerCharge::class),
             'can_record_payment' => $this->context->can('payments.create'),
             'default_fees' => [
-                'relocation' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_RELOCATION),
-                'reinstallation' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_REINSTALLATION),
+                'relocation' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_RELOCATION, $customer->branch_id),
+                'reinstallation' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_REINSTALLATION, $customer->branch_id),
             ],
             'zones' => $canRelocate ? $this->zonesForSelect() : [],
         ];

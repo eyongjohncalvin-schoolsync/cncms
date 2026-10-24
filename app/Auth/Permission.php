@@ -95,6 +95,8 @@ enum Permission: string
     // ---- Branches -------------------------------------------------
     case BranchesView = 'branches.view';
     case BranchesManage = 'branches.manage';
+    /** Set one's OWN branch's contact details, MoMo number, fees and prices (branches v2 D4). */
+    case BranchesSettings = 'branches.settings';
 
     // ---- Expenditures -------------------------------------------
     case ExpendituresView = 'expenditures.view';

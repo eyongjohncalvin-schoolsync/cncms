@@ -427,7 +427,8 @@ class PaymentReceiptService
     private function buildSnapshot(Payment $payment): array
     {
         $customer = $payment->customer;
-        $company = Company::cached();
+        // The branch where the money was paid (branches v2 D4).
+        $company = Company::forBranch($payment->branch_id);
         $purpose = $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION;
         $isSubscription = $purpose === Payment::PURPOSE_SUBSCRIPTION;
         // A one-off charge's kind (installation / relocation /

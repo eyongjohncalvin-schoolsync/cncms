@@ -84,11 +84,12 @@ class CustomerRelocationService
     }
 
     /**
-     * The company's default fee for a kind; null when none is set.
+     * The default fee for a kind — the branch's own when it sets one
+     * (branches v2 D4), else headquarters'; null when none is set.
      */
-    public static function defaultFee(string $kind): ?string
+    public static function defaultFee(string $kind, ?int $branchId = null): ?string
     {
-        $company = Company::cached();
+        $company = Company::forBranch($branchId);
         $fee = match ($kind) {
             CustomerCharge::KIND_RELOCATION => $company?->relocation_fee,
             CustomerCharge::KIND_REINSTALLATION => $company?->reinstallation_fee,
@@ -108,7 +109,7 @@ class CustomerRelocationService
     private function openWithPayment(Customer $customer, string $kind, OneOffChargeData $data, User $actor, array $extra): array
     {
         $label = strtolower(CustomerCharge::KIND_LABELS[$kind]);
-        $standard = self::defaultFee($kind);
+        $standard = self::defaultFee($kind, $customer->branch_id);
         $fee = $data->fee ?? $standard;
 
         if ($fee === null || (bccomp($fee, '0', 2) <= 0 && $standard === null)) {

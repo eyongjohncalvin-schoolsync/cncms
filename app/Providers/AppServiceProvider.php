@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\Branch;
 use App\Models\Company;
 use App\Models\PaymentReceipt;
 use App\Models\PersonalAccessToken;
@@ -87,7 +88,7 @@ class AppServiceProvider extends ServiceProvider
         // Branches v2: parent → branch memo used to stamp branch_id on new rows.
         // A zone can change branch (its customers and agents follow it by
         // cascade), so a zone moving branch, and any tenant switch, starts it afresh.
-        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => BranchLookup::flush());
+        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => [BranchLookup::flush(), Branch::flushMemo()]);
         Zone::updated(static function (Zone $zone): void {
             if ($zone->wasChanged('branch_id')) {
                 BranchLookup::flush();

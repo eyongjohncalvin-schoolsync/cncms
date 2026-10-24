@@ -21,6 +21,8 @@ export interface AuthUser {
     role: string | null;
     /** Platform-wide flag, independent of role/tenant — see EnsureLandlord. */
     is_landlord: boolean;
+    /** Fenced to one branch (branches v2) — not merely viewing one via the switcher. */
+    branch_fenced: boolean;
     /**
      * Tenant-scoped Investor tier flag (tenant_users.is_investor) — see
      * App\Policies\ReportPolicy::view()'s docblock. Display hint only:
@@ -216,6 +218,7 @@ export interface Zone {
 export interface Branch {
     uuid: string;
     name: string;
+    is_headquarters?: boolean;
     zone_count?: number;
 }
 

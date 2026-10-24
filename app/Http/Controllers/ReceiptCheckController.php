@@ -61,6 +61,8 @@ class ReceiptCheckController extends Controller
         $receipt = PaymentReceipt::query()->where('receipt_number', $number)->first();
 
         if ($receipt !== null) {
+            // The branch that issued it answers questions about it (branches v2 D4).
+            $view['companyPhone'] = Company::forBranch($receipt->branch_id)?->phone;
             $snapshot = $receipt->snapshot ?? [];
 
             $outcome = match (true) {

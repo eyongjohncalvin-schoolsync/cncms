@@ -67,7 +67,7 @@ class ReceiptBookService
     public function pdf(ReceiptBlock $block): DomPdf
     {
         $block->loadMissing('holder');
-        $company = Company::cached();
+        $company = Company::forBranch($block->branch_id);
 
         $leaves = $block->leaves()->get()->map(fn (ReceiptLeaf $leaf): array => [
             'number' => $leaf->number,
