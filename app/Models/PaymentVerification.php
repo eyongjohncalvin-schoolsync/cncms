@@ -46,4 +46,10 @@ class PaymentVerification extends Model
     {
         return 'payment';
     }
+
+    /** Customer history: stays whole for its customer; fenced on lists and links instead (BelongsToBranch). */
+    protected static function fencedByBranchScope(): bool
+    {
+        return false;
+    }
 }

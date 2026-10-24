@@ -124,7 +124,17 @@ export interface PageProps {
     maintenance: MaintenanceNotice | null;
     /** Set while a landlord is logged in as this user (App\Support\Impersonation). */
     impersonation: { impersonator: string | null; user: string } | null;
+    /**
+     * Branch switcher (branches v2): set only for a user not fenced to a
+     * branch, once the company has 2+ branches. `current` null = all branches.
+     */
+    branchView: BranchView | null;
     [key: string]: unknown;
+}
+
+export interface BranchView {
+    branches: { uuid: string; name: string; is_headquarters: boolean }[];
+    current: string | null;
 }
 
 /** App\Models\MaintenanceWindow::toNotice(). Times are ISO-8601. */

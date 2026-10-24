@@ -6,7 +6,6 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
-use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -37,7 +36,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[RouteKey('uuid')]
 class Customer extends Model
 {
-    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch, SoftDeletes;
+    use Auditable, BelongsToBranch, HasUuid, SoftDeletes;
 
     /** customers.activation_status of a field registration awaiting the office (phase 3). */
     public const string ACTIVATION_PENDING = 'pending';

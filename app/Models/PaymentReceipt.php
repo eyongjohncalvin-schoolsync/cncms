@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
+use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Support\ReceiptSecurityCode;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -37,7 +38,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class PaymentReceipt extends Model
 {
-    use Auditable, BelongsToBranch, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     public const string STATUS_ISSUED = 'issued';
 
@@ -122,5 +123,11 @@ class PaymentReceipt extends Model
     protected function branchParent(): ?string
     {
         return 'payment';
+    }
+
+    /** Customer history: stays whole for its customer; fenced on lists and links instead (BelongsToBranch). */
+    protected static function fencedByBranchScope(): bool
+    {
+        return false;
     }
 }

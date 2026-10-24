@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
+use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -87,7 +88,7 @@ class FreeMonthGrant extends Model
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(Customer::class)->withoutGlobalScope(BranchScope::class);
     }
 
     public function service(): BelongsTo
@@ -160,5 +161,11 @@ class FreeMonthGrant extends Model
     protected function branchParent(): ?string
     {
         return 'customer';
+    }
+
+    /** Customer history: stays whole for its customer; fenced on lists and links instead (BelongsToBranch). */
+    protected static function fencedByBranchScope(): bool
+    {
+        return false;
     }
 }

@@ -16,6 +16,7 @@ use App\Models\Manuscript;
 use App\Models\User;
 use App\Repositories\Contracts\ArrearsAdjustmentRepositoryInterface;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -105,7 +106,7 @@ class ArrearsAdjustmentService
         // create/approve/reject); 60s TTL as a backstop, matching
         // DashboardController's own inline dashboard:counts cache.
         return Cache::remember(
-            'arrears_adjustments:dashboard:v'.$this->dashboardVersion(),
+            'arrears_adjustments:dashboard:v'.$this->dashboardVersion().':'.(TenantContext::currentBranchId() ?? 'all'),
             now()->addSeconds(60),
             fn (): array => $this->adjustments->dashboardCounts(),
         );

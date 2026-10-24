@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repositories\Eloquent;
 
 use App\Models\ArrearsAdjustment;
+use App\Repositories\Concerns\ScopesByBranch;
 use App\Repositories\Contracts\ArrearsAdjustmentRepositoryInterface;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -13,6 +14,8 @@ use Illuminate\Support\Collection;
 
 class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterface
 {
+    use ScopesByBranch;
+
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->scoped($filters)
@@ -23,12 +26,12 @@ class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterfac
 
     public function findByUuid(string $uuid, array $with = []): ?ArrearsAdjustment
     {
-        return ArrearsAdjustment::query()->with($with)->where('uuid', $uuid)->first();
+        return $this->fenced()->with($with)->where('uuid', $uuid)->first();
     }
 
     public function findManyByUuids(array $uuids): Collection
     {
-        return ArrearsAdjustment::query()->whereIn('uuid', $uuids)->get()->keyBy('uuid');
+        return $this->fenced()->whereIn('uuid', $uuids)->get()->keyBy('uuid');
     }
 
     /**
@@ -75,16 +78,16 @@ class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterfac
 
     public function dashboardCounts(): array
     {
-        $pendingApproval = ArrearsAdjustment::query()
+        $pendingApproval = $this->fenced()
             ->whereIn('status', ['pending', 'pending_second_approval'])
             ->count();
 
-        $appliedThisMonth = ArrearsAdjustment::query()
+        $appliedThisMonth = $this->fenced()
             ->where('status', 'approved')
             ->where('approved_at', '>=', Carbon::now()->startOfMonth())
             ->count();
 
-        $totalWrittenOff = ArrearsAdjustment::query()
+        $totalWrittenOff = $this->fenced()
             ->where('status', 'approved')
             ->where('direction', 'decrease')
             ->sum('amount');
@@ -101,7 +104,7 @@ class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterfac
      */
     private function scoped(array $filters): Builder
     {
-        return ArrearsAdjustment::query()
+        return $this->fenced()
             // 'awaiting_approval' = both pending stages — the same set the
             // dashboard's pending_approval count uses (dashboardCounts()).
             ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $status === 'awaiting_approval'
@@ -111,5 +114,15 @@ class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterfac
                 $filters['customer_uuid'] ?? null,
                 fn (Builder $query, string $uuid) => $query->whereHas('customer', fn (Builder $inner) => $inner->where('uuid', $uuid))
             );
+    }
+
+    /**
+     * Branches v2: adjustments are customer history (no global branch scope),
+     * so lists, counts and lookups by uuid are fenced here; lookups for one
+     * customer stay whole.
+     */
+    private function fenced(): Builder
+    {
+        return $this->scopeToBranchDirect(ArrearsAdjustment::query(), $this->currentBranchId());
     }
 }

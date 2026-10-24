@@ -285,7 +285,7 @@ billing period lock, and identity (one login per person, across transfers).
 |---|---|
 | **P0 Hygiene** ✅ | `preventLazyLoading` (non-prod); fix the §6 hotspots and the central-users leak. |
 | **P1 Data spine** ✅ | `branch_id` on every §4.2 table + backfill + indexes + NOT NULL; `BelongsToBranch` (stamping + immutability); customer→zone composite FK; replace every `whereHas` zone chain with the direct column. No behaviour change. |
-| **P2 Fence** | Global branch scope for fenced users; route binding; money-out, cash book, alerts/digests, complaints, arrears, audit log, exports, sync fenced; branch switcher; fence tests per module. *After P2 it is safe to fence staff to a branch.* |
+| **P2 Fence** ✅ | Global branch scope for fenced users; route binding; money-out, cash book, alerts/digests, complaints, arrears, audit log, exports, sync fenced; branch switcher; fence tests per module. *After P2 it is safe to fence staff to a branch.* |
 | **P3 Settings & prices** | `branch_settings`, `branch_prices`, resolvers, repricing, bills/receipts/messages per branch. Branch details on the Branches page. |
 | **P4 Staff & salaries** | `staff_assignments`, transfers, branch-manager hiring, `salary_grades`, `staff_salaries` with HQ approval. |
 | **P5 Money between branches** | Per-branch accounts on screens, `branch_transfers` (send/receive, in-transit flag), "sends to HQ" policy, branch budgets. Customer moves between branches. |

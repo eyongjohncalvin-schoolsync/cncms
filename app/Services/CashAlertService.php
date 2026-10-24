@@ -15,6 +15,7 @@ use App\Models\RemittanceLine;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
 use Illuminate\Support\Carbon;
 
 /**
@@ -82,6 +83,7 @@ class CashAlertService
         $start = Company::cached()?->cash_controls_start_date;
 
         $rows = Payment::query()
+            ->forBranch(TenantContext::currentBranchId())
             ->where('method', 'cash')
             ->whereNotNull('recorded_by')
             ->where('verification_status', '!=', 'rejected')

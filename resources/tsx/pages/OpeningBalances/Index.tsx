@@ -47,7 +47,7 @@ interface Batch {
     updated_at: string | null;
     is_locked: boolean;
     is_own_submission: boolean;
-    can: { edit: boolean; approve: boolean; reject: boolean; reopen: boolean };
+    can: { edit: boolean; discard: boolean; approve: boolean; reject: boolean; reopen: boolean };
 }
 
 interface HistoryItem {
@@ -561,7 +561,7 @@ export default function OpeningBalancesIndex({ batch, rows, history, can_start, 
 
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                         <div>
-                            {editable && (
+                            {batch?.can.discard && (
                                 <Button variant="ghost" onClick={discard} disabled={busy}>
                                     Discard draft
                                 </Button>

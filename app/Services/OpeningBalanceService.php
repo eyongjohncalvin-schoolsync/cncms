@@ -10,6 +10,7 @@ use App\Models\Manuscript;
 use App\Models\OpeningBalanceBatch;
 use App\Models\OpeningBalanceEntry;
 use App\Models\Role;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Support\BranchLookup;
@@ -203,7 +204,7 @@ class OpeningBalanceService
 
             $entries = $batch->entries()->with('customer')->get();
             BranchLookup::remember($entries->pluck('customer'));
-            $conflicts = Customer::query()
+            $conflicts = Customer::query()->withoutGlobalScope(BranchScope::class)
                 ->whereIn('id', $entries->pluck('customer_id'))
                 ->whereHas('manuscripts')
                 ->pluck('name');

@@ -400,6 +400,7 @@ class ReportService
         // technician fees would distort the collection ratio.
         $collectedByZone = Payment::query()
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
+            ->when($branchId !== null, fn ($query) => $query->where('payments.branch_id', $branchId))
             ->where('payments.purpose', Payment::PURPOSE_SUBSCRIPTION)
             ->where('payments.verification_status', 'verified')
             ->whereBetween('payments.created_at', [$start, $end])

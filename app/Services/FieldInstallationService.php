@@ -15,6 +15,7 @@ use App\Models\CustomerCharge;
 use App\Models\ExpenseCategory;
 use App\Models\FieldInstallation;
 use App\Models\Payment;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\Zone;
@@ -107,7 +108,7 @@ class FieldInstallationService
             throw ValidationException::withMessages(['zone_uuid' => ['This zone is outside your branch.']]);
         }
 
-        if (Customer::query()->withTrashed()->where('uuid', $data['customer_uuid'])->exists()) {
+        if (Customer::query()->withoutGlobalScope(BranchScope::class)->withTrashed()->where('uuid', $data['customer_uuid'])->exists()) {
             throw ValidationException::withMessages(['customer_uuid' => ['A customer with this id already exists — the registration was not saved.']]);
         }
 
@@ -263,7 +264,7 @@ class FieldInstallationService
                     'purpose' => mb_substr("Refund — field registration rejected: {$customer->name} ({$customer->accountCode()}): {$reason}", 0, 500),
                     'category_uuid' => $category->uuid,
                     'amount' => $taken,
-                ], $actor);
+                ], $actor, branchId: $customer->branch_id);
             }
 
             if ($locked->customer_charge_id !== null) {

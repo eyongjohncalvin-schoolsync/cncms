@@ -31,16 +31,23 @@ class OpeningBalanceBatchPolicy
         return $this->context->can('opening_balances.enter');
     }
 
-    /** Edit entries / go-live month, submit, or discard — drafts only. */
+    /** Edit entries / go-live month, or submit — drafts only. */
     public function update(User $user, OpeningBalanceBatch $batch): bool
     {
         return $batch->isDraft() && $this->context->can('opening_balances.enter');
+    }
+
+    /** Discarding the draft drops every branch's entries — company-wide (branches v2). */
+    public function discard(User $user, OpeningBalanceBatch $batch): bool
+    {
+        return $this->update($user, $batch) && $this->context->actsForCompany();
     }
 
     public function approve(User $user, OpeningBalanceBatch $batch): bool
     {
         return $batch->isPendingApproval()
             && $this->context->can('opening_balances.approve')
+            && $this->context->actsForCompany()
             && ($user->id !== $batch->submitted_by || $this->context->isSuper());
     }
 
@@ -56,6 +63,6 @@ class OpeningBalanceBatchPolicy
      */
     public function reopen(User $user, OpeningBalanceBatch $batch): bool
     {
-        return $batch->isApproved() && $this->context->can('opening_balances.approve');
+        return $batch->isApproved() && $this->context->can('opening_balances.approve') && $this->context->actsForCompany();
     }
 }

@@ -181,8 +181,14 @@ class ReceiptStockController extends Controller
      */
     private function lookup(string $search): ?array
     {
+        $branchId = TenantContext::currentBranchId();
         $leaf = ReceiptLeaf::query()->with(['block.holder', 'cancelledBy'])->where('number', strtoupper($search))->first();
-        $receipt = PaymentReceipt::query()->with('payment.customer')->where('receipt_number', strtoupper($search))->first();
+        $receipt = PaymentReceipt::query()->forBranch($branchId)->with('payment.customer')->where('receipt_number', strtoupper($search))->first();
+
+        // Branches v2: another branch's receipt book is not found from a fenced branch.
+        if ($leaf !== null && $branchId !== null && $leaf->block->branch_id !== $branchId) {
+            $leaf = null;
+        }
 
         if ($leaf === null && $receipt === null) {
             return ['number' => strtoupper($search), 'found' => false];

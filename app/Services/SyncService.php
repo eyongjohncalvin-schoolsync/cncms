@@ -13,6 +13,7 @@ use App\Models\CustomerSubscription;
 use App\Models\Expenditure;
 use App\Models\FieldInstallation;
 use App\Models\Payment;
+use App\Models\Scopes\BranchScope;
 use App\Models\Service;
 use App\Models\SyncQueue;
 use App\Models\User;
@@ -218,7 +219,8 @@ class SyncService
         }
 
         if ($entityType === 'payment') {
-            $payment = Payment::query()->where('uuid', $entityUuid)->firstOrFail();
+            // Only a payment of the caller's own branch (branches v2).
+            $payment = Payment::query()->forBranch(TenantContext::currentBranchId())->where('uuid', $entityUuid)->firstOrFail();
 
             $storedPath = $file->store('receipts/payments', 'public');
 
@@ -261,6 +263,7 @@ class SyncService
         if ($lastSyncAt) {
             $pendingPull = Customer::query()->where('updated_at', '>=', $lastSyncAt)->count()
                 + Payment::query()
+                    ->forBranch(TenantContext::currentBranchId())
                     ->whereIn('verification_status', ['verified', 'rejected'])
                     ->where('updated_at', '>=', $lastSyncAt)
                     ->count();
@@ -513,8 +516,9 @@ class SyncService
         // Same idempotency guard as pushPayment() above. A row an older
         // build synced before E1 is a legacy expenditure with that local_uuid.
         if ($localUuid !== null) {
-            $existingUuid = Voucher::query()->where('local_uuid', $localUuid)->value('uuid')
-                ?? Expenditure::query()->where('local_uuid', $localUuid)->value('uuid');
+            // Idempotency must see every branch (branches v2): a row that can't be seen would be re-inserted and fail its unique key forever.
+            $existingUuid = Voucher::query()->withoutGlobalScope(BranchScope::class)->where('local_uuid', $localUuid)->value('uuid')
+                ?? Expenditure::query()->withoutGlobalScope(BranchScope::class)->where('local_uuid', $localUuid)->value('uuid');
 
             if ($existingUuid !== null) {
                 return [
@@ -629,7 +633,7 @@ class SyncService
         // Same idempotency guard as pushPayment()/pushExpenditure() above —
         // see pushPayment()'s comment for the full rationale.
         if ($localUuid !== null) {
-            $existingUuid = Complaint::query()->where('local_uuid', $localUuid)->value('uuid');
+            $existingUuid = Complaint::query()->withoutGlobalScope(BranchScope::class)->where('local_uuid', $localUuid)->value('uuid');
 
             if ($existingUuid !== null) {
                 return [

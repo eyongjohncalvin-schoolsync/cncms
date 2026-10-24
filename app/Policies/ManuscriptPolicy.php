@@ -44,7 +44,8 @@ class ManuscriptPolicy
      */
     public function calculate(User $user): bool
     {
-        return $this->context->can('manuscripts.calculate');
+        // The billing run is company-wide (branches v2 D5): never from a town's fenced staff.
+        return $this->context->can('manuscripts.calculate') && $this->context->actsForCompany();
     }
 
     /**

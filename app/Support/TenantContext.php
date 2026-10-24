@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Models\Agent;
+use App\Models\Branch;
+use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use Database\Seeders\DefaultRolesSeeder;
 use Illuminate\Support\Facades\DB;
@@ -56,12 +58,44 @@ final class TenantContext
      */
     private ?array $roleState = null;
 
+    /**
+     * @param  bool  $branchChosen  true when $branchId is a branch an unfenced
+     *                              user picked in the branch switcher (a view,
+     *                              not a fence) — see viewingBranch()
+     */
     public function __construct(
         public readonly TenantUser $tenantUser,
         public readonly string $role,
         public readonly ?int $branchId = null,
         public readonly ?int $zoneId = null,
+        public readonly bool $branchChosen = false,
     ) {}
+
+    /**
+     * Branches v2 switcher (docs/plans/branches-v2.md §8): an unfenced user
+     * narrowing every screen to one branch for this request. Uses the same
+     * fence as a fenced user, so every list, report and lookup follows it.
+     */
+    public function viewingBranch(int $branchId): self
+    {
+        return new self($this->tenantUser, $this->role, $branchId, $this->zoneId, branchChosen: true);
+    }
+
+    /** Fenced to one branch by the owner (not merely viewing one). */
+    public function isFenced(): bool
+    {
+        return $this->branchId !== null && ! $this->branchChosen;
+    }
+
+    /**
+     * May run what is company-wide by design — the monthly billing run and
+     * its publishing, opening balances (branches v2 D5): anyone not fenced to
+     * a town, headquarters staff included.
+     */
+    public function actsForCompany(): bool
+    {
+        return ! $this->isFenced() || $this->branchId === Branch::headquartersId();
+    }
 
     public function is(string $role): bool
     {
@@ -281,7 +315,7 @@ final class TenantContext
         // an agent's own Agent row is the single source of truth for both
         // fences (branch transitively via zone->branch, zone directly).
         $agent = $tenantUser->role === 'agent'
-            ? Agent::query()->with('zone')->where('user_id', $tenantUser->user_id)->first()
+            ? Agent::query()->withoutGlobalScope(BranchScope::class)->with(['zone' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)])->where('user_id', $tenantUser->user_id)->first()
             : null;
 
         $branchId = $tenantUser->role === 'agent'

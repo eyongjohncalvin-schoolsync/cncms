@@ -140,7 +140,8 @@ class ManuscriptGenerationBatchService
             throw $e;
         }
 
-        $customerIds ??= Customer::query()->activated()->orderBy('id')->pluck('id')->all();
+        // One company-wide billing run (branches v2 D5), whoever triggers it.
+        $customerIds ??= Customer::query()->withoutGlobalScope(BranchScope::class)->activated()->orderBy('id')->pluck('id')->all();
         $chunkSize = max(1, (int) config('scheduled_tasks.manuscript_generation.chunk_size', 250));
         $chunks = array_chunk($customerIds, $chunkSize);
 

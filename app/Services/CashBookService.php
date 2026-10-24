@@ -8,9 +8,11 @@ use App\Models\Branch;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Support\BranchAttribution;
 use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -39,23 +41,31 @@ class CashBookService
         return BusinessTimezone::today();
     }
 
-    /** The cashier's own till, created the first time they need it. */
+    /**
+     * The cashier's own till, created the first time they need it. A
+     * person's till is theirs whichever branch is being viewed (branches v2).
+     */
     public function tillFor(User $user): CashAccount
     {
-        return CashAccount::query()->firstOrCreate(
+        return CashAccount::query()->withoutGlobalScope(BranchScope::class)->firstOrCreate(
             ['kind' => CashAccount::KIND_TILL, 'holder_user_id' => $user->id],
             ['name' => "Till — {$user->name}", 'is_active' => true, 'branch_id' => BranchAttribution::forUser($user)],
         );
     }
 
-    /** The company wallet for a mobile-money method (mtn_momo / orange_money). */
+    /**
+     * The company wallet for a mobile-money method (mtn_momo / orange_money)
+     * — headquarters' until branches get their own wallets (branches v2 P5),
+     * so found whichever branch the caller works in.
+     */
     public function walletFor(string $paymentMethod): CashAccount
     {
         $provider = CashAccount::WALLET_PROVIDERS[$paymentMethod];
+        $headquartersId = Branch::headquartersId();
 
-        return CashAccount::query()->firstOrCreate(
-            ['kind' => CashAccount::KIND_MOBILE_MONEY, 'provider' => $provider, 'is_active' => true],
-            ['name' => $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet', 'branch_id' => Branch::headquartersId()],
+        return CashAccount::query()->withoutGlobalScope(BranchScope::class)->firstOrCreate(
+            ['kind' => CashAccount::KIND_MOBILE_MONEY, 'provider' => $provider, 'is_active' => true, 'branch_id' => $headquartersId],
+            ['name' => $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet'],
         );
     }
 
@@ -67,7 +77,8 @@ class CashBookService
             'provider' => $provider,
             'account_number' => $accountNumber,
             'is_active' => true,
-            'branch_id' => Branch::headquartersId(),
+            // The branch being worked in (a fenced user's, or the one an unfenced user is viewing), else headquarters.
+            'branch_id' => TenantContext::currentBranchId() ?? Branch::headquartersId(),
         ]);
     }
 

@@ -6,7 +6,6 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
-use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -20,7 +19,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class Agent extends Model
 {
-    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid;
 
     protected function casts(): array
     {

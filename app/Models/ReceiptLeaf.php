@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
+use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
@@ -48,7 +49,8 @@ class ReceiptLeaf extends Model
 
     public function block(): BelongsTo
     {
-        return $this->belongsTo(ReceiptBlock::class, 'receipt_block_id');
+        // A leaf always knows its book, whoever looks it up (branches v2) — refusals then name the real holder.
+        return $this->belongsTo(ReceiptBlock::class, 'receipt_block_id')->withoutGlobalScope(BranchScope::class);
     }
 
     public function receipt(): HasOne

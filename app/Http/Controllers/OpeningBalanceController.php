@@ -131,7 +131,7 @@ class OpeningBalanceController extends Controller
 
     public function destroy(OpeningBalanceBatch $openingBalanceBatch): RedirectResponse
     {
-        $this->authorize('update', $openingBalanceBatch);
+        $this->authorize('discard', $openingBalanceBatch);
 
         $this->openingBalances->discard($openingBalanceBatch);
 
@@ -164,6 +164,7 @@ class OpeningBalanceController extends Controller
             'is_own_submission' => $batch->submitted_by === $user->id,
             'can' => [
                 'edit' => $user->can('update', $batch),
+                'discard' => $user->can('discard', $batch),
                 'approve' => $user->can('approve', $batch),
                 'reject' => $user->can('reject', $batch),
                 'reopen' => $user->can('reopen', $batch),

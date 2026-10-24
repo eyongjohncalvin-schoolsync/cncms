@@ -353,8 +353,7 @@ export default function UsersControlCenterUsers({
                                     <p className="-mt-2 text-xs text-slate-500">
                                         Fences this person to one branch's data only. Leave as "All branches" for
                                         unrestricted access. Ignored for the Agent role — agents are scoped
-                                        automatically by their assigned zone's branch instead. Not yet a full
-                                        fence: bons, expenses, budgets and tills are still shared across branches.
+                                        automatically by their assigned zone's branch instead.
                                     </p>
                                 </>
                             )}

@@ -132,10 +132,10 @@ class PaymentController extends Controller
             // bottleneck, the fix is a maintained cache/aggregate, not
             // silently narrowing the signal to "this month".
             'statusCounts' => [
-                'all' => Payment::query()->count(),
+                'all' => Payment::query()->forBranch(TenantContext::currentBranchId())->count(),
                 'pending' => $this->payments->pendingVerificationCount(),
-                'verified' => Payment::query()->where('verification_status', 'verified')->count(),
-                'rejected' => Payment::query()->where('verification_status', 'rejected')->count(),
+                'verified' => Payment::query()->forBranch(TenantContext::currentBranchId())->where('verification_status', 'verified')->count(),
+                'rejected' => Payment::query()->forBranch(TenantContext::currentBranchId())->where('verification_status', 'rejected')->count(),
             ],
         ]);
     }

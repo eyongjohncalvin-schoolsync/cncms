@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models\Concerns;
 
 use App\Models\Branch;
+use App\Models\Scopes\BranchScope;
 use App\Support\BranchLookup;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -28,6 +29,10 @@ use LogicException;
  *
  * The parent's branch comes from, in order: a loaded parent relation,
  * App\Support\BranchLookup (primed by bulk writers), one query (remembered).
+ *
+ * Also fences every query on the model to the current fenced user's branch
+ * (App\Models\Scopes\BranchScope) — except customer history, see
+ * fencedByBranchScope().
  */
 trait BelongsToBranch
 {
@@ -42,8 +47,25 @@ trait BelongsToBranch
         return false;
     }
 
+    /**
+     * Whether a fenced user's every query on this model is limited to their
+     * branch (App\Models\Scopes\BranchScope). False for a customer's history
+     * (payments, bills, charges, …): it stays with the branch where it
+     * happened while the customer may move, so "this customer's history" must
+     * stay whole — those rows are fenced on list screens (repositories) and
+     * on direct links (route binding) instead.
+     */
+    protected static function fencedByBranchScope(): bool
+    {
+        return true;
+    }
+
     protected static function bootBelongsToBranch(): void
     {
+        if (static::fencedByBranchScope()) {
+            static::addGlobalScope(new BranchScope);
+        }
+
         static::creating(function (Model $model): void {
             if ($model->getAttribute('branch_id') === null) {
                 $model->setAttribute('branch_id', $model->branchIdFromParent());
@@ -113,7 +135,7 @@ trait BelongsToBranch
         $branchId = BranchLookup::get($parentClass, (int) $key);
 
         if ($branchId === null) {
-            $branchId = $relation->getQuery()->value('branch_id');
+            $branchId = $relation->getQuery()->withoutGlobalScope(BranchScope::class)->value('branch_id');
 
             if ($branchId !== null) {
                 BranchLookup::rememberIds($parentClass, [(int) $key => (int) $branchId]);

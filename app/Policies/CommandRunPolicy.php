@@ -33,7 +33,8 @@ class CommandRunPolicy
      */
     public function publish(User $user): bool
     {
-        return $this->context->can('command_runs.publish');
+        // Publishing a billing run is company-wide (branches v2 D5).
+        return $this->context->can('command_runs.publish') && $this->context->actsForCompany();
     }
 
     /**

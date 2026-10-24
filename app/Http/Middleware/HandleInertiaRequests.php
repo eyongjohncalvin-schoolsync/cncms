@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Models\Branch;
 use App\Models\Company;
 use App\Services\NotificationService;
 use App\Support\Impersonation;
@@ -93,6 +94,12 @@ class HandleInertiaRequests extends Middleware
                     'logo_url' => Company::cached()?->logoUrl(),
                 ]
                 : null,
+            // Branch switcher (branches v2 §8): only for someone not fenced to
+            // a branch, and only once the company has more than one branch —
+            // a one-town company never sees it.
+            'branchView' => $context !== null && ! $context->isFenced()
+                ? fn (): ?array => $this->branchView($context)
+                : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
@@ -131,6 +138,27 @@ class HandleInertiaRequests extends Middleware
             'impersonation' => fn () => Impersonation::active() && $user
                 ? ['impersonator' => Impersonation::impersonator()?->name, 'user' => $user->name]
                 : null,
+        ];
+    }
+
+    /**
+     * @return array{branches: list<array{uuid: string, name: string, is_headquarters: bool}>, current: ?string}|null
+     */
+    private function branchView(TenantContext $context): ?array
+    {
+        $branches = Branch::query()->orderByDesc('is_headquarters')->orderBy('name')->get(['id', 'uuid', 'name', 'is_headquarters']);
+
+        if ($branches->count() < 2) {
+            return null;
+        }
+
+        return [
+            'branches' => $branches->map(fn (Branch $branch): array => [
+                'uuid' => $branch->uuid,
+                'name' => $branch->name,
+                'is_headquarters' => $branch->is_headquarters,
+            ])->values()->all(),
+            'current' => $context->branchChosen ? $branches->firstWhere('id', $context->branchId)?->uuid : null,
         ];
     }
 }
