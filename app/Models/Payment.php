@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
@@ -38,7 +39,7 @@ use LogicException;
 #[RouteKey('uuid')]
 class Payment extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     /** The monthly bill — the only money billing ever sees. */
     public const string PURPOSE_SUBSCRIPTION = 'subscription';
@@ -143,14 +144,6 @@ class Payment extends Model
             'method' => ['nullable', 'string', 'in:'.implode(',', self::METHODS)],
             'method_reference' => ['nullable', 'string', 'max:100', 'required_if:method,'.implode(',', self::METHODS_REQUIRING_REFERENCE)],
         ];
-    }
-
-    /**
-     * Payment has no direct zone — branch is reached through its Customer.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return 'customer.zone';
     }
 
     protected function casts(): array
@@ -273,5 +266,11 @@ class Payment extends Model
     public function technicianFeePayout(): BelongsTo
     {
         return $this->belongsTo(TechnicianFeePayout::class);
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
     }
 }

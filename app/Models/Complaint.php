@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -48,7 +49,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class Complaint extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     protected function casts(): array
     {
@@ -117,5 +118,11 @@ class Complaint extends Model
     public function escalations(): HasMany
     {
         return $this->hasMany(ComplaintEscalation::class);
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
     }
 }

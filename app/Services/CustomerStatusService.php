@@ -9,6 +9,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\BranchLookup;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -131,6 +132,7 @@ class CustomerStatusService
         // One query for the whole selection, with the latest manuscript the
         // suspend/reconnect paths read, rather than a lookup per uuid.
         $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid');
+        BranchLookup::remember($customersByUuid);
 
         foreach ($customerUuids as $uuid) {
             $customer = $customersByUuid->get($uuid);

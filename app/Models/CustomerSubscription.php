@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -24,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\Pivot;
  */
 class CustomerSubscription extends Pivot
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     protected $table = 'customer_service';
 
@@ -55,5 +56,11 @@ class CustomerSubscription extends Pivot
     public function serviceVariant(): BelongsTo
     {
         return $this->belongsTo(ServiceVariant::class);
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
     }
 }

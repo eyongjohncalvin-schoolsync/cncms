@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Tenant;
+use App\Support\BranchLookup;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -107,6 +108,8 @@ class ManuscriptImportAugust extends Command
 
                 return self::FAILURE;
             }
+
+            BranchLookup::rememberFor(Customer::class, array_column($rows, 'customer_id'));
 
             DB::transaction(function () use ($rows): void {
                 foreach ($rows as $attrs) {

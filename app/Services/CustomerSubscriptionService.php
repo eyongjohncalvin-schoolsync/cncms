@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\CustomerSubscription;
 use App\Models\Service;
 use App\Models\ServiceVariant;
+use App\Support\BranchLookup;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -49,6 +50,9 @@ class CustomerSubscriptionService
                 'services' => ['Select at least one service.'],
             ]);
         }
+
+        // Every subscription row below takes this customer's branch.
+        BranchLookup::remember([$customer]);
 
         // Resolve every uuid up front, rejecting duplicates/unknowns/
         // cross-references here rather than mid-loop.

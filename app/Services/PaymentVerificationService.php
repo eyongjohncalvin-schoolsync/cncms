@@ -10,6 +10,7 @@ use App\Models\PaymentVerification;
 use App\Models\User;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\PaymentVerificationRepositoryInterface;
+use App\Support\BranchLookup;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Support\Carbon;
@@ -56,6 +57,8 @@ class PaymentVerificationService
      */
     private function applyDecision(Payment $payment, VerifyPaymentData $data, User $actor): void
     {
+        BranchLookup::remember([$payment]);
+
         DB::transaction(function () use ($payment, $data, $actor): void {
             $verification = $payment->relationLoaded('verification') && $payment->verification !== null
                 ? $payment->verification
@@ -151,6 +154,7 @@ class PaymentVerificationService
         // One query for the whole selection (with everything verify() and
         // receipt issuing read) rather than a lookup per payment.
         $paymentsByUuid = $this->payments->findManyByUuids($paymentUuids, ['customer.zone.branch', 'verification', 'receipt', 'customerCharge']);
+        BranchLookup::remember($paymentsByUuid);
 
         foreach ($paymentUuids as $uuid) {
             $payment = $paymentsByUuid->get($uuid);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
@@ -19,7 +20,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class Agent extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     protected function casts(): array
     {
@@ -42,5 +43,17 @@ class Agent extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /** Its branch comes from its zone (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'zone';
+    }
+
+    /** Its CURRENT branch: follows its zone (BelongsToBranch). */
+    protected static function branchFollowsParent(): bool
+    {
+        return true;
     }
 }

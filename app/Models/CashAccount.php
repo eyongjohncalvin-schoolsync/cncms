@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -22,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class CashAccount extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     public const string KIND_TILL = 'till';
 
@@ -54,14 +55,14 @@ class CashAccount extends Model
         return $this->belongsTo(User::class, 'holder_user_id');
     }
 
-    /** A till's branch is its holder's when it was opened; wallets, safe and bank are headquarters'. */
-    public function branch(): BelongsTo
-    {
-        return $this->belongsTo(Branch::class);
-    }
-
     public function isTill(): bool
     {
         return $this->kind === self::KIND_TILL;
+    }
+
+    /** Set by the creating service (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return null;
     }
 }

@@ -10,6 +10,7 @@ use App\Models\Payment;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\BranchLookup;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -90,10 +91,7 @@ class PaymentService
             now()->addSeconds(15),
             fn (): int => Payment::query()
                 ->where('verification_status', 'pending')
-                ->when($branchId !== null, fn ($query) => $query->whereHas(
-                    'customer.zone',
-                    fn ($inner) => $inner->where('branch_id', $branchId),
-                ))
+                ->when($branchId !== null, fn ($query) => $query->where('payments.branch_id', $branchId))
                 ->count(),
         );
     }
@@ -129,6 +127,9 @@ class PaymentService
      */
     public function createForCustomer(Customer $customer, PaymentData $data): Payment
     {
+        // The payment takes this customer's branch (BelongsToBranch) — no lookup query.
+        BranchLookup::remember([$customer]);
+
         // RBAC v2: mirrors PaymentPolicy::verify() exactly — the office gate
         // is now the `payments.verify` catalog permission; the agent
         // zone-scoped branch stays an additive OR (agent is NOT seeded
@@ -221,6 +222,7 @@ class PaymentService
      */
     private function createWithFieldReceipt(Customer $customer, PaymentData $data, array $attributes): Payment
     {
+        BranchLookup::remember([$customer]);
         $actor = auth()->user();
 
         $payment = DB::transaction(function () use ($customer, $data, $attributes, $actor): Payment {
@@ -278,6 +280,7 @@ class PaymentService
         // Zone/branch and latest manuscript are what each payment's receipt
         // reads when it's issued on the spot.
         $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid');
+        BranchLookup::remember($customersByUuid);
 
         foreach ($customerUuids as $customerUuid) {
             $customer = $customersByUuid->get($customerUuid);

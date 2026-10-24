@@ -16,7 +16,7 @@ class AgentRepository implements AgentRepositoryInterface
 
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
-        return $this->scopeToBranch(Agent::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Agent::query(), $this->currentBranchId())
             ->with(['zone', 'user'])
             ->when($filters['zone_id'] ?? null, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
@@ -26,7 +26,7 @@ class AgentRepository implements AgentRepositoryInterface
 
     public function findByUuid(string $uuid, array $with = []): ?Agent
     {
-        return $this->scopeToBranch(Agent::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Agent::query(), $this->currentBranchId())
             ->with($with)
             ->where('uuid', $uuid)
             ->first();

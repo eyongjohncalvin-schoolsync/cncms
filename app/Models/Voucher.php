@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -29,7 +30,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class Voucher extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     public const string KIND_EXPENSE = 'expense';
 
@@ -64,12 +65,6 @@ class Voucher extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(ExpenseCategory::class, 'expense_category_id');
-    }
-
-    /** The requester's branch (headquarters when unfenced), set by VoucherService. */
-    public function branch(): BelongsTo
-    {
-        return $this->belongsTo(Branch::class);
     }
 
     public function paidFrom(): BelongsTo
@@ -124,5 +119,11 @@ class Voucher extends Model
     public function requiredApproverIds(): array
     {
         return array_map('intval', $this->required_approver_ids ?? []);
+    }
+
+    /** Set by the creating service (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return null;
     }
 }

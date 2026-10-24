@@ -19,14 +19,6 @@ class Zone extends Model
 {
     use Auditable, HasUuid, ScopesRouteBindingToBranch;
 
-    /**
-     * Zone carries branch_id directly — no relation hop needed.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return null;
-    }
-
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);

@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\FieldDevice;
 use App\Models\User;
+use App\Support\BranchAttribution;
 use App\Support\ReceiptSecurityCode;
 
 /**
@@ -25,6 +26,7 @@ class FieldDeviceService
 
         $device = FieldDevice::query()->create([
             'user_id' => $user->id,
+            'branch_id' => BranchAttribution::forUser($user),
             'name' => $name,
             'secret' => $secret,
             'registered_at' => now(),

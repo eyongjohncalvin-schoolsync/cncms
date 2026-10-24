@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Models\Voucher;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Support\Billing\FreeMonthPlan;
+use App\Support\BranchLookup;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
@@ -76,6 +77,7 @@ class SyncService
         }
 
         $paymentLookups = $this->paymentPushLookups($changes['payments'] ?? []);
+        BranchLookup::remember($paymentLookups['customers']);
 
         foreach ($changes['payments'] ?? [] as $item) {
             [$entry, $error] = $this->pushPayment($item, $deviceId, $paymentLookups);
@@ -709,7 +711,7 @@ class SyncService
             ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
             ->when(
                 $zoneId === null && $branchId !== null,
-                fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId))
+                fn ($query) => $query->where('customers.branch_id', $branchId)
             )
             ->get();
 
@@ -806,7 +808,7 @@ class SyncService
             ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
             ->when(
                 $zoneId === null && $branchId !== null,
-                fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId))
+                fn ($query) => $query->where('customers.branch_id', $branchId)
             )
             ->pluck('uuid')
             ->all();
@@ -820,10 +822,9 @@ class SyncService
      * would not be re-included unless it also picked up a fresh updated_at.
      * See report note.
      *
-     * Same branch/zone fence as upsertedCustomers() above, applied via the
-     * customer relation (Payment has no direct zone — see
-     * App\Models\Payment::branchRouteBindingRelation()'s identical
-     * 'customer.zone' path).
+     * Same branch/zone fence as upsertedCustomers() above: the zone through
+     * the customer relation (Payment has no direct zone), the branch on the
+     * payment's own branch_id.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -839,7 +840,7 @@ class SyncService
             ->when($zoneId !== null, fn ($query) => $query->whereHas('customer', fn ($inner) => $inner->where('zone_id', $zoneId)))
             ->when(
                 $zoneId === null && $branchId !== null,
-                fn ($query) => $query->whereHas('customer.zone', fn ($inner) => $inner->where('branch_id', $branchId))
+                fn ($query) => $query->where('payments.branch_id', $branchId)
             )
             ->get()
             ->map(function (Payment $payment) use ($status): array {

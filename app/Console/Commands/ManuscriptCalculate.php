@@ -14,6 +14,7 @@ use App\Services\ManuscriptCalculator;
 use App\Services\ManuscriptRerunGuard;
 use App\Services\ManuscriptService;
 use App\Support\Billing\FreeMonthPlan;
+use App\Support\BranchLookup;
 use App\Support\DetectsUniqueViolation;
 use Illuminate\Console\Command;
 use Illuminate\Database\QueryException;
@@ -214,6 +215,7 @@ class ManuscriptCalculate extends Command
             &$errorDetails,
         ): void {
             $customerIds = $customers->pluck('id');
+            BranchLookup::remember($customers);
 
             // Batch-resolve, once per chunk of 200, what ManuscriptCalculator
             // used to query per customer: each customer's most recent

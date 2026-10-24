@@ -121,6 +121,7 @@ class SwecomRepair202608IncidentTest extends TestCase
                 ->create(['customer_id' => $trashed->id]);
             $this->db()->table('messages')->insert([
                 'customer_id' => $trashed->id,
+                'branch_id' => $trashed->branch_id,
                 'content' => 'fixture message',
                 'type' => 'sms',
                 'created_at' => now(),
@@ -167,6 +168,7 @@ class SwecomRepair202608IncidentTest extends TestCase
                 $this->db()->table('customers')->insert([
                     'id' => $id,
                     'zone_id' => $baselineZone->id,
+                    'branch_id' => $baselineZone->branch_id,
                     'name' => $name,
                     'location' => 'x',
                     'bill' => 2500,
@@ -178,6 +180,7 @@ class SwecomRepair202608IncidentTest extends TestCase
                 ]);
                 $this->db()->table('manuscripts')->insert([
                     'customer_id' => $id,
+                    'branch_id' => $baselineZone->branch_id,
                     'bill' => 2500,
                     'total_arrears' => 0,
                     'credit' => $credit,

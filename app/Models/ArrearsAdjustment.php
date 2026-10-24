@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -56,7 +57,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class ArrearsAdjustment extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     /**
      * Two-approver threshold default (companies.arrears_second_approval_threshold's
@@ -131,5 +132,11 @@ class ArrearsAdjustment extends Model
     public function isPending(): bool
     {
         return in_array($this->status, ['pending', 'pending_second_approval'], true);
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
     }
 }

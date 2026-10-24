@@ -82,11 +82,23 @@ creation, indexed:**
 | `vouchers` ✅, `voucher_approvals` | requester's fence (built) / the bon |
 | `expenditures` ✅, `budgets` | the bon (built) / set per branch (P5) |
 | `cash_accounts` ✅, `cash_movements`, `cash_day_closes` | holder / HQ (built) / the account |
-| `remittances`, `remittance_lines` | the collector's branch |
-| `technician_fee_payouts` | the installation |
-| `receipt_blocks`, `receipt_leaves`, `field_devices` | the branch they are issued to |
-| `alerts`, `complaint_escalations`, `notification_recipients` | the subject record |
-| `audit_logs` | the subject record when it has one (nullable) |
+| `remittances` | the collector's branch |
+| `technician_fee_payouts` | the till it was paid from |
+| `receipt_blocks`, `field_devices` | the holder's branch (a device's block: the device's) |
+| `audit_logs`, `bill_batch_files` | the audited row / the zone — **nullable** (company-wide rows, all-zones files) |
+
+**Built in P1** (all of the above, NOT NULL except the two nullable ones), with
+`App\Models\Concerns\BelongsToBranch` stamping and `App\Support\BranchLookup`
+keeping bulk writers free of per-row lookups.
+
+**Child rows with no column** (always read through their parent, fenced by it):
+`voucher_approvals`, `remittance_lines`, `receipt_leaves`,
+`complaint_escalations`, `notification_recipients`.
+
+**Later phases:** `budgets` (P5 — unique key becomes category+period+branch),
+`notifications` (P6 — nullable source branch for alert routing). Company-wide:
+`bill_batches`, `opening_balance_batches`, `sync_queue`. (`alerts` was dropped
+in 2026-08; `user_activitylogs` is unused.)
 
 **HQ settings with branch override (inherit unless overridden):** `companies`
 (MoMo numbers, contacts, fees, receipt/bill details), `services.price`,
@@ -271,8 +283,8 @@ billing period lock, and identity (one login per person, across transfers).
 
 | Phase | Scope |
 |---|---|
-| **P0 Hygiene** | `preventLazyLoading` (non-prod); fix the §6 hotspots and the central-users leak. |
-| **P1 Data spine** | `branch_id` on every §4.2 table + backfill + indexes + NOT NULL; `BelongsToBranch` (stamping + immutability); customer→zone composite FK; replace every `whereHas` zone chain with the direct column. No behaviour change. |
+| **P0 Hygiene** ✅ | `preventLazyLoading` (non-prod); fix the §6 hotspots and the central-users leak. |
+| **P1 Data spine** ✅ | `branch_id` on every §4.2 table + backfill + indexes + NOT NULL; `BelongsToBranch` (stamping + immutability); customer→zone composite FK; replace every `whereHas` zone chain with the direct column. No behaviour change. |
 | **P2 Fence** | Global branch scope for fenced users; route binding; money-out, cash book, alerts/digests, complaints, arrears, audit log, exports, sync fenced; branch switcher; fence tests per module. *After P2 it is safe to fence staff to a branch.* |
 | **P3 Settings & prices** | `branch_settings`, `branch_prices`, resolvers, repricing, bills/receipts/messages per branch. Branch details on the Branches page. |
 | **P4 Staff & salaries** | `staff_assignments`, transfers, branch-manager hiring, `salary_grades`, `staff_salaries` with HQ approval. |

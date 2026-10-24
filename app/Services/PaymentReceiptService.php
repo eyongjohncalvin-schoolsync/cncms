@@ -14,6 +14,7 @@ use App\Models\ReceiptBlock;
 use App\Models\ReceiptLeaf;
 use App\Models\User;
 use App\Support\AmountInWords;
+use App\Support\BranchLookup;
 use App\Support\PaymentReceiptLink;
 use App\Support\QrCode;
 use App\Support\ReceiptSecurityCode;
@@ -79,6 +80,7 @@ class PaymentReceiptService
      */
     public function issueFor(Payment $payment, ?User $actor = null, bool $autoSend = true): PaymentReceipt
     {
+        BranchLookup::remember([$payment]);
         $payment->loadMissing(['customer.zone.branch', 'verification', 'recordedBy']);
 
         $existing = $payment->relationLoaded('receipt')
@@ -164,6 +166,7 @@ class PaymentReceiptService
      */
     public function issueField(Payment $payment, ReceiptLeaf $leaf, CarbonInterface $issuedAt, ?FieldDevice $device, ?string $deviceCode, ?User $actor = null): PaymentReceipt
     {
+        BranchLookup::remember([$payment]);
         $payment->loadMissing(['customer.zone.branch', 'verification', 'recordedBy']);
 
         $source = $leaf->block->kind === ReceiptBlock::KIND_DIGITAL ? PaymentReceipt::SOURCE_DIGITAL : PaymentReceipt::SOURCE_BOOK;

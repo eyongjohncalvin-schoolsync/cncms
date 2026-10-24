@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -28,7 +29,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class Expenditure extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     public const string SOURCE_VOUCHER = 'voucher';
 
@@ -50,12 +51,6 @@ class Expenditure extends Model
             'recorded_offline' => 'boolean',
             'voided_at' => 'datetime',
         ];
-    }
-
-    /** The branch this spending belongs to — copied from its bon. */
-    public function branch(): BelongsTo
-    {
-        return $this->belongsTo(Branch::class);
     }
 
     public function category(): BelongsTo
@@ -106,5 +101,11 @@ class Expenditure extends Model
     public function period(): string
     {
         return $this->spent_at->format('Y-m');
+    }
+
+    /** Its branch comes from its voucher (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'voucher';
     }
 }

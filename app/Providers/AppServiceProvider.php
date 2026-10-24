@@ -8,10 +8,12 @@ use App\Models\PersonalAccessToken;
 use App\Models\Report;
 use App\Models\Role;
 use App\Models\User;
+use App\Models\Zone;
 use App\Policies\PaymentReceiptPolicy;
 use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
 use App\Services\FreeMonthGrantService;
+use App\Support\BranchLookup;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -81,6 +83,16 @@ class AppServiceProvider extends ServiceProvider
         // key colliding after a reactivation/re-provision. Flushing on both
         // tenancy transitions bounds any staleness to a single job/test.
         Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => Company::flushMemo());
+
+        // Branches v2: parent → branch memo used to stamp branch_id on new rows.
+        // A zone can change branch (its customers and agents follow it by
+        // cascade), so a zone moving branch, and any tenant switch, starts it afresh.
+        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => BranchLookup::flush());
+        Zone::updated(static function (Zone $zone): void {
+            if ($zone->wasChanged('branch_id')) {
+                BranchLookup::flush();
+            }
+        });
 
         $this->preventLazyLoading();
 

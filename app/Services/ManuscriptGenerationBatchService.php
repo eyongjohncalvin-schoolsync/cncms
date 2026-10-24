@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\ScheduledTask;
+use App\Support\BranchLookup;
 use App\Support\DetectsUniqueViolation;
 use Illuminate\Bus\Batch;
 use Illuminate\Database\QueryException;
@@ -329,6 +330,8 @@ class ManuscriptGenerationBatchService
             // query per customer — publish() walks every customer in the
             // tenant, so a per-row lookup is thousands of queries.
             $existingByCustomer = $this->existingManuscriptsFor(array_keys($customers), $commandRun->period);
+            // Each new manuscript is stamped with its customer's branch — looked up once, not per row.
+            BranchLookup::rememberFor(Customer::class, array_keys($customers));
             $processedPaymentIds = [];
             $processedAdjustmentIds = [];
 

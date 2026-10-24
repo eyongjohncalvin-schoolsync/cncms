@@ -12,6 +12,7 @@ use App\Models\OpeningBalanceEntry;
 use App\Models\Role;
 use App\Models\User;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\BranchLookup;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -118,6 +119,7 @@ class OpeningBalanceService
         $this->assertDraft($batch);
 
         $eligible = $this->customers->withoutManuscripts(array_column($rows, 'customer_uuid'))->keyBy('uuid');
+        BranchLookup::remember($eligible);
         $unknown = collect($rows)->pluck('customer_uuid')->reject(fn (string $uuid): bool => $eligible->has($uuid));
 
         if ($unknown->isNotEmpty()) {
@@ -200,6 +202,7 @@ class OpeningBalanceService
             }
 
             $entries = $batch->entries()->with('customer')->get();
+            BranchLookup::remember($entries->pluck('customer'));
             $conflicts = Customer::query()
                 ->whereIn('id', $entries->pluck('customer_id'))
                 ->whereHas('manuscripts')

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -21,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * shortage stays open until repaid or written off.
  */
 #[Fillable([
-    'number', 'collector_user_id', 'business_date', 'status',
+    'number', 'collector_user_id', 'branch_id', 'business_date', 'status',
     'expected_cash', 'expected_mtn', 'expected_orange', 'expected_bank',
     'declared_cash', 'declared_denominations', 'collector_note', 'submitted_at',
     'received_by', 'received_at', 'till_account_id', 'received_cash', 'received_denominations', 'cash_variance', 'receiver_note',
@@ -30,7 +31,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class Remittance extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     protected function casts(): array
     {
@@ -92,5 +93,11 @@ class Remittance extends Model
     public function isSubmitted(): bool
     {
         return $this->status === 'submitted';
+    }
+
+    /** Set by the creating service (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return null;
     }
 }

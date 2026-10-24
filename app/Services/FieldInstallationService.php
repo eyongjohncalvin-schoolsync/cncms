@@ -309,7 +309,7 @@ class FieldInstallationService
 
         return Customer::query()
             ->pendingActivation()
-            ->when($branchId !== null, fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId)))
+            ->when($branchId !== null, fn ($query) => $query->where('customers.branch_id', $branchId))
             ->count();
     }
 

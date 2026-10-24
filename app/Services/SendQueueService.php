@@ -148,7 +148,7 @@ class SendQueueService
         }
 
         if ($branchId !== null) {
-            $customer->whereHas('zone', fn (Builder $zone) => $zone->where('branch_id', $branchId));
+            $customer->where('customers.branch_id', $branchId);
         }
     }
 

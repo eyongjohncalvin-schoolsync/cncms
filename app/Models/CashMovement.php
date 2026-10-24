@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -24,7 +25,7 @@ use LogicException;
 ])]
 class CashMovement extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     public const UPDATED_AT = null;
 
@@ -96,5 +97,11 @@ class CashMovement extends Model
     public function recordedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'recorded_by');
+    }
+
+    /** Its branch comes from its account (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'account';
     }
 }

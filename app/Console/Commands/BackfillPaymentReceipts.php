@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\Tenant;
 use App\Services\PaymentReceiptService;
+use App\Support\BranchLookup;
 use Illuminate\Console\Command;
 
 /**
@@ -84,6 +85,8 @@ class BackfillPaymentReceipts extends Command
             // each chunk costs a fixed number of lookups, not several per
             // payment.
             $base()->with(['customer.zone.branch', 'verification', 'receipt'])->orderBy('id')->chunkById(200, function ($payments) use ($receipts, &$issued): void {
+                BranchLookup::remember($payments);
+
                 foreach ($payments as $payment) {
                     $receipts->issueFor($payment, autoSend: false);
                     $issued++;

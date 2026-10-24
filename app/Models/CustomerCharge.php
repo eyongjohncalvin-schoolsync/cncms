@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
@@ -47,7 +48,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class CustomerCharge extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     public const string KIND_INSTALLATION = 'installation';
 
@@ -106,14 +107,6 @@ class CustomerCharge extends Model
     public const string DECISION_APPROVED = 'approved';
 
     public const string DECISION_REJECTED = 'rejected';
-
-    /**
-     * A charge has no direct zone — branch is reached through its Customer.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return 'customer.zone';
-    }
 
     protected function casts(): array
     {
@@ -318,5 +311,11 @@ class CustomerCharge extends Model
     public function hasPendingWaiver(): bool
     {
         return $this->waiver_status === self::WAIVER_PENDING;
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
     }
 }

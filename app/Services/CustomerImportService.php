@@ -9,6 +9,7 @@ use App\Http\Requests\StoreCustomerRequest;
 use App\Imports\CustomersImport;
 use App\Models\Upload;
 use App\Models\User;
+use App\Support\BranchLookup;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
@@ -76,6 +77,7 @@ final class CustomerImportService
         // 29 zones, cached for an hour by ZoneService::all() — one lookup
         // for the whole file rather than a query per row.
         $zonesByName = $this->zones->all()->keyBy('name');
+        BranchLookup::remember($zonesByName);
 
         $succeeded = [];
         $failed = [];

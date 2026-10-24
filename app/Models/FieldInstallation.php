@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
@@ -38,7 +39,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class FieldInstallation extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     public const string STATUS_PENDING = 'pending';
 
@@ -55,14 +56,6 @@ class FieldInstallation extends Model
             'collected_at' => 'datetime',
             'decided_at' => 'datetime',
         ];
-    }
-
-    /**
-     * No direct zone — branch is reached through the customer.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return 'customer.zone';
     }
 
     public function customer(): BelongsTo
@@ -102,5 +95,11 @@ class FieldInstallation extends Model
     public function isPending(): bool
     {
         return $this->status === self::STATUS_PENDING;
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
     }
 }

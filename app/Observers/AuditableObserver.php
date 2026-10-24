@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Observers;
 
 use App\Models\AuditLog;
+use App\Models\Concerns\BelongsToBranch;
+use App\Models\Zone;
 use App\Support\Impersonation;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
@@ -79,10 +81,30 @@ class AuditableObserver
                 'ip_address' => request()->ip(),
                 'user_agent' => request()->userAgent(),
                 'device_id' => request()->header('X-Device-ID'),
+                // Only sent when the row has a branch, so the early tenant
+                // migrations that write audit rows before audit_logs.branch_id
+                // exists keep working (same reason as impersonated_by).
+                ...(($branchId = $this->branchIdOf($model)) !== null ? ['branch_id' => $branchId] : []),
             ]);
         } catch (Throwable $e) {
             report($e);
         }
+    }
+
+    /**
+     * The audited row's branch (branches v2): branch-owned rows and zones
+     * carry their own; anything else is company-wide (null). Read from the
+     * row in memory — never a query per audit entry.
+     */
+    protected function branchIdOf(Model $model): ?int
+    {
+        if (! $model instanceof Zone && ! in_array(BelongsToBranch::class, class_uses_recursive($model), true)) {
+            return null;
+        }
+
+        $branchId = $model->getAttribute('branch_id');
+
+        return $branchId !== null ? (int) $branchId : null;
     }
 
     /**

@@ -33,7 +33,7 @@ interface ComplaintRepositoryInterface
      *                                            plus the service-resolved
      *                                            customer_id/zone_id.
      */
-    public function create(int $submittedBy, array $attributes): Complaint;
+    public function create(int $submittedBy, array $attributes, int $branchId): Complaint;
 
     public function update(Complaint $complaint, array $attributes): Complaint;
 

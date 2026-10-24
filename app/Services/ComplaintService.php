@@ -9,8 +9,10 @@ use App\DataTransferObjects\ResolveComplaintData;
 use App\Models\Complaint;
 use App\Models\Customer;
 use App\Models\User;
+use App\Models\Zone;
 use App\Repositories\Contracts\ComplaintRepositoryInterface;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\BranchAttribution;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -73,15 +75,19 @@ class ComplaintService
             $customer = $this->resolveCustomer($data->customerUuid);
             $customerId = $customer->id;
             $zoneId = $customer->zone_id;
+            $branchId = $customer->branch_id;
         } else {
             $zoneId = TenantContext::currentZoneId();
+            $branchId = $zoneId !== null
+                ? Zone::query()->whereKey($zoneId)->value('branch_id')
+                : BranchAttribution::forUserId($submittedByUserId);
         }
 
         $complaint = $this->complaints->create($submittedByUserId, [
             ...$data->toAttributes(),
             'customer_id' => $customerId,
             'zone_id' => $zoneId,
-        ]);
+        ], (int) $branchId);
 
         return $complaint->load(['submittedBy', 'customer.zone', 'zone']);
     }

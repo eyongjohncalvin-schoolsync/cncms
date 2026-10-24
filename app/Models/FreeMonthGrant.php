@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
@@ -49,7 +50,7 @@ use Illuminate\Support\Carbon;
 #[RouteKey('uuid')]
 class FreeMonthGrant extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     public const string REASON_INSTALLATION_OFFER = 'installation_offer';
 
@@ -73,14 +74,6 @@ class FreeMonthGrant extends Model
         self::REASON_COMPENSATION => 'Compensation',
         self::REASON_OPENING_BALANCE => 'Carried in at go-live',
     ];
-
-    /**
-     * A grant has no direct zone — branch is reached through its Customer.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return 'customer.zone';
-    }
 
     protected function casts(): array
     {
@@ -161,5 +154,11 @@ class FreeMonthGrant extends Model
     {
         // `!Y-m` pins the parse to the 1st — see the !Y-m gotcha.
         return Carbon::createFromFormat('!Y-m', $period)->addMonthsNoOverflow($months)->format('Y-m');
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
     }
 }

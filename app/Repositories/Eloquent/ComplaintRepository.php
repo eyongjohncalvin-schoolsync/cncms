@@ -42,10 +42,12 @@ class ComplaintRepository implements ComplaintRepositoryInterface
      * it's set via direct property assignment instead, same shape as
      * PaymentVerification's verified_by writes elsewhere in this codebase.
      */
-    public function create(int $submittedBy, array $attributes): Complaint
+    public function create(int $submittedBy, array $attributes, int $branchId): Complaint
     {
         $complaint = new Complaint($attributes);
         $complaint->submitted_by = $submittedBy;
+        // Derived by ComplaintService (the customer's, the agent's zone's, or the submitter's branch) — never from input.
+        $complaint->branch_id = $branchId;
         $complaint->save();
 
         return $complaint;
