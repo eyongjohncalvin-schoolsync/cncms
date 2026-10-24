@@ -198,14 +198,29 @@ remembered is what the v1 doc warned about, so v2 enforces it structurally:
      save without one once the column is NOT NULL.
    - `updating`: refuses to change `branch_id` (immutability; moves go through
      their own services, which use an explicit bypass).
-   - a **global scope** that applies **only when a fenced `TenantContext` is
-     bound** (unfenced users, artisan commands and queue jobs → no-op). This
-     reverses v1's "no global scope": with ~30 branch-owned tables and
-     ~50 entry points, fail-closed beats remembered-every-time. Explicit
-     `withoutBranchScope()` is allowed only in a few named system services.
+   - a **global scope** (`App\Models\Scopes\BranchScope`) that applies **only
+     when a fenced `TenantContext` is bound**, or the switcher narrows the view
+     (unfenced users, artisan commands and queue jobs → no-op). This reverses
+     v1's "no global scope": fail-closed beats remembered-every-time.
+     **As built (P2):** the scope is on *whole-branch records* — customers,
+     agents, zones, complaints, bons, expenditures, cash accounts, movements,
+     day closes, remittances, receipt books, devices, technician payouts.
+     **Customer history is deliberately not globally scoped** (payments, bills,
+     charges, subscriptions, free months, adjustments, opening balances,
+     messages, verifications, receipts): it keeps the branch where it happened
+     while the customer can move, so "this customer's history" must stay
+     whole (a scoped history broke arrears for a moved customer in the
+     audit). History is fenced on lists (repositories), counts, searches and
+     URLs instead, and always resolves its customer.
+   - Named, commented bypasses (`withoutGlobalScope(BranchScope::class)`) only
+     where something is company-wide by design: daily bon limit and monthly
+     cap (D10), the billing run / publish / opening balances (D5 — also gated
+     to `TenantContext::actsForCompany()`), headquarters wallets, a person's
+     own till, sync idempotency checks, a receipt leaf's book.
    - `scopeForBranch(?int)` for the HQ switcher and reports.
-2. **Route model binding** uses the same scope (replaces
-   `ScopesRouteBindingToBranch`'s zone joins) — another branch's uuid is a 404.
+2. **Route model binding**: whole-branch records through the global scope;
+   history through `ScopesRouteBindingToBranch` on the row's own column —
+   another branch's uuid is a 404.
 3. **`ScopesByBranch` repository concern** becomes `where('branch_id', …)`;
    all `whereHas('zone' / 'customer.zone')` chains are removed.
 4. **Architecture test**: every model with a `branch_id` column uses
