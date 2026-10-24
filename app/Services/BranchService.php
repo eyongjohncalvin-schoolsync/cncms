@@ -78,6 +78,12 @@ class BranchService
      */
     public function delete(Branch $branch): void
     {
+        if ($branch->is_headquarters) {
+            throw ValidationException::withMessages([
+                'branch' => ['Headquarters cannot be deleted.'],
+            ]);
+        }
+
         try {
             DB::transaction(fn () => $this->branches->delete($branch));
         } catch (QueryException $e) {

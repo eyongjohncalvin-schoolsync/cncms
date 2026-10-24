@@ -15,6 +15,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\VoucherApproval;
+use App\Support\BranchAttribution;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
@@ -188,6 +189,7 @@ class VoucherService
             'required_approver_ids' => $approvers['ids'],
             'attachment_path' => $attachment?->store('vouchers', $this->disk()),
             'requested_by' => $requester->id,
+            'branch_id' => BranchAttribution::forUser($requester),
             'from_collections' => $fromCollections,
             'local_uuid' => $data['local_uuid'] ?? null,
             'recorded_by_device' => $data['recorded_by_device'] ?? null,
@@ -437,6 +439,7 @@ class VoucherService
                 'spent_at' => $today,
                 'notes' => "Money returned on bon {$locked->number}",
                 'voucher_id' => $locked->id,
+                'branch_id' => $locked->branch_id,
                 'source' => Expenditure::SOURCE_ADJUSTMENT,
                 'corrects_expenditure_id' => $original->id,
                 'relates_to_period' => $original->period() !== BusinessTimezone::periodOf($today) ? $original->period() : null,
@@ -584,6 +587,7 @@ class VoucherService
             'notes' => "Paid to {$receivedByName} on voucher {$voucher->number}",
             'receipt_path' => $voucher->receipt_path,
             'voucher_id' => $voucher->id,
+            'branch_id' => $voucher->branch_id,
             'source' => Expenditure::SOURCE_VOUCHER,
             'relates_to_period' => $paidPeriod !== null && $paidPeriod !== BusinessTimezone::periodOf($today) ? $paidPeriod : null,
         ]);

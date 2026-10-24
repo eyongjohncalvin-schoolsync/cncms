@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'requested_by', 'approved_at', 'rejected_by', 'rejection_reason',
     'paid_by', 'paid_at', 'paid_from_account_id', 'payment_method', 'payment_reference', 'received_by_name', 'signed_copy_path', 'expenditure_id',
     'settle_due_on', 'spent_amount', 'returned_amount', 'settled_by', 'settled_at', 'settlement_note',
-    'from_collections', 'remittance_id', 'local_uuid', 'recorded_by_device', 'receipt_path',
+    'from_collections', 'remittance_id', 'local_uuid', 'recorded_by_device', 'receipt_path', 'branch_id',
 ])]
 #[RouteKey('uuid')]
 class Voucher extends Model
@@ -64,6 +64,12 @@ class Voucher extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(ExpenseCategory::class, 'expense_category_id');
+    }
+
+    /** The requester's branch (headquarters when unfenced), set by VoucherService. */
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function paidFrom(): BelongsTo

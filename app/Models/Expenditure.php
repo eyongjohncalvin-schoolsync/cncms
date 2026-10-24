@@ -23,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'category_id', 'user_id', 'amount', 'description', 'receipt_path', 'spent_at',
     'notes', 'recorded_offline', 'recorded_by_device', 'local_uuid',
     'voucher_id', 'source', 'status', 'relates_to_period', 'corrects_expenditure_id',
-    'edit_reason', 'void_reason', 'voided_by', 'voided_at',
+    'edit_reason', 'void_reason', 'voided_by', 'voided_at', 'branch_id',
 ])]
 #[RouteKey('uuid')]
 class Expenditure extends Model
@@ -50,6 +50,12 @@ class Expenditure extends Model
             'recorded_offline' => 'boolean',
             'voided_at' => 'datetime',
         ];
+    }
+
+    /** The branch this spending belongs to — copied from its bon. */
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function category(): BelongsTo

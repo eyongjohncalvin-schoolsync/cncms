@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Branch;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
 use App\Models\User;
+use App\Support\BranchAttribution;
 use App\Support\BusinessTimezone;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -42,7 +44,7 @@ class CashBookService
     {
         return CashAccount::query()->firstOrCreate(
             ['kind' => CashAccount::KIND_TILL, 'holder_user_id' => $user->id],
-            ['name' => "Till — {$user->name}", 'is_active' => true],
+            ['name' => "Till — {$user->name}", 'is_active' => true, 'branch_id' => BranchAttribution::forUser($user)],
         );
     }
 
@@ -53,7 +55,7 @@ class CashBookService
 
         return CashAccount::query()->firstOrCreate(
             ['kind' => CashAccount::KIND_MOBILE_MONEY, 'provider' => $provider, 'is_active' => true],
-            ['name' => $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet'],
+            ['name' => $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet', 'branch_id' => Branch::headquartersId()],
         );
     }
 
@@ -65,6 +67,7 @@ class CashBookService
             'provider' => $provider,
             'account_number' => $accountNumber,
             'is_active' => true,
+            'branch_id' => Branch::headquartersId(),
         ]);
     }
 

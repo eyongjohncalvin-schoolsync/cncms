@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * wallets. Its balance is never stored — it is the sum of its
  * CashMovement rows (App\Services\CashBookService::balance()).
  */
-#[Fillable(['kind', 'name', 'provider', 'account_number', 'holder_user_id', 'is_active'])]
+#[Fillable(['kind', 'name', 'provider', 'account_number', 'holder_user_id', 'is_active', 'branch_id'])]
 #[RouteKey('uuid')]
 class CashAccount extends Model
 {
@@ -52,6 +52,12 @@ class CashAccount extends Model
     public function holder(): BelongsTo
     {
         return $this->belongsTo(User::class, 'holder_user_id');
+    }
+
+    /** A till's branch is its holder's when it was opened; wallets, safe and bank are headquarters'. */
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function isTill(): bool
