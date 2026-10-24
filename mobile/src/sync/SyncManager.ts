@@ -45,6 +45,7 @@ import {
 } from '../db/installations';
 import { refreshFormData } from '../db/formCache';
 import { OLD_SERVER_MESSAGE, serverAcceptsInstallations, type FieldInstallationItem } from '../utils/fieldInstallation';
+import { isFinalUploadFailure, withJitter } from '../utils/syncTuning';
 import type { SyncPushBonRequestItem, SyncPushComplaintItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
 
 /**
@@ -65,7 +66,9 @@ import type { SyncPushBonRequestItem, SyncPushComplaintItem, SyncPushPaymentItem
 // 5s / 15s / 45s / 2m / 5m — offline-sync-strategy.md §6's backoff table,
 // applied only to whole-sync-attempt network failures (not per-item
 // validation failures, which are surfaced immediately and retried on the
-// next natural trigger instead of a tight timer loop).
+// next natural trigger instead of a tight timer loop). Each delay is spread
+// ±20% (withJitter) so phones that lost the network together don't all
+// retry in the same second. After the last step the periodic timer takes over.
 const RETRY_SCHEDULE_MS = [5_000, 15_000, 45_000, 120_000, 300_000];
 
 // Within the design doc's "5-10 min" periodic in-foreground window.
@@ -74,6 +77,10 @@ const PERIODIC_INTERVAL_MS = 5 * 60 * 1000;
 class SyncManagerImpl {
     private started = false;
     private inFlight = false;
+    /** A trigger arrived mid-cycle: run exactly one more cycle when this one ends. */
+    private pendingRerun = false;
+    /** Receipt photo uploads run apart from the main cycle so a slow 3G upload never holds up push/pull. */
+    private uploadsInFlight = false;
     private isOnline = true;
     private retryAttempt = 0;
     private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -164,8 +171,8 @@ class SyncManagerImpl {
      * within the same screen visit; see mobile-app-react-native.md §5 — the
      * badge must still start amber unconditionally, this only ever
      * accelerates a possible flip, never guarantees one. No-op while
-     * offline; syncNow()'s own `inFlight` guard makes this safe to call
-     * even if a sync happens to already be running.
+     * offline; if a sync is already running, syncNow() queues exactly one
+     * follow-up cycle so this write is never silently skipped.
      */
     notifyLocalWrite(): void {
         if (this.isOnline) {
@@ -200,20 +207,34 @@ class SyncManagerImpl {
         });
     }
 
+    /**
+     * One sync cycle. The critical, cheap steps (push, pull, acknowledgements)
+     * run first; receipt photo uploads are then started in the background
+     * (startReceiptUploads) so a slow upload never delays the next push/pull.
+     *
+     * A trigger that arrives while a cycle is running (a local write, a
+     * reconnect, a manual tap) is not dropped: it sets `pendingRerun`, and
+     * exactly one more cycle runs as soon as the current one finishes.
+     */
     async syncNow(trigger: string): Promise<void> {
         if (this.inFlight) {
+            this.pendingRerun = true;
+
             return;
         }
 
         this.inFlight = true;
+        let succeeded = false;
 
         try {
             await this.push();
             await this.pull();
-            await this.uploadPendingReceipts();
             await this.flushPendingAcknowledgements();
+            this.startReceiptUploads();
             await this.refreshReceiptStock();
             await this.refreshFormCache();
+
+            succeeded = true;
 
             this.retryAttempt = 0;
 
@@ -238,6 +259,17 @@ class SyncManagerImpl {
             patchSyncState({ syncingProgress: null });
             await this.refreshQueuedCounts();
             this.inFlight = false;
+        }
+
+        // A failed cycle already has a backoff retry scheduled; only rerun
+        // straight away after a successful one, so a dead network isn't
+        // hammered in a tight loop.
+        if (this.pendingRerun) {
+            this.pendingRerun = false;
+
+            if (succeeded) {
+                void this.syncNow('rerun');
+            }
         }
     }
 
@@ -306,7 +338,7 @@ class SyncManagerImpl {
             return;
         }
 
-        const delay = RETRY_SCHEDULE_MS[this.retryAttempt];
+        const delay = withJitter(RETRY_SCHEDULE_MS[this.retryAttempt]);
         this.retryAttempt += 1;
 
         this.retryTimer = setTimeout(() => {
@@ -538,20 +570,45 @@ class SyncManagerImpl {
     }
 
     /**
+     * Kicks off uploadPendingReceipts() without awaiting it. At most one
+     * upload pass runs at a time; a cycle that ends while one is still going
+     * leaves it to finish, and anything it missed is picked up next cycle.
+     */
+    private startReceiptUploads(): void {
+        if (this.uploadsInFlight) {
+            return;
+        }
+
+        this.uploadsInFlight = true;
+
+        void this.uploadPendingReceipts()
+            .catch(() => {
+                // Per-item errors are handled inside; this only keeps a
+                // local DB read failure from becoming an unhandled rejection.
+            })
+            .finally(() => {
+                this.uploadsInFlight = false;
+            });
+    }
+
+    /**
      * Uploads receipt photos for payments that have already synced (real
      * server_uuid) but whose captured local photo hasn't been pushed yet —
      * per offline-sync-strategy.md §4.4, this is always a separate
      * multipart request addressed by entity_type+entity_uuid, never bundled
-     * into push()'s payload. Runs after push()/pull() so a payment that
+     * into push()'s payload. Started after push()/pull() so a payment that
      * just synced THIS cycle is picked up in the same cycle rather than
-     * waiting for the next trigger.
+     * waiting for the next trigger — but in the background (see
+     * startReceiptUploads()), so it never blocks the cycle itself.
      *
      * Best-effort and per-item: one failed upload (still-offline receipt,
      * a transient 500) must never fail the whole sync attempt or block
      * other items — the payment itself is already safely synced either
      * way, so a stuck receipt is an inconvenience, not lost cash. Left
-     * with receipt_server_path still NULL on failure so the next cycle
-     * retries it automatically.
+     * with receipt_server_path still NULL on a retryable failure (offline,
+     * timeout, 5xx) so the next cycle retries it automatically. A 413/422
+     * means the server will never take this file, so it is dropped
+     * (receipt_server_path = '') instead of being re-sent every sync forever.
      */
     private async uploadPendingReceipts(): Promise<void> {
         const pending = await getPaymentsAwaitingReceiptUpload();
@@ -564,14 +621,20 @@ class SyncManagerImpl {
             try {
                 const result = await uploadReceipt('payment', payment.server_uuid, payment.receipt_local_uri);
                 await markPaymentReceiptUploaded(payment.local_uuid, result.receipt_url);
-            } catch {
-                // Swallowed deliberately — see doc comment above.
+            } catch (error) {
+                const status = (error as { response?: { status?: number } })?.response?.status;
+
+                if (isFinalUploadFailure(status)) {
+                    console.warn(`Receipt photo for payment ${payment.local_uuid} refused by the server (HTTP ${status}); not retrying.`);
+                    await markPaymentReceiptUploaded(payment.local_uuid, '');
+                }
+                // Anything else is swallowed deliberately — see doc comment above.
             }
         }
 
         // A bon request's receipt photo: only its requester, only while the
-        // bon is still pending. Once the server refuses for good (403/422),
-        // stop retrying.
+        // bon is still pending. Once the server refuses for good (403, or
+        // 413/422 for a file it will never accept), stop retrying.
         const pendingBonReceipts = await getBonRequestsAwaitingReceiptUpload();
 
         for (const bon of pendingBonReceipts) {
@@ -585,7 +648,8 @@ class SyncManagerImpl {
             } catch (error) {
                 const status = (error as { response?: { status?: number } })?.response?.status;
 
-                if (status === 403 || status === 422) {
+                if (status === 403 || isFinalUploadFailure(status)) {
+                    console.warn(`Receipt photo for bon ${bon.local_uuid} refused by the server (HTTP ${status}); not retrying.`);
                     await markBonReceiptDone(bon.local_uuid, '');
                 }
             }

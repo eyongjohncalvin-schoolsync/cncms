@@ -3,6 +3,7 @@ import { API_BASE_URL } from './config';
 import { getCurrentToken } from '../auth/tokenState';
 import { setMaintenanceState } from '../maintenance/maintenanceStore';
 import { isAnnouncingEndpoint } from '../utils/maintenanceState';
+import { REQUEST_TIMEOUT_MS } from '../utils/syncTuning';
 import type { ApiErrorBody } from '../types/api';
 
 /**
@@ -22,7 +23,7 @@ import type { ApiErrorBody } from '../types/api';
  */
 export const apiClient = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 20000,
+    timeout: REQUEST_TIMEOUT_MS.default,
     headers: {
         Accept: 'application/json',
     },
@@ -94,9 +95,20 @@ export function isMaintenanceError(error: unknown): boolean {
     return axios.isAxiosError<ApiErrorBody>(error) && error.response?.status === 503 && error.response.data?.code === 'MAINTENANCE';
 }
 
+/** HTTP 429 — the server's rate limiter (e.g. too many sign-in attempts). */
+export function isRateLimitError(error: unknown): boolean {
+    return axios.isAxiosError(error) && error.response?.status === 429;
+}
+
 export function extractErrorMessage(error: unknown, fallback = 'Something went wrong.'): string {
     if (isNetworkError(error)) {
         return "Couldn't reach the server.";
+    }
+
+    // Laravel's throttle answers "Too Many Attempts." — say what to do instead
+    // (sign-in, email codes and two-factor are all rate limited).
+    if (isRateLimitError(error)) {
+        return 'Too many attempts. Wait a minute and try again.';
     }
 
     if (axios.isAxiosError<ApiErrorBody>(error) && error.response?.data?.message) {

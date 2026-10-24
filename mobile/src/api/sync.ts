@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { REQUEST_TIMEOUT_MS } from '../utils/syncTuning';
 import type {
     AcknowledgeNotificationResponse,
     ExpenseCategoryListResponse,
@@ -11,7 +12,7 @@ import type {
 } from '../types/api';
 
 export async function pushChanges(body: SyncPushRequestBody): Promise<SyncPushResponse> {
-    const { data } = await apiClient.post<SyncPushResponse>('/sync/push', body);
+    const { data } = await apiClient.post<SyncPushResponse>('/sync/push', body, { timeout: REQUEST_TIMEOUT_MS.sync });
 
     return data;
 }
@@ -19,6 +20,7 @@ export async function pushChanges(body: SyncPushRequestBody): Promise<SyncPushRe
 export async function pullChanges(since: string | null): Promise<SyncPullResponse> {
     const { data } = await apiClient.get<SyncPullResponse>('/sync/pull', {
         params: since ? { since } : undefined,
+        timeout: REQUEST_TIMEOUT_MS.sync,
     });
 
     return data;
@@ -72,6 +74,7 @@ export async function uploadReceipt(
 
     const { data } = await apiClient.post<UploadReceiptResponse>('/sync/upload-receipt', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: REQUEST_TIMEOUT_MS.upload,
     });
 
     return data;

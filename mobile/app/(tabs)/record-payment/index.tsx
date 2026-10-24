@@ -11,6 +11,7 @@ import {
     View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { shrinkReceiptPhoto } from '../../../src/sync/receiptPhoto';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Card } from '../../../src/components/ui/Card';
 import { Button } from '../../../src/components/ui/Button';
@@ -297,7 +298,8 @@ export default function RecordPaymentScreen() {
         const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.6 });
 
         if (!result.canceled && result.assets[0]) {
-            setReceiptUri(result.assets[0].uri);
+            // Shrunk before it is stored, so the queued upload is small.
+            setReceiptUri(await shrinkReceiptPhoto(result.assets[0].uri));
         }
     }
 

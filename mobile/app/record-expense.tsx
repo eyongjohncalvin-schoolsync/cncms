@@ -9,6 +9,7 @@ import { TextInput } from '../src/components/ui/TextInput';
 import { getExpenseCategories } from '../src/db/categories';
 import { insertLocalExpenditure } from '../src/db/expenditures';
 import { syncManager } from '../src/sync/SyncManager';
+import { shrinkReceiptPhoto } from '../src/sync/receiptPhoto';
 import { glyphForCategoryIcon } from '../src/utils/categoryIcons';
 import { validateBonRequestForm, type BonRequestFormErrors } from '../src/utils/validation';
 import { formatFcfa, todayDateOnly } from '../src/utils/format';
@@ -62,7 +63,8 @@ export default function RequestBonScreen() {
         const result = await ImagePicker.launchCameraAsync({ quality: 0.5, allowsEditing: false });
 
         if (!result.canceled && result.assets && result.assets.length > 0) {
-            setPhotoUri(result.assets[0].uri);
+            // Shrunk before it is stored, so the queued upload is small.
+            setPhotoUri(await shrinkReceiptPhoto(result.assets[0].uri));
         }
     }
 
