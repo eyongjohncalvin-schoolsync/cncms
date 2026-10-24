@@ -27,6 +27,8 @@ final readonly class NotificationData
         public string $broadcastScope = 'all',
         public ?int $recipientUserId = null,
         public ?string $recipientRole = null,
+        /** The branch it is about (branches v2 D12); null = company-wide. Derived from the source when not given. */
+        public ?int $branchId = null,
     ) {}
 
     /**
@@ -45,6 +47,7 @@ final readonly class NotificationData
             'broadcast_scope' => $this->broadcastScope,
             'recipient_user_id' => $this->recipientUserId,
             'recipient_role' => $this->recipientRole,
+            'branch_id' => $this->branchId,
         ];
     }
 }

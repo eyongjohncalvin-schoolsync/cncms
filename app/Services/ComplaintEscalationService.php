@@ -137,6 +137,7 @@ class ComplaintEscalationService
                 $this->title(3),
                 $this->body($complaint, 3),
                 $this->link($complaint),
+                branchId: $complaint->branch_id,
             );
 
             ComplaintEscalation::query()->create([
@@ -193,7 +194,7 @@ class ComplaintEscalationService
         $link = $this->link($complaint);
 
         if ($rows->contains(fn (ComplaintEscalation $row): bool => $row->notified_scope === 'all')) {
-            $this->notifications->broadcastToAll('complaint.resolved', 'info', $title, $body, $link);
+            $this->notifications->broadcastToAll('complaint.resolved', 'info', $title, $body, $link, branchId: $complaint->branch_id);
 
             return;
         }
@@ -201,14 +202,14 @@ class ComplaintEscalationService
         $roles = $rows->where('notified_scope', 'role')->pluck('notified_role')->filter()->unique();
 
         foreach ($roles as $role) {
-            $this->notifications->broadcastToRole($role, 'complaint.resolved', 'info', $title, $body, $link);
+            $this->notifications->broadcastToRole($role, 'complaint.resolved', 'info', $title, $body, $link, branchId: $complaint->branch_id);
         }
 
         $userIds = $rows->where('notified_scope', 'user')->pluck('notified_user_id')->filter()->unique();
 
         if ($userIds->isNotEmpty()) {
             User::query()->whereIn('id', $userIds)->get()->each(
-                fn (User $user) => $this->notifications->broadcastToUser($user, 'complaint.resolved', 'info', $title, $body, $link)
+                fn (User $user) => $this->notifications->broadcastToUser($user, 'complaint.resolved', 'info', $title, $body, $link, branchId: $complaint->branch_id)
             );
         }
     }
@@ -260,6 +261,7 @@ class ComplaintEscalationService
                     $this->title(0),
                     $this->body($complaint, 0),
                     $this->link($complaint),
+                    branchId: $complaint->branch_id,
                 );
 
                 ComplaintEscalation::query()->create([
@@ -278,6 +280,7 @@ class ComplaintEscalationService
                 $this->title(0),
                 $this->body($complaint, 0),
                 $this->link($complaint),
+                branchId: $complaint->branch_id,
             );
 
             ComplaintEscalation::query()->create([
@@ -301,6 +304,7 @@ class ComplaintEscalationService
                     $this->title(1),
                     $this->body($complaint, 1),
                     $this->link($complaint),
+                    branchId: $complaint->branch_id,
                 );
 
                 ComplaintEscalation::query()->create([
@@ -331,6 +335,7 @@ class ComplaintEscalationService
                 $this->title(2),
                 $this->body($complaint, 2),
                 $this->link($complaint),
+                branchId: $complaint->branch_id,
             );
 
             ComplaintEscalation::query()->create([

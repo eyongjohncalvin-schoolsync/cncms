@@ -7,8 +7,13 @@ namespace App\Services;
 use App\DataTransferObjects\NotificationData;
 use App\Http\Resources\NotificationResource;
 use App\Jobs\SendPushNotificationJob;
+use App\Models\ArrearsAdjustment;
+use App\Models\Complaint;
 use App\Models\Notification;
+use App\Models\Payment;
+use App\Models\Remittance;
 use App\Models\User;
+use App\Models\Voucher;
 use App\Repositories\Contracts\NotificationRepositoryInterface;
 use App\Support\TenantContext;
 use Illuminate\Support\Facades\Cache;
@@ -67,7 +72,12 @@ class NotificationService
      */
     public function create(NotificationData $data): Notification
     {
-        $notification = $this->notifications->create($data->toAttributes());
+        $attributes = $data->toAttributes();
+        // Branches v2 D12: a notification about one branch's bon, handover,
+        // adjustment or complaint is that branch's (null = company-wide).
+        $attributes['branch_id'] ??= $this->branchOfSource($data->sourceType, $data->sourceUuid);
+
+        $notification = $this->notifications->create($attributes);
 
         SendPushNotificationJob::dispatch($notification->uuid);
 
@@ -90,6 +100,7 @@ class NotificationService
         ?string $link = null,
         ?string $sourceType = null,
         ?string $sourceUuid = null,
+        ?int $branchId = null,
     ): Notification {
         return $this->create(new NotificationData(
             type: $type,
@@ -101,6 +112,7 @@ class NotificationService
             sourceUuid: $sourceUuid,
             broadcastScope: 'user',
             recipientUserId: $user->id,
+            branchId: $branchId,
         ));
     }
 
@@ -125,9 +137,10 @@ class NotificationService
         ?string $link = null,
         ?string $sourceType = null,
         ?string $sourceUuid = null,
+        ?int $branchId = null,
     ): Notification {
         if ($role === 'all') {
-            return $this->broadcastToAll($type, $severity, $title, $body, $link, $sourceType, $sourceUuid);
+            return $this->broadcastToAll($type, $severity, $title, $body, $link, $sourceType, $sourceUuid, $branchId);
         }
 
         return $this->create(new NotificationData(
@@ -140,6 +153,7 @@ class NotificationService
             sourceUuid: $sourceUuid,
             broadcastScope: 'role',
             recipientRole: $role,
+            branchId: $branchId,
         ));
     }
 
@@ -154,6 +168,7 @@ class NotificationService
         ?string $link = null,
         ?string $sourceType = null,
         ?string $sourceUuid = null,
+        ?int $branchId = null,
     ): Notification {
         return $this->create(new NotificationData(
             type: $type,
@@ -164,6 +179,7 @@ class NotificationService
             sourceType: $sourceType,
             sourceUuid: $sourceUuid,
             broadcastScope: 'all',
+            branchId: $branchId,
         ));
     }
 
@@ -188,12 +204,14 @@ class NotificationService
         // 30s TTL is only a backstop so a missed bump can't stick long,
         // keeping the bell near-real-time.
         $key = sprintf(
-            'notifications:feed:v%d:u%d:%s:%d:%d',
+            'notifications:feed:v%d:u%d:%s:%d:%d:b%s',
             $this->feedVersion(),
             $user->id,
             $context->role,
             (int) $isInvestor,
             $limit,
+            // Branches v2 D12: the fence changes what the feed holds.
+            $context->isFenced() ? (string) $context->branchId : 'all',
         );
 
         return Cache::remember($key, now()->addSeconds(30), function () use ($user, $context, $isInvestor, $limit): array {
@@ -243,5 +261,30 @@ class NotificationService
     {
         Cache::add(self::FEED_VERSION_KEY, 0);
         Cache::increment(self::FEED_VERSION_KEY);
+    }
+
+    /**
+     * The branch of what a notification is about (branches v2 D12) — one
+     * indexed lookup by uuid, across branches; null for company-wide sources
+     * (opening balances, month closes) or none.
+     */
+    private function branchOfSource(?string $sourceType, ?string $sourceUuid): ?int
+    {
+        $model = match ($sourceType) {
+            'voucher' => Voucher::class,
+            'remittance' => Remittance::class,
+            'arrears_adjustment' => ArrearsAdjustment::class,
+            'complaint' => Complaint::class,
+            'payment' => Payment::class,
+            default => null,
+        };
+
+        if ($model === null || $sourceUuid === null) {
+            return null;
+        }
+
+        $branchId = $model::query()->withoutGlobalScopes()->where('uuid', $sourceUuid)->value('branch_id');
+
+        return $branchId !== null ? (int) $branchId : null;
     }
 }

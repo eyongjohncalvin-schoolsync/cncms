@@ -22,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Fillable([
     'type', 'severity', 'title', 'body', 'link', 'source_type', 'source_uuid',
-    'broadcast_scope', 'recipient_user_id', 'recipient_role',
+    'broadcast_scope', 'recipient_user_id', 'recipient_role', 'branch_id',
 ])]
 #[RouteKey('uuid')]
 class Notification extends Model
@@ -69,8 +69,17 @@ class Notification extends Model
      * separate $isInvestor flag, never by $role — even if $role somehow
      * were the literal string "investor", that alone would not match.
      */
-    public function matchesAudience(int $userId, string $role, bool $isInvestor): bool
+    /**
+     * @param  ?int  $fenceBranchId  the viewer's branch fence (branches v2 D12):
+     *                               a fenced viewer only gets their branch's and
+     *                               company-wide notifications
+     */
+    public function matchesAudience(int $userId, string $role, bool $isInvestor, ?int $fenceBranchId = null): bool
     {
+        if ($fenceBranchId !== null && $this->branch_id !== null && $this->branch_id !== $fenceBranchId) {
+            return false;
+        }
+
         return match ($this->broadcast_scope) {
             'all' => true,
             'user' => $this->recipient_user_id === $userId,

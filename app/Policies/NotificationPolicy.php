@@ -36,7 +36,7 @@ class NotificationPolicy
 
     public function view(User $user, Notification $notification): bool
     {
-        return $notification->matchesAudience($user->id, $this->context->role, (bool) $this->context->tenantUser->is_investor);
+        return $notification->matchesAudience($user->id, $this->context->role, (bool) $this->context->tenantUser->is_investor, $this->context->isFenced() ? $this->context->branchId : null);
     }
 
     public function acknowledge(User $user, Notification $notification): bool

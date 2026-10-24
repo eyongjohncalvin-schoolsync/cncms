@@ -47,6 +47,10 @@ class CashAlertsDigest extends Command
             $userIds = TenantUser::query()
                 ->where('tenant_id', $tenant->id)
                 ->where(fn ($query) => $query->whereIn('role', $roles)->orWhere('is_investor', true))
+                // Branches v2 D12: the digest covers the whole company, so it goes
+                // to unfenced staff only — never to one branch's manager.
+                ->whereNull('branch_id')
+                ->where('role', '!=', 'agent')
                 ->pluck('user_id');
 
             $recipients = User::query()->whereIn('id', $userIds)->whereNotNull('email')->get();

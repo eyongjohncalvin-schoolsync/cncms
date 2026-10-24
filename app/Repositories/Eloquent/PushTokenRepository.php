@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Repositories\Eloquent;
 
+use App\Models\Agent;
 use App\Models\DevicePushToken;
 use App\Models\Notification;
+use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Repositories\Contracts\PushTokenRepositoryInterface;
 use Illuminate\Support\Collection;
@@ -96,6 +98,12 @@ class PushTokenRepository implements PushTokenRepositoryInterface
             },
             default => $query->whereRaw('1 = 0'),
         };
+
+        // Branches v2 D12: a notification about one branch only reaches that
+        // branch's agents (an agent's branch is their zone's).
+        if ($notification->branch_id !== null) {
+            $query->whereIn('user_id', Agent::query()->withoutGlobalScope(BranchScope::class)->where('branch_id', $notification->branch_id)->whereNotNull('user_id')->select('user_id'));
+        }
 
         return $query->pluck('user_id');
     }

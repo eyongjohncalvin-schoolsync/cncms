@@ -7,6 +7,7 @@ namespace App\Repositories\Eloquent;
 use App\Models\Notification;
 use App\Models\NotificationRecipient;
 use App\Repositories\Contracts\NotificationRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -121,6 +122,16 @@ class NotificationRepository implements NotificationRepositoryInterface
      */
     private function audienceScope(Builder $query, int $userId, string $role, bool $isInvestor): Builder
     {
+        // Branches v2 D12: a fenced viewer gets their branch's notifications and
+        // company-wide ones (branch_id null) — never another branch's. Mirrors
+        // Notification::matchesAudience()'s $fenceBranchId. Feeds are only ever
+        // built for the current request's user, whose fence is bound here.
+        $context = app()->bound(TenantContext::class) ? app(TenantContext::class) : null;
+
+        if ($context?->isFenced()) {
+            $query->where(fn (Builder $q) => $q->whereNull('branch_id')->orWhere('branch_id', $context->branchId));
+        }
+
         return $query->where(function (Builder $q) use ($userId, $role, $isInvestor) {
             $q->where('broadcast_scope', 'all')
                 ->orWhere(fn (Builder $inner) => $inner->where('broadcast_scope', 'user')->where('recipient_user_id', $userId))
