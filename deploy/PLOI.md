@@ -39,7 +39,9 @@ Then, on the server in Ploi:
   `bcmath`, `mbstring` are enabled. `zip` is needed by `tenant:import` and the
   XLSX exports.
 - **Databases → create** a database `cncms` with its own user. Keep the
-  password for `.env`.
+  password for `.env`. **Never put the `postgres` superuser in production
+  `.env`:** a superuser bypasses every database permission (and any future
+  row-level security), so a single app bug could reach everything.
 - **PHP settings:** `memory_limit` at least 512M,
   `upload_max_filesize`/`post_max_size` at least 30M (customer imports).
 

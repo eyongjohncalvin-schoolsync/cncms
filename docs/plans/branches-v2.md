@@ -256,14 +256,16 @@ Roles and permissions, expense categories, document numbering (bon/receipt
 numbers carry the branch `code` prefix instead of separate counters), the
 billing period lock, and identity (one login per person, across transfers).
 
-## 11. Remaining questions (small, can be answered during build)
+## 11. Further decisions (owner agreed, 2026-10-24)
 
-1. Bon limits (single bon, daily) — the same company-wide numbers for every
-   branch (proposed), or per-branch limits?
-2. When a customer moves town mid-month: proposed — the new branch bills from
-   the **next** period; the current month stays with the old branch.
-3. Who receives a branch's alerts: proposed — that branch's manager + owner +
-   investors; never another branch's manager.
+| # | Decision |
+|---|---|
+| D10 | Bon limits (single bon, daily) are the **same company-wide numbers for every branch**, so a new branch never multiplies the allowance. |
+| D11 | A customer who moves town mid-month: the **new branch bills from the next period**; the current month stays with the old branch. |
+| D12 | A branch's alerts go to **that branch's manager + owner + investors** — never to another branch's manager. |
+| D13 | **Fencing is enforced in the application** (§5), not with Postgres row-level security. RLS may be added later on the most sensitive tables (payments, cash movements, vouchers) as a second lock; the per-table `branch_id` keeps each policy a one-liner. |
+| D14 | **Production never connects as a superuser** — the app uses its own `cncms` role (already so in `deploy/PLOI.md` and `deploy/scripts/provision.sh`). If RLS is added, the tables also need `FORCE ROW LEVEL SECURITY` (the `cncms` role owns them) and the branch must be set with `SET LOCAL` per transaction. |
+| D15 | **Standing bar for every phase: no known vulnerability and no avoidable slow query ships.** Each phase ends with a security review of its diff (fencing, mass assignment, authorization, input validation) and an `EXPLAIN` check of its new or changed hot queries. |
 
 ## 12. Build phases (each ends green and shippable; nothing visible changes until P2)
 
@@ -290,4 +292,4 @@ Square per-location price overrides — squareup.com/help/us/en/article/8242 ·
 Workday grades — doc.workday.com ·
 Citus multi-tenant modelling — docs.citusdata.com/en/stable/use_cases/multi_tenant.html ·
 PostgreSQL multicolumn indexes, RLS, partitioning — postgresql.org/docs/current ·
-Laravel lazy-loading prevention — laravel.com/docs/12.x/eloquent-relationships
+Laravel 13 lazy-loading prevention — laravel.com/docs/13.x/eloquent-relationships#preventing-lazy-loading
