@@ -145,20 +145,24 @@ in 2026-08; `user_activitylogs` is unused.)
 
 ### 4.6 Settings and prices (D4)
 
-- **`branch_settings`** — one optional row per branch, every column nullable =
-  "inherit from HQ": `momo_mtn`, `momo_orange`, `phone`, `email`, `address`,
-  `relocation_fee`, `reinstallation_fee`, `reconnection_fine`, bill/receipt footer.
-- **`branch_prices`** — sparse overrides: `branch_id`, exactly one of
-  `service_id | service_variant_id | installation_offer_id` (real FKs + a CHECK
-  that exactly one is set), `price`, `reason` (required), `set_by`,
-  `effective_from`. Unique per (branch, target, effective_from). The previous
-  rows are the price history.
-- **Resolution** (one service, `App\Support\BranchSettings` / `BranchPrices`):
-  `branch override ?? HQ value`. Loaded **once per branch per request/job** into
-  keyed maps and cached per (tenant, branch); never one query per customer.
-  `Company::cached()` stays the HQ record; per-branch values are read through
-  `BranchSettings::for($branchId)`, and queue jobs pass the branch id
-  explicitly (they have no request context).
+- **Branch details (built, P3a)** — nullable columns on `branches` itself
+  (one set per branch, no join): `code`, `location`, `phone`, `email`,
+  `tech_number`, `momo_number`, `momo_name`, `reconnection_fine`,
+  `relocation_fee`, `reinstallation_fee`; null = inherit the company row.
+  Read through `Company::forBranch($branchId)` — the HQ record with the
+  branch's overrides laid on top, read-only — using the branch of the
+  customer / payment / receipt book the document is about.
+- **`branch_prices` (built, P3b)** — append-only changes: `branch_id`, exactly
+  one of `service_id | service_variant_id | installation_offer_id` (real FKs +
+  CHECK), `price` (null = back to HQ), `reason` (required), `set_by`. The
+  latest row per target is current and takes effect immediately; the rows are
+  the price history. (Future-dated prices were left out — not needed yet.)
+- **Resolution** (`App\Support\BranchPrices`): one query per branch per
+  process, then in-memory lookups; never one query per customer. Forms use the
+  customer's branch, or the branch being worked in.
+- **Who sets them:** `branches.manage` for any branch; the new
+  `branches.settings` permission (admin, manager) for one's own branch;
+  headquarters has none — its values are the company settings.
 - **Repricing:** a branch override reprices that branch's subscribers the same
   way an HQ price change reprices everyone today
   (`CustomerSubscriptionService`), and an HQ change no longer touches
