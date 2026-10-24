@@ -13,9 +13,11 @@ use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
 use App\Services\FreeMonthGrantService;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -80,7 +82,25 @@ class AppServiceProvider extends ServiceProvider
         // tenancy transitions bounds any staleness to a single job/test.
         Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => Company::flushMemo());
 
+        $this->preventLazyLoading();
+
         $this->configureRateLimiting();
+    }
+
+    /**
+     * N+1 guard (docs/plans/branches-v2.md §6): a lazy-loaded relation fails
+     * the test suite, is only logged locally (the local app runs on real
+     * data and must keep working), and is ignored in production.
+     */
+    private function preventLazyLoading(): void
+    {
+        Model::preventLazyLoading(! $this->app->isProduction());
+
+        if (! $this->app->runningUnitTests()) {
+            Model::handleLazyLoadingViolationUsing(static function (Model $model, string $relation): void {
+                Log::warning('Lazy loading ['.$relation.'] on ['.$model::class.'].');
+            });
+        }
     }
 
     /**

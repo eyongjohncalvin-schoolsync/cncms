@@ -102,7 +102,9 @@ class PaymentVerificationService
 
             // An installation instalment approved or rejected may settle or
             // re-open its charge (docs/plans/installation-and-promotions.md).
-            $payment->customerCharge?->refreshStatus();
+            if ($payment->customer_charge_id !== null) {
+                $payment->loadMissing('customerCharge')->customerCharge?->refreshStatus();
+            }
         });
 
         $this->forgetShowCache($payment->uuid);
@@ -148,7 +150,7 @@ class PaymentVerificationService
 
         // One query for the whole selection (with everything verify() and
         // receipt issuing read) rather than a lookup per payment.
-        $paymentsByUuid = $this->payments->findManyByUuids($paymentUuids, ['customer.zone.branch', 'verification', 'receipt']);
+        $paymentsByUuid = $this->payments->findManyByUuids($paymentUuids, ['customer.zone.branch', 'verification', 'receipt', 'customerCharge']);
 
         foreach ($paymentUuids as $uuid) {
             $payment = $paymentsByUuid->get($uuid);

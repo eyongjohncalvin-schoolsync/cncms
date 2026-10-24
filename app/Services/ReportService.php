@@ -16,6 +16,7 @@ use App\Models\FreeMonthGrant;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
+use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Support\BusinessTimezone;
@@ -602,7 +603,9 @@ class ReportService
             ->values()
             ->all();
 
-        $users = User::query()->pluck('name', 'id');
+        // This tenant's staff only — users is the central table shared by every tenant.
+        $tenantUserIds = TenantUser::query()->where('tenant_id', (string) tenant()?->getTenantKey())->pluck('user_id');
+        $users = User::query()->whereIn('id', $tenantUserIds)->pluck('name', 'id');
         $byUser = [];
         $count = function (string $column, string $key, $query) use (&$byUser, $users): void {
             foreach ($query->groupBy($column)->selectRaw("{$column} as user_id, count(*) as n")->get() as $row) {

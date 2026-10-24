@@ -240,6 +240,7 @@ class FieldInstallationService
             $customer = Customer::query()->with('zone')->whereKey($locked->customer_id)->lockForUpdate()->firstOrFail();
 
             $payments = Payment::query()
+                ->with(['verification', 'customerCharge'])
                 ->where('field_installation_id', $locked->id)
                 ->where('verification_status', '!=', 'rejected')
                 ->get();

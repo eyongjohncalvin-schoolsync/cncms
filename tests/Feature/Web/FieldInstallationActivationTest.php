@@ -241,7 +241,7 @@ class FieldInstallationActivationTest extends TestCase
         $this->post("/field-installations/{$field->uuid}/reject", ['reason' => 'Customer already has an account'])
             ->assertRedirect('/customers?pending_activation=1');
 
-        $payments = Payment::query()->where('field_installation_id', $field->id)->get();
+        $payments = Payment::query()->with('receipt')->where('field_installation_id', $field->id)->get();
         $this->assertCount(2, $payments);
         $this->assertTrue($payments->every(fn (Payment $p): bool => $p->verification_status === 'rejected'));
         $this->assertTrue($payments->every(fn (Payment $p): bool => $p->receipt->status === PaymentReceipt::STATUS_VOID));

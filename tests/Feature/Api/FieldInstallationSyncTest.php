@@ -90,7 +90,7 @@ class FieldInstallationSyncTest extends TestCase
         $this->assertSame(1, $field->proposal['service_plans'][0]['free_months']);
         $this->assertSame($charge->id, $field->customer_charge_id);
 
-        $payments = Payment::query()->where('field_installation_id', $field->id)->orderBy('id')->get();
+        $payments = Payment::query()->with('receipt')->where('field_installation_id', $field->id)->orderBy('id')->get();
         $this->assertSame(['subscription', 'installation'], $payments->pluck('purpose')->all());
         $this->assertSame(['5000.00', '10000.00'], $payments->map(fn (Payment $p): string => (string) $p->amount)->all());
         $this->assertEquals([['service_id' => $this->tv->id, 'months' => 2, 'rate' => '2500.00']], $payments[0]->service_months);

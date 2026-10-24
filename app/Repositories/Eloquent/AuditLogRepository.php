@@ -39,7 +39,7 @@ class AuditLogRepository implements AuditLogRepositoryInterface
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->scoped($filters)
-            ->with('user')
+            ->with(['user', 'impersonator'])
             ->latest('created_at')
             ->paginate($perPage);
     }
