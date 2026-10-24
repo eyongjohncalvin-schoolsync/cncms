@@ -23,7 +23,6 @@ class StoreZoneRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:25', 'unique:zones,name'],
-            'town' => ['nullable', 'string', 'max:25'],
             // Branches v2: a fenced manager's zones are always in their own branch.
             'branch_uuid' => ['nullable', 'uuid', 'exists:branches,uuid', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
         ];

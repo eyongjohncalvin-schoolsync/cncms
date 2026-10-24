@@ -18,7 +18,7 @@ export type BulkDeleteZonesTarget =
 interface PreviewZone {
     uuid: string;
     name: string;
-    town: string;
+    branch_name: string | null;
     customer_count: number;
     agent_count: number;
     kept_reason: string | null;
@@ -181,7 +181,7 @@ export function BulkDeleteZonesModal({
                                             >
                                                 {zone.name}{" "}
                                                 <span className="text-slate-500">
-                                                    · {zone.town}
+                                                    {zone.branch_name ? `· ${zone.branch_name}` : ''}
                                                 </span>
                                             </li>
                                         ))}

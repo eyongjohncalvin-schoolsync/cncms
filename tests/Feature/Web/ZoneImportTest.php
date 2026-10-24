@@ -7,6 +7,7 @@ namespace Tests\Feature\Web;
 use App\Models\TenantUser;
 use App\Models\Upload;
 use App\Models\User;
+use App\Models\Zone;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
@@ -89,8 +90,9 @@ class ZoneImportTest extends TestCase
                 && $import['failed_count'] === 0;
         });
 
-        $this->assertDatabaseHas('zones', ['name' => 'ZIMP-A', 'town' => 'KUMBA 3']);
-        $this->assertDatabaseHas('zones', ['name' => 'ZIMP-B', 'town' => 'KUMBA 3']);
+        // An older sheet's town column is accepted and ignored (a zone's town is its branch's).
+        $this->assertDatabaseHas('zones', ['name' => 'ZIMP-A', 'town' => null]);
+        $this->assertDatabaseHas('zones', ['name' => 'ZIMP-B', 'town' => null]);
 
         $upload = Upload::query()->where('type', 'zones')->latest('id')->first();
         $this->assertNotNull($upload);
@@ -118,7 +120,7 @@ class ZoneImportTest extends TestCase
         });
 
         // The duplicate did not create a second row for the same name.
-        $this->assertSame(1, \App\Models\Zone::query()->where('name', 'ZIMP-DUP')->count());
+        $this->assertSame(1, Zone::query()->where('name', 'ZIMP-DUP')->count());
         $this->assertDatabaseHas('zones', ['id' => $existing->id, 'name' => 'ZIMP-DUP']);
         $this->assertDatabaseHas('zones', ['name' => 'ZIMP-NEW']);
     }

@@ -205,7 +205,6 @@ export type SuspendReason = 'tv_problem' | 'poor_service' | 'customer_request' |
 export interface Zone {
     uuid: string;
     name: string;
-    town: string;
     customer_count?: number;
     /** Active agents currently assigned to this zone. Populated on Agents/Index for the "Change Zone" quick action. */
     agent_count?: number;
@@ -664,7 +663,7 @@ export interface CustomerOneOffCharges {
     can_reinstall: boolean;
     can_record_payment: boolean;
     default_fees: { relocation: string | null; reinstallation: string | null };
-    zones: { uuid: string; name: string; town: string }[];
+    zones: { uuid: string; name: string; branch_name?: string | null }[];
 }
 
 export type FreeMonthGrantStatus = 'awaiting_installation_payment' | 'pending_approval' | 'approved' | 'rejected' | 'cancelled';

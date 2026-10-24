@@ -26,7 +26,7 @@ export default function ZonesEdit({ zone, branches }: ZonesEditProps) {
 
             <div className="animate-fade-up mb-6">
                 <h2 className="font-display text-2xl text-slate-900">Edit {zone.name}</h2>
-                <p className="mt-1 text-sm text-slate-500">Update this zone's name and town.</p>
+                <p className="mt-1 text-sm text-slate-500">Update this zone's name and branch.</p>
             </div>
 
             <Card className="animate-fade-up max-w-md" style={{ animationDelay: '0.05s' }}>
@@ -45,7 +45,6 @@ export default function ZonesEdit({ zone, branches }: ZonesEditProps) {
                                     error={errors.name}
                                     required
                                 />
-                                <TextInput id="town" name="town" label="Town" defaultValue={zone.town} error={errors.town} />
 
                                 {branches.length > 1 && (
                                     <SelectInput

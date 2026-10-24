@@ -30,6 +30,15 @@ class Zone extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    /**
+     * Where the zone is: its branch's name (a branch is a town, branches v2).
+     * From the per-request branch memo — no query per zone.
+     */
+    public function branchName(): ?string
+    {
+        return $this->branch_id !== null ? Branch::allMemoized()->get($this->branch_id)?->name : null;
+    }
+
     public function customers(): HasMany
     {
         return $this->hasMany(Customer::class);

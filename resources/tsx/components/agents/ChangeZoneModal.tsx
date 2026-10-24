@@ -92,7 +92,7 @@ export function ChangeZoneModal({ agent, zones, onClose }: { agent: Agent | null
                         <option value="">Select a zone</option>
                         {zones.map((zone) => (
                             <option key={zone.uuid} value={zone.uuid}>
-                                {zone.name} ({zone.town})
+                                {zone.name}{zone.branch_name ? ` (${zone.branch_name})` : ''}
                             </option>
                         ))}
                     </SelectInput>
@@ -101,7 +101,7 @@ export function ChangeZoneModal({ agent, zones, onClose }: { agent: Agent | null
                         <div className="flex flex-col gap-3">
                             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                                 <p className="font-medium text-slate-900">
-                                    {selectedZone.name} ({selectedZone.town})
+                                    {selectedZone.name}{selectedZone.branch_name ? ` (${selectedZone.branch_name})` : ''}
                                 </p>
                                 <p className="mt-1 text-slate-600">
                                     {destinationCustomerCount} customer{destinationCustomerCount === 1 ? '' : 's'}

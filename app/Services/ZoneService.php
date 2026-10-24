@@ -133,7 +133,7 @@ class ZoneService
      *
      * @param  array<int, string>|null  $uuids
      * @param  array<string, mixed>  $filters
-     * @return array{zones: array<int, array{uuid: string, name: string, town: string, customer_count: int, agent_count: int, kept_reason: string|null}>, truncated: bool}
+     * @return array{zones: array<int, array{uuid: string, name: string, branch_name: ?string, customer_count: int, agent_count: int, kept_reason: string|null}>, truncated: bool}
      *
      * @throws ValidationException When an explicit uuid is unknown or outside the caller's branch.
      */
@@ -153,7 +153,7 @@ class ZoneService
                 ->map(fn (Zone $zone): array => [
                     'uuid' => $zone->uuid,
                     'name' => $zone->name,
-                    'town' => $zone->town,
+                    'branch_name' => $zone->branchName(),
                     'customer_count' => (int) $zone->customers_count,
                     'agent_count' => (int) $zone->agents_count,
                     'kept_reason' => $this->keptReason($zone),

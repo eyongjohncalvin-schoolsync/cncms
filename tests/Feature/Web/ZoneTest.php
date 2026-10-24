@@ -106,10 +106,11 @@ class ZoneTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page->component('Zones/Edit')->where('zone.uuid', $zone->uuid));
 
-        $response = $this->patch("/zones/{$zone->uuid}", ['town' => 'UPDATED TOWN']);
+        // A zone's town is its branch's now: a sent town is ignored.
+        $response = $this->patch("/zones/{$zone->uuid}", ['name' => 'UPDATED NAME', 'town' => 'UPDATED TOWN']);
 
         $response->assertRedirect('/zones');
-        $this->assertDatabaseHas('zones', ['id' => $zone->id, 'town' => 'UPDATED TOWN']);
+        $this->assertDatabaseHas('zones', ['id' => $zone->id, 'name' => 'UPDATED NAME', 'town' => $zone->town]);
     }
 
     public function test_super_can_delete_a_zone(): void

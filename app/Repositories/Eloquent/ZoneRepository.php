@@ -37,7 +37,7 @@ class ZoneRepository implements ZoneRepositoryInterface
      */
     public function all(): Collection
     {
-        return Zone::query()->withoutGlobalScope(BranchScope::class)->orderBy('name')->get(['id', 'uuid', 'name', 'town', 'branch_id']);
+        return Zone::query()->withoutGlobalScope(BranchScope::class)->orderBy('name')->get(['id', 'uuid', 'name', 'branch_id']);
     }
 
     public function findByUuid(string $uuid): ?Zone

@@ -27,7 +27,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 /**
  * Web (session-auth, Inertia) counterpart to Api\ZoneController — see
  * CustomerController's doc comment for the shared rationale. Zones are a
- * simple two-field resource (name, town), so there is no dedicated show
+ * simple resource (name, branch), so there is no dedicated show
  * page — index/create/edit/destroy only.
  */
 class ZoneController extends Controller
@@ -217,14 +217,13 @@ class ZoneController extends Controller
     }
 
     /**
-     * @return array{uuid: string, name: string, town: string, customer_count: int|null, branch_uuid: string|null, branch_name: string|null}
+     * @return array{uuid: string, name: string, customer_count: int|null, branch_uuid: string|null, branch_name: string|null}
      */
     private function shapeZone(Zone $zone): array
     {
         return [
             'uuid' => $zone->uuid,
             'name' => $zone->name,
-            'town' => $zone->town,
             'customer_count' => $zone->customers_count ?? null,
             'branch_uuid' => $zone->branch?->uuid,
             'branch_name' => $zone->branch?->name,

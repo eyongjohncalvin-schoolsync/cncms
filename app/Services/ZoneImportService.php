@@ -72,16 +72,17 @@ final class ZoneImportService
             // Heading row is row 1, so the first data row is row 2.
             $rowNumber = $index + 2;
 
+            // A zone's town is its branch's (branches v2) — an older sheet's
+            // `town` column is ignored.
             $name = $this->clean($row['name'] ?? null);
-            $town = $this->clean($row['town'] ?? null);
 
             // A wholly blank row (trailing spreadsheet artifact) isn't a
             // real entry — skip it without reporting it as a failure.
-            if ($name === null && $town === null) {
+            if ($name === null) {
                 continue;
             }
 
-            $validator = Validator::make(['name' => $name, 'town' => $town], $rules);
+            $validator = Validator::make(['name' => $name], $rules);
 
             if ($validator->fails()) {
                 $failed[$rowNumber] = $validator->errors()->first();

@@ -10,7 +10,7 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
 /**
  * Thin maatwebsite/excel adapter for zone_upload.xlsx — see
  * cncms-context's "Bulk Import Formats" section for the two-column
- * (name, town) layout. All the actual row validation/creation logic lives
+ * (name) layout. All the actual row validation/creation logic lives
  * in App\Services\ZoneImportService; this class only tells the package
  * "row 1 is a heading row" so Excel::toCollection() returns rows keyed by
  * their (snake_cased) column headers instead of numeric indexes.
@@ -30,5 +30,5 @@ class ZonesImport implements Import, WithHeadingRow
      *
      * @var list<string>
      */
-    public const array COLUMNS = ['name', 'town'];
+    public const array COLUMNS = ['name'];
 }

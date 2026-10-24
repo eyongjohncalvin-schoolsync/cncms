@@ -539,7 +539,7 @@ class CustomerController extends Controller
     }
 
     /**
-     * @return array<int, array{uuid: string, name: string, town: string}>
+     * @return array<int, array{uuid: string, name: string, branch_name: ?string}>
      */
     private function zonesForSelect(): array
     {
@@ -547,7 +547,7 @@ class CustomerController extends Controller
             ->map(fn (Zone $zone) => [
                 'uuid' => $zone->uuid,
                 'name' => $zone->name,
-                'town' => $zone->town,
+                'branch_name' => $zone->branchName(),
             ])
             ->all();
     }
@@ -834,7 +834,7 @@ class CustomerController extends Controller
      * its balance, the "Relocate" / "Re-install" permissions, the
      * company's default fees and the zones a relocation may move to.
      *
-     * @return array{balance: string, charges: list<array<string, mixed>>, can_relocate: bool, can_reinstall: bool, can_record_payment: bool, default_fees: array{relocation: ?string, reinstallation: ?string}, zones: array<int, array{uuid: string, name: string, town: string}>}
+     * @return array{balance: string, charges: list<array<string, mixed>>, can_relocate: bool, can_reinstall: bool, can_record_payment: bool, default_fees: array{relocation: ?string, reinstallation: ?string}, zones: array<int, array{uuid: string, name: string, branch_name: ?string}>}
      */
     private function shapeOneOffCharges(Customer $customer): array
     {

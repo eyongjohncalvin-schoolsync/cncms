@@ -120,7 +120,7 @@ class AgentController extends Controller
 
     /**
      * Zone list for the Agents/Index "Change Zone" quick action, enriched
-     * beyond ZoneService::all()'s bare uuid/name/town with the per-zone
+     * beyond ZoneService::all()'s bare uuid/name/branch with the per-zone
      * customer/active-agent counts the office needs to judge a reassignment
      * before confirming it — workload (customer_count) and whether the
      * destination/source zone would end up over- or under-covered
@@ -130,7 +130,7 @@ class AgentController extends Controller
      * being touched concurrently elsewhere this session — this keeps the
      * change isolated to this controller.
      *
-     * @return array<int, array{uuid: string, name: string, town: string, customer_count: int, agent_count: int, agent_names: array<int, string>}>
+     * @return array<int, array{uuid: string, name: string, branch_name: ?string, customer_count: int, agent_count: int, agent_names: array<int, string>}>
      */
     private function zonesWithStats(): array
     {
@@ -145,7 +145,7 @@ class AgentController extends Controller
             ->map(fn (Zone $zone): array => [
                 'uuid' => $zone->uuid,
                 'name' => $zone->name,
-                'town' => $zone->town,
+                'branch_name' => $zone->branchName(),
                 'customer_count' => $zone->customers_count,
                 'agent_count' => $zone->agent_count,
                 'agent_names' => $zone->agents->pluck('name')->all(),

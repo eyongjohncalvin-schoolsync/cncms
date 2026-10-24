@@ -88,7 +88,7 @@ class ZoneImportTemplateTest extends TestCase
         $firstDataRow = $typedSheets->first()->first();
         $this->assertNotNull($firstDataRow);
         $this->assertArrayHasKey('name', $firstDataRow->toArray());
-        $this->assertArrayHasKey('town', $firstDataRow->toArray());
+        $this->assertArrayNotHasKey('town', $firstDataRow->toArray());
     }
 
     public function test_agent_gets_a_403_downloading_the_zone_import_template(): void

@@ -129,7 +129,7 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                 onClose={() => setImportOpen(false)}
                 action="/zones/import"
                 entityLabel="Zones"
-                columnsHelp="name, town"
+                columnsHelp="name"
                 templateUrl="/zones/import/template"
             />
 
@@ -195,7 +195,6 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                             )}
                             <Th>Name</Th>
                             <Th>Branch</Th>
-                            <Th>Town</Th>
                             <Th>Customers</Th>
                             <Th>Actions</Th>
                         </TableHead>
@@ -215,7 +214,6 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                                     )}
                                     <Td className="font-medium text-slate-900">{zone.name}</Td>
                                     <Td>{zone.branch_name ?? '—'}</Td>
-                                    <Td>{zone.town}</Td>
                                     <Td>{customerCount}</Td>
                                     <Td>
                                         <Dropdown label={`Actions for ${zone.name}`}>

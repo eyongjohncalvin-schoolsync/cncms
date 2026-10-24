@@ -80,11 +80,12 @@ class ZoneTest extends TestCase
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")
             ->patchJson("/api/v1/zones/{$zone->uuid}", [
-                'town' => 'UPDATED TOWN',
+                'name' => 'UPDATED NAME',
             ]);
 
-        $response->assertOk()->assertJsonPath('data.town', 'UPDATED TOWN');
-        $this->assertDatabaseHas('zones', ['id' => $zone->id, 'town' => 'UPDATED TOWN']);
+        // `town` stays in the API for older app builds — now the zone's branch.
+        $response->assertOk()->assertJsonPath('data.name', 'UPDATED NAME')->assertJsonPath('data.town', $zone->branch->name)->assertJsonPath('data.branch_name', $zone->branch->name);
+        $this->assertDatabaseHas('zones', ['id' => $zone->id, 'name' => 'UPDATED NAME']);
     }
 
     public function test_super_can_delete_a_zone(): void

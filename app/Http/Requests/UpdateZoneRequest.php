@@ -25,7 +25,6 @@ class UpdateZoneRequest extends FormRequest
                 'sometimes', 'required', 'string', 'max:25',
                 Rule::unique('zones', 'name')->ignore($this->route('zone')),
             ],
-            'town' => ['sometimes', 'nullable', 'string', 'max:25'],
             // Branches v2: a fenced manager's zones are always in their own branch.
             'branch_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:branches,uuid', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
         ];

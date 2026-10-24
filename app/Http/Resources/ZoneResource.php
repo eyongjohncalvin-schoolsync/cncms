@@ -19,7 +19,9 @@ class ZoneResource extends JsonResource
         return [
             'uuid' => $this->uuid,
             'name' => $this->name,
-            'town' => $this->town,
+            // Kept for apps built before zones lost their own town: now the branch's.
+            'town' => $this->branchName(),
+            'branch_name' => $this->branchName(),
             'customer_count' => $this->whenCounted('customers'),
             'agent' => $this->whenLoaded('agents', function () {
                 $agent = $this->agents->first();

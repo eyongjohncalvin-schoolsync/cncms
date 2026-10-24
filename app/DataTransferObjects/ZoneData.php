@@ -19,7 +19,6 @@ final readonly class ZoneData
 {
     public function __construct(
         public ?string $name = null,
-        public ?string $town = null,
         public ?string $branchUuid = null,
     ) {}
 
@@ -27,7 +26,6 @@ final readonly class ZoneData
     {
         return new self(
             name: $data['name'] ?? null,
-            town: $data['town'] ?? null,
             branchUuid: $data['branch_uuid'] ?? null,
         );
     }
@@ -42,7 +40,6 @@ final readonly class ZoneData
     {
         return array_filter([
             'name' => $this->name,
-            'town' => $this->town,
         ], static fn (mixed $value): bool => $value !== null);
     }
 }

@@ -214,7 +214,7 @@ class DisconnectionsController extends Controller
     }
 
     /**
-     * @return array<int, array{uuid: string, name: string, town: string}>
+     * @return array<int, array{uuid: string, name: string, branch_name: ?string}>
      */
     private function zonesForSelect(): array
     {
@@ -222,7 +222,7 @@ class DisconnectionsController extends Controller
             ->map(fn (Zone $zone) => [
                 'uuid' => $zone->uuid,
                 'name' => $zone->name,
-                'town' => $zone->town,
+                'branch_name' => $zone->branchName(),
             ])
             ->all();
     }

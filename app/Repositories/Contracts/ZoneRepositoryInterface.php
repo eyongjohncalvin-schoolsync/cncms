@@ -17,7 +17,7 @@ interface ZoneRepositoryInterface
     public function paginate(array $filters, int $perPage): LengthAwarePaginator;
 
     /**
-     * All zones ordered by name, minimal columns (uuid, name, town) — backs
+     * All zones ordered by name, minimal columns (uuid, name, branch) — backs
      * dropdown/select inputs. Callers needing more columns/relations should
      * query Zone directly instead of adding weight to this hot path.
      *

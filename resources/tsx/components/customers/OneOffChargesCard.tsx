@@ -184,7 +184,7 @@ function OneOffModal({
                             {oneOff.zones.map((zone) => (
                                 <option key={zone.uuid} value={zone.uuid}>
                                     {zone.name}
-                                    {zone.town ? ` — ${zone.town}` : ''}
+                                    {zone.branch_name ? ` — ${zone.branch_name}` : ''}
                                 </option>
                             ))}
                         </SelectInput>

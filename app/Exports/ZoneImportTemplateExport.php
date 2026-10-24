@@ -36,8 +36,8 @@ final class ZoneImportTemplateExport implements Export, FromArray, ShouldAutoSiz
     public function array(): array
     {
         return [
-            ['THR01 (3/CORNERS)', 'KUMBA 3'],
-            ['AR01(JUNCTION)', 'KUMBA 3'],
+            ['THR01 (3/CORNERS)'],
+            ['AR01(JUNCTION)'],
         ];
     }
 }
