@@ -37,6 +37,16 @@ class OpeningBalanceBatchPolicy
         return $batch->isDraft() && $this->context->can('opening_balances.enter');
     }
 
+    /**
+     * Submitting the batch, or moving its first billing month, settles every
+     * branch's entries at once — company-wide (branches v2). A fenced
+     * manager still enters their own branch's balances.
+     */
+    public function submit(User $user, OpeningBalanceBatch $batch): bool
+    {
+        return $this->update($user, $batch) && $this->context->actsForCompany();
+    }
+
     /** Discarding the draft drops every branch's entries — company-wide (branches v2). */
     public function discard(User $user, OpeningBalanceBatch $batch): bool
     {

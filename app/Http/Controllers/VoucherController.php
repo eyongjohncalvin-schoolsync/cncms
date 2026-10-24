@@ -8,6 +8,7 @@ use App\Http\Requests\CorrectVoucherRequest;
 use App\Models\CashAccount;
 use App\Models\Company;
 use App\Models\ExpenseCategory;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\VoucherApproval;
@@ -180,7 +181,7 @@ class VoucherController extends Controller
             ],
             'categories' => ExpenseCategory::query()->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get(['uuid', 'name'])->toArray(),
             'pay_accounts' => $user->can('pay', $voucher) || $user->can('settle', $voucher)
-                ? $this->payAccounts($user, $context)
+                ? $this->payAccounts($user, $context, $voucher)
                 : [],
             'is_investor' => (bool) $context->tenantUser->is_investor,
         ]);
@@ -226,7 +227,7 @@ class VoucherController extends Controller
         $this->authorize('pay', $voucher);
 
         $validated = $request->validate([
-            'account' => ['required', 'uuid', Rule::in(array_column($this->payAccounts($request->user(), app(TenantContext::class)), 'uuid'))],
+            'account' => ['required', 'uuid', Rule::in(array_column($this->payAccounts($request->user(), app(TenantContext::class), $voucher), 'uuid'))],
             'method' => ['required', Rule::in(['cash', 'mtn_momo', 'orange_money', 'bank'])],
             'reference' => ['nullable', 'required_unless:method,cash', 'string', 'max:100'],
             'received_by_name' => ['required', 'string', 'max:150'],
@@ -346,12 +347,15 @@ class VoucherController extends Controller
      *
      * @return list<array{uuid: string, name: string, balance: string}>
      */
-    private function payAccounts(User $user, TenantContext $context): array
+    private function payAccounts(User $user, TenantContext $context, Voucher $voucher): array
     {
-        $accounts = collect([$this->cashBook->tillFor($user)]);
+        // Branches v2 §4.7: a bon is paid only from its own branch's accounts —
+        // money never crosses branches except by a branch transfer.
+        $accounts = collect([$this->cashBook->tillFor($user)])->filter(fn (CashAccount $till): bool => $till->branch_id === $voucher->branch_id);
 
         if ($context->can('cash.view')) {
-            $accounts = $accounts->merge(CashAccount::query()->where('is_active', true)->where('kind', '!=', CashAccount::KIND_TILL)->get());
+            $accounts = $accounts->merge(CashAccount::query()->withoutGlobalScope(BranchScope::class)->where('branch_id', $voucher->branch_id)
+                ->where('is_active', true)->where('kind', '!=', CashAccount::KIND_TILL)->get());
         }
 
         $balances = $this->cashBook->balances($accounts->pluck('id')->all());

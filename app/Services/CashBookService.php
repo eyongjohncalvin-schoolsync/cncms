@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Branch;
+use App\Models\BranchTransfer;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
@@ -47,10 +48,35 @@ class CashBookService
      */
     public function tillFor(User $user): CashAccount
     {
-        return CashAccount::query()->withoutGlobalScope(BranchScope::class)->firstOrCreate(
-            ['kind' => CashAccount::KIND_TILL, 'holder_user_id' => $user->id],
-            ['name' => "Till — {$user->name}", 'is_active' => true, 'branch_id' => BranchAttribution::forUser($user)],
-        );
+        $branchId = BranchAttribution::forUser($user);
+        $till = $this->activeTillOf($user);
+
+        // A cashier transferred to another branch: their emptied till stays,
+        // closed, in the old branch's books and a new one opens here. (A till
+        // still holding money blocks the transfer — UserController.) A till
+        // with a branch transfer still in transit stays open: a refusal must
+        // be able to put the money back into it.
+        if ($till !== null && $till->branch_id !== $branchId && bccomp($this->balance($till), '0', 2) === 0
+            && ! BranchTransfer::query()->where('from_account_id', $till->id)->where('status', BranchTransfer::STATUS_SENT)->exists()) {
+            $till->update(['is_active' => false]);
+            $till = null;
+        }
+
+        return $till ?? CashAccount::query()->create([
+            'kind' => CashAccount::KIND_TILL,
+            'holder_user_id' => $user->id,
+            'name' => "Till — {$user->name}",
+            'is_active' => true,
+            'branch_id' => $branchId,
+        ]);
+    }
+
+    /** The person's open till, whichever branch it is in. */
+    public function activeTillOf(User $user): ?CashAccount
+    {
+        return CashAccount::query()->withoutGlobalScope(BranchScope::class)
+            ->where('kind', CashAccount::KIND_TILL)->where('holder_user_id', $user->id)->where('is_active', true)
+            ->first();
     }
 
     /**

@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
+use App\Support\BusinessTimezone;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 
 /**
  * `status_changed_at`/`prepaid_paused` back the prepaid-time preservation
@@ -206,6 +208,30 @@ class Customer extends Model
     }
 
     /** Its CURRENT branch: follows its zone (BelongsToBranch). */
+    /**
+     * Branches v2 §4.3 / D11: a customer whose branch changes (relocated into
+     * another branch's zone) gets a recorded move — the new branch bills from
+     * next month; this month and everything before stay with the old branch.
+     */
+    protected static function booted(): void
+    {
+        static::updated(function (Customer $customer): void {
+            if (! $customer->wasChanged('branch_id')) {
+                return;
+            }
+
+            CustomerBranchMove::query()->create([
+                'customer_id' => $customer->id,
+                'from_branch_id' => $customer->getOriginal('branch_id'),
+                'to_branch_id' => $customer->branch_id,
+                'from_zone_id' => $customer->getOriginal('zone_id'),
+                'to_zone_id' => $customer->zone_id,
+                'effective_period' => Carbon::createFromFormat('!Y-m', BusinessTimezone::currentPeriod())->addMonthNoOverflow()->format('Y-m'),
+                'moved_by' => auth()->id(),
+            ]);
+        });
+    }
+
     protected static function branchFollowsParent(): bool
     {
         return true;

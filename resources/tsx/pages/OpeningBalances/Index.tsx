@@ -47,7 +47,7 @@ interface Batch {
     updated_at: string | null;
     is_locked: boolean;
     is_own_submission: boolean;
-    can: { edit: boolean; discard: boolean; approve: boolean; reject: boolean; reopen: boolean };
+    can: { edit: boolean; submit: boolean; discard: boolean; approve: boolean; reject: boolean; reopen: boolean };
 }
 
 interface HistoryItem {
@@ -500,7 +500,7 @@ export default function OpeningBalancesIndex({ batch, rows, history, can_start, 
                     <Card className="animate-fade-up mb-4 p-4">
                         <div className="flex flex-wrap items-end gap-3">
                             <div className="w-48">
-                                <SelectInput label="First billing month" value={batch.go_live_period} disabled={!editable} onChange={(event) => changeGoLive(event.target.value)}>
+                                <SelectInput label="First billing month" value={batch.go_live_period} disabled={!batch.can.submit} onChange={(event) => changeGoLive(event.target.value)}>
                                     {month_options.map((option) => (
                                         <option key={option.value} value={option.value}>
                                             {option.label}
@@ -568,7 +568,7 @@ export default function OpeningBalancesIndex({ batch, rows, history, can_start, 
                             )}
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            {editable && (
+                            {batch.can.submit && (
                                 <Button
                                     onClick={() => setConfirmSubmit(true)}
                                     disabled={busy || totals.entered === 0 || dirty.size > 0 || invalidRows.length > 0}

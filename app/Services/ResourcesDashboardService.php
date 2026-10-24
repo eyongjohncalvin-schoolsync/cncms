@@ -275,7 +275,11 @@ class ResourcesDashboardService
      */
     private function budgetsFor(string $period, array $actualsByCategory): array
     {
-        $budgets = Budget::query()->with('category')->where('period', $period)->get();
+        // Branches v2: a branch view compares its own budgets; the company view the company's.
+        $branchId = TenantContext::currentBranchId();
+        $budgets = Budget::query()->with('category')->where('period', $period)
+            ->when($branchId === null, fn ($query) => $query->whereNull('branch_id'), fn ($query) => $query->where('branch_id', $branchId))
+            ->get();
 
         if ($budgets->isEmpty()) {
             return [];

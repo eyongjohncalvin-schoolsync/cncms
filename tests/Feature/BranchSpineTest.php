@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use App\DataTransferObjects\ComplaintData;
 use App\Models\Agent;
 use App\Models\AuditLog;
+use App\Models\BillBatch;
 use App\Models\BillBatchFile;
 use App\Models\Branch;
 use App\Models\BranchPrice;
@@ -16,6 +17,7 @@ use App\Models\CashMovement;
 use App\Models\Company;
 use App\Models\Concerns\BelongsToBranch;
 use App\Models\Customer;
+use App\Models\Notification;
 use App\Models\Payment;
 use App\Models\StaffAssignment;
 use App\Models\StaffSalary;
@@ -75,6 +77,10 @@ class BranchSpineTest extends TestCase
             StaffAssignment::class, StaffSalary::class,
             // A company budget has no branch (null); a branch budget has one.
             Budget::class,
+            // Who ran the bills: a branch, or null for a company-wide run.
+            BillBatch::class,
+            // The branch a notification is about, or null for company-wide news (D12).
+            Notification::class,
         ];
 
         $checked = 0;

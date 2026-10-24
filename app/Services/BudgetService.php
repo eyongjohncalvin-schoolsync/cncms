@@ -113,7 +113,7 @@ class BudgetService
 
                 Budget::query()->updateOrCreate(
                     ['period' => $period, 'category_id' => $categoryId, 'branch_id' => $branchId],
-                    ['amount' => number_format((float) $amount, 2, '.', '')],
+                    ['amount' => bcadd((string) $amount, '0', 2)],
                 );
             }
         });

@@ -23,7 +23,9 @@ class SalaryPolicy
 
     public function setFor(User $user, TenantUser $tenantUser): bool
     {
-        return $this->context->can('salaries.manage') && $this->staff->worksInMyBranch($tenantUser);
+        return $this->context->can('salaries.manage')
+            && (int) $tenantUser->user_id !== $user->id
+            && $this->staff->worksInMyBranch($tenantUser);
     }
 
     /** The grades and approvals: headquarters' call. */

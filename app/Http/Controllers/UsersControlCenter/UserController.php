@@ -16,6 +16,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use App\Repositories\Contracts\BranchRepositoryInterface;
 use App\Services\AccountSecurityService;
+use App\Services\CashBookService;
 use App\Services\SalaryService;
 use App\Services\StaffAssignmentService;
 use App\Support\TenantContext;
@@ -168,11 +169,23 @@ class UserController extends Controller
         // fenced manager; this is the second lock.
         if ($this->context->isFenced()) {
             unset($data['branch_uuid'], $data['is_investor']);
+            // Pin whoever a fenced manager edits to that branch: an agent's fence
+            // comes from their zone (tenant_users.branch_id is often null), so a
+            // role change away from agent would otherwise leave them unfenced.
+            $data['branch_id'] = $this->context->branchId;
         }
 
         if (array_key_exists('branch_uuid', $data)) {
             $data['branch_id'] = $this->resolveBranchId($data['branch_uuid']);
             unset($data['branch_uuid']);
+
+            // Branches v2: a cashier's till belongs to their branch — money in it
+            // must be handed over before they move to another branch.
+            $till = $data['branch_id'] !== $tenantUser->branch_id ? app(CashBookService::class)->activeTillOf($tenantUser->user) : null;
+
+            if ($till !== null && bccomp(app(CashBookService::class)->balance($till), '0', 2) !== 0) {
+                throw ValidationException::withMessages(['branch_uuid' => ['Their till still holds money — hand it over (and close the day) before moving them to another branch.']]);
+            }
         }
 
         // Defensive: a role change away from 'worker' also clears the

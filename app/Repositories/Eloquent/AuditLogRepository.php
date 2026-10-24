@@ -10,6 +10,7 @@ use App\Models\ExpenseCategory;
 use App\Models\Payment;
 use App\Models\User;
 use App\Repositories\Contracts\AuditLogRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -50,6 +51,9 @@ class AuditLogRepository implements AuditLogRepositoryInterface
     private function scoped(array $filters): Builder
     {
         return AuditLog::query()
+            // Branches v2: a fenced viewer sees their branch's changes only — never
+            // company-wide rows (settings, roles) or another branch's.
+            ->when(TenantContext::currentBranchId(), fn (Builder $query, int $branchId) => $query->where('branch_id', $branchId))
             ->when($filters['table_name'] ?? null, fn (Builder $query, string $table) => $query->where('table_name', $table))
             ->when($filters['action'] ?? null, fn (Builder $query, string $action) => $query->where('action', $action))
             // Power-user/debugging escape hatch: an exact record_uuid still

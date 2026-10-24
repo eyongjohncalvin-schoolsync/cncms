@@ -366,7 +366,14 @@ class VoucherService
             }
 
             if (bccomp($returned, '0', 2) > 0) {
-                $this->cashBook->record($this->cashBook->tillFor($actor), 'in', $returned, CashMovement::KIND_ADVANCE_RETURN, $actor, [
+                $till = $this->cashBook->tillFor($actor);
+
+                // Branches v2 §4.7: the change goes back into the bon's own branch.
+                if ($till->branch_id !== $locked->branch_id) {
+                    throw ValidationException::withMessages(['returned_amount' => "The change from {$locked->number} goes back to its own branch — settle it there."]);
+                }
+
+                $this->cashBook->record($till, 'in', $returned, CashMovement::KIND_ADVANCE_RETURN, $actor, [
                     'document_number' => $locked->number,
                     'source' => $locked,
                     'note' => 'Change returned from advance',
@@ -477,6 +484,11 @@ class VoucherService
 
         if ($locked->status !== 'approved') {
             throw ValidationException::withMessages(['account' => "Voucher {$locked->number} is {$locked->status}, not approved."]);
+        }
+
+        // Branches v2 §4.7: no joint account — a bon is paid from its own branch's money.
+        if ($from->branch_id !== $locked->branch_id) {
+            throw ValidationException::withMessages(['account' => "Pay {$locked->number} from an account of its own branch — send money between branches with a branch transfer."]);
         }
 
         if (! $locked->needsStakeholders()) {

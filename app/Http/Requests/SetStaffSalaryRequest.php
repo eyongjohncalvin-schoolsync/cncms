@@ -6,6 +6,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 /**
  * A staff member's salary (branches v2 D8): an amount, usually on one of
@@ -26,7 +27,7 @@ class SetStaffSalaryRequest extends FormRequest
     {
         return [
             'amount' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
-            'grade_uuid' => ['nullable', 'uuid', 'exists:salary_grades,uuid'],
+            'grade_uuid' => ['nullable', 'uuid', Rule::exists('salary_grades', 'uuid')->where('is_active', true)],
             'reason' => ['nullable', 'string', 'max:255'],
         ];
     }

@@ -29,16 +29,16 @@ class ServicePolicy
 
     public function create(User $user): bool
     {
-        return $this->context->can('services.manage');
+        return $this->context->can('services.manage') && $this->context->actsForCompany();
     }
 
     public function update(User $user, Service $service): bool
     {
-        return $this->context->can('services.manage');
+        return $this->context->can('services.manage') && $this->context->actsForCompany();
     }
 
     public function delete(User $user, Service $service): bool
     {
-        return $this->context->can('services.manage');
+        return $this->context->can('services.manage') && $this->context->actsForCompany();
     }
 }

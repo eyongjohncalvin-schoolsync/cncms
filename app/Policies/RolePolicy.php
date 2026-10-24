@@ -42,19 +42,19 @@ class RolePolicy
 
     public function create(User $user): bool
     {
-        return $this->context->can('roles.manage');
+        return $this->context->can('roles.manage') && $this->context->actsForCompany();
     }
 
     public function update(User $user, Role $role): bool
     {
         // The super role's matrix is read-only (all-on, via the bypass) —
         // no one edits it, not even another super.
-        return $this->context->can('roles.manage') && ! $role->is_super;
+        return $this->context->can('roles.manage') && ! $role->is_super && $this->context->actsForCompany();
     }
 
     public function delete(User $user, Role $role): bool
     {
         // System roles (super included) are permanent fixtures.
-        return $this->context->can('roles.manage') && ! $role->is_system;
+        return $this->context->can('roles.manage') && ! $role->is_system && $this->context->actsForCompany();
     }
 }

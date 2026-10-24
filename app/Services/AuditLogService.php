@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\AuditLog;
 use App\Models\ExpenseCategory;
 use App\Repositories\Contracts\AuditLogRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
@@ -32,7 +33,8 @@ class AuditLogService
     {
         $page = Paginator::resolveCurrentPage() ?: 1;
 
-        $cacheKey = 'audit:logs:list:'.md5(json_encode([$filters, $perPage, $page]));
+        // The viewer's branch fence changes what the page holds (branches v2).
+        $cacheKey = 'audit:logs:list:'.md5(json_encode([$filters, $perPage, $page, TenantContext::currentBranchId()]));
 
         return Cache::remember(
             $cacheKey,

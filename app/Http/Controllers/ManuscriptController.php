@@ -104,6 +104,7 @@ class ManuscriptController extends Controller
     private function billBatchesForPeriod(string $period): array
     {
         return BillBatch::query()
+            ->visible()
             ->with('files')
             ->where('period', $period)
             ->latest('id')

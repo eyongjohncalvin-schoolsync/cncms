@@ -14,7 +14,7 @@ class StoreOpeningBalanceBatchRequest extends FormRequest
         $batch = $this->route('openingBalanceBatch');
 
         return $batch instanceof OpeningBalanceBatch
-            ? $this->user()->can('update', $batch)
+            ? $this->user()->can('submit', $batch)
             : $this->user()->can('create', OpeningBalanceBatch::class);
     }
 

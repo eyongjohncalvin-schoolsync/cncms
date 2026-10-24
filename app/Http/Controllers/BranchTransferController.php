@@ -89,6 +89,10 @@ class BranchTransferController extends Controller
         $from = CashAccount::query()->where('uuid', $validated['from_account'])->where('is_active', true)->firstOrFail();
         $to = Branch::query()->where('uuid', $validated['to_branch'])->firstOrFail();
 
+        // As for a transfer within the branch: a cashier sends from their own
+        // till; only cash.view holders send from other accounts.
+        abort_unless($from->holder_user_id === $request->user()->id || app(TenantContext::class)->can('cash.view'), 403);
+
         $transfer = $this->transfers->send($from, $to, (string) $validated['amount'], $validated['note'] ?? null, $request->user());
 
         return redirect()->route('cash.branch-transfers')->with('success', "{$transfer->number}: sent to {$to->name} — in transit until they receive it.");

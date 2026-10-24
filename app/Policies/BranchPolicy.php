@@ -35,17 +35,17 @@ class BranchPolicy
 
     public function create(User $user): bool
     {
-        return $this->context->can('branches.manage');
+        return $this->context->can('branches.manage') && $this->context->actsForCompany();
     }
 
     public function update(User $user): bool
     {
-        return $this->context->can('branches.manage');
+        return $this->context->can('branches.manage') && $this->context->actsForCompany();
     }
 
     public function delete(User $user): bool
     {
-        return $this->context->can('branches.manage');
+        return $this->context->can('branches.manage') && $this->context->actsForCompany();
     }
 
     /**
@@ -60,7 +60,7 @@ class BranchPolicy
             return false;
         }
 
-        return $this->context->can('branches.manage')
+        return ($this->context->can('branches.manage') && $this->context->actsForCompany())
             || ($this->context->can('branches.settings') && $this->context->isFenced() && $this->context->branchId === $branch->id);
     }
 }

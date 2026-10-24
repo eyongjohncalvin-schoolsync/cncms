@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Support\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -25,7 +26,8 @@ class UpdateZoneRequest extends FormRequest
                 Rule::unique('zones', 'name')->ignore($this->route('zone')),
             ],
             'town' => ['sometimes', 'nullable', 'string', 'max:25'],
-            'branch_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:branches,uuid'],
+            // Branches v2: a fenced manager's zones are always in their own branch.
+            'branch_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:branches,uuid', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
         ];
     }
 }

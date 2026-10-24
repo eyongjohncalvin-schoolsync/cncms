@@ -91,7 +91,8 @@ class SalaryTest extends TestCase
                 && $row['salary']['current'] === '60000.00'
                 && $row['salary']['pending']['amount'] === '95000.00'));
 
-        $this->as('admin');
+        // Headquarters decides — here the owner, who may also sign off a salary they proposed.
+        $this->as('super');
         $this->get('/settings/salaries')->assertOk()->assertInertia(fn (Assert $page) => $page->where('pending.0.uuid', $pending->uuid));
         $this->post("/settings/salaries/{$pending->uuid}/approve")->assertSessionHasNoErrors();
 
@@ -141,6 +142,7 @@ class SalaryTest extends TestCase
         $this->assertSame('70000.00', (string) $agent->fresh()->salary);
         $this->assertSame(StaffSalary::STATUS_PENDING, $this->latest($this->bueaStaff)->status);
 
+        $this->as('super');
         $this->post('/settings/salaries/'.$this->latest($this->bueaStaff)->uuid.'/approve')->assertSessionHasNoErrors();
         $this->assertSame('120000.00', (string) $agent->fresh()->salary);
     }

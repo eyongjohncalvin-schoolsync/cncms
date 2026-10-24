@@ -447,7 +447,7 @@ class ReportService
         $query = Payment::query()
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id')
-            ->join('branches', 'branches.id', '=', 'zones.branch_id')
+            ->join('branches', 'branches.id', '=', 'payments.branch_id')
             ->where('payments.purpose', '!=', Payment::PURPOSE_TECHNICIAN_FEE)
             ->where('payments.verification_status', 'pending')
             ->where('payments.created_at', '<', $cutoff);

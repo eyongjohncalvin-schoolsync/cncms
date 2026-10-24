@@ -579,6 +579,7 @@ class ArrearsAdjustmentService
                 "/customers/{$customer->uuid}",
                 'arrears_adjustment',
                 $adjustment->uuid,
+                branchId: $adjustment->branch_id,
             );
         }
 
@@ -605,6 +606,7 @@ class ArrearsAdjustmentService
                     "/customers/{$customer->uuid}",
                     'arrears_adjustment',
                     $adjustment->uuid,
+                    branchId: $adjustment->branch_id,
                 );
             });
     }
@@ -626,6 +628,7 @@ class ArrearsAdjustmentService
             "/customers/{$adjustment->customer->uuid}",
             'arrears_adjustment',
             $adjustment->uuid,
+            branchId: $adjustment->branch_id,
         );
     }
 }

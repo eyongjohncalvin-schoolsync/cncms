@@ -28,16 +28,16 @@ class InstallationOfferPolicy
 
     public function create(User $user): bool
     {
-        return $this->context->can('installations.offers');
+        return $this->context->can('installations.offers') && $this->context->actsForCompany();
     }
 
     public function update(User $user, InstallationOffer $installationOffer): bool
     {
-        return $this->context->can('installations.offers');
+        return $this->context->can('installations.offers') && $this->context->actsForCompany();
     }
 
     public function delete(User $user, InstallationOffer $installationOffer): bool
     {
-        return $this->context->can('installations.offers');
+        return $this->context->can('installations.offers') && $this->context->actsForCompany();
     }
 }

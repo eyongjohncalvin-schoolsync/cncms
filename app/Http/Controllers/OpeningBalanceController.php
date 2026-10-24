@@ -95,7 +95,7 @@ class OpeningBalanceController extends Controller
 
     public function submit(Request $request, OpeningBalanceBatch $openingBalanceBatch): RedirectResponse
     {
-        $this->authorize('update', $openingBalanceBatch);
+        $this->authorize('submit', $openingBalanceBatch);
 
         $this->openingBalances->submit($openingBalanceBatch, $request->user());
 
@@ -164,6 +164,7 @@ class OpeningBalanceController extends Controller
             'is_own_submission' => $batch->submitted_by === $user->id,
             'can' => [
                 'edit' => $user->can('update', $batch),
+                'submit' => $user->can('submit', $batch),
                 'discard' => $user->can('discard', $batch),
                 'approve' => $user->can('approve', $batch),
                 'reject' => $user->can('reject', $batch),

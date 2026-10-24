@@ -44,6 +44,6 @@ class CommandRunPolicy
      */
     public function manageSchedule(User $user): bool
     {
-        return $this->context->can('command_runs.schedule');
+        return $this->context->can('command_runs.schedule') && $this->context->actsForCompany();
     }
 }

@@ -11,6 +11,7 @@ use App\Models\BillBatchFile;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Zone;
+use App\Support\TenantContext;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Bus\Batch;
 use Illuminate\Support\Collection;
@@ -108,6 +109,8 @@ class BillBatchService
             'total_bills' => $customers->count(),
             'total_zones' => $byZone->count(),
             'generated_by' => $userId,
+            // Branches v2: the branch it was generated for (null = company-wide).
+            'branch_id' => TenantContext::currentBranchId(),
         ]);
 
         $jobs = [];

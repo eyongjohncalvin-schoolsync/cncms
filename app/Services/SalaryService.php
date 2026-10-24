@@ -10,6 +10,7 @@ use App\Models\Scopes\BranchScope;
 use App\Models\StaffSalary;
 use App\Models\User;
 use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -80,6 +81,12 @@ class SalaryService
 
             if ($locked->status !== StaffSalary::STATUS_PENDING) {
                 throw ValidationException::withMessages(['salary' => 'This salary was already decided.']);
+            }
+
+            // Nobody signs off their own pay, nor a salary they proposed — the
+            // owner excepted, as for opening balances (a one-person headquarters).
+            if ($actor->id === (int) $locked->user_id || ($actor->id === (int) $locked->set_by && ! app(TenantContext::class)->isSuper())) {
+                throw ValidationException::withMessages(['salary' => 'Someone else must decide this salary.']);
             }
 
             $locked->update([

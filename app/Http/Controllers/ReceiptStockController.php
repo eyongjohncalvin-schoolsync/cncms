@@ -215,14 +215,20 @@ class ReceiptStockController extends Controller
     }
 
     /**
-     * Everyone in this workspace who can be handed a receipt book.
+     * Everyone in this workspace who can be handed a receipt book — for a
+     * fenced manager, only their branch's staff (as on the Users page).
      *
      * @return list<array{id: int, name: string, role: string}>
      */
     private function holderOptions(): array
     {
+        $context = $this->context();
+
         return TenantUser::query()
-            ->where('tenant_id', $this->context()->tenantUser->tenant_id)
+            ->where('tenant_id', $context->tenantUser->tenant_id)
+            ->when($context->isFenced(), fn ($query) => $query->where(fn ($inner) => $inner
+                ->where('branch_id', $context->branchId)
+                ->orWhere(fn ($agents) => $agents->where('role', 'agent')->whereIn('user_id', Agent::query()->whereNotNull('user_id')->select('user_id')))))
             ->with('user')
             ->get()
             ->filter(fn (TenantUser $tenantUser): bool => $tenantUser->user !== null)

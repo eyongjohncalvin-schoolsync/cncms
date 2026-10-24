@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DataTransferObjects\ZoneData;
+use App\Models\Scopes\BranchScope;
 use App\Models\Zone;
 use App\Repositories\Contracts\BranchRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
@@ -81,6 +82,14 @@ class ZoneService
     public function update(Zone $zone, ZoneData $data): Zone
     {
         $branchId = $data->branchUuid !== null ? $this->resolveBranchId($data->branchUuid) : null;
+
+        // Branches v2: moving a zone to another branch would silently move all
+        // its customers and agents (the database cascades their branch). Only an
+        // empty zone moves; customers move one by one (a recorded move).
+        if ($branchId !== null && $branchId !== $zone->branch_id
+            && ($zone->customers()->withoutGlobalScope(BranchScope::class)->withTrashed()->exists() || $zone->agents()->withoutGlobalScope(BranchScope::class)->exists())) {
+            throw ValidationException::withMessages(['branch_uuid' => ['This zone still has customers or agents — move them to a zone of the other branch first.']]);
+        }
 
         $zone = $this->zones->update($zone, $data, $branchId);
 
@@ -254,6 +263,13 @@ class ZoneService
      */
     public function resolveBranchId(?string $branchUuid): int
     {
+        // Branches v2: someone fenced to a branch creates zones in it only.
+        $context = app()->bound(TenantContext::class) ? app(TenantContext::class) : null;
+
+        if ($context?->isFenced()) {
+            return (int) $context->branchId;
+        }
+
         if ($branchUuid !== null) {
             $branch = $this->branches->findByUuid($branchUuid);
 

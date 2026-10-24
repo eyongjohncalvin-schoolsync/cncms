@@ -25,6 +25,6 @@ class CompanyPolicy
 
     public function update(User $user): bool
     {
-        return $this->context->can('company.update');
+        return $this->context->can('company.update') && $this->context->actsForCompany();
     }
 }

@@ -177,6 +177,11 @@ class RemittanceService
 
             $till = $this->cashBook->tillFor($receiver);
 
+            // Branches v2 §4.7: a collector's cash goes into their own branch's till.
+            if ($till->branch_id !== $locked->branch_id) {
+                throw ValidationException::withMessages(['received_cash' => "{$locked->number} belongs to another branch — it is received there."]);
+            }
+
             if (bccomp($receivedCash, '0', 2) > 0) {
                 $this->cashBook->record($till, 'in', $receivedCash, CashMovement::KIND_REMITTANCE_CASH, $receiver, [
                     'document_number' => $locked->number,

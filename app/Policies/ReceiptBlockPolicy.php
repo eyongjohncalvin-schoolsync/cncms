@@ -48,6 +48,13 @@ class ReceiptBlockPolicy
 
     public function cancelLeaf(User $user, ReceiptBlock $block): bool
     {
-        return $block->holder_user_id === $user->id || $this->context->can('receipts.manage_stock');
+        if ($block->holder_user_id === $user->id) {
+            return true;
+        }
+
+        // Branches v2: a fenced stock manager only cancels numbers in their branch's books.
+        $fence = TenantContext::currentBranchId();
+
+        return $this->context->can('receipts.manage_stock') && ($fence === null || $block->branch_id === $fence);
     }
 }
