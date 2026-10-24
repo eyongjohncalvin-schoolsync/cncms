@@ -10,6 +10,7 @@ use App\Models\BillBatch;
 use App\Models\BillBatchFile;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Zone;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Bus\Batch;
 use Illuminate\Support\Collection;
@@ -262,6 +263,7 @@ class BillBatchService
         BillBatchFile::updateOrCreate(
             ['bill_batch_id' => $billBatch->id, 'kind' => 'zone', 'zone_id' => $zoneId],
             [
+                'branch_id' => $zoneId !== null ? Zone::query()->whereKey($zoneId)->value('branch_id') : null,
                 'zone_name' => $zoneName,
                 'disk' => $this->disk(),
                 'path' => $path,
@@ -387,7 +389,7 @@ class BillBatchService
 
     /**
      * @param  array<int, array<string, mixed>>  $bills
-     * @return array{0: string, 1: int|null}  [pdf bytes, page count or null]
+     * @return array{0: string, 1: int|null} [pdf bytes, page count or null]
      */
     private function renderPdf(array $bills, int $density, string $template): array
     {

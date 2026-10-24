@@ -14,6 +14,7 @@ use App\Models\ReceiptBlock;
 use App\Models\ReceiptLeaf;
 use App\Models\User;
 use App\Support\AmountInWords;
+use App\Support\BranchLookup;
 use App\Support\PaymentReceiptLink;
 use App\Support\QrCode;
 use App\Support\ReceiptSecurityCode;
@@ -79,6 +80,7 @@ class PaymentReceiptService
      */
     public function issueFor(Payment $payment, ?User $actor = null, bool $autoSend = true): PaymentReceipt
     {
+        BranchLookup::remember([$payment]);
         $payment->loadMissing(['customer.zone.branch', 'verification', 'recordedBy']);
 
         $existing = $payment->relationLoaded('receipt')
@@ -164,6 +166,7 @@ class PaymentReceiptService
      */
     public function issueField(Payment $payment, ReceiptLeaf $leaf, CarbonInterface $issuedAt, ?FieldDevice $device, ?string $deviceCode, ?User $actor = null): PaymentReceipt
     {
+        BranchLookup::remember([$payment]);
         $payment->loadMissing(['customer.zone.branch', 'verification', 'recordedBy']);
 
         $source = $leaf->block->kind === ReceiptBlock::KIND_DIGITAL ? PaymentReceipt::SOURCE_DIGITAL : PaymentReceipt::SOURCE_BOOK;
@@ -424,7 +427,8 @@ class PaymentReceiptService
     private function buildSnapshot(Payment $payment): array
     {
         $customer = $payment->customer;
-        $company = Company::cached();
+        // The branch where the money was paid (branches v2 D4).
+        $company = Company::forBranch($payment->branch_id);
         $purpose = $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION;
         $isSubscription = $purpose === Payment::PURPOSE_SUBSCRIPTION;
         // A one-off charge's kind (installation / relocation /

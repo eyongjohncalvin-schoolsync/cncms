@@ -9,8 +9,11 @@ use App\Models\Company;
 use App\Models\Expenditure;
 use App\Models\ExpenseCategory;
 use App\Models\Payment;
+use App\Models\Scopes\BranchScope;
 use App\Models\Voucher;
 use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The month's spending picture (docs/plans/expenditures-and-spending-controls.md,
@@ -26,12 +29,16 @@ class SpendingControlService
 
     public const int BUDGET_RED_PCT = 100;
 
-    /** Counted (not voided) expenditures whose spent_at falls in $period. */
-    public function spentInPeriod(string $period): string
+    /**
+     * Counted (not voided) expenditures whose spent_at falls in $period —
+     * company-wide unless a branch is given (branches v2: the cap is a
+     * company ceiling, D10).
+     */
+    public function spentInPeriod(string $period, ?int $branchId = null): string
     {
         [$from, $to] = BusinessTimezone::periodDates($period);
 
-        return $this->money(Expenditure::query()->counted()->whereBetween('spent_at', [$from, $to])->sum('amount'));
+        return $this->money($this->forBranch(Expenditure::query(), $branchId)->counted()->whereBetween('spent_at', [$from, $to])->sum('amount'));
     }
 
     /**
@@ -40,15 +47,15 @@ class SpendingControlService
      * paid but not yet settled. Only the current month has outstanding
      * commitments; a past month's committed spend is what it spent.
      */
-    public function committedSpend(string $period, ?int $excludeVoucherId = null): string
+    public function committedSpend(string $period, ?int $excludeVoucherId = null, ?int $branchId = null): string
     {
-        $committed = $this->spentInPeriod($period);
+        $committed = $this->spentInPeriod($period, $branchId);
 
         if ($period !== BusinessTimezone::currentPeriod()) {
             return $committed;
         }
 
-        $outstanding = Voucher::query()
+        $outstanding = $this->forBranch(Voucher::query(), $branchId)
             ->where(fn ($query) => $query
                 ->where('status', 'approved')
                 ->orWhere(fn ($inner) => $inner->where('kind', Voucher::KIND_ADVANCE)->where('status', 'paid')))
@@ -74,13 +81,14 @@ class SpendingControlService
 
     /**
      * Verified income for the month — subscription + installation, never
-     * technician fees (Payment::income()). Company-wide.
+     * technician fees (Payment::income()). Company-wide unless a branch is given.
      */
-    public function verifiedIncome(string $period): string
+    public function verifiedIncome(string $period, ?int $branchId = null): string
     {
         [$start, $end] = BusinessTimezone::periodBoundsUtc($period);
 
         return $this->money(Payment::query()
+            ->when($branchId !== null, fn ($query) => $query->where('payments.branch_id', $branchId))
             ->income()
             ->where('verification_status', 'verified')
             ->whereBetween('created_at', [$start, $end])
@@ -99,14 +107,22 @@ class SpendingControlService
     {
         [$from, $to] = BusinessTimezone::periodDates($period);
 
-        $actuals = Expenditure::query()
+        // Branches v2: a fenced viewer sees their own branch's spending,
+        // income and budgets — never company totals. The monthly cap is a
+        // company ceiling (D10), so it is left out of a branch view.
+        $branchId = TenantContext::currentBranchId();
+
+        $actuals = $this->forBranch(Expenditure::query(), $branchId)
             ->counted()
             ->whereBetween('spent_at', [$from, $to])
             ->groupBy('category_id')
             ->selectRaw('category_id, sum(amount) as total')
             ->pluck('total', 'category_id');
 
-        $budgets = Budget::query()->where('period', $period)->pluck('amount', 'category_id');
+        // A branch's own budgets in a branch view (branches v2 P5); the company's otherwise.
+        $budgets = Budget::query()->where('period', $period)
+            ->when($branchId === null, fn ($query) => $query->whereNull('branch_id'), fn ($query) => $query->where('branch_id', $branchId))
+            ->pluck('amount', 'category_id');
 
         $categoryIds = $actuals->keys()->merge($budgets->keys())->unique()->values();
         $categories = ExpenseCategory::query()->whereIn('id', $categoryIds)->orderBy('sort_order')->orderBy('name')->get();
@@ -126,10 +142,10 @@ class SpendingControlService
             ];
         })->values()->all();
 
-        $spent = $this->spentInPeriod($period);
-        $committed = $this->committedSpend($period);
-        $cap = Company::cached()?->monthly_spending_cap;
-        $income = $this->verifiedIncome($period);
+        $spent = $this->spentInPeriod($period, $branchId);
+        $committed = $this->committedSpend($period, branchId: $branchId);
+        $cap = $branchId === null ? Company::cached()?->monthly_spending_cap : null;
+        $income = $this->verifiedIncome($period, $branchId);
         $net = bcsub($income, $spent, 2);
 
         return [
@@ -165,6 +181,21 @@ class SpendingControlService
         }
 
         return round(((float) $amount / (float) $of) * 100, 1);
+    }
+
+    /**
+     * Money-out rows of one branch, or of the whole company (null) — never
+     * narrowed by the caller's own fence, so limits stay company-wide.
+     *
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  Builder<TModel>  $query
+     * @return Builder<TModel>
+     */
+    private function forBranch(Builder $query, ?int $branchId): Builder
+    {
+        return $query->withoutGlobalScope(BranchScope::class)
+            ->when($branchId !== null, fn (Builder $inner) => $inner->where($inner->getModel()->qualifyColumn('branch_id'), $branchId));
     }
 
     private function money(mixed $value): string

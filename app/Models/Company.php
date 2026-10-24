@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
-use App\Support\TenantContext;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Cache;
+use LogicException;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -149,13 +149,13 @@ class Company extends Model implements HasMedia
     public const string CACHE_KEY = 'company:current';
 
     /**
-     * Branch-fenced cache key for cached() below.
-     * TenantContext::currentBranchId() resolves defensively (see its own
-     * doc comment) so this is safe to call even outside an HTTP request.
+     * Cache key for cached() below. One key per tenant: there is a single
+     * companies row whoever reads it (branch details are layered on top by
+     * forBranch(), never cached under a viewer's fence).
      */
     public static function cacheKey(): string
     {
-        return self::CACHE_KEY.':'.(TenantContext::currentBranchId() ?? 'all');
+        return self::CACHE_KEY.':all';
     }
 
     /**
@@ -189,13 +189,52 @@ class Company extends Model implements HasMedia
      */
     public static function cached(): ?self
     {
-        $memoKey = (tenant()?->getTenantKey() ?? 'central').':'.(TenantContext::currentBranchId() ?? 'all');
+        $memoKey = (string) (tenant()?->getTenantKey() ?? 'central');
 
         if (array_key_exists($memoKey, self::$memo)) {
             return self::$memo[$memoKey];
         }
 
         return self::$memo[$memoKey] = Cache::remember(self::cacheKey(), now()->addHour(), fn () => static::query()->first());
+    }
+
+    /**
+     * The company as seen by one branch (branches v2 §4.6, D4): headquarters'
+     * settings with that branch's own contact details, MoMo number and fees
+     * laid over them (App\Models\Branch::OVERRIDABLE; a null on the branch
+     * inherits). Bills, receipts and messages use the branch of the customer
+     * or payment they are about. A null branch, or a branch overriding
+     * nothing, is headquarters' record itself.
+     *
+     * The result is a read-only view: saving it is refused.
+     */
+    public static function forBranch(?int $branchId): ?self
+    {
+        $company = self::cached();
+        $branch = $branchId !== null ? Branch::allMemoized()->get($branchId) : null;
+
+        if ($company === null || $branch === null || $branch->overrides() === []) {
+            return $company;
+        }
+
+        $memoKey = (tenant()?->getTenantKey() ?? 'central').':branch:'.$branchId;
+
+        return self::$memo[$memoKey] ??= tap(clone $company, function (self $view) use ($branch): void {
+            $view->forceFill($branch->overrides());
+            $view->branchView = true;
+        });
+    }
+
+    /** Set on forBranch()'s read-only copies. */
+    private bool $branchView = false;
+
+    protected static function booted(): void
+    {
+        static::saving(function (self $company): void {
+            if ($company->branchView) {
+                throw new LogicException('A branch view of the company settings is read-only — save the companies row or the branch.');
+            }
+        });
     }
 
     /**

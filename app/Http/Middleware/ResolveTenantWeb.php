@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Http\Controllers\BranchViewController;
+use App\Models\Branch;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\TenantUserIndex;
@@ -76,6 +78,13 @@ class ResolveTenantWeb
         abort_if(! $tenantUser, 403, 'You do not have access to this tenant.');
 
         $context = TenantContext::resolve($tenantUser);
+
+        // Branch switcher (branches v2): an unfenced user viewing one branch.
+        $viewedBranchId = $request->session()->get(BranchViewController::SESSION_KEY);
+
+        if ($context->branchId === null && is_int($viewedBranchId) && Branch::query()->whereKey($viewedBranchId)->exists()) {
+            $context = $context->viewingBranch($viewedBranchId);
+        }
 
         app()->instance(TenantContext::class, $context);
 

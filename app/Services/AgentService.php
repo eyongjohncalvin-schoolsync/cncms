@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\DataTransferObjects\AgentData;
 use App\Models\Agent;
+use App\Models\StaffSalary;
 use App\Models\User;
 use App\Repositories\Contracts\AgentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
@@ -28,7 +29,20 @@ class AgentService
     public function __construct(
         private readonly AgentRepositoryInterface $agents,
         private readonly ZoneRepositoryInterface $zones,
+        private readonly StaffAssignmentService $assignments,
+        private readonly SalaryService $salaries,
     ) {}
+
+    /**
+     * Branches v2 (D7): an agent works in their zone's branch — a zone in
+     * another branch is a transfer, kept in the staff assignment history.
+     */
+    private function recordAssignment(Agent $agent): void
+    {
+        if ($agent->user_id !== null) {
+            $this->assignments->record((int) $agent->user_id, $agent->branch_id, 'agent', auth()->user());
+        }
+    }
 
     public function list(array $filters, int $perPage): LengthAwarePaginator
     {
@@ -85,6 +99,8 @@ class AgentService
         $agent = $this->agents->create($zoneId, $userId, $data);
 
         Cache::forget('agents:all');
+        $this->recordAssignment($agent);
+        $this->recordSalary($agent, null);
 
         return $agent->load(['zone', 'user']);
     }
@@ -93,12 +109,39 @@ class AgentService
     {
         $zoneId = $data->zoneUuid !== null ? $this->resolveZoneId($data->zoneUuid) : null;
         $userId = $data->userUuid !== null ? $this->resolveUserId($data->userUuid) : null;
+        $previousSalary = (string) $agent->salary;
 
         $agent = $this->agents->update($agent, $data, $zoneId, $userId);
 
         Cache::forget('agents:all');
+        $this->recordAssignment($agent);
+
+        if (bccomp((string) $agent->salary, $previousSalary, 2) !== 0) {
+            $this->recordSalary($agent, $previousSalary);
+        }
 
         return $agent->load(['zone', 'user']);
+    }
+
+    /**
+     * Branches v2 D8: an agent's salary follows the salary rules — on their
+     * current grade, inside its range it is approved at once; outside, it
+     * waits for headquarters and the agent keeps $previousSalary until then.
+     * Agents without a login have no salary history and keep the old direct field.
+     */
+    private function recordSalary(Agent $agent, ?string $previousSalary): void
+    {
+        $actor = auth()->user();
+
+        if ($agent->user_id === null || ! $actor instanceof User) {
+            return;
+        }
+
+        $salary = $this->salaries->set((int) $agent->user_id, $agent->branch_id, (string) $agent->salary, $this->salaries->currentGrade((int) $agent->user_id), 'Set on the agent form', $actor);
+
+        if ($salary->status === StaffSalary::STATUS_PENDING && $previousSalary !== null) {
+            $agent->forceFill(['salary' => $previousSalary])->save();
+        }
     }
 
     public function delete(Agent $agent): void

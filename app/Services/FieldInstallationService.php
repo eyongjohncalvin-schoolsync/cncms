@@ -15,6 +15,7 @@ use App\Models\CustomerCharge;
 use App\Models\ExpenseCategory;
 use App\Models\FieldInstallation;
 use App\Models\Payment;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\Zone;
@@ -107,7 +108,7 @@ class FieldInstallationService
             throw ValidationException::withMessages(['zone_uuid' => ['This zone is outside your branch.']]);
         }
 
-        if (Customer::query()->withTrashed()->where('uuid', $data['customer_uuid'])->exists()) {
+        if (Customer::query()->withoutGlobalScope(BranchScope::class)->withTrashed()->where('uuid', $data['customer_uuid'])->exists()) {
             throw ValidationException::withMessages(['customer_uuid' => ['A customer with this id already exists — the registration was not saved.']]);
         }
 
@@ -240,6 +241,7 @@ class FieldInstallationService
             $customer = Customer::query()->with('zone')->whereKey($locked->customer_id)->lockForUpdate()->firstOrFail();
 
             $payments = Payment::query()
+                ->with(['verification', 'customerCharge'])
                 ->where('field_installation_id', $locked->id)
                 ->where('verification_status', '!=', 'rejected')
                 ->get();
@@ -262,7 +264,7 @@ class FieldInstallationService
                     'purpose' => mb_substr("Refund — field registration rejected: {$customer->name} ({$customer->accountCode()}): {$reason}", 0, 500),
                     'category_uuid' => $category->uuid,
                     'amount' => $taken,
-                ], $actor);
+                ], $actor, branchId: $customer->branch_id);
             }
 
             if ($locked->customer_charge_id !== null) {
@@ -308,7 +310,7 @@ class FieldInstallationService
 
         return Customer::query()
             ->pendingActivation()
-            ->when($branchId !== null, fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId)))
+            ->when($branchId !== null, fn ($query) => $query->where('customers.branch_id', $branchId))
             ->count();
     }
 

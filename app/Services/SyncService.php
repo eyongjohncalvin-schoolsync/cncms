@@ -13,12 +13,14 @@ use App\Models\CustomerSubscription;
 use App\Models\Expenditure;
 use App\Models\FieldInstallation;
 use App\Models\Payment;
+use App\Models\Scopes\BranchScope;
 use App\Models\Service;
 use App\Models\SyncQueue;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Support\Billing\FreeMonthPlan;
+use App\Support\BranchLookup;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
@@ -76,6 +78,7 @@ class SyncService
         }
 
         $paymentLookups = $this->paymentPushLookups($changes['payments'] ?? []);
+        BranchLookup::remember($paymentLookups['customers']);
 
         foreach ($changes['payments'] ?? [] as $item) {
             [$entry, $error] = $this->pushPayment($item, $deviceId, $paymentLookups);
@@ -216,7 +219,8 @@ class SyncService
         }
 
         if ($entityType === 'payment') {
-            $payment = Payment::query()->where('uuid', $entityUuid)->firstOrFail();
+            // Only a payment of the caller's own branch (branches v2).
+            $payment = Payment::query()->forBranch(TenantContext::currentBranchId())->where('uuid', $entityUuid)->firstOrFail();
 
             $storedPath = $file->store('receipts/payments', 'public');
 
@@ -259,6 +263,7 @@ class SyncService
         if ($lastSyncAt) {
             $pendingPull = Customer::query()->where('updated_at', '>=', $lastSyncAt)->count()
                 + Payment::query()
+                    ->forBranch(TenantContext::currentBranchId())
                     ->whereIn('verification_status', ['verified', 'rejected'])
                     ->where('updated_at', '>=', $lastSyncAt)
                     ->count();
@@ -511,8 +516,9 @@ class SyncService
         // Same idempotency guard as pushPayment() above. A row an older
         // build synced before E1 is a legacy expenditure with that local_uuid.
         if ($localUuid !== null) {
-            $existingUuid = Voucher::query()->where('local_uuid', $localUuid)->value('uuid')
-                ?? Expenditure::query()->where('local_uuid', $localUuid)->value('uuid');
+            // Idempotency must see every branch (branches v2): a row that can't be seen would be re-inserted and fail its unique key forever.
+            $existingUuid = Voucher::query()->withoutGlobalScope(BranchScope::class)->where('local_uuid', $localUuid)->value('uuid')
+                ?? Expenditure::query()->withoutGlobalScope(BranchScope::class)->where('local_uuid', $localUuid)->value('uuid');
 
             if ($existingUuid !== null) {
                 return [
@@ -627,7 +633,7 @@ class SyncService
         // Same idempotency guard as pushPayment()/pushExpenditure() above —
         // see pushPayment()'s comment for the full rationale.
         if ($localUuid !== null) {
-            $existingUuid = Complaint::query()->where('local_uuid', $localUuid)->value('uuid');
+            $existingUuid = Complaint::query()->withoutGlobalScope(BranchScope::class)->where('local_uuid', $localUuid)->value('uuid');
 
             if ($existingUuid !== null) {
                 return [
@@ -709,7 +715,7 @@ class SyncService
             ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
             ->when(
                 $zoneId === null && $branchId !== null,
-                fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId))
+                fn ($query) => $query->where('customers.branch_id', $branchId)
             )
             ->get();
 
@@ -806,7 +812,7 @@ class SyncService
             ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
             ->when(
                 $zoneId === null && $branchId !== null,
-                fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId))
+                fn ($query) => $query->where('customers.branch_id', $branchId)
             )
             ->pluck('uuid')
             ->all();
@@ -820,10 +826,9 @@ class SyncService
      * would not be re-included unless it also picked up a fresh updated_at.
      * See report note.
      *
-     * Same branch/zone fence as upsertedCustomers() above, applied via the
-     * customer relation (Payment has no direct zone — see
-     * App\Models\Payment::branchRouteBindingRelation()'s identical
-     * 'customer.zone' path).
+     * Same branch/zone fence as upsertedCustomers() above: the zone through
+     * the customer relation (Payment has no direct zone), the branch on the
+     * payment's own branch_id.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -839,7 +844,7 @@ class SyncService
             ->when($zoneId !== null, fn ($query) => $query->whereHas('customer', fn ($inner) => $inner->where('zone_id', $zoneId)))
             ->when(
                 $zoneId === null && $branchId !== null,
-                fn ($query) => $query->whereHas('customer.zone', fn ($inner) => $inner->where('branch_id', $branchId))
+                fn ($query) => $query->where('payments.branch_id', $branchId)
             )
             ->get()
             ->map(function (Payment $payment) use ($status): array {

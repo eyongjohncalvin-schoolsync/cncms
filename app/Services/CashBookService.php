@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Branch;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
+use App\Support\BranchAttribution;
 use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -37,23 +41,34 @@ class CashBookService
         return BusinessTimezone::today();
     }
 
-    /** The cashier's own till, created the first time they need it. */
+    /**
+     * The cashier's own till, created the first time they need it. A
+     * person's till is theirs whichever branch is being viewed (branches v2).
+     */
     public function tillFor(User $user): CashAccount
     {
-        return CashAccount::query()->firstOrCreate(
+        return CashAccount::query()->withoutGlobalScope(BranchScope::class)->firstOrCreate(
             ['kind' => CashAccount::KIND_TILL, 'holder_user_id' => $user->id],
-            ['name' => "Till — {$user->name}", 'is_active' => true],
+            ['name' => "Till — {$user->name}", 'is_active' => true, 'branch_id' => BranchAttribution::forUser($user)],
         );
     }
 
-    /** The company wallet for a mobile-money method (mtn_momo / orange_money). */
-    public function walletFor(string $paymentMethod): CashAccount
+    /**
+     * A branch's wallet for a mobile-money method (mtn_momo / orange_money) —
+     * each branch keeps its own money (branches v2 D3); headquarters' when no
+     * branch is given. Found whichever branch the caller works in, and created
+     * the first time a branch needs it.
+     */
+    public function walletFor(string $paymentMethod, ?int $branchId = null): CashAccount
     {
         $provider = CashAccount::WALLET_PROVIDERS[$paymentMethod];
+        $branchId ??= Branch::headquartersId();
+        $branch = Branch::allMemoized()->get($branchId);
+        $name = $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet';
 
-        return CashAccount::query()->firstOrCreate(
-            ['kind' => CashAccount::KIND_MOBILE_MONEY, 'provider' => $provider, 'is_active' => true],
-            ['name' => $provider === 'mtn' ? 'MTN MoMo wallet' : 'Orange Money wallet'],
+        return CashAccount::query()->withoutGlobalScope(BranchScope::class)->firstOrCreate(
+            ['kind' => CashAccount::KIND_MOBILE_MONEY, 'provider' => $provider, 'is_active' => true, 'branch_id' => $branchId],
+            ['name' => $branch !== null && ! $branch->is_headquarters ? "{$name} — {$branch->name}" : $name],
         );
     }
 
@@ -65,6 +80,8 @@ class CashBookService
             'provider' => $provider,
             'account_number' => $accountNumber,
             'is_active' => true,
+            // The branch being worked in (a fenced user's, or the one an unfenced user is viewing), else headquarters.
+            'branch_id' => TenantContext::currentBranchId() ?? Branch::headquartersId(),
         ]);
     }
 
@@ -133,6 +150,12 @@ class CashBookService
     {
         if ($from->is($to)) {
             throw ValidationException::withMessages(['to_account' => 'Choose a different account to move the money to.']);
+        }
+
+        // Branches v2: there is no joint account — money crosses branches only
+        // as a branch transfer the receiving branch confirms.
+        if ($from->branch_id !== $to->branch_id) {
+            throw ValidationException::withMessages(['to_account' => 'That account belongs to another branch — send a branch transfer instead.']);
         }
 
         if ($to->kind === CashAccount::KIND_BANK && ($reference === null || trim($reference) === '')) {

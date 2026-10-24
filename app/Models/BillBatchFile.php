@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 /**
  * One downloadable PDF (or ZIP) artifact produced by a BillBatch run.
@@ -22,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $kind
  */
 #[Fillable([
-    'bill_batch_id', 'zone_id', 'zone_name', 'kind', 'disk', 'path',
+    'bill_batch_id', 'zone_id', 'branch_id', 'zone_name', 'kind', 'disk', 'path',
     'bill_count', 'page_count', 'size_bytes',
 ])]
 #[RouteKey('uuid')]
@@ -49,7 +50,7 @@ class BillBatchFile extends Model
         return match ($this->kind) {
             'bulk' => "bills-{$this->billBatch->period}-all.pdf",
             'zip' => "bills-{$this->billBatch->period}-by-zone.zip",
-            default => 'bills-'.$this->billBatch->period.'-'.\Illuminate\Support\Str::slug($this->zone_name ?: 'unzoned').'.pdf',
+            default => 'bills-'.$this->billBatch->period.'-'.Str::slug($this->zone_name ?: 'unzoned').'.pdf',
         };
     }
 }

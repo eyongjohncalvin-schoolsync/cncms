@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
+use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -49,7 +51,7 @@ use Illuminate\Support\Carbon;
 #[RouteKey('uuid')]
 class FreeMonthGrant extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     public const string REASON_INSTALLATION_OFFER = 'installation_offer';
 
@@ -74,14 +76,6 @@ class FreeMonthGrant extends Model
         self::REASON_OPENING_BALANCE => 'Carried in at go-live',
     ];
 
-    /**
-     * A grant has no direct zone — branch is reached through its Customer.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return 'customer.zone';
-    }
-
     protected function casts(): array
     {
         return [
@@ -94,7 +88,7 @@ class FreeMonthGrant extends Model
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(Customer::class)->withoutGlobalScope(BranchScope::class);
     }
 
     public function service(): BelongsTo
@@ -161,5 +155,17 @@ class FreeMonthGrant extends Model
     {
         // `!Y-m` pins the parse to the 1st — see the !Y-m gotcha.
         return Carbon::createFromFormat('!Y-m', $period)->addMonthsNoOverflow($months)->format('Y-m');
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
+    }
+
+    /** Customer history: stays whole for its customer; fenced on lists and links instead (BelongsToBranch). */
+    protected static function fencedByBranchScope(): bool
+    {
+        return false;
     }
 }

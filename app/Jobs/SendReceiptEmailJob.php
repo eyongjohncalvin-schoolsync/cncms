@@ -51,7 +51,7 @@ class SendReceiptEmailJob implements ShouldQueue
         $to = (string) $email->recipientEmail($receipt);
         $pdf = Storage::disk($receipts->disk())->get($receipts->pdf($receipt));
 
-        Mail::to($to)->send(new ReceiptMail($receipt, (string) $pdf, Company::cached()?->email));
+        Mail::to($to)->send(new ReceiptMail($receipt, (string) $pdf, Company::forBranch($receipt->branch_id)?->email));
 
         $log->recordSent($receipt, ReceiptEmailService::CHANNEL, $this->actorId ? User::query()->find($this->actorId) : null, $to);
     }

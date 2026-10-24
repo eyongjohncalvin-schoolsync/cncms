@@ -180,7 +180,8 @@ class ManuscriptService
         }
 
         $manuscript = $this->resolveManuscript($customer, $period);
-        $company = Company::cached();
+        // The customer's branch's MoMo number and contacts (branches v2 D4).
+        $company = Company::forBranch($customer->branch_id);
 
         return $this->buildBillData($customer, $manuscript, $period, $company, $company?->logoDataUri(), CustomerChargeService::openBalancesByKind([$customer->id])[$customer->id] ?? []);
     }
@@ -238,7 +239,9 @@ class ManuscriptService
                 continue;
             }
 
-            $bills[] = $this->buildBillData($customer, $manuscript, $period, $company, $logoDataUri, $chargeBalances[$customer->id] ?? []);
+            // Each bill carries its customer's branch's MoMo number and
+            // contacts (branches v2 D4); the logo is company-wide, read once.
+            $bills[] = $this->buildBillData($customer, $manuscript, $period, Company::forBranch($customer->branch_id) ?? $company, $logoDataUri, $chargeBalances[$customer->id] ?? []);
         }
 
         return $bills;

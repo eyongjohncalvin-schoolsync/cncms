@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
+use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -38,7 +40,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class FieldInstallation extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     public const string STATUS_PENDING = 'pending';
 
@@ -57,17 +59,9 @@ class FieldInstallation extends Model
         ];
     }
 
-    /**
-     * No direct zone — branch is reached through the customer.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return 'customer.zone';
-    }
-
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class)->withTrashed();
+        return $this->belongsTo(Customer::class)->withTrashed()->withoutGlobalScope(BranchScope::class);
     }
 
     public function charge(): BelongsTo
@@ -102,5 +96,17 @@ class FieldInstallation extends Model
     public function isPending(): bool
     {
         return $this->status === self::STATUS_PENDING;
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
+    }
+
+    /** Customer history: stays whole for its customer; fenced on lists and links instead (BelongsToBranch). */
+    protected static function fencedByBranchScope(): bool
+    {
+        return false;
     }
 }

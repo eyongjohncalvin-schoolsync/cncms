@@ -8,6 +8,7 @@ use App\Models\FieldDevice;
 use App\Models\ReceiptBlock;
 use App\Models\ReceiptLeaf;
 use App\Models\User;
+use App\Support\BranchAttribution;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -48,6 +49,7 @@ class ReceiptStockService
                 'number' => $this->documentNumbers->next(DocumentNumberService::RECEIPT_BLOCK),
                 'kind' => $kind,
                 'holder_user_id' => $holder->id,
+                'branch_id' => $device !== null ? $device->branch_id : BranchAttribution::forUser($holder),
                 'field_device_id' => $device?->id,
                 'year' => $year,
                 'first_sequence' => $first,

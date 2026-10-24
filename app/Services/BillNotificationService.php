@@ -64,7 +64,7 @@ final class BillNotificationService
             return null;
         }
 
-        $company = Company::cached();
+        $company = Company::forBranch($customer->branch_id);
         // `!Y-m` — reset day/time to base first so a short target month never
         // rolls forward when this runs on the 29th–31st (see the fuller note
         // in ManuscriptService::buildBillData()).

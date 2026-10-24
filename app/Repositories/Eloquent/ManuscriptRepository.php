@@ -132,7 +132,7 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
      */
     private function scoped(array $filters): Builder
     {
-        return $this->scopeToBranch(Manuscript::query(), $this->currentBranchId(), 'customer.zone')
+        return $this->scopeToBranchDirect(Manuscript::query(), $this->currentBranchId())
             ->where('period', $filters['period'])
             ->when(
                 $filters['zone_id'] ?? null,
@@ -190,7 +190,7 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
         // Subscription money only — installation and technician fees are
         // not what the monthly bill is collected against
         // (docs/plans/installation-and-promotions.md).
-        $total = $this->scopeToBranch(Payment::query(), $this->currentBranchId(), 'customer.zone')
+        $total = $this->scopeToBranchDirect(Payment::query(), $this->currentBranchId())
             ->subscription()
             ->where('verification_status', 'verified')
             ->whereBetween('created_at', [$start, $end])

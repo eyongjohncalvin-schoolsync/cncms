@@ -16,6 +16,7 @@ use App\Models\FreeMonthGrant;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
+use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Support\BusinessTimezone;
@@ -33,13 +34,10 @@ use Illuminate\Validation\ValidationException;
  * audit_logs, command_runs, zones, agents), no snapshot table, no new
  * scheduled job.
  *
- * Branch/zone fencing: `payments`/`customers` have no direct branch
- * column — branch is only reachable via `payment -> customer -> zone ->
- * zones.branch_id`. Every query below joins `customers`/`zones` explicitly
- * (rather than the correlated-EXISTS `whereHas()` pattern
- * App\Repositories\Concerns\ScopesByBranch uses for row-listing queries) —
- * better index usage for the aggregate/GROUP BY queries this service is
- * built from. `agent`-role users are fenced one level tighter than their
+ * Branch/zone fencing: every branch-owned row carries its own indexed
+ * branch_id (branches v2), so the branch fence is one condition on the base
+ * table; queries still join `customers`/`zones` for the zone fence and zone
+ * names. `agent`-role users are fenced one level tighter than their
  * TenantContext::branchId (which only resolves to their zone's *branch*):
  * agentZoneId() resolves their own Agent row's zone_id directly, and every
  * query here prefers that over the branch fence when it's set — see
@@ -402,6 +400,7 @@ class ReportService
         // technician fees would distort the collection ratio.
         $collectedByZone = Payment::query()
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
+            ->when($branchId !== null, fn ($query) => $query->where('payments.branch_id', $branchId))
             ->where('payments.purpose', Payment::PURPOSE_SUBSCRIPTION)
             ->where('payments.verification_status', 'verified')
             ->whereBetween('payments.created_at', [$start, $end])
@@ -602,7 +601,9 @@ class ReportService
             ->values()
             ->all();
 
-        $users = User::query()->pluck('name', 'id');
+        // This tenant's staff only — users is the central table shared by every tenant.
+        $tenantUserIds = TenantUser::query()->where('tenant_id', (string) tenant()?->getTenantKey())->pluck('user_id');
+        $users = User::query()->whereIn('id', $tenantUserIds)->pluck('name', 'id');
         $byUser = [];
         $count = function (string $column, string $key, $query) use (&$byUser, $users): void {
             foreach ($query->groupBy($column)->selectRaw("{$column} as user_id, count(*) as n")->get() as $row) {
@@ -1048,12 +1049,15 @@ class ReportService
     }
 
     /**
-     * Explicit JOIN-based branch/zone fencing for report aggregate queries
-     * (preferred over App\Repositories\Concerns\ScopesByBranch's correlated
-     * `whereHas()` for these — better index usage on GROUP BY/aggregate
-     * queries). $query must already join a `zones` table. A zone fence
+     * Branch/zone fencing for report aggregate queries. $query must already
+     * join a `zones` table (for the zone fence and zone names). A zone fence
      * (agent role) always wins over a branch fence when both are present —
      * a zone is strictly narrower than its branch.
+     *
+     * The branch fence is the base row's own indexed branch_id (branches v2):
+     * money and bills count for the branch where they happened, even after
+     * the customer moved. Audit rows from before branches v2 carry no branch,
+     * so status changes are fenced by the customer's branch.
      */
     private function fenceZones(Builder $query, ?int $branchId, ?int $zoneId): Builder
     {
@@ -1062,7 +1066,9 @@ class ReportService
         }
 
         if ($branchId !== null) {
-            return $query->where('zones.branch_id', $branchId);
+            $model = $query->getModel();
+
+            return $query->where($model instanceof AuditLog ? 'customers.branch_id' : $model->qualifyColumn('branch_id'), $branchId);
         }
 
         return $query;

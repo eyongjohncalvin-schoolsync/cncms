@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DataTransferObjects\CustomerServiceSelection;
+use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\CustomerSubscription;
+use App\Models\Scopes\BranchScope;
 use App\Models\Service;
 use App\Models\ServiceVariant;
+use App\Support\BranchLookup;
+use App\Support\BranchPrices;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -49,6 +53,9 @@ class CustomerSubscriptionService
                 'services' => ['Select at least one service.'],
             ]);
         }
+
+        // Every subscription row below takes this customer's branch.
+        BranchLookup::remember([$customer]);
 
         // Resolve every uuid up front, rejecting duplicates/unknowns/
         // cross-references here rather than mid-loop.
@@ -237,7 +244,7 @@ class CustomerSubscriptionService
      * back to the service's 0.00 catalogue seed price. Falls back to the
      * catalogue price only when no legacy bill was given either.
      */
-    public function defaultSelection(?string $bill = null): CustomerServiceSelection
+    public function defaultSelection(?string $bill = null, ?int $branchId = null): CustomerServiceSelection
     {
         $default = Service::default();
 
@@ -247,7 +254,8 @@ class CustomerSubscriptionService
             ]);
         }
 
-        return new CustomerServiceSelection($default->uuid, $bill ?? (string) $default->price);
+        // The customer's branch's price when it sets one (branches v2 D4).
+        return new CustomerServiceSelection($default->uuid, $bill ?? BranchPrices::for($branchId)->service($default));
     }
 
     /**
@@ -268,9 +276,49 @@ class CustomerSubscriptionService
     public function applyCataloguePriceToSubscribers(Service $service): int
     {
         return $this->applyPriceToRows(
-            CustomerSubscription::query()->where('service_id', $service->id)->whereNull('service_variant_id'),
+            $this->exceptBranchesOverriding(
+                CustomerSubscription::query()->where('service_id', $service->id)->whereNull('service_variant_id'),
+                fn (BranchPrices $prices): bool => $prices->overridesService($service->id),
+            ),
             (string) $service->price,
         );
+    }
+
+    /**
+     * A branch's own price applied to its current subscribers (branches v2
+     * D4, App\Services\BranchPriceService): the base rows of $serviceId, or
+     * the rows pinned to $variantId, of customers who belong to the branch
+     * now. Returns the number of subscriptions repriced.
+     */
+    public function applyPriceToBranchSubscribers(int $branchId, int $serviceId, ?int $variantId, string $price): int
+    {
+        return $this->applyPriceToRows(
+            CustomerSubscription::query()
+                ->whereIn('customer_id', Customer::query()->withoutGlobalScope(BranchScope::class)->where('branch_id', $branchId)->select('id'))
+                ->when(
+                    $variantId === null,
+                    fn (Builder $query) => $query->where('service_id', $serviceId)->whereNull('service_variant_id'),
+                    fn (Builder $query) => $query->where('service_variant_id', $variantId),
+                ),
+            $price,
+        );
+    }
+
+    /**
+     * Headquarters' catalogue price never reprices the customers of a branch
+     * that sets its own price for that item (branches v2 D4).
+     *
+     * @param  Builder<CustomerSubscription>  $query
+     * @param  callable(BranchPrices): bool  $overrides
+     * @return Builder<CustomerSubscription>
+     */
+    private function exceptBranchesOverriding(Builder $query, callable $overrides): Builder
+    {
+        $branchIds = Branch::allMemoized()->keys()->filter(fn (int $branchId): bool => $overrides(BranchPrices::for($branchId)))->values()->all();
+
+        return $branchIds === []
+            ? $query
+            : $query->whereNotIn('customer_id', Customer::query()->withoutGlobalScope(BranchScope::class)->whereIn('branch_id', $branchIds)->select('id'));
     }
 
     /**
@@ -281,7 +329,10 @@ class CustomerSubscriptionService
     public function applyVariantPriceToSubscribers(ServiceVariant $variant): int
     {
         return $this->applyPriceToRows(
-            CustomerSubscription::query()->where('service_variant_id', $variant->id),
+            $this->exceptBranchesOverriding(
+                CustomerSubscription::query()->where('service_variant_id', $variant->id),
+                fn (BranchPrices $prices): bool => $prices->overridesVariant($variant->id),
+            ),
             (string) $variant->price,
         );
     }

@@ -1350,6 +1350,9 @@ class PaymentTest extends TestCase
             )));
         };
 
+        // Warm the per-process branch list memo so the first measured run isn't charged its one-time load.
+        $countLookups(1);
+
         $this->assertSame($countLookups(2), $countLookups(4));
     }
 

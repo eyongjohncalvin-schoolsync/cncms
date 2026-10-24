@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -21,14 +22,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * unique across every kind of receipt.
  */
 #[Fillable([
-    'number', 'kind', 'holder_user_id', 'field_device_id', 'year', 'first_sequence', 'last_sequence',
+    'number', 'kind', 'holder_user_id', 'branch_id', 'field_device_id', 'year', 'first_sequence', 'last_sequence',
     'status', 'allocated_by', 'closed_at', 'closed_by',
     'pdf_status', 'pdf_path', 'pdf_disk', 'pdf_error', 'pdf_generated_at',
 ])]
 #[RouteKey('uuid')]
 class ReceiptBlock extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     public const string KIND_DIGITAL = 'digital';
 
@@ -84,5 +85,11 @@ class ReceiptBlock extends Model
     public function lastNumber(): string
     {
         return ReceiptLeaf::formatNumber($this->year, $this->last_sequence);
+    }
+
+    /** Set by the creating service (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return null;
     }
 }

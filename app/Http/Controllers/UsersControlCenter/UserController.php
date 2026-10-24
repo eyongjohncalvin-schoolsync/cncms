@@ -7,12 +7,17 @@ namespace App\Http\Controllers\UsersControlCenter;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreTenantUserRequest;
 use App\Http\Requests\UpdateTenantUserRequest;
+use App\Models\Agent;
 use App\Models\Branch;
 use App\Models\Role;
+use App\Models\SalaryGrade;
+use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Repositories\Contracts\BranchRepositoryInterface;
 use App\Services\AccountSecurityService;
+use App\Services\SalaryService;
+use App\Services\StaffAssignmentService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +46,8 @@ class UserController extends Controller
     public function __construct(
         private readonly TenantContext $context,
         private readonly BranchRepositoryInterface $branches,
+        private readonly StaffAssignmentService $assignments,
+        private readonly SalaryService $salaries,
     ) {}
 
     public function index(): Response
@@ -49,11 +56,27 @@ class UserController extends Controller
 
         $tenantUsers = TenantUser::query()
             ->where('tenant_id', $this->context->tenantUser->tenant_id)
+            // Branches v2 (D7): a fenced manager sees their branch's staff —
+            // fenced to it, or agents of its zones (Agent is branch-scoped).
+            ->when($this->context->isFenced(), fn ($query) => $query->where(fn ($inner) => $inner
+                ->where('branch_id', $this->context->branchId)
+                ->orWhere(fn ($agents) => $agents->where('role', 'agent')->whereIn('user_id', Agent::query()->whereNotNull('user_id')->pluck('user_id')))))
             ->with(['user', 'branch'])
             ->get();
 
+        // Branches v2 D8: salaries for whoever may set them — two queries for the whole list.
+        $canSetSalaries = $this->context->can('salaries.manage');
+        $salaries = $canSetSalaries ? $this->salaries->summaryFor($tenantUsers->pluck('user_id')->map(fn ($id): int => (int) $id)->all()) : [];
+
         return Inertia::render('UsersControlCenter/Users', [
+            'can_set_salaries' => $canSetSalaries,
+            'salary_grades' => $canSetSalaries
+                ? SalaryGrade::query()->where('is_active', true)->orderBy('min_amount')->get(['uuid', 'name', 'min_amount', 'max_amount'])
+                    ->map(fn (SalaryGrade $grade): array => ['uuid' => $grade->uuid, 'name' => $grade->name, 'min_amount' => (string) $grade->min_amount, 'max_amount' => (string) $grade->max_amount])
+                    ->values()->all()
+                : [],
             'users' => $tenantUsers->map(fn (TenantUser $tenantUser): array => [
+                'salary' => $salaries[(int) $tenantUser->user_id] ?? null,
                 'id' => $tenantUser->id,
                 'role' => $tenantUser->role,
                 'job_title' => $tenantUser->job_title,
@@ -88,6 +111,9 @@ class UserController extends Controller
                 'uuid' => $branch->uuid,
                 'name' => $branch->name,
             ])->values(),
+            // Branches v2 (D7): a fenced manager hires into their branch and
+            // never moves staff between branches or grants investor status.
+            'fenced' => $this->context->isFenced(),
         ]);
     }
 
@@ -105,7 +131,8 @@ class UserController extends Controller
     public function store(StoreTenantUserRequest $request): RedirectResponse
     {
         $data = $request->validated();
-        $branchId = $this->resolveBranchId($data['branch_uuid'] ?? null);
+        // Branches v2 (D7): a fenced manager hires into their own branch.
+        $branchId = $this->context->isFenced() ? $this->context->branchId : $this->resolveBranchId($data['branch_uuid'] ?? null);
 
         $user = DB::connection('pgsql')->transaction(fn (): User => User::query()->create([
             'name' => $data['name'],
@@ -125,6 +152,8 @@ class UserController extends Controller
                 'job_title' => $data['job_title'] ?? null,
                 'branch_id' => $branchId,
             ]);
+
+            $this->assignments->record($user->id, $branchId, $data['role'], request()->user(), 'Hired');
         });
 
         return redirect()->route('users.index')->with('success', 'User created.');
@@ -133,6 +162,13 @@ class UserController extends Controller
     public function update(UpdateTenantUserRequest $request, TenantUser $tenantUser): RedirectResponse
     {
         $data = $request->validated();
+
+        // Branches v2 (D7): only headquarters moves staff between branches or
+        // grants investor status — the request already refuses these from a
+        // fenced manager; this is the second lock.
+        if ($this->context->isFenced()) {
+            unset($data['branch_uuid'], $data['is_investor']);
+        }
 
         if (array_key_exists('branch_uuid', $data)) {
             $data['branch_id'] = $this->resolveBranchId($data['branch_uuid']);
@@ -157,6 +193,15 @@ class UserController extends Controller
         }
 
         $tenantUser->update($data);
+
+        // Branches v2 (D7): a transfer or a new role opens the next assignment.
+        if ($tenantUser->wasChanged(['branch_id', 'role'])) {
+            $agentBranchId = $tenantUser->role === 'agent'
+                ? Agent::query()->withoutGlobalScope(BranchScope::class)->where('user_id', $tenantUser->user_id)->with(['zone' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)])->first()?->zone?->branch_id
+                : null;
+
+            $this->assignments->record($tenantUser->user_id, $agentBranchId ?? $tenantUser->branch_id, $tenantUser->role, $request->user());
+        }
 
         return redirect()->route('users.index')->with('success', 'Saved.');
     }
@@ -187,7 +232,7 @@ class UserController extends Controller
      */
     public function deactivate(TenantUser $tenantUser, AccountSecurityService $account): RedirectResponse
     {
-        $this->authorize('deactivate', TenantUser::class);
+        $this->authorize('deactivate', $tenantUser);
 
         $account->deactivate($tenantUser->user);
 

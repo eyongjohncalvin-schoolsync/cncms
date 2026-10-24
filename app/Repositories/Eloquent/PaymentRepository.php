@@ -16,7 +16,7 @@ class PaymentRepository implements PaymentRepositoryInterface
 
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
-        return $this->scopeToBranch(Payment::query(), $this->currentBranchId(), 'customer.zone')
+        return $this->scopeToBranchDirect(Payment::query(), $this->currentBranchId())
             ->with(['customer', 'verification.verifier'])
             ->when($filters['customer_id'] ?? null, fn ($query, $customerId) => $query->where('customer_id', $customerId))
             ->when(
@@ -47,7 +47,7 @@ class PaymentRepository implements PaymentRepositoryInterface
 
     public function findByUuid(string $uuid, array $with = []): ?Payment
     {
-        return $this->scopeToBranch(Payment::query(), $this->currentBranchId(), 'customer.zone')
+        return $this->scopeToBranchDirect(Payment::query(), $this->currentBranchId())
             ->with($with)
             ->where('uuid', $uuid)
             ->first();
@@ -59,7 +59,7 @@ class PaymentRepository implements PaymentRepositoryInterface
             return new Collection;
         }
 
-        return $this->scopeToBranch(Payment::query(), $this->currentBranchId(), 'customer.zone')
+        return $this->scopeToBranchDirect(Payment::query(), $this->currentBranchId())
             ->with($with)
             ->whereIn('uuid', $uuids)
             ->get()

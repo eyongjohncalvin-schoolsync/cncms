@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Branch;
 use App\Models\Expenditure;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -29,6 +30,8 @@ class ExpenditureFactory extends Factory
             'notes' => null,
             'recorded_offline' => false,
             'recorded_by_device' => null,
+            // A legacy expenditure (no bon) belongs to headquarters.
+            'branch_id' => fn (): ?int => Branch::headquartersId(),
         ];
     }
 

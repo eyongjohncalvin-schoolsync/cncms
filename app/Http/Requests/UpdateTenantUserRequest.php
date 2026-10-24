@@ -6,6 +6,8 @@ namespace App\Http\Requests;
 
 use App\Models\Role;
 use App\Models\TenantUser;
+use App\Rules\NotSuperForFencedUser;
+use App\Support\TenantContext;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -36,7 +38,7 @@ class UpdateTenantUserRequest extends FormRequest
             // with zero super users. Two guards: nobody changes their own
             // role, and the last super can't be moved off it.
             'role' => [
-                'sometimes', 'required', 'string', Rule::exists('roles', 'name'),
+                'sometimes', 'required', 'string', Rule::exists('roles', 'name'), new NotSuperForFencedUser,
                 function (string $attribute, mixed $value, Closure $fail): void {
                     $tenantUser = $this->route('tenantUser');
 
@@ -63,7 +65,8 @@ class UpdateTenantUserRequest extends FormRequest
             // Center Users page patches this alone, same "each control patches its own field"
             // pattern as role/job_title. null clears the fence back to
             // unrestricted (see StoreTenantUserRequest's doc comment).
-            'branch_uuid' => ['sometimes', 'nullable', 'string'],
+            // Branches v2 (D7): transfers between branches are headquarters' call.
+            'branch_uuid' => ['sometimes', 'nullable', 'string', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
             // The narrow per-user payment-recording grant — see
             // PaymentPolicy::create()'s doc comment and the
             // add_can_record_payments_to_tenant_users_table migration.
@@ -95,7 +98,8 @@ class UpdateTenantUserRequest extends FormRequest
             // of the row's role, so no role-mismatch rule is needed here.
             // authorize() above already restricts this whole request to
             // super/admin, matching who may grant it.
-            'is_investor' => ['sometimes', 'boolean'],
+            // Branches v2: investor status is granted by headquarters only.
+            'is_investor' => ['sometimes', 'boolean', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
         ];
     }
 }

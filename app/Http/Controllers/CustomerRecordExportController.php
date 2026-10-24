@@ -52,7 +52,7 @@ class CustomerRecordExportController extends Controller
 
         return Pdf::loadView('pdf.customer-record', [
             'data' => $data,
-            'company' => Company::cached(),
+            'company' => Company::forBranch($customer->branch_id),
         ])
             ->setPaper('a4', 'portrait')
             ->download('customer-'.$this->slug($customer).'-record.pdf');

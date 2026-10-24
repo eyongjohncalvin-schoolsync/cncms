@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
+use App\Models\Concerns\ScopesRouteBindingToBranch;
+use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -16,7 +19,7 @@ use Illuminate\Support\Carbon;
 #[RouteKey('uuid')]
 class Manuscript extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     /**
      * The bill's (invoice's) number — "{TENANT}-{YYYYMM}-{customer id}",
@@ -61,7 +64,7 @@ class Manuscript extends Model
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(Customer::class)->withoutGlobalScope(BranchScope::class);
     }
 
     /**
@@ -121,5 +124,17 @@ class Manuscript extends Model
     public function commandRun(): BelongsTo
     {
         return $this->belongsTo(CommandRun::class);
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
+    }
+
+    /** Customer history: stays whole for its customer; fenced on lists and links instead (BelongsToBranch). */
+    protected static function fencedByBranchScope(): bool
+    {
+        return false;
     }
 }

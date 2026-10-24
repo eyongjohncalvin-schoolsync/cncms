@@ -42,11 +42,11 @@ class DashboardController extends Controller
             now()->addSeconds(60),
             fn (): array => [
                 'total_customers' => Customer::query()
-                    ->when($branchId !== null, fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId)))
+                    ->when($branchId !== null, fn ($query) => $query->where('customers.branch_id', $branchId))
                     ->count(),
                 'active_customers' => Customer::query()
                     ->where('status', 'active')
-                    ->when($branchId !== null, fn ($query) => $query->whereHas('zone', fn ($inner) => $inner->where('branch_id', $branchId)))
+                    ->when($branchId !== null, fn ($query) => $query->where('customers.branch_id', $branchId))
                     ->count(),
             ],
         );

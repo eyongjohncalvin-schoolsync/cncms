@@ -32,5 +32,11 @@ abstract class TestCase extends BaseTestCase
         if ($database !== 'cncms_testing') {
             throw new RuntimeException("Refusing to run tests against database [{$database}]; expected [cncms_testing].");
         }
+
+        // Long web actions (CustomerRecordExportController, ManuscriptController)
+        // call set_time_limit(120) for their request; in one long phpunit
+        // process that would otherwise kill whichever later test is running
+        // when those 120 seconds run out.
+        set_time_limit(0);
     }
 }

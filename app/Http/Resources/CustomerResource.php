@@ -50,7 +50,7 @@ class CustomerResource extends JsonResource
             // a hardcoded 2,000 FCFA that could drift from what
             // Settings > Company Info has configured.
             'reconnection_fine' => in_array($this->status, ['disconnected', 'suspended'], true)
-                ? (string) (Company::cached()?->reconnection_fine ?? '2000.00')
+                ? (string) (Company::forBranch($this->branch_id)?->reconnection_fine ?? '2000.00')
                 : null,
             'manuscript' => $this->whenLoaded('latestManuscript', fn () => $this->latestManuscript ? [
                 'uuid' => $this->latestManuscript->uuid,

@@ -8,6 +8,7 @@ use App\DataTransferObjects\ZoneData;
 use App\Models\Zone;
 use App\Repositories\Contracts\BranchRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -39,7 +40,12 @@ class ZoneService
      */
     public function all(): Collection
     {
-        return Cache::remember('zones:all', now()->addHour(), fn (): Collection => $this->zones->all());
+        $zones = Cache::remember('zones:all', now()->addHour(), fn (): Collection => $this->zones->all());
+        $branchId = TenantContext::currentBranchId();
+
+        // Branches v2: the caller's own branch only; internal ids stay server-side.
+        return ($branchId === null ? $zones : $zones->where('branch_id', $branchId)->values())
+            ->each(fn (Zone $zone) => $zone->makeHidden(['id', 'branch_id']));
     }
 
     public function findOrFail(string $uuid): Zone

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -24,7 +25,7 @@ use LogicException;
 ])]
 class CashMovement extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     public const UPDATED_AT = null;
 
@@ -63,6 +64,15 @@ class CashMovement extends Model
      */
     public const string KIND_BON_CORRECTION = 'bon_correction';
 
+    /**
+     * Money sent to, or received from, another branch (branches v2 §4.7).
+     * Source: the App\Models\BranchTransfer. Never income or expense.
+     */
+    public const string KIND_BRANCH_TRANSFER = 'branch_transfer';
+
+    /** A refused branch transfer coming back to the sender's account. Source: the App\Models\BranchTransfer. */
+    public const string KIND_BRANCH_TRANSFER_RETURN = 'branch_transfer_return';
+
     protected function casts(): array
     {
         return [
@@ -96,5 +106,11 @@ class CashMovement extends Model
     public function recordedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'recorded_by');
+    }
+
+    /** Its branch comes from its account (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'account';
     }
 }

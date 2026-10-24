@@ -131,10 +131,7 @@ class ResourcesDashboardService
         $row = Payment::query()
             ->income()
             ->whereBetween('created_at', [$start, $end])
-            ->when($branchId !== null, fn ($query) => $query->whereHas(
-                'customer.zone',
-                fn ($inner) => $inner->where('branch_id', $branchId),
-            ))
+            ->when($branchId !== null, fn ($query) => $query->where('payments.branch_id', $branchId))
             ->selectRaw("
                 coalesce(sum(amount) filter (where verification_status = 'verified'), 0) as verified,
                 coalesce(sum(amount) filter (where verification_status = 'pending'), 0) as pending,
@@ -185,10 +182,7 @@ class ResourcesDashboardService
             ->whereIn('customer_charge_id', CustomerCharge::query()->select('id')->where('kind', CustomerCharge::KIND_INSTALLATION))
             ->where('verification_status', 'verified')
             ->whereBetween('created_at', [$start, $end])
-            ->when($branchId !== null, fn ($query) => $query->whereHas(
-                'customer.zone',
-                fn ($inner) => $inner->where('branch_id', $branchId),
-            ))
+            ->when($branchId !== null, fn ($query) => $query->where('payments.branch_id', $branchId))
             ->sum('amount');
 
         return bcadd((string) ($total ?: '0'), '0', 2);

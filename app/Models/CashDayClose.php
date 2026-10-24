@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -23,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class CashDayClose extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     protected function casts(): array
     {
@@ -52,5 +53,11 @@ class CashDayClose extends Model
     public function isClosed(): bool
     {
         return $this->closed_at !== null;
+    }
+
+    /** Its branch comes from its account (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'account';
     }
 }

@@ -125,6 +125,10 @@ const settingsNavItem = { href: '/settings/company', labelKey: 'common.settings'
 // Manage Branches — BranchPolicy::create/update/delete → `branches.manage`.
 const branchesNavItem = { href: '/branches', labelKey: 'common.branches', icon: IconBuildingCommunity, accent: 'slate' as const };
 
+// My branch — a branch's own staff holding `branches.settings` set their
+// branch's details, MoMo number, fees and prices (BranchPolicy::manageSettings).
+const myBranchNavItem = { href: '/my-branch', labelKey: 'common.my_branch', icon: IconBuildingCommunity, accent: 'slate' as const };
+
 // Resources (P&L dashboard) — ExpenditurePolicy::viewDashboard →
 // `expenditures.dashboard`. Nobody records an expense directly any more:
 // every cash-out is a bon (docs/plans/expenditures-and-spending-controls.md, E1).
@@ -199,7 +203,7 @@ const usersControlCenterNavItem = { href: '/users', labelKey: 'common.users_cont
  * dashboard. RBAC v2 Wave 4: `role` is no longer needed here — every gate is
  * now a permission check.
  */
-export function buildVisibleNavItems(permissions: string[] = []) {
+export function buildVisibleNavItems(permissions: string[] = [], branchFenced = false) {
     const can = (permission: string) => permissions.includes('*') || permissions.includes(permission);
     const canAny = (...perms: string[]) => perms.some(can);
 
@@ -221,8 +225,9 @@ export function buildVisibleNavItems(permissions: string[] = []) {
         ...(canAny('vouchers.request', 'vouchers.approve', 'vouchers.pay', 'cash.view') ? [vouchersNavItem] : []),
         ...(can('audit.view') ? [auditNavItem] : []),
         ...(can('branches.manage') ? [branchesNavItem] : []),
+        ...(!can('branches.manage') && branchFenced && can('branches.settings') ? [myBranchNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),
-        ...(canAny('company.update', 'command_runs.view', 'services.manage') ? [settingsNavItem] : []),
+        ...(canAny('company.update', 'command_runs.view', 'services.manage', 'salaries.manage') ? [settingsNavItem] : []),
     ];
 }
 
@@ -240,6 +245,7 @@ export function buildVisibleNavItems(permissions: string[] = []) {
  */
 export function AppNav({
     permissions = [],
+    branchFenced = false,
     currentPath,
     companyName,
     companyLogoUrl,
@@ -247,6 +253,8 @@ export function AppNav({
 }: {
     /** auth.user.permissions from the Inertia share (`['*']` for super). */
     permissions?: string[];
+    /** auth.user.branch_fenced — the user is fenced to one branch. */
+    branchFenced?: boolean;
     currentPath: string;
     companyName?: string | null;
     /** The tenant's own logo (Company::logoUrl()); the CNCMS mark when null. */
@@ -254,7 +262,7 @@ export function AppNav({
     onNavigate?: () => void;
 }) {
     const { t } = useTranslation();
-    const visibleNavItems = buildVisibleNavItems(permissions);
+    const visibleNavItems = buildVisibleNavItems(permissions, branchFenced);
 
     return (
         <>

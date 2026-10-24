@@ -13,7 +13,8 @@ import { SelectInput } from '@/components/ui/SelectInput';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RoleBadge } from '@/components/shared/StatusBadge';
-import type { Branch, RoleOption, TenantUserRow } from '@/types';
+import { formatCurrency } from '@/lib/formatCurrency';
+import type { Branch, RoleOption, SalaryGradeOption, TenantUserRow } from '@/types';
 
 // Free-text convenience only (see the tenant_users migration's doc block) —
 // paired with a plain <input list="..."> so admins can still type any job
@@ -48,14 +49,23 @@ export default function UsersControlCenterUsers({
     users,
     roles,
     branches,
+    fenced,
+    can_set_salaries,
+    salary_grades,
 }: {
     users: TenantUserRow[];
     roles: RoleOption[];
     branches: Branch[];
+    /** Branches v2: the viewer manages one branch — no branch moves, no investor grants. */
+    fenced: boolean;
+    /** Branches v2 D8: the viewer may set salaries (salaries.manage). */
+    can_set_salaries: boolean;
+    salary_grades: SalaryGradeOption[];
 }) {
-    const showBranchControls = branches.length > 1;
+    const showBranchControls = !fenced && branches.length > 1;
     const [createOpen, setCreateOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<TenantUserRow | null>(null);
+    const [salaryUser, setSalaryUser] = useState<TenantUserRow | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
@@ -165,6 +175,7 @@ export default function UsersControlCenterUsers({
                             <Th>Can Record Payments</Th>
                             <Th>Investor</Th>
                             <Th>Status</Th>
+                            {can_set_salaries && <Th>Salary</Th>}
                             <Th>Actions</Th>
                         </TableHead>
                         <TableBody>
@@ -266,6 +277,7 @@ export default function UsersControlCenterUsers({
                                                 type="checkbox"
                                                 aria-label={`Investor — ${tenantUser.name}`}
                                                 checked={tenantUser.is_investor}
+                                                disabled={fenced}
                                                 onChange={(e) => toggleIsInvestor(tenantUser, e.target.checked)}
                                                 className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
                                             />
@@ -277,6 +289,26 @@ export default function UsersControlCenterUsers({
                                             {tenantUser.status}
                                         </Badge>
                                     </Td>
+                                    {can_set_salaries && (
+                                        <Td>
+                                            <div className="flex flex-col items-start gap-1">
+                                                <span className="text-sm text-slate-700">
+                                                    {tenantUser.salary?.current ? formatCurrency(tenantUser.salary.current) : '—'}
+                                                    {tenantUser.salary?.grade && <span className="ml-1 text-xs text-slate-400">({tenantUser.salary.grade})</span>}
+                                                </span>
+                                                {tenantUser.salary?.pending && (
+                                                    <Badge tone="yellow">Waiting for HQ: {formatCurrency(tenantUser.salary.pending.amount)}</Badge>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSalaryUser(tenantUser)}
+                                                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                                                >
+                                                    Set salary
+                                                </button>
+                                            </div>
+                                        </Td>
+                                    )}
                                     <Td>
                                         <div className="flex items-center gap-3">
                                             <button
@@ -420,6 +452,61 @@ export default function UsersControlCenterUsers({
                                     <Button type="submit" disabled={processing} className="font-semibold">
                                         {processing && <LoadingSpinner className="mr-1.5 text-white" />}
                                         {processing ? 'Saving…' : 'Save'}
+                                    </Button>
+                                </div>
+                            </>
+                        )}
+                    </Form>
+                )}
+            </Modal>
+
+            <Modal open={salaryUser !== null} onClose={() => setSalaryUser(null)} title="Set salary">
+                {salaryUser && (
+                    <Form
+                        key={salaryUser.id}
+                        action={`/users/${salaryUser.id}/salary`}
+                        method="post"
+                        options={{ preserveScroll: true }}
+                        onSuccess={() => setSalaryUser(null)}
+                        className="flex flex-col gap-4"
+                    >
+                        {({ errors, processing }) => (
+                            <>
+                                <p className="text-sm text-slate-600">
+                                    <span className="font-medium text-slate-700">{salaryUser.name}</span>
+                                    {salaryUser.salary?.current && <> — currently {formatCurrency(salaryUser.salary.current)}</>}. A salary
+                                    outside its grade's range waits for headquarters; the current salary stays until then.
+                                </p>
+                                {salary_grades.length > 0 && (
+                                    <SelectInput id="grade_uuid" name="grade_uuid" label="Grade" defaultValue="" error={errors.grade_uuid}>
+                                        <option value="">No grade (needs headquarters' approval)</option>
+                                        {salary_grades.map((grade) => (
+                                            <option key={grade.uuid} value={grade.uuid}>
+                                                {grade.name} — {formatCurrency(grade.min_amount)} to {formatCurrency(grade.max_amount)}
+                                            </option>
+                                        ))}
+                                    </SelectInput>
+                                )}
+                                <TextInput
+                                    id="amount"
+                                    name="amount"
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    inputMode="decimal"
+                                    label="Monthly salary (FCFA)"
+                                    defaultValue={salaryUser.salary?.current ?? ''}
+                                    error={errors.amount}
+                                    required
+                                />
+                                <TextInput id="reason" name="reason" label="Reason (optional)" error={errors.reason} placeholder="e.g. Promotion, annual review" />
+                                <div className="flex justify-end gap-2">
+                                    <Button type="button" variant="secondary" onClick={() => setSalaryUser(null)}>
+                                        Cancel
+                                    </Button>
+                                    <Button type="submit" disabled={processing}>
+                                        {processing && <LoadingSpinner className="mr-1.5 text-white" />}
+                                        {processing ? 'Saving…' : 'Save salary'}
                                     </Button>
                                 </div>
                             </>

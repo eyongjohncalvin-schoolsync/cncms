@@ -18,7 +18,7 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
-        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->when(
                 ! empty($filters['archived']),
                 fn ($query) => $query->onlyTrashed()->with('archivedBy'),
@@ -49,7 +49,7 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function findByUuid(string $uuid, array $with = [], bool $withTrashed = false): ?Customer
     {
-        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->when($withTrashed, fn ($query) => $query->withTrashed())
             ->with($with)
             ->where('uuid', $uuid)
@@ -118,7 +118,7 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function activeWithLatestManuscript(?int $zoneId = null): Collection
     {
-        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->with(['zone', 'latestManuscript'])
             ->where('status', 'active')
             // Field registrations awaiting activation are never billed,
@@ -131,7 +131,7 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function findManyByUuids(array $uuids, array $with = []): Collection
     {
-        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->with($with)
             ->whereIn('uuid', $uuids)
             ->get();
@@ -139,7 +139,7 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function withoutManuscripts(?array $uuids = null): Collection
     {
-        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->with('zone')
             ->when($uuids !== null, fn ($query) => $query->whereIn('uuid', $uuids))
             ->whereDoesntHave('manuscripts')
@@ -150,7 +150,7 @@ class CustomerRepository implements CustomerRepositoryInterface
 
     public function allMatching(array $filters): Collection
     {
-        return $this->scopeToBranch(Customer::query(), $this->currentBranchId())
+        return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->when($filters['zone_id'] ?? null, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
             ->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when($filters['level'] ?? null, fn ($query, $level) => $query->where('level', $level))

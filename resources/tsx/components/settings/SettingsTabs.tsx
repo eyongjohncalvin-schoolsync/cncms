@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { IconBuildingStore, IconTerminal2, IconBellRinging, IconPrinter, IconBroadcast, IconGift } from '@tabler/icons-react';
+import { IconBuildingStore, IconTerminal2, IconBellRinging, IconPrinter, IconBroadcast, IconGift, IconCash } from '@tabler/icons-react';
 
 // "Users & Roles" moved out of Settings entirely in RBAC v2 Wave 3 — it's
 // now the top-level "Users Control Center" nav item (/users), gated by the
@@ -18,6 +18,8 @@ const tabs = [
     // installations.offers-gated (InstallationOfferPolicy) — same "tab may
     // render, controller enforces" tradeoff as Services above.
     { href: '/settings/installation-offers', label: 'Installation offers', icon: IconGift },
+    // salaries.manage + headquarters (SalaryPolicy::manageScale) — same tradeoff.
+    { href: '/settings/salaries', label: 'Salaries', icon: IconCash },
 ];
 
 /**
@@ -34,7 +36,7 @@ const tabs = [
 export function SettingsTabs({
     active,
 }: {
-    active: 'company' | 'command-runs' | 'notifications' | 'bill-printing' | 'services' | 'installation-offers';
+    active: 'company' | 'command-runs' | 'notifications' | 'bill-printing' | 'services' | 'installation-offers' | 'salaries';
 }) {
     return (
         <div className="mb-6 inline-flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 animate-fade-up">

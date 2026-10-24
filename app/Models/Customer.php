@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
-use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -36,7 +36,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[RouteKey('uuid')]
 class Customer extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch, SoftDeletes;
+    use Auditable, BelongsToBranch, HasUuid, SoftDeletes;
 
     /** customers.activation_status of a field registration awaiting the office (phase 3). */
     public const string ACTIVATION_PENDING = 'pending';
@@ -197,5 +197,17 @@ class Customer extends Model
     public function subscriptions(): HasMany
     {
         return $this->hasMany(CustomerSubscription::class);
+    }
+
+    /** Its branch comes from its zone (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'zone';
+    }
+
+    /** Its CURRENT branch: follows its zone (BelongsToBranch). */
+    protected static function branchFollowsParent(): bool
+    {
+        return true;
     }
 }

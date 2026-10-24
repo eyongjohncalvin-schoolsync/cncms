@@ -72,7 +72,7 @@ class VoucherController extends Controller
                 'daily' => $company?->voucher_daily_limit !== null ? (string) $company->voucher_daily_limit : null,
                 // E8: the day counts bons by the day they are PAID, plus the
                 // approved ones still waiting to be paid.
-                'committed_today' => bcadd($this->vouchers->paidToday(), (string) Voucher::query()->where('status', 'approved')->sum('amount'), 2),
+                'committed_today' => $this->vouchers->committedToday(),
             ],
             // Monthly cap + per-category budgets for the bon form's warnings
             // (docs/plans/expenditures-and-spending-controls.md, items 4–5).

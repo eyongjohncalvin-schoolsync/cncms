@@ -2,20 +2,27 @@
 
 namespace App\Providers;
 
+use App\Models\Branch;
 use App\Models\Company;
 use App\Models\PaymentReceipt;
 use App\Models\PersonalAccessToken;
 use App\Models\Report;
 use App\Models\Role;
 use App\Models\User;
+use App\Models\Zone;
 use App\Policies\PaymentReceiptPolicy;
 use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
+use App\Policies\SalaryPolicy;
 use App\Services\FreeMonthGrantService;
+use App\Support\BranchLookup;
+use App\Support\BranchPrices;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -72,6 +79,10 @@ class AppServiceProvider extends ServiceProvider
         // to naming-convention discovery — see PaymentReceiptPolicy's docblock.
         Gate::policy(PaymentReceipt::class, PaymentReceiptPolicy::class);
 
+        // Branches v2 D8: salaries are not one model's policy — named gates.
+        Gate::define('salaries.setFor', [SalaryPolicy::class, 'setFor']);
+        Gate::define('salaries.manageScale', [SalaryPolicy::class, 'manageScale']);
+
         // Win 2 (perf): App\Models\Company::cached()'s per-request memo is
         // keyed by tenant id, but a long-lived worker that hops tenants (or
         // the test suite, which re-initializes tenancy every method) must
@@ -80,7 +91,35 @@ class AppServiceProvider extends ServiceProvider
         // tenancy transitions bounds any staleness to a single job/test.
         Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => Company::flushMemo());
 
+        // Branches v2: parent → branch memo used to stamp branch_id on new rows.
+        // A zone can change branch (its customers and agents follow it by
+        // cascade), so a zone moving branch, and any tenant switch, starts it afresh.
+        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => [BranchLookup::flush(), Branch::flushMemo(), BranchPrices::flush()]);
+        Zone::updated(static function (Zone $zone): void {
+            if ($zone->wasChanged('branch_id')) {
+                BranchLookup::flush();
+            }
+        });
+
+        $this->preventLazyLoading();
+
         $this->configureRateLimiting();
+    }
+
+    /**
+     * N+1 guard (docs/plans/branches-v2.md §6): a lazy-loaded relation fails
+     * the test suite, is only logged locally (the local app runs on real
+     * data and must keep working), and is ignored in production.
+     */
+    private function preventLazyLoading(): void
+    {
+        Model::preventLazyLoading(! $this->app->isProduction());
+
+        if (! $this->app->runningUnitTests()) {
+            Model::handleLazyLoadingViolationUsing(static function (Model $model, string $relation): void {
+                Log::warning('Lazy loading ['.$relation.'] on ['.$model::class.'].');
+            });
+        }
     }
 
     /**

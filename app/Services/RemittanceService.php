@@ -12,6 +12,7 @@ use App\Models\Remittance;
 use App\Models\RemittanceLine;
 use App\Models\User;
 use App\Models\Voucher;
+use App\Support\BranchAttribution;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -123,6 +124,7 @@ class RemittanceService
                 'bons_total' => $this->sumAmounts($bons),
                 'number' => $this->documentNumbers->next(DocumentNumberService::REMITTANCE),
                 'collector_user_id' => $collector->id,
+                'branch_id' => BranchAttribution::forUser($collector),
                 'business_date' => $this->cashBook->today(),
                 'status' => 'submitted',
                 'expected_cash' => $totals['cash'],
@@ -190,7 +192,8 @@ class RemittanceService
 
                 $line->update(['wallet_confirmed' => true]);
 
-                $this->cashBook->record($this->cashBook->walletFor($line->method), 'in', (string) $line->amount, CashMovement::KIND_REMITTANCE_WALLET, $receiver, [
+                // The collector's branch's wallet (branches v2 D3: no joint account).
+                $this->cashBook->record($this->cashBook->walletFor($line->method, $locked->branch_id), 'in', (string) $line->amount, CashMovement::KIND_REMITTANCE_WALLET, $receiver, [
                     'document_number' => $locked->number,
                     'source' => $locked,
                     'reference' => $line->reference,

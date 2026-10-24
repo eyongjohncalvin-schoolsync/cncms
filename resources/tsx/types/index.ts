@@ -21,6 +21,8 @@ export interface AuthUser {
     role: string | null;
     /** Platform-wide flag, independent of role/tenant — see EnsureLandlord. */
     is_landlord: boolean;
+    /** Fenced to one branch (branches v2) — not merely viewing one via the switcher. */
+    branch_fenced: boolean;
     /**
      * Tenant-scoped Investor tier flag (tenant_users.is_investor) — see
      * App\Policies\ReportPolicy::view()'s docblock. Display hint only:
@@ -124,7 +126,17 @@ export interface PageProps {
     maintenance: MaintenanceNotice | null;
     /** Set while a landlord is logged in as this user (App\Support\Impersonation). */
     impersonation: { impersonator: string | null; user: string } | null;
+    /**
+     * Branch switcher (branches v2): set only for a user not fenced to a
+     * branch, once the company has 2+ branches. `current` null = all branches.
+     */
+    branchView: BranchView | null;
     [key: string]: unknown;
+}
+
+export interface BranchView {
+    branches: { uuid: string; name: string; is_headquarters: boolean }[];
+    current: string | null;
 }
 
 /** App\Models\MaintenanceWindow::toNotice(). Times are ISO-8601. */
@@ -206,6 +218,7 @@ export interface Zone {
 export interface Branch {
     uuid: string;
     name: string;
+    is_headquarters?: boolean;
     zone_count?: number;
 }
 
@@ -866,8 +879,24 @@ export interface PermissionOption {
 /** Area heading => its permissions, from App\Auth\Permission::byArea(). */
 export type PermissionsByArea = Record<string, PermissionOption[]>;
 
+/** A person's salary (branches v2 D8): the approved one, and any waiting for headquarters. */
+export interface StaffSalarySummary {
+    current: string | null;
+    grade: string | null;
+    pending: { uuid: string; amount: string } | null;
+}
+
+export interface SalaryGradeOption {
+    uuid: string;
+    name: string;
+    min_amount: string;
+    max_amount: string;
+}
+
 export interface TenantUserRow {
     id: number;
+    /** Present when the viewer may set salaries. */
+    salary?: StaffSalarySummary | null;
     /** A role name — a built-in (see `Role`) or a tenant custom role. */
     role: string;
     /** Purely descriptive label (e.g. "Recovery Coordinator") — separate from `role`, which drives permissions. */

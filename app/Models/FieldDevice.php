@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -20,12 +21,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * once at registration, encrypted at rest, never serialised, never audited
  * (AuditableObserver excludes it). A revoked device's codes are refused.
  */
-#[Fillable(['user_id', 'name', 'secret', 'registered_at', 'last_seen_at', 'revoked_at', 'revoked_by'])]
+#[Fillable(['user_id', 'branch_id', 'name', 'secret', 'registered_at', 'last_seen_at', 'revoked_at', 'revoked_by'])]
 #[Hidden(['secret'])]
 #[RouteKey('uuid')]
 class FieldDevice extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     protected function casts(): array
     {
@@ -51,5 +52,11 @@ class FieldDevice extends Model
     public function isRevoked(): bool
     {
         return $this->revoked_at !== null;
+    }
+
+    /** Set by the creating service (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return null;
     }
 }

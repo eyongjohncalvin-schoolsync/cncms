@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\ScheduledTask;
+use App\Support\BranchLookup;
 use App\Support\DetectsUniqueViolation;
 use Illuminate\Bus\Batch;
 use Illuminate\Database\QueryException;
@@ -139,7 +140,8 @@ class ManuscriptGenerationBatchService
             throw $e;
         }
 
-        $customerIds ??= Customer::query()->activated()->orderBy('id')->pluck('id')->all();
+        // One company-wide billing run (branches v2 D5), whoever triggers it.
+        $customerIds ??= Customer::query()->withoutGlobalScope(BranchScope::class)->activated()->orderBy('id')->pluck('id')->all();
         $chunkSize = max(1, (int) config('scheduled_tasks.manuscript_generation.chunk_size', 250));
         $chunks = array_chunk($customerIds, $chunkSize);
 
@@ -329,6 +331,8 @@ class ManuscriptGenerationBatchService
             // query per customer — publish() walks every customer in the
             // tenant, so a per-row lookup is thousands of queries.
             $existingByCustomer = $this->existingManuscriptsFor(array_keys($customers), $commandRun->period);
+            // Each new manuscript is stamped with its customer's branch — looked up once, not per row.
+            BranchLookup::rememberFor(Customer::class, array_keys($customers));
             $processedPaymentIds = [];
             $processedAdjustmentIds = [];
 

@@ -2,7 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Models\Branch;
 use App\Models\Complaint;
+use App\Models\Zone;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -36,6 +38,22 @@ class ComplaintFactory extends Factory
             'customer_id' => null,
             'zone_id' => null,
         ];
+    }
+
+    /**
+     * A complaint about a customer takes the customer's branch on create
+     * (BelongsToBranch); an operational one takes its zone's, or
+     * headquarters' — what ComplaintService derives for real submissions.
+     */
+    public function configure(): static
+    {
+        return $this->afterMaking(function (Complaint $complaint): void {
+            if ($complaint->customer_id === null && $complaint->branch_id === null) {
+                $complaint->branch_id = $complaint->zone_id !== null
+                    ? Zone::query()->whereKey($complaint->zone_id)->value('branch_id')
+                    : Branch::headquartersId();
+            }
+        });
     }
 
     /**

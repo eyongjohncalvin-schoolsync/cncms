@@ -23,6 +23,7 @@ export function MobileNavDrawer({
     onClose,
     id,
     permissions = [],
+    branchFenced = false,
     currentPath,
     companyName,
     companyLogoUrl,
@@ -31,6 +32,7 @@ export function MobileNavDrawer({
     onClose: () => void;
     id: string;
     permissions?: string[];
+    branchFenced?: boolean;
     currentPath: string;
     companyName?: string | null;
     companyLogoUrl?: string | null;
@@ -72,6 +74,7 @@ export function MobileNavDrawer({
 
                         <AppNav
                             permissions={permissions}
+                            branchFenced={branchFenced}
                             currentPath={currentPath}
                             companyName={companyName}
                             companyLogoUrl={companyLogoUrl}

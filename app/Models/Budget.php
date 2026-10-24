@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['category_id', 'period', 'amount'])]
+#[Fillable(['category_id', 'period', 'amount', 'branch_id'])]
 #[RouteKey('uuid')]
 class Budget extends Model
 {

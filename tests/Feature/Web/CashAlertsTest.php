@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Web;
 
 use App\Mail\CashAlertsDigestMail;
+use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Payment;
 use App\Models\ReceiptBlock;
@@ -125,6 +126,7 @@ class CashAlertsTest extends TestCase
             'needed_on' => now()->subDays(10)->toDateString(),
             'status' => 'paid',
             'requested_by' => $requester->id,
+            'branch_id' => Branch::headquartersId(),
             'paid_at' => now()->subDays(10),
             'settle_due_on' => now()->subDays(3)->toDateString(),
             'signed_copy_path' => 'vouchers/x.jpg',

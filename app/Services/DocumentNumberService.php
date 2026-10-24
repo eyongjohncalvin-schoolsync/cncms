@@ -38,7 +38,10 @@ class DocumentNumberService
     public const string TECHNICIAN_FEE = 'TF';
 
     /** @var list<string> */
-    public const array SERIES = [self::RECEIPT_BLOCK, self::REMITTANCE, self::VOUCHER, self::DEPOSIT, self::TRANSFER, self::TECHNICIAN_FEE];
+    /** Money sent between branches (branches v2): BT-2026-000001. */
+    public const string BRANCH_TRANSFER = 'BT';
+
+    public const array SERIES = [self::RECEIPT_BLOCK, self::REMITTANCE, self::VOUCHER, self::DEPOSIT, self::TRANSFER, self::TECHNICIAN_FEE, self::BRANCH_TRANSFER];
 
     public function next(string $series): string
     {

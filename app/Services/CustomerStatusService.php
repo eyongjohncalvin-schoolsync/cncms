@@ -9,6 +9,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Support\BranchLookup;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -131,6 +132,7 @@ class CustomerStatusService
         // One query for the whole selection, with the latest manuscript the
         // suspend/reconnect paths read, rather than a lookup per uuid.
         $customersByUuid = $this->customers->findManyByUuids($customerUuids, ['zone.branch', 'latestManuscript'])->keyBy('uuid');
+        BranchLookup::remember($customersByUuid);
 
         foreach ($customerUuids as $uuid) {
             $customer = $customersByUuid->get($uuid);
@@ -271,7 +273,7 @@ class CustomerStatusService
     {
         $this->guardTransition($customer, 'active', ['disconnected', 'suspended']);
 
-        $fine = $this->reconnectionFine();
+        $fine = $this->reconnectionFine($customer);
         $hasArrearsPayment = $arrearsPayment !== null && bccomp($arrearsPayment, '0.00', 2) > 0;
 
         // Captured BEFORE updateStatus() below overwrites status/status_changed_at/
@@ -418,8 +420,9 @@ class CustomerStatusService
      * somehow missing — the migration's column default already covers the
      * normal case, this is just defense against an unseeded tenant.
      */
-    private function reconnectionFine(): string
+    private function reconnectionFine(Customer $customer): string
     {
-        return (string) (Company::cached()?->reconnection_fine ?? '2000.00');
+        // The customer's branch may set its own fine (branches v2 D4).
+        return (string) (Company::forBranch($customer->branch_id)?->reconnection_fine ?? '2000.00');
     }
 }

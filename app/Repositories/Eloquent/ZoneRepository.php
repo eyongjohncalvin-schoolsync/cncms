@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repositories\Eloquent;
 
 use App\DataTransferObjects\ZoneData;
+use App\Models\Scopes\BranchScope;
 use App\Models\Zone;
 use App\Repositories\Concerns\ScopesByBranch;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
@@ -29,20 +30,14 @@ class ZoneRepository implements ZoneRepositoryInterface
     }
 
     /**
-     * Deliberately NOT branch-scoped: this backs zone dropdown/select
-     * inputs across Customers/Agents/Payments/Manuscripts filter UIs and is
-     * cached tenant-wide (App\Services\ZoneService::all()'s 'zones:all' key
-     * — a single cache entry shared by every caller regardless of the
-     * caller's branch fence). Branch-scoping it here without also making
-     * that cache key branch-aware would leak one branch-fenced user's
-     * dropdown options into another's cached response. The zone create/
-     * customer create/agent create forms aren't in this feature's listed
-     * scope (branches-and-locations.md section 4's repository list), so
-     * this is deliberately left as future work rather than half-fixed here.
+     * Every zone of the company, deliberately NOT branch-scoped: it is cached
+     * once for the whole company (App\Services\ZoneService::all()'s
+     * 'zones:all' key) and ZoneService narrows it to the caller's branch, so
+     * one fenced user's list can never be served to another.
      */
     public function all(): Collection
     {
-        return Zone::query()->orderBy('name')->get(['uuid', 'name', 'town']);
+        return Zone::query()->withoutGlobalScope(BranchScope::class)->orderBy('name')->get(['id', 'uuid', 'name', 'town', 'branch_id']);
     }
 
     public function findByUuid(string $uuid): ?Zone

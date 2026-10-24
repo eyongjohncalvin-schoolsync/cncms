@@ -34,6 +34,55 @@ class Role extends Model
 {
     use Auditable, HasUuid;
 
+    /**
+     * The built-in role keys. A custom role's generated key may never be
+     * one of these, even if the tenant's row for it is missing.
+     *
+     * @var list<string>
+     */
+    public const RESERVED_NAMES = ['super', 'admin', 'manager', 'agent', 'cashier', 'worker'];
+
+    /** Length of the `roles.name` column. */
+    public const NAME_MAX_LENGTH = 50;
+
+    /**
+     * Build the permanent key for a new custom role from its display name:
+     * an ASCII, lowercase, underscore-separated slug ("IT Technician" →
+     * `it_technician`), cut to the column length, and made unique within
+     * this tenant's `roles` table — and never equal to a reserved system
+     * key — by appending `_2`, `_3`, … The key is always server-generated;
+     * a key sent by the client is never used.
+     */
+    public static function generateUniqueName(string $label): string
+    {
+        $base = Str::slug($label, '_');
+
+        if ($base === '') {
+            $base = 'role';
+        }
+
+        $candidate = self::fitName($base, '');
+        $counter = 2;
+
+        while (in_array($candidate, self::RESERVED_NAMES, true) || static::query()->where('name', $candidate)->exists()) {
+            $candidate = self::fitName($base, '_'.$counter);
+            $counter++;
+        }
+
+        return $candidate;
+    }
+
+    /**
+     * Trim `$base` so `$base.$suffix` fits the `name` column, without
+     * leaving a dangling underscore before the suffix.
+     */
+    private static function fitName(string $base, string $suffix): string
+    {
+        $trimmed = rtrim(substr($base, 0, self::NAME_MAX_LENGTH - strlen($suffix)), '_');
+
+        return ($trimmed === '' ? 'role' : $trimmed).$suffix;
+    }
+
     protected function casts(): array
     {
         return [

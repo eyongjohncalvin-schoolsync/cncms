@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -23,12 +24,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'category_id', 'user_id', 'amount', 'description', 'receipt_path', 'spent_at',
     'notes', 'recorded_offline', 'recorded_by_device', 'local_uuid',
     'voucher_id', 'source', 'status', 'relates_to_period', 'corrects_expenditure_id',
-    'edit_reason', 'void_reason', 'voided_by', 'voided_at',
+    'edit_reason', 'void_reason', 'voided_by', 'voided_at', 'branch_id',
 ])]
 #[RouteKey('uuid')]
 class Expenditure extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, BelongsToBranch, HasUuid;
 
     public const string SOURCE_VOUCHER = 'voucher';
 
@@ -100,5 +101,11 @@ class Expenditure extends Model
     public function period(): string
     {
         return $this->spent_at->format('Y-m');
+    }
+
+    /** Its branch comes from its voucher (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'voucher';
     }
 }

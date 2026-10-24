@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Models\Customer;
+use App\Models\Scopes\BranchScope;
 use App\Services\ManuscriptCalculator;
 use App\Support\Billing\FreeMonthPlan;
 use App\Support\ScheduledTasks\ManuscriptChunkDataResolver;
@@ -70,7 +71,7 @@ class ComputeManuscriptChunkJob implements ShouldQueue
 
         // activated(): a field registration still awaiting activation when
         // this chunk runs gets no register row (installation phase 3).
-        $customers = Customer::query()->activated()->whereIn('id', $this->customerIds)->get()->keyBy('id');
+        $customers = Customer::query()->withoutGlobalScope(BranchScope::class)->activated()->whereIn('id', $this->customerIds)->get()->keyBy('id');
 
         // Free months & first billed month (installation phase 2).
         $freeMonthPlans = FreeMonthPlan::forCustomers($customers);

@@ -11,10 +11,12 @@ use App\Models\Company;
 use App\Models\Expenditure;
 use App\Models\ExpenseCategory;
 use App\Models\Role;
+use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\VoucherApproval;
+use App\Support\BranchAttribution;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
@@ -86,14 +88,9 @@ class VoucherService
         }
 
         if ($company?->voucher_daily_limit !== null) {
-            $committed = $this->paidToday($excludeVoucherId);
-
-            if ($stage === self::STAGE_APPROVE) {
-                $committed = bcadd($committed, (string) Voucher::query()
-                    ->where('status', 'approved')
-                    ->when($excludeVoucherId !== null, fn ($query) => $query->whereKeyNot($excludeVoucherId))
-                    ->sum('amount'), 2);
-            }
+            $committed = $stage === self::STAGE_APPROVE
+                ? $this->committedToday($excludeVoucherId)
+                : $this->paidToday($excludeVoucherId);
 
             if (bccomp(bcadd($committed, $amount, 2), (string) $company->voucher_daily_limit, 2) > 0) {
                 $reasons[] = 'above_daily_limit';
@@ -107,12 +104,27 @@ class VoucherService
         return ['tier' => $reasons === [] ? Voucher::TIER_STANDARD : Voucher::TIER_STAKEHOLDERS, 'reasons' => $reasons];
     }
 
-    /** Total of the bons paid out today, Cameroon time. */
+    /**
+     * Today's company-wide commitment against the daily limit: bons paid out
+     * today plus bons approved and waiting to be paid. Company-wide whoever
+     * asks (branches v2 D10) — a branch never gets its own daily allowance.
+     */
+    public function committedToday(?int $excludeVoucherId = null): string
+    {
+        return bcadd($this->paidToday($excludeVoucherId), (string) Voucher::query()
+            ->withoutGlobalScope(BranchScope::class)
+            ->where('status', 'approved')
+            ->when($excludeVoucherId !== null, fn ($query) => $query->whereKeyNot($excludeVoucherId))
+            ->sum('amount'), 2);
+    }
+
+    /** Total of the bons paid out today, Cameroon time, company-wide (D10). */
     public function paidToday(?int $excludeVoucherId = null): string
     {
         [$start, $end] = BusinessTimezone::dayBoundsUtc(BusinessTimezone::today());
 
         return bcadd((string) Voucher::query()
+            ->withoutGlobalScope(BranchScope::class)
             ->whereIn('status', ['paid', 'settled'])
             ->whereBetween('paid_at', [$start, $end])
             ->when($excludeVoucherId !== null, fn ($query) => $query->whereKeyNot($excludeVoucherId))
@@ -155,8 +167,9 @@ class VoucherService
      * an expense at request, an advance at the latest when it is settled.
      *
      * @param  array{kind: string, payee_name: string, purpose: string, category_uuid?: ?string, amount: string, needed_on?: ?string, from_collections?: bool, local_uuid?: ?string, recorded_by_device?: ?string}  $data
+     * @param  ?int  $branchId  a bon the system raises for a customer (a refund) belongs to the customer's branch; otherwise the requester's (branches v2)
      */
-    public function request(array $data, User $requester, ?UploadedFile $attachment = null): Voucher
+    public function request(array $data, User $requester, ?UploadedFile $attachment = null, ?int $branchId = null): Voucher
     {
         $categoryId = isset($data['category_uuid']) ? ExpenseCategory::query()->where('uuid', $data['category_uuid'])->value('id') : null;
 
@@ -188,6 +201,7 @@ class VoucherService
             'required_approver_ids' => $approvers['ids'],
             'attachment_path' => $attachment?->store('vouchers', $this->disk()),
             'requested_by' => $requester->id,
+            'branch_id' => $branchId ?? BranchAttribution::forUser($requester),
             'from_collections' => $fromCollections,
             'local_uuid' => $data['local_uuid'] ?? null,
             'recorded_by_device' => $data['recorded_by_device'] ?? null,
@@ -437,6 +451,7 @@ class VoucherService
                 'spent_at' => $today,
                 'notes' => "Money returned on bon {$locked->number}",
                 'voucher_id' => $locked->id,
+                'branch_id' => $locked->branch_id,
                 'source' => Expenditure::SOURCE_ADJUSTMENT,
                 'corrects_expenditure_id' => $original->id,
                 'relates_to_period' => $original->period() !== BusinessTimezone::periodOf($today) ? $original->period() : null,
@@ -584,6 +599,7 @@ class VoucherService
             'notes' => "Paid to {$receivedByName} on voucher {$voucher->number}",
             'receipt_path' => $voucher->receipt_path,
             'voucher_id' => $voucher->id,
+            'branch_id' => $voucher->branch_id,
             'source' => Expenditure::SOURCE_VOUCHER,
             'relates_to_period' => $paidPeriod !== null && $paidPeriod !== BusinessTimezone::periodOf($today) ? $paidPeriod : null,
         ]);

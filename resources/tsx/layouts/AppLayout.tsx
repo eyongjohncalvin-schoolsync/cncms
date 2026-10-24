@@ -14,6 +14,7 @@ import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { NotificationBell } from '@/components/shared/NotificationBell';
 import { EmergencyBanner } from '@/components/shared/EmergencyBanner';
 import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
+import { BranchSwitcher } from '@/components/shared/BranchSwitcher';
 import { ImpersonationBanner } from '@/components/shared/ImpersonationBanner';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
 import { AppNav } from '@/components/shared/AppNav';
@@ -52,7 +53,7 @@ export function AppLayout({
      */
     breadcrumbs?: BreadcrumbItem[];
 }) {
-    const { auth, flash, notifications, company, maintenance, impersonation } = usePage<PageProps>().props;
+    const { auth, flash, notifications, company, maintenance, impersonation, branchView } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
     const permissions = auth.user?.permissions ?? [];
     const { t } = useTranslation();
@@ -105,7 +106,13 @@ export function AppLayout({
                     <div className="absolute -top-16 left-1/2 h-52 w-52 -translate-x-1/2 rounded-full bg-blue-200/25 blur-3xl" />
                 </div>
 
-                <AppNav permissions={permissions} currentPath={currentPath} companyName={company?.name} companyLogoUrl={company?.logo_url} />
+                <AppNav
+                    permissions={permissions}
+                    branchFenced={auth.user?.branch_fenced ?? false}
+                    currentPath={currentPath}
+                    companyName={company?.name}
+                    companyLogoUrl={company?.logo_url}
+                />
             </aside>
 
             <MobileNavDrawer
@@ -113,6 +120,7 @@ export function AppLayout({
                 onClose={() => setDrawerOpen(false)}
                 id={MOBILE_NAV_ID}
                 permissions={permissions}
+                branchFenced={auth.user?.branch_fenced ?? false}
                 currentPath={currentPath}
                 companyName={company?.name}
                 companyLogoUrl={company?.logo_url}
@@ -168,6 +176,8 @@ export function AppLayout({
                                         <span className="hidden lg:inline">{t('common.landlord')}</span>
                                     </Link>
                                 )}
+
+                                {branchView && <BranchSwitcher branchView={branchView} />}
 
                                 <div className="flex items-center gap-0.5 text-slate-500 [&_button]:rounded-lg [&_button:hover]:bg-slate-100">
                                     <NotificationBell />

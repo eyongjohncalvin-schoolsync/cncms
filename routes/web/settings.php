@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\SalaryController;
 use App\Http\Controllers\SettingsBillPrintingController;
 use App\Http\Controllers\SettingsCommandRunController;
 use App\Http\Controllers\SettingsCompanyController;
@@ -97,3 +98,14 @@ Route::patch('settings/installation-offers/cap', [SettingsInstallationOfferContr
 Route::patch('settings/installation-offers/one-off-fees', [SettingsInstallationOfferController::class, 'updateOneOffFees'])->name('settings.installation-offers.one-off-fees');
 Route::patch('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'update'])->name('settings.installation-offers.update');
 Route::delete('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'destroy'])->name('settings.installation-offers.destroy');
+
+// Salaries (branches v2 D8): headquarters' grades and approvals; a person's
+// salary is set from the Users Control Center.
+Route::get('settings/salaries', [SalaryController::class, 'index'])->name('settings.salaries.index');
+Route::middleware('not-impersonating:money')->group(function () {
+    Route::post('settings/salaries/grades', [SalaryController::class, 'storeGrade'])->name('settings.salaries.grades.store');
+    Route::patch('settings/salaries/grades/{salaryGrade}', [SalaryController::class, 'updateGrade'])->name('settings.salaries.grades.update');
+    Route::post('settings/salaries/{staffSalary}/approve', [SalaryController::class, 'approve'])->name('settings.salaries.approve');
+    Route::post('settings/salaries/{staffSalary}/reject', [SalaryController::class, 'reject'])->name('settings.salaries.reject');
+    Route::post('users/{tenantUser}/salary', [SalaryController::class, 'set'])->name('users.salary.set');
+});

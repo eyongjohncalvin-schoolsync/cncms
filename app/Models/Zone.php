@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
-use App\Models\Concerns\ScopesRouteBindingToBranch;
+use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -17,14 +17,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class Zone extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, HasUuid;
 
-    /**
-     * Zone carries branch_id directly — no relation hop needed.
-     */
-    protected static function branchRouteBindingRelation(): ?string
+    /** A branch-fenced user only ever sees their own branch's zones (branches v2 §5). */
+    protected static function booted(): void
     {
-        return null;
+        static::addGlobalScope(new BranchScope);
     }
 
     public function branch(): BelongsTo

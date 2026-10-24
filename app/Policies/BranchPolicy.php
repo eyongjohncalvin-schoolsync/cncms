@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Branch;
 use App\Models\User;
 use App\Support\TenantContext;
 
@@ -45,5 +46,21 @@ class BranchPolicy
     public function delete(User $user): bool
     {
         return $this->context->can('branches.manage');
+    }
+
+    /**
+     * A branch's own contact details, MoMo number, fees and prices
+     * (branches v2 D4): whoever manages branches, for any branch; a branch's
+     * own staff holding `branches.settings`, for their branch only.
+     * Headquarters has none — its values are the company settings.
+     */
+    public function manageSettings(User $user, Branch $branch): bool
+    {
+        if ($branch->is_headquarters) {
+            return false;
+        }
+
+        return $this->context->can('branches.manage')
+            || ($this->context->can('branches.settings') && $this->context->isFenced() && $this->context->branchId === $branch->id);
     }
 }

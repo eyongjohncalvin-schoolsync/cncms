@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
+use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -38,7 +40,7 @@ use LogicException;
 #[RouteKey('uuid')]
 class Payment extends Model
 {
-    use Auditable, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
 
     /** The monthly bill — the only money billing ever sees. */
     public const string PURPOSE_SUBSCRIPTION = 'subscription';
@@ -145,14 +147,6 @@ class Payment extends Model
         ];
     }
 
-    /**
-     * Payment has no direct zone — branch is reached through its Customer.
-     */
-    protected static function branchRouteBindingRelation(): ?string
-    {
-        return 'customer.zone';
-    }
-
     protected function casts(): array
     {
         return [
@@ -170,7 +164,7 @@ class Payment extends Model
 
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(Customer::class)->withoutGlobalScope(BranchScope::class);
     }
 
     /**
@@ -273,5 +267,17 @@ class Payment extends Model
     public function technicianFeePayout(): BelongsTo
     {
         return $this->belongsTo(TechnicianFeePayout::class);
+    }
+
+    /** Its branch comes from its customer (BelongsToBranch). */
+    protected function branchParent(): ?string
+    {
+        return 'customer';
+    }
+
+    /** Customer history: stays whole for its customer; fenced on lists and links instead (BelongsToBranch). */
+    protected static function fencedByBranchScope(): bool
+    {
+        return false;
     }
 }

@@ -101,6 +101,7 @@ class BranchController extends Controller
         return [
             'uuid' => $branch->uuid,
             'name' => $branch->name,
+            'is_headquarters' => $branch->is_headquarters,
             'zone_count' => $branch->zones_count ?? null,
         ];
     }

@@ -250,6 +250,12 @@ class UsersControlCenterTest extends TestCase
         DB::connection('pgsql')->rollBack();
 
         tenancy()->initialize(Tenant::find('swecom'));
+        // This test commits real rows; a run killed before its finally ran
+        // would otherwise leave the user behind and fail every later run.
+        $leftoverIds = User::query()->where('email', 'newuctuser@example.test')->orWhere('username', 'newuctuser')->pluck('id');
+        TenantUser::query()->whereIn('user_id', $leftoverIds)->delete();
+        User::query()->whereKey($leftoverIds)->delete();
+
         $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
         $originalRole = TenantUser::query()->where('user_id', $user->id)->value('role');
         TenantUser::query()->where('user_id', $user->id)->update(['role' => 'super']);

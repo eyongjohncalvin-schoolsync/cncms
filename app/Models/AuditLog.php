@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 // statements, and there is no `updated_at` column — records are write-once.
 #[Fillable([
     'tenant_id', 'table_name', 'record_uuid', 'record_id', 'action',
-    'old_values', 'new_values', 'user_id', 'impersonated_by', 'ip_address', 'user_agent', 'device_id',
+    'old_values', 'new_values', 'user_id', 'impersonated_by', 'ip_address', 'user_agent', 'device_id', 'branch_id',
 ])]
 class AuditLog extends Model
 {
