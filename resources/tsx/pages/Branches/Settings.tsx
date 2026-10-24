@@ -1,9 +1,34 @@
-import { Form, Head } from '@inertiajs/react';
+import { Form, Head, useForm } from '@inertiajs/react';
+import type { FormEvent } from 'react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
+import { Table, TableBody, TableHead, Td, Th } from '@/components/ui/Table';
 import { TextInput } from '@/components/ui/TextInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+
+interface PricedItem {
+    uuid: string;
+    name: string;
+    hq_price: string;
+    /** The branch's own price, or null when it uses headquarters'. */
+    branch_price: string | null;
+}
+
+interface PriceList {
+    services: (PricedItem & { variants: PricedItem[] })[];
+    offers: PricedItem[];
+}
+
+interface PriceChange {
+    when: string;
+    item: string;
+    price: string | null;
+    reason: string;
+    by: string | null;
+}
+
+type PriceTarget = 'service' | 'variant' | 'offer';
 
 type Overridable =
     | 'location'
@@ -21,6 +46,78 @@ interface BranchSettingsProps {
     /** Headquarters' value for each field — what the branch uses when its own is empty. */
     headquarters: Record<Overridable, string | null>;
     can_manage_branches: boolean;
+    prices: PriceList;
+    price_history: PriceChange[];
+}
+
+const money = (value: string) => `${Number(value).toLocaleString('fr-FR')} FCFA`;
+
+/**
+ * One item's branch price: empty = headquarters' price. A reason is always
+ * required (it is the price history); services and options can also reprice
+ * the branch's current subscribers.
+ */
+function PriceRow({ branchUuid, target, item, label }: { branchUuid: string; target: PriceTarget; item: PricedItem; label: string }) {
+    const form = useForm({
+        target_type: target,
+        target_uuid: item.uuid,
+        price: item.branch_price ?? '',
+        reason: '',
+        apply_to_subscribers: target !== 'offer',
+    });
+
+    function submit(event: FormEvent) {
+        event.preventDefault();
+        form.post(`/branches/${branchUuid}/prices`, { preserveScroll: true, onSuccess: () => form.reset('reason') });
+    }
+
+    return (
+        <form onSubmit={submit} className="grid gap-3 border-b border-slate-100 py-4 last:border-0 md:grid-cols-[minmax(0,1.2fr)_8rem_minmax(0,1.5fr)_auto] md:items-start">
+            <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-900">{label}</p>
+                <p className="text-xs text-slate-500">
+                    HQ: {money(item.hq_price)}
+                    {item.branch_price !== null && <span className="ml-2 font-medium text-blue-700">This branch: {money(item.branch_price)}</span>}
+                </p>
+            </div>
+            <TextInput
+                id={`price-${item.uuid}`}
+                aria-label={`${label} price for this branch`}
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                placeholder={item.hq_price}
+                value={form.data.price}
+                onChange={(e) => form.setData('price', e.target.value)}
+                error={form.errors.price}
+            />
+            <div className="flex flex-col gap-2">
+                <TextInput
+                    id={`reason-${item.uuid}`}
+                    aria-label={`Reason for the ${label} price`}
+                    placeholder="Reason (e.g. competition in town)"
+                    value={form.data.reason}
+                    onChange={(e) => form.setData('reason', e.target.value)}
+                    error={form.errors.reason}
+                />
+                {target !== 'offer' && (
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                            type="checkbox"
+                            checked={form.data.apply_to_subscribers}
+                            onChange={(e) => form.setData('apply_to_subscribers', e.target.checked)}
+                            className="rounded border-slate-300"
+                        />
+                        Apply to this branch's current subscribers
+                    </label>
+                )}
+            </div>
+            <Button type="submit" variant="secondary" disabled={form.processing || form.data.reason.trim() === ''} className="rounded-lg px-4 py-2 text-sm">
+                {form.processing ? 'Saving…' : 'Save'}
+            </Button>
+        </form>
+    );
 }
 
 const CONTACT_FIELDS: { name: Overridable; label: string; type?: string }[] = [
@@ -44,7 +141,7 @@ const FEE_FIELDS: { name: Overridable; label: string }[] = [
  * and messages print and what its staff charge; an empty field uses
  * headquarters' value, shown as the placeholder.
  */
-export default function BranchSettings({ branch, headquarters, can_manage_branches }: BranchSettingsProps) {
+export default function BranchSettings({ branch, headquarters, can_manage_branches, prices, price_history }: BranchSettingsProps) {
     const placeholder = (field: Overridable) => (headquarters[field] ? `HQ: ${headquarters[field]}` : 'Not set at HQ');
 
     return (
@@ -132,6 +229,58 @@ export default function BranchSettings({ branch, headquarters, can_manage_branch
                     </div>
                 )}
             </Form>
+
+            <Card className="animate-fade-up mt-8 max-w-4xl">
+                <CardHeader>
+                    <h3 className="text-sm font-semibold text-slate-900">Prices</h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                        Headquarters' price applies unless this branch sets its own. Leave the price empty and save to go
+                        back to headquarters' price. Every change needs a reason and is kept below.
+                    </p>
+                </CardHeader>
+                <CardBody>
+                    {prices.services.flatMap((service) => [
+                        <PriceRow key={service.uuid} branchUuid={branch.uuid} target="service" item={service} label={service.name} />,
+                        ...service.variants.map((variant) => (
+                            <PriceRow
+                                key={variant.uuid}
+                                branchUuid={branch.uuid}
+                                target="variant"
+                                item={variant}
+                                label={`${service.name} — ${variant.name}`}
+                            />
+                        )),
+                    ])}
+                    {prices.offers.map((offer) => (
+                        <PriceRow key={offer.uuid} branchUuid={branch.uuid} target="offer" item={offer} label={`Installation: ${offer.name}`} />
+                    ))}
+                </CardBody>
+            </Card>
+
+            {price_history.length > 0 && (
+                <Card className="animate-fade-up mt-6 max-w-4xl p-0">
+                    <Table label="Price history">
+                        <TableHead>
+                            <Th>When</Th>
+                            <Th>Item</Th>
+                            <Th>Price</Th>
+                            <Th>Reason</Th>
+                            <Th>By</Th>
+                        </TableHead>
+                        <TableBody>
+                            {price_history.map((change, index) => (
+                                <tr key={`${change.when}-${index}`}>
+                                    <Td>{new Date(change.when).toLocaleString()}</Td>
+                                    <Td>{change.item}</Td>
+                                    <Td>{change.price !== null ? money(change.price) : 'Back to HQ price'}</Td>
+                                    <Td>{change.reason}</Td>
+                                    <Td>{change.by ?? '—'}</Td>
+                                </tr>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </Card>
+            )}
         </AppLayout>
     );
 }

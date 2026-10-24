@@ -9,6 +9,7 @@ use App\Models\Agent;
 use App\Models\AuditLog;
 use App\Models\BillBatchFile;
 use App\Models\Branch;
+use App\Models\BranchPrice;
 use App\Models\CashAccount;
 use App\Models\CashMovement;
 use App\Models\Company;
@@ -64,6 +65,8 @@ class BranchSpineTest extends TestCase
             // Carry branch_id with another meaning, or nullable by design.
             Zone::class, Company::class, TenantUser::class,
             AuditLog::class, BillBatchFile::class,
+            // A branch's own price list (settings), not data the branch owns.
+            BranchPrice::class,
         ];
 
         $checked = 0;

@@ -90,8 +90,13 @@ class CashControlsFoundationTest extends TestCase
     public function test_cashier_is_a_reserved_role_name(): void
     {
         $this->actingAsRole('super');
+        $systemCashier = Role::query()->where('name', 'cashier')->firstOrFail();
 
-        $this->post('/users/roles', ['name' => 'cashier', 'label' => 'Another cashier'])->assertSessionHasErrors('name');
+        // Keys are generated from the label and never reuse a built-in key.
+        $this->post('/users/roles', ['name' => 'cashier', 'label' => 'Cashier'])->assertSessionHasNoErrors();
+
+        $this->assertTrue(Role::query()->where('name', 'cashier_2')->where('label', 'Cashier')->exists());
+        $this->assertSame($systemCashier->label, $systemCashier->fresh()->label);
     }
 
     public function test_a_payment_defaults_to_cash(): void

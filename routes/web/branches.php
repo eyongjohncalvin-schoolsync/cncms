@@ -14,6 +14,7 @@ Route::put('branch-view', [BranchViewController::class, 'update'])->name('branch
 Route::get('my-branch', [BranchSettingsController::class, 'mine'])->name('branches.mine');
 Route::get('branches/{branch}/settings', [BranchSettingsController::class, 'edit'])->name('branches.settings.edit');
 Route::patch('branches/{branch}/settings', [BranchSettingsController::class, 'update'])->name('branches.settings.update');
+Route::post('branches/{branch}/prices', [BranchSettingsController::class, 'setPrice'])->name('branches.prices.store');
 
 Route::get('branches', [BranchController::class, 'index'])->name('branches.index');
 Route::get('branches/create', [BranchController::class, 'create'])->name('branches.create');

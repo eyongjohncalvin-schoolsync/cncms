@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\InstallationOffer;
 use App\Models\InstallationOfferService as OfferServiceMonths;
 use App\Models\Service;
+use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -83,15 +84,18 @@ class InstallationOfferService
      *
      * @return list<array{uuid: string, name: string, description: ?string, fee: string, is_default: bool, months: list<array{service_uuid: string, service_name: string, months: int}>}>
      */
-    public function availableForForm(): array
+    public function availableForForm(?int $branchId = null): array
     {
+        // The fee of the customer's branch (or the branch being worked in) — branches v2 D4.
+        $prices = $branchId !== null ? BranchPrices::for($branchId) : BranchPrices::current();
+
         return InstallationOffer::query()
             ->available(BusinessTimezone::today())
             ->with('serviceMonths.service')
             ->orderByDesc('is_default')
             ->orderBy('name')
             ->get()
-            ->map(fn (InstallationOffer $offer): array => $this->shape($offer))
+            ->map(fn (InstallationOffer $offer): array => [...$this->shape($offer), 'fee' => $prices->offerFee($offer)])
             ->values()
             ->all();
     }

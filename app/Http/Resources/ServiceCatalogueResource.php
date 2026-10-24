@@ -6,6 +6,7 @@ namespace App\Http\Resources;
 
 use App\Models\Service;
 use App\Models\ServiceVariant;
+use App\Support\BranchPrices;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -28,12 +29,13 @@ class ServiceCatalogueResource extends JsonResource
             'uuid' => $this->uuid,
             'name' => $this->name,
             'description' => $this->description,
-            'price' => $this->price,
+            // The agent's branch's prices (branches v2 D4).
+            'price' => BranchPrices::current()->service($this->resource),
             'is_default' => $this->is_default,
             'variants' => $this->variants->map(fn (ServiceVariant $variant): array => [
                 'uuid' => $variant->uuid,
                 'name' => $variant->name,
-                'price' => $variant->price,
+                'price' => BranchPrices::current()->variant($variant),
             ])->values()->all(),
         ];
     }

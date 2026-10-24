@@ -15,7 +15,9 @@ use App\Models\InstallationOffer;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\User;
+use App\Models\Zone;
 use App\Support\Billing\FreeMonthPlan;
+use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -117,7 +119,7 @@ class CustomerInstallationService
      */
     public function create(CustomerData $customerData, InstallationData $installation, User $actor): array
     {
-        $plan = $this->planFor($customerData->services ?? [], $installation);
+        $plan = $this->planFor($customerData->services ?? [], $installation, branchId: $this->branchOfZone($customerData->zoneUuid));
 
         return DB::transaction(function () use ($customerData, $installation, $actor, $plan): array {
             return $this->grants->deferRecalculation(function () use ($customerData, $installation, $actor, $plan): array {
@@ -228,7 +230,7 @@ class CustomerInstallationService
             methodReference: $installation->methodReference,
         );
 
-        $plan = $this->planFor($customerData->services ?? [], $moneyOnly, field: true);
+        $plan = $this->planFor($customerData->services ?? [], $moneyOnly, field: true, branchId: $this->branchOfZone($customerData->zoneUuid));
 
         return DB::transaction(function () use ($customerData, $installation, $customerUuid, $field, $installationReceipt, $upfrontReceipt, $actor, $plan): array {
             $customer = $this->customers->create($customerData);
@@ -386,7 +388,7 @@ class CustomerInstallationService
             servicePlans: $plans,
             connectedOn: $connectedOn,
             reason: $installation->reason,
-        ), field: true, activation: true, charge: $charge);
+        ), field: true, activation: true, charge: $charge, branchId: $customer->branch_id);
 
         return DB::transaction(function () use ($customer, $installation, $actor, $plan, $charge): array {
             return $this->grants->deferRecalculation(function () use ($customer, $installation, $actor, $plan, $charge): array {
@@ -420,6 +422,14 @@ class CustomerInstallationService
         });
     }
 
+    /** The branch a new customer joins through their zone (null: the branch being worked in). */
+    private function branchOfZone(?string $zoneUuid): ?int
+    {
+        $branchId = $zoneUuid !== null ? Zone::query()->where('uuid', $zoneUuid)->value('branch_id') : null;
+
+        return $branchId !== null ? (int) $branchId : null;
+    }
+
     /**
      * Resolves and checks the section, and works out what it means.
      *
@@ -431,9 +441,11 @@ class CustomerInstallationService
      * @param  list<CustomerServiceSelection>  $services
      * @return array{offer: ?InstallationOffer, standard_fee: ?string, charge_amount: ?string, fee_needs_approval: bool, waiver_needed: bool, free_by_service_id: array<int, array{from: string, months: int}>, free_needs_approval: bool, service_months: list<array{service_id: int, months: int, rate: string}>, upfront_amount: string, connected_on: string, installation_month: string, summary: array<string, mixed>}
      */
-    private function planFor(array $services, InstallationData $installation, bool $field = false, bool $activation = false, ?CustomerCharge $charge = null): array
+    private function planFor(array $services, InstallationData $installation, bool $field = false, bool $activation = false, ?CustomerCharge $charge = null, ?int $branchId = null): array
     {
         $today = BusinessTimezone::today();
+        // The customer's branch's prices and offer fees (branches v2 D4).
+        $branchPrices = $branchId !== null ? BranchPrices::for($branchId) : BranchPrices::current();
         $offer = null;
 
         if ($installation->offerUuid !== null) {
@@ -459,7 +471,7 @@ class CustomerInstallationService
         }
 
         if ($services === [] && ($default = Service::default()) !== null) {
-            $prices[$default->id] = bcadd((string) $default->price, '0', 2);
+            $prices[$default->id] = $branchPrices->service($default);
             $bill = $prices[$default->id];
         }
 
@@ -491,7 +503,7 @@ class CustomerInstallationService
             $feeNeedsApproval = $charge?->approval_status !== null;
         } else {
             // Fee: the offer's unless overridden.
-            $standardFee = $offer !== null ? bcadd((string) $offer->fee, '0', 2) : null;
+            $standardFee = $offer !== null ? $branchPrices->offerFee($offer) : null;
             $fee = $installation->fee !== null ? bcadd($installation->fee, '0', 2) : ($standardFee ?? '0.00');
 
             if (bccomp($fee, '0', 2) < 0) {

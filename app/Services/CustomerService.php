@@ -169,7 +169,7 @@ class CustomerService
         return DB::transaction(function () use ($zoneId, $data): Customer {
             $customer = $this->customers->create($zoneId, $data);
 
-            $selections = $data->services ?? [$this->subscriptions->defaultSelection($data->bill)];
+            $selections = $data->services ?? [$this->subscriptions->defaultSelection($data->bill, $customer->branch_id)];
             $this->subscriptions->sync($customer, $selections);
 
             return $customer;

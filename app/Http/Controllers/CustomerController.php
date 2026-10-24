@@ -43,6 +43,7 @@ use App\Services\InvoiceService;
 use App\Services\ManuscriptRunLockService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
+use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -621,6 +622,8 @@ class CustomerController extends Controller
         $heldVariantIds = $customer?->relationLoaded('subscriptions')
             ? $customer->subscriptions->pluck('service_variant_id')->filter()->unique()->all()
             : [];
+        // Branches v2 D4: the customer's branch's prices; for a new customer, the branch being worked in.
+        $prices = $customer !== null ? BranchPrices::for($customer->branch_id) : BranchPrices::current();
 
         return Service::query()
             ->where(fn ($query) => $query->where('active', true)->when(
@@ -639,13 +642,13 @@ class CustomerController extends Controller
                 'uuid' => $service->uuid,
                 'name' => $service->name,
                 'description' => $service->description,
-                'price' => $service->price,
+                'price' => $prices->service($service),
                 'is_default' => $service->is_default,
                 'active' => $service->active,
                 'variants' => $service->variants->map(fn (ServiceVariant $variant): array => [
                     'uuid' => $variant->uuid,
                     'name' => $variant->name,
-                    'price' => $variant->price,
+                    'price' => $prices->variant($variant),
                     'active' => $variant->active,
                 ])->values()->all(),
             ])
@@ -747,7 +750,7 @@ class CustomerController extends Controller
         $user = request()->user();
         $proposal = $field->proposal;
         $services = Service::query()->pluck('name', 'uuid');
-        $offers = app(InstallationOfferService::class)->availableForForm();
+        $offers = app(InstallationOfferService::class)->availableForForm($customer->branch_id);
         $offerName = ($proposal['installation_offer_uuid'] ?? null) !== null
             ? InstallationOffer::query()->where('uuid', $proposal['installation_offer_uuid'])->value('name')
             : null;
