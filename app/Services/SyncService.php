@@ -37,6 +37,9 @@ use Throwable;
  */
 class SyncService
 {
+    /** How far back a first / full pull sends payment verification results (mobile data). */
+    private const int FULL_PULL_PAYMENT_DAYS = 60;
+
     public function __construct(
         private readonly PaymentService $payments,
         private readonly PaymentVerificationService $verifications,
@@ -840,7 +843,10 @@ class SyncService
         return Payment::query()
             ->with(['customer', 'verification'])
             ->where('verification_status', $status)
-            ->when($sinceAt, fn ($query) => $query->where('updated_at', '>=', $sinceAt))
+            // A first / full pull only needs recent verification results (the phone
+            // tracks its own queued payments), not every payment ever — that payload
+            // never finished downloading on 3G.
+            ->where('updated_at', '>=', $sinceAt ?? now()->subDays(self::FULL_PULL_PAYMENT_DAYS))
             ->when($zoneId !== null, fn ($query) => $query->whereHas('customer', fn ($inner) => $inner->where('zone_id', $zoneId)))
             ->when(
                 $zoneId === null && $branchId !== null,

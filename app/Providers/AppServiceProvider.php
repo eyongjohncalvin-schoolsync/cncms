@@ -135,12 +135,18 @@ class AppServiceProvider extends ServiceProvider
     {
         // Login brute-force protection — shared by both the web session
         // login (POST /login) and the API token login
-        // (POST /api/v1/auth/login). Keyed by IP since there is no
-        // authenticated user yet at the point of a login attempt.
-        RateLimiter::for('login', fn (Request $request) => Limit::perMinutes(
-            config('rate-limits.login.decay_minutes'),
-            config('rate-limits.login.max_attempts'),
-        )->by($request->ip()));
+        // (POST /api/v1/auth/login). Keyed by account + IP: field agents on
+        // MTN/Orange data share a handful of carrier IPs, so a per-IP-only
+        // limit let one agent's typos lock out everyone in town. A looser
+        // per-IP ceiling still stops one source spraying many accounts.
+        RateLimiter::for('login', function (Request $request): array {
+            $account = mb_strtolower(trim((string) ($request->input('email') ?? $request->input('username') ?? $request->input('login') ?? '')));
+
+            return [
+                Limit::perMinutes(config('rate-limits.login.decay_minutes'), config('rate-limits.login.max_attempts'))->by('account:'.$account.'|'.$request->ip()),
+                Limit::perMinutes(config('rate-limits.login.decay_minutes'), config('rate-limits.login.ip_max_attempts'))->by('ip:'.$request->ip()),
+            ];
+        });
 
         // Self-service registration / workspace creation / Google OAuth
         // callback. Keyed by IP — provisioning a tenant schema is

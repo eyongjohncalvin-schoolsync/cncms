@@ -42,6 +42,32 @@ class RateLimitTest extends TestCase
             ->assertJsonStructure(['message']);
     }
 
+    /**
+     * Field agents on mobile data share a few carrier IPs: one agent's
+     * failed attempts must not lock a colleague out on the same IP — while
+     * one IP still cannot spray unlimited accounts.
+     */
+    public function test_one_accounts_failed_logins_do_not_lock_out_another_on_the_same_ip(): void
+    {
+        for ($i = 0; $i < 5; $i++) {
+            $this->postJson('/api/v1/auth/login', ['email' => 'agent-one@example.test', 'password' => 'wrong'])->assertStatus(401);
+        }
+
+        $this->postJson('/api/v1/auth/login', ['email' => 'agent-one@example.test', 'password' => 'wrong'])->assertStatus(429);
+        $this->postJson('/api/v1/auth/login', ['email' => 'agent-two@example.test', 'password' => 'wrong'])->assertStatus(401);
+    }
+
+    public function test_one_ip_still_has_a_ceiling_across_accounts(): void
+    {
+        config(['rate-limits.login.ip_max_attempts' => 3]);
+
+        for ($i = 0; $i < 3; $i++) {
+            $this->postJson('/api/v1/auth/login', ['email' => "spray{$i}@example.test", 'password' => 'wrong'])->assertStatus(401);
+        }
+
+        $this->postJson('/api/v1/auth/login', ['email' => 'spray9@example.test', 'password' => 'wrong'])->assertStatus(429);
+    }
+
     public function test_rate_limit_config_matches_the_documented_api_spec(): void
     {
         // api-spec.md section 11 — the documented target limits this

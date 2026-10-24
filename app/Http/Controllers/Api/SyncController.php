@@ -59,7 +59,9 @@ class SyncController extends Controller
         $validated = $request->validate([
             'entity_type' => ['required', 'string', 'in:payment,voucher,expenditure'],
             'entity_uuid' => ['required', 'uuid'],
-            'receipt' => ['required', 'image', 'max:2048'],
+            // The app shrinks photos to ~200 KB before upload; 5 MB is the safety net
+            // for older app builds (a rejected photo used to be retried forever).
+            'receipt' => ['required', 'image', 'max:5120'],
         ]);
 
         $result = $this->sync->uploadReceipt(

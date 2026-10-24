@@ -22,11 +22,13 @@ declare(strict_types=1);
 
 return [
 
-    // Login brute-force protection, keyed by IP. Applies to BOTH the web
-    // session login (POST /login) and the API token login
-    // (POST /api/v1/auth/login).
+    // Login brute-force protection. Applies to BOTH the web session login
+    // (POST /login) and the API token login (POST /api/v1/auth/login).
+    // max_attempts is per account + IP; ip_max_attempts is the ceiling for
+    // one IP across all accounts (field agents share carrier IPs on mobile data).
     'login' => [
         'max_attempts' => (int) env('RATE_LIMIT_LOGIN_MAX_ATTEMPTS', 5),
+        'ip_max_attempts' => (int) env('RATE_LIMIT_LOGIN_IP_MAX_ATTEMPTS', 50),
         'decay_minutes' => (int) env('RATE_LIMIT_LOGIN_DECAY_MINUTES', 1),
     ],
 

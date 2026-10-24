@@ -79,6 +79,7 @@ directory `/public`.
   editor names them:
 
   ```bash
+  set -e   # any failed step (e.g. a migration) stops the deploy and Ploi marks it failed
   cd {SITE_DIRECTORY}
   git pull origin {BRANCH}
   {SITE_COMPOSER} install --no-interaction --prefer-dist --optimize-autoloader --no-dev
