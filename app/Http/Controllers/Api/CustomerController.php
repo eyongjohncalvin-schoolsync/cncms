@@ -220,7 +220,9 @@ class CustomerController extends Controller
         $zoneUuid = $request->string('zone_uuid')->toString() ?: null;
 
         if ($this->context->is('agent')) {
-            $zoneId = $this->context->zoneId;
+            // Their own zones only — one of them when they pick it.
+            $picked = $zoneUuid !== null ? $this->zones->all()->firstWhere('uuid', $zoneUuid)?->id : null;
+            $zoneId = $picked !== null && $this->context->coversZone($picked) ? $picked : ($this->context->zoneIds ?? []);
         } elseif ($zoneUuid !== null) {
             $zoneId = $this->zones->findOrFail($zoneUuid)->id;
         } else {

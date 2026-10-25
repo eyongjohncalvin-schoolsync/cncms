@@ -135,8 +135,9 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
         return $this->scopeToBranchDirect(Manuscript::query(), $this->currentBranchId())
             ->where('period', $filters['period'])
             ->when(
-                $filters['zone_id'] ?? null,
-                fn (Builder $query, $zoneId) => $query->whereHas('customer', fn (Builder $inner) => $inner->where('zone_id', $zoneId))
+                ($filters['zone_id'] ?? null) !== null,
+                // One zone, or the zones an agent covers — an empty list matches nothing.
+                fn (Builder $query) => $query->whereHas('customer', fn (Builder $inner) => $inner->whereIn('zone_id', (array) $filters['zone_id']))
             )
             ->when(
                 $filters['status'] ?? null,
@@ -196,8 +197,9 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
             ->whereBetween('created_at', [$start, $end])
             ->whereHas('customer', fn (Builder $inner) => $inner->where('status', 'active'))
             ->when(
-                $filters['zone_id'] ?? null,
-                fn (Builder $query, $zoneId) => $query->whereHas('customer', fn (Builder $inner) => $inner->where('zone_id', $zoneId))
+                ($filters['zone_id'] ?? null) !== null,
+                // One zone, or the zones an agent covers — an empty list matches nothing.
+                fn (Builder $query) => $query->whereHas('customer', fn (Builder $inner) => $inner->whereIn('zone_id', (array) $filters['zone_id']))
             )
             ->when(
                 $filters['status'] ?? null,

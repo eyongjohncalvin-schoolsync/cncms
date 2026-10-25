@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\DataTransferObjects\AgentData;
 use App\Models\Agent;
+use App\Models\Scopes\BranchScope;
 use App\Models\StaffSalary;
 use App\Models\User;
 use App\Repositories\Contracts\AgentRepositoryInterface;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class AgentService
@@ -31,6 +33,7 @@ class AgentService
         private readonly ZoneRepositoryInterface $zones,
         private readonly StaffAssignmentService $assignments,
         private readonly SalaryService $salaries,
+        private readonly ZoneCoverageService $coverage,
     ) {}
 
     /**
@@ -96,7 +99,12 @@ class AgentService
         $zoneId = $this->resolveZoneId($data->zoneUuid);
         $userId = $this->resolveUserId($data->userUuid);
 
-        $agent = $this->agents->create($zoneId, $userId, $data);
+        $agent = DB::transaction(function () use ($zoneId, $userId, $data): Agent {
+            $agent = $this->agents->create($zoneId, $userId, $data);
+            $this->coverage->coverOnly($agent, $agent->zone()->withoutGlobalScope(BranchScope::class)->firstOrFail(), auth()->user());
+
+            return $agent;
+        });
 
         Cache::forget('agents:all');
         $this->recordAssignment($agent);
@@ -111,7 +119,24 @@ class AgentService
         $userId = $data->userUuid !== null ? $this->resolveUserId($data->userUuid) : null;
         $previousSalary = (string) $agent->salary;
 
-        $agent = $this->agents->update($agent, $data, $zoneId, $userId);
+        $movesZone = $zoneId !== null && $zoneId !== $agent->zone_id;
+
+        $agent = DB::transaction(function () use ($agent, $data, $zoneId, $userId, $movesZone): Agent {
+            // Moving the agent's home zone on the agent form means they now
+            // cover that zone only. Their old coverage goes first: the agent's
+            // branch may change, and the database keeps coverage in it.
+            if ($movesZone) {
+                $agent->coverage()->withoutGlobalScope(BranchScope::class)->delete();
+            }
+
+            $agent = $this->agents->update($agent, $data, $zoneId, $userId);
+
+            if ($movesZone) {
+                $this->coverage->coverOnly($agent, $agent->zone()->withoutGlobalScope(BranchScope::class)->firstOrFail(), auth()->user());
+            }
+
+            return $agent;
+        });
 
         Cache::forget('agents:all');
         $this->recordAssignment($agent);

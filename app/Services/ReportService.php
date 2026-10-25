@@ -39,7 +39,7 @@ use Illuminate\Validation\ValidationException;
  * table; queries still join `customers`/`zones` for the zone fence and zone
  * names. `agent`-role users are fenced one level tighter than their
  * TenantContext::branchId (which only resolves to their zone's *branch*):
- * agentZoneId() resolves their own Agent row's zone_id directly, and every
+ * agentZoneIds() is the zones they cover (TenantContext::zoneIds), and every
  * query here prefers that over the branch fence when it's set — see
  * fenceZones().
  *
@@ -68,14 +68,14 @@ class ReportService
         $day = $this->resolveDate($date);
         [$start, $end] = $this->boundsUtc($day, $day);
         $branchId = $this->context->branchId;
-        $zoneId = $this->agentZoneId();
+        $zoneIds = $this->agentZoneIds();
 
-        $key = sprintf('%s:daily:%s:%s', self::CACHE_PREFIX, $day->toDateString(), $this->scopeSuffix($branchId, $zoneId));
+        $key = sprintf('%s:daily:%s:%s', self::CACHE_PREFIX, $day->toDateString(), $this->scopeSuffix($branchId, $zoneIds));
 
         return Cache::remember(
             $key,
             $this->ttlFor($start, $end),
-            fn (): array => $this->buildDaily($day, $start, $end, $branchId, $zoneId),
+            fn (): array => $this->buildDaily($day, $start, $end, $branchId, $zoneIds),
         );
     }
 
@@ -89,14 +89,14 @@ class ReportService
         $weekEnd = $day->copy()->endOfWeek(Carbon::SUNDAY);
         [$start, $end] = $this->boundsUtc($weekStart, $weekEnd);
         $branchId = $this->context->branchId;
-        $zoneId = $this->agentZoneId();
+        $zoneIds = $this->agentZoneIds();
 
-        $key = sprintf('%s:weekly:%s:%s', self::CACHE_PREFIX, $this->weekId($weekStart), $this->scopeSuffix($branchId, $zoneId));
+        $key = sprintf('%s:weekly:%s:%s', self::CACHE_PREFIX, $this->weekId($weekStart), $this->scopeSuffix($branchId, $zoneIds));
 
         return Cache::remember(
             $key,
             $this->ttlFor($start, $end),
-            fn (): array => $this->buildWeekly($weekStart, $weekEnd, $start, $end, $branchId, $zoneId),
+            fn (): array => $this->buildWeekly($weekStart, $weekEnd, $start, $end, $branchId, $zoneIds),
         );
     }
 
@@ -108,9 +108,9 @@ class ReportService
         $period = $this->resolvePeriod($period);
         [$start, $end] = $this->monthBoundsUtc($period);
         $branchId = $this->context->branchId;
-        $zoneId = $this->agentZoneId();
+        $zoneIds = $this->agentZoneIds();
 
-        $key = sprintf('%s:monthly:%s:%s', self::CACHE_PREFIX, $period, $this->scopeSuffix($branchId, $zoneId));
+        $key = sprintf('%s:monthly:%s:%s', self::CACHE_PREFIX, $period, $this->scopeSuffix($branchId, $zoneIds));
 
         // The cached payload is role-agnostic (branch/zone-fenced only) —
         // buildMonthly() always computes the pnl block. Role-based
@@ -124,7 +124,7 @@ class ReportService
         $payload = Cache::remember(
             $key,
             $this->ttlFor($start, $end),
-            fn (): array => $this->buildMonthly($period, $start, $end, $branchId, $zoneId),
+            fn (): array => $this->buildMonthly($period, $start, $end, $branchId, $zoneIds),
         );
 
         return $this->applyRoleVisibility($payload);
@@ -157,10 +157,10 @@ class ReportService
         $period = $this->resolvePeriod($period);
         [$start, $end] = $this->monthBoundsUtc($period);
         $branchId = $this->context->branchId;
-        $zoneId = $this->agentZoneId();
+        $zoneIds = $this->agentZoneIds();
 
-        $data = $this->applyRoleVisibility($this->buildMonthly($period, $start, $end, $branchId, $zoneId));
-        $data['branch_label'] = $this->branchLabel($branchId, $zoneId);
+        $data = $this->applyRoleVisibility($this->buildMonthly($period, $start, $end, $branchId, $zoneIds));
+        $data['branch_label'] = $this->branchLabel($branchId, $zoneIds);
         $data['generated_at'] = Carbon::now(BusinessTimezone::WAT);
 
         return $data;
@@ -201,29 +201,29 @@ class ReportService
     /**
      * @return array<string, mixed>
      */
-    private function buildDaily(Carbon $day, Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function buildDaily(Carbon $day, Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
         return [
             'tier' => 'daily',
             'date' => $day->toDateString(),
             'label' => $day->format('D j M Y'),
             'is_current' => $day->isSameDay(Carbon::now(BusinessTimezone::WAT)),
-            'payments' => $this->paymentsBreakdown($start, $end, $branchId, $zoneId),
+            'payments' => $this->paymentsBreakdown($start, $end, $branchId, $zoneIds),
             // The flat table of today's payments the Daily tier's UI shows
             // for office roles (super/admin/manager) — see the task spec's
             // "Daily: stat cards only ... + one flat table of today's
             // payments". Capped defensively; a single WAT calendar day's
             // payment volume never approaches this in practice.
-            'payments_today' => $this->paymentsListForDay($start, $end, $branchId, $zoneId),
-            'pending_queue' => $this->pendingQueue($branchId, $zoneId),
-            'verifications_actioned' => $this->verificationsActioned($start, $end, $branchId, $zoneId),
-            'new_customers' => ['count' => $this->newCustomersCount($start, $end, $branchId, $zoneId)],
-            'status_changes' => $this->statusChanges($start, $end, $branchId, $zoneId),
+            'payments_today' => $this->paymentsListForDay($start, $end, $branchId, $zoneIds),
+            'pending_queue' => $this->pendingQueue($branchId, $zoneIds),
+            'verifications_actioned' => $this->verificationsActioned($start, $end, $branchId, $zoneIds),
+            'new_customers' => ['count' => $this->newCustomersCount($start, $end, $branchId, $zoneIds)],
+            'status_changes' => $this->statusChanges($start, $end, $branchId, $zoneIds),
             // Not branch/zone-scoped — see ResourcesDashboardService::expensesFor()'s
             // doc comment: expenditures carry no zone/branch attribution in
             // the schema today.
             'expenditures' => $this->expendituresForDay($day),
-            'offline_sync' => $this->offlineSync($start, $end, $branchId, $zoneId),
+            'offline_sync' => $this->offlineSync($start, $end, $branchId, $zoneIds),
         ];
     }
 
@@ -247,9 +247,9 @@ class ReportService
     /**
      * @return array{count: int, total: string, by_device: list<array{device: ?string, count: int, total: string}>}
      */
-    private function offlineSync(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function offlineSync(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
-        $totals = $this->paymentsQuery($branchId, $zoneId)
+        $totals = $this->paymentsQuery($branchId, $zoneIds)
             ->where('payments.recorded_offline', true)
             ->whereBetween('payments.created_at', [$start, $end])
             ->selectRaw('count(*) as count, coalesce(sum(payments.amount), 0) as total')
@@ -260,7 +260,7 @@ class ReportService
         // future payments.recorded_by column would enable a real per-agent
         // breakdown; until then this groups by device, which is what's
         // actually recorded.
-        $byDevice = $this->paymentsQuery($branchId, $zoneId)
+        $byDevice = $this->paymentsQuery($branchId, $zoneIds)
             ->where('payments.recorded_offline', true)
             ->whereBetween('payments.created_at', [$start, $end])
             ->groupBy('payments.recorded_by_device')
@@ -288,14 +288,14 @@ class ReportService
     /**
      * @return array<string, mixed>
      */
-    private function buildWeekly(Carbon $weekStart, Carbon $weekEnd, Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function buildWeekly(Carbon $weekStart, Carbon $weekEnd, Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
-        $current = $this->weeklyRollup($start, $end, $branchId, $zoneId);
+        $current = $this->weeklyRollup($start, $end, $branchId, $zoneIds);
 
         $prevWeekStart = $weekStart->copy()->subWeek();
         $prevWeekEnd = $weekEnd->copy()->subWeek();
         [$prevStart, $prevEnd] = $this->boundsUtc($prevWeekStart, $prevWeekEnd);
-        $previous = $this->weeklyRollup($prevStart, $prevEnd, $branchId, $zoneId);
+        $previous = $this->weeklyRollup($prevStart, $prevEnd, $branchId, $zoneIds);
 
         return [
             'tier' => 'weekly',
@@ -308,7 +308,7 @@ class ReportService
             // The Weekly tier's exactly-one 7-bar BarChart — reuses the same
             // day-bucketing query the Monthly tier's trend line uses
             // (dailyTrend() is range-agnostic), just bounded to this week.
-            'daily_breakdown' => $this->dailyTrend($start, $end, $branchId, $zoneId),
+            'daily_breakdown' => $this->dailyTrend($start, $end, $branchId, $zoneIds),
             'new_customers' => $current['new_customers'],
             'net_disconnections' => $current['net_disconnections'],
             'deltas' => [
@@ -317,23 +317,23 @@ class ReportService
                 'new_customers' => $this->delta($current['new_customers'], $previous['new_customers']),
                 'net_disconnections' => $this->delta($current['net_disconnections'], $previous['net_disconnections']),
             ],
-            'league_table' => $this->leagueTable($start, $end, $branchId, $zoneId),
+            'league_table' => $this->leagueTable($start, $end, $branchId, $zoneIds),
             // The figure that most directly protects revenue — verified
             // payments are the only ones manuscript:calculate ever counts
             // (App\Console\Commands\ManuscriptCalculate reads only
             // verification_status = 'verified' payments), so a payment
             // stuck pending for a week or more is a week of billed revenue
             // that isn't actually landing anywhere yet.
-            'verification_sla' => $this->verificationSla($branchId, $zoneId),
+            'verification_sla' => $this->verificationSla($branchId, $zoneIds),
         ];
     }
 
     /**
      * @return array{collections: array{total: string, verified: string, count: int, by_purpose: array{subscription: string, installation: string, relocation: string, reinstallation: string}}, new_customers: int, net_disconnections: int}
      */
-    private function weeklyRollup(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function weeklyRollup(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
-        $paymentsRow = $this->paymentsQuery($branchId, $zoneId)
+        $paymentsRow = $this->paymentsQuery($branchId, $zoneIds)
             ->whereBetween('payments.created_at', [$start, $end])
             ->selectRaw("
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified'), 0) as verified,
@@ -344,9 +344,9 @@ class ReportService
             ")
             ->first();
 
-        $newCustomers = $this->newCustomersCount($start, $end, $branchId, $zoneId);
+        $newCustomers = $this->newCustomersCount($start, $end, $branchId, $zoneIds);
 
-        $statusChanges = $this->statusChanges($start, $end, $branchId, $zoneId);
+        $statusChanges = $this->statusChanges($start, $end, $branchId, $zoneIds);
         $disconnects = (int) collect($statusChanges)->where('to', 'disconnected')->sum('count');
         $reconnects = (int) collect($statusChanges)
             ->where('from', 'disconnected')
@@ -382,9 +382,9 @@ class ReportService
      *
      * @return list<array{zone_uuid: string, zone_name: string, collected: string, expected: string, ratio_pct: float}>
      */
-    private function leagueTable(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function leagueTable(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
-        if ($zoneId !== null) {
+        if ($zoneIds !== null) {
             return [];
         }
 
@@ -440,7 +440,7 @@ class ReportService
      *
      * @return list<array{branch_name: string, count: int, total: string}>
      */
-    private function verificationSla(?int $branchId, ?int $zoneId): array
+    private function verificationSla(?int $branchId, ?array $zoneIds): array
     {
         $cutoff = Carbon::now()->subDays(7);
 
@@ -452,7 +452,7 @@ class ReportService
             ->where('payments.verification_status', 'pending')
             ->where('payments.created_at', '<', $cutoff);
 
-        $query = $this->fenceZones($query, $branchId, $zoneId);
+        $query = $this->fenceZones($query, $branchId, $zoneIds);
 
         return $query
             ->groupBy('branches.id', 'branches.name')
@@ -475,7 +475,7 @@ class ReportService
     /**
      * @return array<string, mixed>
      */
-    private function buildMonthly(string $period, Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function buildMonthly(string $period, Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
         $payload = [
             'tier' => 'monthly',
@@ -491,7 +491,7 @@ class ReportService
             // billing_ledger/pnl below are verified-only and bucketed by
             // manuscript processing. They will legitimately disagree; never
             // merge them under one heading.
-            'collections_cash_received' => $this->paymentsBreakdown($start, $end, $branchId, $zoneId),
+            'collections_cash_received' => $this->paymentsBreakdown($start, $end, $branchId, $zoneIds),
             // Arrears Adjustment feature: approved, 'decrease'-direction
             // (write-off) adjustments TARGETING this period — deliberately
             // its own top-level key, never merged into collections_cash_received
@@ -499,10 +499,10 @@ class ReportService
             // "distinct key/heading, they will legitimately disagree" rule
             // for exactly the same reason (this is a ledger correction, not
             // cash collected or a normal billing run).
-            'arrears_adjustments_written_off' => $this->arrearsAdjustmentsWrittenOff($period, $branchId, $zoneId),
+            'arrears_adjustments_written_off' => $this->arrearsAdjustmentsWrittenOff($period, $branchId, $zoneIds),
             'billing_ledger' => $this->billingRunFor($period),
-            'collection_health' => $this->collectionHealth($period, $branchId, $zoneId),
-            'trend' => $this->dailyTrend($start, $end, $branchId, $zoneId),
+            'collection_health' => $this->collectionHealth($period, $branchId, $zoneIds),
+            'trend' => $this->dailyTrend($start, $end, $branchId, $zoneIds),
             // Always computed here (this method's result is the CACHED,
             // role-agnostic payload) — P&L is gated OUT for manager/agent
             // per the task spec's role table, but that filtering happens in
@@ -515,7 +515,7 @@ class ReportService
             // installation income, the cost of free months as foregone
             // revenue (never income), customers on promo, promos ending
             // soon, and who gave grants / waivers.
-            'installations' => $this->installationsAndPromotions($period, $start, $end, $branchId, $zoneId),
+            'installations' => $this->installationsAndPromotions($period, $start, $end, $branchId, $zoneIds),
         ];
 
         return $payload;
@@ -524,11 +524,11 @@ class ReportService
     /**
      * @return array{by_offer: list<array{offer: string, count: int, fees: string}>, installation_income: string, one_off_charges: list<array{kind: string, label: string, count: int, fees: string, income: string}>, promo_cost: string, customers_on_promo: int, ending_soon: list<array{customer: string, service: string, ends: string}>, grants_by_user: list<array{user: string, requested: int, approved: int, waivers_approved: int}>}
      */
-    private function installationsAndPromotions(string $period, Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function installationsAndPromotions(string $period, Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
         $charges = fn () => $this->fenceZones(CustomerCharge::query()
             ->join('customers', 'customers.id', '=', 'customer_charges.customer_id')
-            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId);
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneIds);
 
         $byOffer = $charges()
             ->leftJoin('installation_offers', 'installation_offers.id', '=', 'customer_charges.installation_offer_id')
@@ -545,7 +545,7 @@ class ReportService
         // own figure; relocation and re-installation are separate lines.
         $incomeByKind = $this->fenceZones(Payment::query()
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
-            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId)
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneIds)
             ->join('customer_charges', 'customer_charges.id', '=', 'payments.customer_charge_id')
             ->where('payments.purpose', Payment::PURPOSE_INSTALLATION)
             ->where('payments.verification_status', 'verified')
@@ -576,13 +576,13 @@ class ReportService
 
         $manuscripts = fn () => $this->fenceZones(Manuscript::query()
             ->join('customers', 'customers.id', '=', 'manuscripts.customer_id')
-            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId)
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneIds)
             ->where('manuscripts.period', $period)
             ->where('manuscripts.free_value', '>', 0);
 
         $grants = fn () => $this->fenceZones(FreeMonthGrant::query()
             ->join('customers', 'customers.id', '=', 'free_month_grants.customer_id')
-            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneId);
+            ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneIds);
 
         $nextPeriod = Carbon::createFromFormat('!Y-m', $period)->addMonthNoOverflow()->format('Y-m');
 
@@ -672,7 +672,7 @@ class ReportService
     /**
      * @return array{collection_rate: float, total_collected: string, total_bill: string, arrears_aging: array{"1x": int, "2x": int, "3x_plus": int}}
      */
-    private function collectionHealth(string $period, ?int $branchId, ?int $zoneId): array
+    private function collectionHealth(string $period, ?int $branchId, ?array $zoneIds): array
     {
         // ManuscriptService::summary() already branch-fences itself via
         // TenantContext::currentBranchId() internally (see
@@ -680,8 +680,8 @@ class ReportService
         // narrows it further for an agent (whose TenantContext::branchId
         // only resolves to their zone's *branch*, not the zone itself).
         $filters = ['period' => $period];
-        if ($zoneId !== null) {
-            $filters['zone_id'] = $zoneId;
+        if ($zoneIds !== null) {
+            $filters['zone_id'] = $zoneIds;
         }
 
         $summary = $this->manuscripts->summary($filters);
@@ -690,7 +690,7 @@ class ReportService
             'collection_rate' => $summary['collection_rate'],
             'total_collected' => $summary['total_collected'],
             'total_bill' => $summary['total_bill'],
-            'arrears_aging' => $this->arrearsAging($period, $branchId, $zoneId),
+            'arrears_aging' => $this->arrearsAging($period, $branchId, $zoneIds),
         ];
     }
 
@@ -705,7 +705,7 @@ class ReportService
      *
      * @return array{"1x": int, "2x": int, "3x_plus": int}
      */
-    private function arrearsAging(string $period, ?int $branchId, ?int $zoneId): array
+    private function arrearsAging(string $period, ?int $branchId, ?array $zoneIds): array
     {
         $query = Manuscript::query()
             ->join('customers', 'customers.id', '=', 'manuscripts.customer_id')
@@ -713,7 +713,7 @@ class ReportService
             ->where('manuscripts.period', $period)
             ->where('customers.status', 'active');
 
-        $query = $this->fenceZones($query, $branchId, $zoneId);
+        $query = $this->fenceZones($query, $branchId, $zoneIds);
 
         $rows = $query->select('manuscripts.total_arrears', 'customers.bill')->get();
 
@@ -755,9 +755,9 @@ class ReportService
      *
      * @return list<array{date: string, verified: string, payment_count: int}>
      */
-    private function dailyTrend(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function dailyTrend(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
-        $rows = $this->paymentsQuery($branchId, $zoneId)
+        $rows = $this->paymentsQuery($branchId, $zoneIds)
             ->whereBetween('payments.created_at', [$start, $end])
             ->selectRaw(
                 "(payments.created_at AT TIME ZONE 'UTC' AT TIME ZONE ?)::date as day, ".
@@ -783,9 +783,9 @@ class ReportService
     /**
      * @return array{total: string, verified: string, pending: string, rejected: string, count: int, by_purpose: array{subscription: string, installation: string, relocation: string, reinstallation: string}}
      */
-    private function paymentsBreakdown(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function paymentsBreakdown(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
-        $row = $this->paymentsQuery($branchId, $zoneId)
+        $row = $this->paymentsQuery($branchId, $zoneIds)
             ->whereBetween('payments.created_at', [$start, $end])
             ->selectRaw("
                 coalesce(sum(payments.amount) filter (where payments.verification_status = 'verified'), 0) as verified,
@@ -825,9 +825,9 @@ class ReportService
      *
      * @return array{count: int, total: string, oldest_age_hours: ?int, oldest_created_at: ?string, items: list<array{uuid: string, customer_name: string, amount: string, age_hours: int}>}
      */
-    private function pendingQueue(?int $branchId, ?int $zoneId): array
+    private function pendingQueue(?int $branchId, ?array $zoneIds): array
     {
-        $row = $this->paymentsQuery($branchId, $zoneId)
+        $row = $this->paymentsQuery($branchId, $zoneIds)
             ->where('payments.verification_status', 'pending')
             ->selectRaw('count(*) as count, coalesce(sum(payments.amount), 0) as total, min(payments.created_at) as oldest')
             ->first();
@@ -839,16 +839,16 @@ class ReportService
             'total' => (string) $row->total,
             'oldest_age_hours' => $oldest ? (int) $oldest->diffInHours(Carbon::now()) : null,
             'oldest_created_at' => $oldest?->toIso8601String(),
-            'items' => $this->pendingQueueItems($branchId, $zoneId),
+            'items' => $this->pendingQueueItems($branchId, $zoneIds),
         ];
     }
 
     /**
      * @return list<array{uuid: string, customer_name: string, amount: string, age_hours: int}>
      */
-    private function pendingQueueItems(?int $branchId, ?int $zoneId, int $limit = 10): array
+    private function pendingQueueItems(?int $branchId, ?array $zoneIds, int $limit = 10): array
     {
-        return $this->paymentsQuery($branchId, $zoneId)
+        return $this->paymentsQuery($branchId, $zoneIds)
             ->where('payments.verification_status', 'pending')
             ->orderBy('payments.created_at')
             ->limit($limit)
@@ -871,9 +871,9 @@ class ReportService
     /**
      * @return list<array{uuid: string, customer_name: string, zone_name: string, amount: string, verification_status: string, created_at: string}>
      */
-    private function paymentsListForDay(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId, int $limit = 200): array
+    private function paymentsListForDay(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds, int $limit = 200): array
     {
-        return $this->paymentsQuery($branchId, $zoneId)
+        return $this->paymentsQuery($branchId, $zoneIds)
             ->whereBetween('payments.created_at', [$start, $end])
             ->orderByDesc('payments.created_at')
             ->limit($limit)
@@ -900,7 +900,7 @@ class ReportService
     /**
      * @return array{approved: int, rejected: int}
      */
-    private function verificationsActioned(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function verificationsActioned(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
         $query = PaymentVerification::query()
             ->join('payments', 'payments.id', '=', 'payment_verifications.payment_id')
@@ -910,7 +910,7 @@ class ReportService
             ->whereNotNull('payment_verifications.verified_at')
             ->whereBetween('payment_verifications.verified_at', [$start, $end]);
 
-        $query = $this->fenceZones($query, $branchId, $zoneId);
+        $query = $this->fenceZones($query, $branchId, $zoneIds);
 
         $row = $query->selectRaw("
             count(*) filter (where payment_verifications.status = 'approved') as approved,
@@ -923,9 +923,9 @@ class ReportService
         ];
     }
 
-    private function newCustomersCount(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): int
+    private function newCustomersCount(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): int
     {
-        return (int) $this->customersQuery($branchId, $zoneId)
+        return (int) $this->customersQuery($branchId, $zoneIds)
             ->whereBetween('customers.created_at', [$start, $end])
             ->count('customers.id');
     }
@@ -940,7 +940,7 @@ class ReportService
      *
      * @return list<array{from: ?string, to: ?string, count: int}>
      */
-    private function statusChanges(Carbon $start, Carbon $end, ?int $branchId, ?int $zoneId): array
+    private function statusChanges(Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
         $query = AuditLog::query()
             ->join('customers', 'customers.id', '=', 'audit_logs.record_id')
@@ -950,7 +950,7 @@ class ReportService
             ->whereBetween('audit_logs.created_at', [$start, $end])
             ->whereRaw("audit_logs.old_values->>'status' IS DISTINCT FROM audit_logs.new_values->>'status'");
 
-        $query = $this->fenceZones($query, $branchId, $zoneId);
+        $query = $this->fenceZones($query, $branchId, $zoneIds);
 
         return $query
             ->selectRaw("audit_logs.old_values->>'status' as from_status, audit_logs.new_values->>'status' as to_status, count(*) as count")
@@ -998,21 +998,21 @@ class ReportService
      * motivation fees (D13, docs/plans/installation-and-promotions.md) are
      * pass-through cash that only shows in the cash book.
      */
-    private function paymentsQuery(?int $branchId, ?int $zoneId): Builder
+    private function paymentsQuery(?int $branchId, ?array $zoneIds): Builder
     {
         $query = Payment::query()
             ->where('payments.purpose', '!=', Payment::PURPOSE_TECHNICIAN_FEE)
             ->join('customers', 'customers.id', '=', 'payments.customer_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id');
 
-        return $this->fenceZones($query, $branchId, $zoneId);
+        return $this->fenceZones($query, $branchId, $zoneIds);
     }
 
-    private function customersQuery(?int $branchId, ?int $zoneId): Builder
+    private function customersQuery(?int $branchId, ?array $zoneIds): Builder
     {
         $query = Customer::query()->join('zones', 'zones.id', '=', 'customers.zone_id');
 
-        return $this->fenceZones($query, $branchId, $zoneId);
+        return $this->fenceZones($query, $branchId, $zoneIds);
     }
 
     /**
@@ -1029,7 +1029,7 @@ class ReportService
      *
      * @return array{count: int, total: string}
      */
-    private function arrearsAdjustmentsWrittenOff(string $period, ?int $branchId, ?int $zoneId): array
+    private function arrearsAdjustmentsWrittenOff(string $period, ?int $branchId, ?array $zoneIds): array
     {
         $query = ArrearsAdjustment::query()
             ->join('customers', 'customers.id', '=', 'arrears_adjustments.customer_id')
@@ -1038,7 +1038,7 @@ class ReportService
             ->where('arrears_adjustments.direction', 'decrease')
             ->where('arrears_adjustments.target_period', $period);
 
-        $row = $this->fenceZones($query, $branchId, $zoneId)
+        $row = $this->fenceZones($query, $branchId, $zoneIds)
             ->selectRaw('count(*) as count, coalesce(sum(arrears_adjustments.amount), 0) as total')
             ->first();
 
@@ -1059,10 +1059,10 @@ class ReportService
      * the customer moved. Audit rows from before branches v2 carry no branch,
      * so status changes are fenced by the customer's branch.
      */
-    private function fenceZones(Builder $query, ?int $branchId, ?int $zoneId): Builder
+    private function fenceZones(Builder $query, ?int $branchId, ?array $zoneIds): Builder
     {
-        if ($zoneId !== null) {
-            return $query->where('zones.id', $zoneId);
+        if ($zoneIds !== null) {
+            return $query->whereIn('zones.id', $zoneIds);
         }
 
         if ($branchId !== null) {
@@ -1075,31 +1075,28 @@ class ReportService
     }
 
     /**
-     * An `agent`-role user's report fence is their own zone specifically —
-     * one level tighter than TenantContext::branchId (which, for agents,
-     * already resolves to their zone's *branch* — see
-     * TenantContext::resolveAgentBranchId()). Mirrors that exact same
-     * "resolve this agent's own Agent row's zone" pattern rather than
-     * duplicating it differently here. Returns null for every other role
-     * (their fence is branchId alone, handled by fenceZones()).
+     * An `agent`-role user's report fence is the zones they cover — one
+     * level tighter than TenantContext::branchId. Straight from
+     * TenantContext::zoneIds (resolved once per request); null for every
+     * other role (their fence is branchId alone, handled by fenceZones()).
+     *
+     * @return list<int>|null
      */
-    private function agentZoneId(): ?int
+    private function agentZoneIds(): ?array
     {
-        if ($this->context->role !== 'agent') {
-            return null;
-        }
-
-        $agent = Agent::query()->where('user_id', $this->context->tenantUser->user_id)->first();
-
-        return $agent?->zone_id;
+        return $this->context->role === 'agent' ? ($this->context->zoneIds ?? []) : null;
     }
 
-    private function branchLabel(?int $branchId, ?int $zoneId): string
+    private function branchLabel(?int $branchId, ?array $zoneIds): string
     {
-        if ($zoneId !== null) {
-            $zone = Zone::find($zoneId);
+        if ($zoneIds !== null) {
+            $names = Zone::query()->whereIn('id', $zoneIds)->orderBy('name')->pluck('name');
 
-            return $zone ? "Zone: {$zone->name}" : 'Zone-scoped';
+            return match (true) {
+                $names->isEmpty() => 'Zone-scoped',
+                $names->count() <= 3 => ($names->count() === 1 ? 'Zone: ' : 'Zones: ').$names->implode(', '),
+                default => "{$names->count()} zones",
+            };
         }
 
         if ($branchId !== null) {
@@ -1111,12 +1108,12 @@ class ReportService
         return 'All Branches';
     }
 
-    private function scopeSuffix(?int $branchId, ?int $zoneId): string
+    private function scopeSuffix(?int $branchId, ?array $zoneIds): string
     {
         $suffix = (string) ($branchId ?? 'all');
 
-        if ($zoneId !== null) {
-            $suffix .= ':zone-'.$zoneId;
+        if ($zoneIds !== null) {
+            $suffix .= ':zones-'.($zoneIds === [] ? 'none' : implode('-', $zoneIds));
         }
 
         return $suffix;

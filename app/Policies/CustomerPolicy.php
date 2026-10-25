@@ -120,9 +120,7 @@ class CustomerPolicy
         // OR (agent is NOT seeded `customers.change_status` — see Wave 2
         // rules and TenantContext::zoneId).
         return $this->context->can('customers.change_status')
-            || ($this->context->role === 'agent'
-                && $this->context->zoneId !== null
-                && $customer->zone_id === $this->context->zoneId);
+            || $this->context->isAgentCovering($customer->zone_id);
     }
 
     public function suspend(User $user): bool

@@ -116,7 +116,7 @@ class CustomerRepository implements CustomerRepositoryInterface
         return $customer;
     }
 
-    public function activeWithLatestManuscript(?int $zoneId = null): Collection
+    public function activeWithLatestManuscript(int|array|null $zoneIds = null): Collection
     {
         return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->with(['zone', 'latestManuscript'])
@@ -124,7 +124,8 @@ class CustomerRepository implements CustomerRepositoryInterface
             // Field registrations awaiting activation are never billed,
             // so never at risk and never eligible (installation phase 3).
             ->activated()
-            ->when($zoneId, fn ($query, $zoneId) => $query->where('zone_id', $zoneId))
+            // An empty list (an agent covering no zone) matches nothing, never everything.
+            ->when($zoneIds !== null, fn ($query) => $query->whereIn('zone_id', (array) $zoneIds))
             ->orderBy('name')
             ->get();
     }

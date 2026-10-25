@@ -24,8 +24,8 @@ class ManuscriptController extends Controller
     ) {}
 
     /**
-     * Zone scoping is force-applied server-side from TenantContext::zoneId
-     * for the `agent` role — mirrors CustomerController::
+     * Zone scoping is force-applied server-side from TenantContext::zoneIds
+     * (the zones they cover) for the `agent` role — mirrors CustomerController::
      * eligibleForDisconnection()'s exact pattern (resolved once by
      * ResolveTenant from the caller's own Agent row). Any `zone_uuid` query
      * value an agent sends is deliberately ignored, so an agent cannot see
@@ -46,7 +46,7 @@ class ManuscriptController extends Controller
 
         if ($this->context->is('agent')) {
             unset($filters['zone_uuid']);
-            $filters['zone_id'] = $this->context->zoneId;
+            $filters['zone_id'] = $this->context->zoneIds ?? [];
         }
 
         $manuscripts = $this->manuscripts->list($filters, $perPage);

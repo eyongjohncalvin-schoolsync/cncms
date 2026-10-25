@@ -62,8 +62,8 @@ class ComplaintService
      * customer_id/zone_id are never taken from client input (see
      * ComplaintData's class doc) — derived here per
      * references/complaint-desk.md section 2: the customer's own zone for
-     * `category = 'customer'`, or the submitting agent's own zone (via
-     * TenantContext::currentZoneId(), null for every non-agent role) for
+     * `category = 'customer'`, or the submitting agent's home zone (via
+     * TenantContext::currentHomeZoneId(), null for every non-agent role) for
      * `category = 'operational'`.
      */
     public function create(ComplaintData $data, int $submittedByUserId): Complaint
@@ -77,7 +77,7 @@ class ComplaintService
             $zoneId = $customer->zone_id;
             $branchId = $customer->branch_id;
         } else {
-            $zoneId = TenantContext::currentZoneId();
+            $zoneId = TenantContext::currentHomeZoneId();
             $branchId = $zoneId !== null
                 ? Zone::query()->whereKey($zoneId)->value('branch_id')
                 : BranchAttribution::forUserId($submittedByUserId);
@@ -117,7 +117,7 @@ class ComplaintService
                 return collect();
             }
         } else {
-            $zoneId = TenantContext::currentZoneId();
+            $zoneId = TenantContext::currentHomeZoneId();
         }
 
         return $this->complaints->possibleDuplicates($category, $zoneId, $customerId)->load('submittedBy');

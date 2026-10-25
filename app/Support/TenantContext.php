@@ -8,6 +8,7 @@ use App\Models\Agent;
 use App\Models\Branch;
 use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
+use App\Models\ZoneAgent;
 use Database\Seeders\DefaultRolesSeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -36,13 +37,13 @@ use Illuminate\Support\Facades\Schema;
  * checking `role` exactly as before, and repositories separately consult
  * `branchId` to decide which rows a query returns.
  *
- * `zoneId` is the same kind of row-level fence, one level narrower than
- * `branchId` — it backs PaymentPolicy::verify()'s "an agent may verify a
- * payment only for a customer in their own zone" rule. Resolved the same
- * direct way as branchId: for `agent` role, their own Agent row's
- * `zone_id`; every other role gets `null` (unrestricted — no other role is
- * zone-scoped, unlike branchId which every role can be fenced to via
- * tenant_users.branch_id).
+ * `zoneIds` is the same kind of row-level fence, one level narrower than
+ * `branchId`: the zones an `agent` covers (AppModelsZoneAgent —
+ * management may give one agent one zone, several, or all of them). It backs
+ * every "an agent only sees / collects / verifies in their own zones" rule
+ * (sync, payments, disconnections, field registration, reports). Every
+ * other role gets `null` (not zone-scoped). An agent with no zones gets an
+ * empty list — they see nothing, never the whole branch.
  */
 final class TenantContext
 {
@@ -67,7 +68,8 @@ final class TenantContext
         public readonly TenantUser $tenantUser,
         public readonly string $role,
         public readonly ?int $branchId = null,
-        public readonly ?int $zoneId = null,
+        /** @var list<int>|null */
+        public readonly ?array $zoneIds = null,
         public readonly bool $branchChosen = false,
     ) {}
 
@@ -78,7 +80,7 @@ final class TenantContext
      */
     public function viewingBranch(int $branchId): self
     {
-        return new self($this->tenantUser, $this->role, $branchId, $this->zoneId, branchChosen: true);
+        return new self($this->tenantUser, $this->role, $branchId, $this->zoneIds, branchChosen: true);
     }
 
     /** Fenced to one branch by the owner (not merely viewing one). */
@@ -276,14 +278,49 @@ final class TenantContext
 
     /**
      * Same defensive, container-lookup contract as currentBranchId() above
-     * (see its doc comment for why), for `zoneId` — needed by
-     * App\Services\PaymentVerificationService::verifyMany()'s per-item
-     * zone re-check, which must keep working however PaymentVerificationService
-     * ends up being resolved.
+     * (see its doc comment for why), for `zoneIds`: the zones an agent
+     * covers, or null when the caller is not zone-scoped.
+     *
+     * @return list<int>|null
      */
-    public static function currentZoneId(): ?int
+    public static function currentZoneIds(): ?array
     {
-        return app()->bound(self::class) ? app(self::class)->zoneId : null;
+        return app()->bound(self::class) ? app(self::class)->zoneIds : null;
+    }
+
+    /**
+     * Whether the caller may act in this zone: anyone not zone-scoped, or an
+     * agent covering it.
+     */
+    public function coversZone(?int $zoneId): bool
+    {
+        return $this->zoneIds === null || ($zoneId !== null && in_array($zoneId, $this->zoneIds, true));
+    }
+
+    /** An agent covering this zone (the zone-scoped half of several office permissions). */
+    public function isAgentCovering(?int $zoneId): bool
+    {
+        return $this->role === 'agent' && $this->zoneIds !== null && $zoneId !== null && in_array($zoneId, $this->zoneIds, true);
+    }
+
+    /**
+     * The one zone to file something under when an agent doesn't say which —
+     * e.g. a general (non-customer) complaint: their home zone if they still
+     * cover it, else the first zone they cover. Null when not zone-scoped or
+     * covering nothing.
+     */
+    public static function currentHomeZoneId(): ?int
+    {
+        if (! app()->bound(self::class) || app(self::class)->zoneIds === null) {
+            return null;
+        }
+
+        $context = app(self::class);
+        $homeZoneId = Agent::query()->withoutGlobalScope(BranchScope::class)->where('user_id', $context->tenantUser->user_id)->value('zone_id');
+
+        return $homeZoneId !== null && in_array((int) $homeZoneId, $context->zoneIds, true)
+            ? (int) $homeZoneId
+            : ($context->zoneIds[0] ?? null);
     }
 
     /**
@@ -311,7 +348,7 @@ final class TenantContext
      */
     public static function resolve(TenantUser $tenantUser): self
     {
-        // Resolved once and reused for both branchId and zoneId below —
+        // Resolved once and reused for both branchId and zoneIds below —
         // an agent's own Agent row is the single source of truth for both
         // fences (branch transitively via zone->branch, zone directly).
         $agent = $tenantUser->role === 'agent'
@@ -322,13 +359,14 @@ final class TenantContext
             ? ($agent?->zone?->branch_id ?? $tenantUser->branch_id)
             : $tenantUser->branch_id;
 
-        // Unlike branchId, no fallback to a tenant_users column here — no
-        // other role is ever zone-scoped, and an agent with no Agent row
-        // (or an Agent row with no zone) simply has no zone fence (null,
-        // i.e. PaymentPolicy::verify() falls through to false for them
-        // rather than granting/denying based on a nonexistent zone).
-        $zoneId = $tenantUser->role === 'agent' ? $agent?->zone_id : null;
+        // The zones the agent covers (App\Models\ZoneAgent), one query. An
+        // agent with no Agent row or no zones gets an empty list: zone-scoped
+        // to nothing, never unrestricted. No other role is zone-scoped.
+        $zoneIds = $tenantUser->role === 'agent'
+            ? ($agent === null ? [] : ZoneAgent::query()->withoutGlobalScope(BranchScope::class)
+                ->where('agent_id', $agent->id)->orderBy('zone_id')->pluck('zone_id')->map(fn ($id): int => (int) $id)->all())
+            : null;
 
-        return new self($tenantUser, $tenantUser->role, $branchId, $zoneId);
+        return new self($tenantUser, $tenantUser->role, $branchId, $zoneIds);
     }
 }

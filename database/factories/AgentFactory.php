@@ -3,6 +3,10 @@
 namespace Database\Factories;
 
 use App\Models\Agent;
+use App\Models\Scopes\BranchScope;
+use App\Models\Zone;
+use App\Models\ZoneAgent;
+use App\Services\ZoneCoverageService;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -35,6 +39,25 @@ class AgentFactory extends Factory
             'sync_token' => null,
             'last_sync_at' => null,
         ];
+    }
+
+    /**
+     * Like a real new agent (AgentService::create()): they cover their home
+     * zone — its responsible collector when it has none yet, else a helper.
+     * withoutCoverage() skips it, for an agent who covers nothing.
+     */
+    public function configure(): static
+    {
+        return $this->afterCreating(function (Agent $agent): void {
+            app(ZoneCoverageService::class)->coverOnly($agent, Zone::query()->withoutGlobalScope(BranchScope::class)->findOrFail($agent->zone_id), null);
+        });
+    }
+
+    public function withoutCoverage(): static
+    {
+        return $this->afterCreating(function (Agent $agent): void {
+            ZoneAgent::query()->withoutGlobalScope(BranchScope::class)->where('agent_id', $agent->id)->delete();
+        });
     }
 
     public function inactive(): static

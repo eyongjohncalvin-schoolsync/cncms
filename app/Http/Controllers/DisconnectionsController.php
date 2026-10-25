@@ -111,9 +111,12 @@ class DisconnectionsController extends Controller
         $zoneId = null;
 
         if ($isAgent) {
-            $agent = Agent::query()->with('zone')->where('user_id', $request->user()->id)->first();
-            $zoneId = $agent?->zone_id;
-            $zoneUuid = $agent?->zone?->uuid;
+            // Their own zones only — one of them when they pick it, which
+            // the zone filter then shows; anything else is ignored.
+            $picked = $zoneUuid !== null ? $this->zones->all()->firstWhere('uuid', $zoneUuid)?->id : null;
+            $covers = $picked !== null && $this->context->coversZone($picked);
+            $zoneId = $covers ? $picked : ($this->context->zoneIds ?? []);
+            $zoneUuid = $covers ? $zoneUuid : null;
         } elseif ($zoneUuid !== null) {
             $zoneId = $this->zones->findOrFail($zoneUuid)->id;
         }
@@ -218,12 +221,15 @@ class DisconnectionsController extends Controller
      */
     private function zonesForSelect(): array
     {
+        // An agent picks among the zones they cover only.
         return $this->zones->all()
+            ->filter(fn (Zone $zone): bool => $this->context->coversZone($zone->id))
             ->map(fn (Zone $zone) => [
                 'uuid' => $zone->uuid,
                 'name' => $zone->name,
                 'branch_name' => $zone->branchName(),
             ])
+            ->values()
             ->all();
     }
 

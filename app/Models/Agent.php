@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'zone_id', 'user_id', 'name', 'location', 'phone', 'salary', 'email', 'dob',
@@ -31,9 +32,20 @@ class Agent extends Model
         ];
     }
 
+    /**
+     * The agent's home zone: the anchor of their branch, and what app builds
+     * before 1.0.1 show as "my zone". The zones they actually cover are
+     * coverage() (App\Models\ZoneAgent).
+     */
     public function zone(): BelongsTo
     {
         return $this->belongsTo(Zone::class);
+    }
+
+    /** @return HasMany<ZoneAgent, $this> */
+    public function coverage(): HasMany
+    {
+        return $this->hasMany(ZoneAgent::class);
     }
 
     // Cross-schema relation — User is pinned to the central `pgsql` connection

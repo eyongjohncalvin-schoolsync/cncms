@@ -149,7 +149,6 @@ class PaymentVerificationService
         $verified = [];
         $skipped = [];
         $isAgent = $this->context->role === 'agent';
-        $zoneId = $this->context->zoneId;
 
         // One query for the whole selection (with everything verify() and
         // receipt issuing read) rather than a lookup per payment.
@@ -177,8 +176,8 @@ class PaymentVerificationService
                 continue;
             }
 
-            if ($isAgent && ($zoneId === null || $payment->customer->zone_id !== $zoneId)) {
-                $skipped[$uuid] = 'Outside your zone.';
+            if ($isAgent && ! $this->context->isAgentCovering($payment->customer->zone_id)) {
+                $skipped[$uuid] = 'Outside your zones.';
 
                 continue;
             }

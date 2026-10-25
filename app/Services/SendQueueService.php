@@ -141,10 +141,10 @@ class SendQueueService
     private function fence(Builder $customer): void
     {
         $branchId = TenantContext::currentBranchId();
-        $zoneId = TenantContext::currentZoneId();
+        $zoneIds = TenantContext::currentZoneIds();
 
-        if ($zoneId !== null) {
-            $customer->where('zone_id', $zoneId);
+        if ($zoneIds !== null) {
+            $customer->whereIn('zone_id', $zoneIds);
         }
 
         if ($branchId !== null) {

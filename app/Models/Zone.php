@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['branch_id', 'name', 'town'])]
 #[RouteKey('uuid')]
@@ -51,8 +52,21 @@ class Zone extends Model
         return $this->hasMany(Customer::class);
     }
 
+    /** Agents whose HOME zone this is — who covers it is coverage(). */
     public function agents(): HasMany
     {
         return $this->hasMany(Agent::class);
+    }
+
+    /** @return HasMany<ZoneAgent, $this> */
+    public function coverage(): HasMany
+    {
+        return $this->hasMany(ZoneAgent::class);
+    }
+
+    /** The zone's responsible collector — the name on its bills. */
+    public function responsibleCoverage(): HasOne
+    {
+        return $this->hasOne(ZoneAgent::class)->where('role', ZoneAgent::ROLE_RESPONSIBLE);
     }
 }

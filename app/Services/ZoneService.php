@@ -103,7 +103,9 @@ class ZoneService
         // its customers and agents (the database cascades their branch). Only an
         // empty zone moves; customers move one by one (a recorded move).
         if ($branchId !== null && $branchId !== $zone->branch_id
-            && ($zone->customers()->withoutGlobalScope(BranchScope::class)->withTrashed()->exists() || $zone->agents()->withoutGlobalScope(BranchScope::class)->exists())) {
+            && ($zone->customers()->withoutGlobalScope(BranchScope::class)->withTrashed()->exists()
+                || $zone->agents()->withoutGlobalScope(BranchScope::class)->exists()
+                || $zone->coverage()->withoutGlobalScope(BranchScope::class)->exists())) {
             throw ValidationException::withMessages(['branch_uuid' => ['This zone still has customers or agents — move them to a zone of the other branch first.']]);
         }
 

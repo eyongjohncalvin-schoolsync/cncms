@@ -138,6 +138,12 @@
             <td class="kc-label">Zone</td>
             <td>{{ $customer->zone?->name }}</td>
         </tr>
+        @if (! empty($collector_name))
+            <tr>
+                <td class="kc-label">Collector</td>
+                <td>{{ $collector_name }}</td>
+            </tr>
+        @endif
         @if ($customer->phone)
             <tr>
                 <td class="kc-label">Tel</td>

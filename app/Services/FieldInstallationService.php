@@ -90,16 +90,16 @@ class FieldInstallationService
             throw ValidationException::withMessages(['zone_uuid' => ['Unknown zone.']]);
         }
 
-        // Own zone only. An office role holding the permission (no zone of
-        // its own) is fenced by its branch like any customer it adds.
-        $ownZoneId = TenantContext::currentZoneId();
+        // Own zones only. An office role holding the permission (not
+        // zone-scoped) is fenced by its branch like any customer it adds.
+        $ownZoneIds = TenantContext::currentZoneIds();
 
-        if ($ownZoneId !== null && $zone->id !== $ownZoneId) {
-            throw ValidationException::withMessages(['zone_uuid' => ['You can only register customers in your own zone.']]);
+        if ($ownZoneIds === []) {
+            throw ValidationException::withMessages(['zone_uuid' => ['Your account has no zone — ask the office to assign one before registering customers.']]);
         }
 
-        if ($ownZoneId === null && $this->context->role === 'agent') {
-            throw ValidationException::withMessages(['zone_uuid' => ['Your account has no zone — ask the office to assign one before registering customers.']]);
+        if ($ownZoneIds !== null && ! in_array($zone->id, $ownZoneIds, true)) {
+            throw ValidationException::withMessages(['zone_uuid' => ['You can only register customers in your own zones.']]);
         }
 
         $branchId = TenantContext::currentBranchId();

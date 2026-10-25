@@ -18,6 +18,7 @@ use App\Models\Service;
 use App\Models\SyncQueue;
 use App\Models\User;
 use App\Models\Voucher;
+use App\Models\ZoneAgent;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Support\Billing\FreeMonthPlan;
 use App\Support\BranchLookup;
@@ -685,10 +686,10 @@ class SyncService
      * Branch/zone-fenced the same way every other list/show query in this
      * app already is (App\Repositories\Concerns\ScopesByBranch) — the
      * puller's own TenantContext, not the client's `since` window, decides
-     * which rows are even eligible. An `agent` is fenced to their own zone
-     * (TenantContext::currentZoneId()) rather than the wider branch fence,
-     * since a mobile agent's cache should only ever hold customers/payments
-     * from the zone they actually work — narrower than what a branch-fenced
+     * which rows are even eligible. An `agent` is fenced to the zones they
+     * cover (TenantContext::currentZoneIds()) rather than the wider branch
+     * fence, since a mobile agent's cache should only ever hold customers/
+     * payments from the zones they actually work — narrower than what a branch-fenced
      * office role sees, and correct even for a cross-branch (null-branch)
      * office role, who still sees everything. See
      * mobile-app-react-native.md section 3 / rbac-permissions.md section 6
@@ -699,8 +700,11 @@ class SyncService
      */
     private function upsertedCustomers(?Carbon $sinceAt): array
     {
-        $zoneId = TenantContext::currentZoneId();
+        $zoneIds = TenantContext::currentZoneIds();
         $branchId = TenantContext::currentBranchId();
+        // A zone given to the agent since their last pull: its customers are
+        // new to this phone though their rows haven't changed — send them all.
+        $newZoneIds = $sinceAt !== null ? $this->zonesCoveredSince($sinceAt) : [];
 
         $customers = Customer::query()
             // latestManuscript is eager-loaded alongside zone so the mobile
@@ -714,10 +718,12 @@ class SyncService
             // local SQLite cache with no live call, so this is the only way
             // that screen ever sees service details at all.
             ->with(['zone', 'latestManuscript', 'subscriptions.service', 'subscriptions.serviceVariant'])
-            ->when($sinceAt, fn ($query) => $query->where('updated_at', '>=', $sinceAt))
-            ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
+            ->when($sinceAt, fn ($query) => $query->where(fn ($inner) => $inner
+                ->where('updated_at', '>=', $sinceAt)
+                ->when($newZoneIds !== [], fn ($orNew) => $orNew->orWhereIn('zone_id', $newZoneIds))))
+            ->when($zoneIds !== null, fn ($query) => $query->whereIn('zone_id', $zoneIds))
             ->when(
-                $zoneId === null && $branchId !== null,
+                $zoneIds === null && $branchId !== null,
                 fn ($query) => $query->where('customers.branch_id', $branchId)
             )
             ->get();
@@ -804,17 +810,40 @@ class SyncService
      *
      * @return array<int, string>
      */
+    /**
+     * Zones the pulling agent was given at or after $sinceAt — one query.
+     * Empty for anyone not zone-scoped.
+     *
+     * @return list<int>
+     */
+    private function zonesCoveredSince(Carbon $sinceAt): array
+    {
+        $context = app()->bound(TenantContext::class) ? app(TenantContext::class) : null;
+
+        if ($context === null || $context->zoneIds === null || $context->zoneIds === []) {
+            return [];
+        }
+
+        return ZoneAgent::query()->withoutGlobalScope(BranchScope::class)
+            ->whereIn('zone_id', $context->zoneIds)
+            ->whereIn('agent_id', Agent::query()->withoutGlobalScope(BranchScope::class)->select('id')->where('user_id', $context->tenantUser->user_id))
+            ->where('created_at', '>=', $sinceAt)
+            ->pluck('zone_id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
     private function deletedCustomers(?Carbon $sinceAt): array
     {
-        $zoneId = TenantContext::currentZoneId();
+        $zoneIds = TenantContext::currentZoneIds();
         $branchId = TenantContext::currentBranchId();
 
         return Customer::query()
             ->onlyTrashed()
             ->when($sinceAt, fn ($query) => $query->where('deleted_at', '>=', $sinceAt))
-            ->when($zoneId !== null, fn ($query) => $query->where('zone_id', $zoneId))
+            ->when($zoneIds !== null, fn ($query) => $query->whereIn('zone_id', $zoneIds))
             ->when(
-                $zoneId === null && $branchId !== null,
+                $zoneIds === null && $branchId !== null,
                 fn ($query) => $query->where('customers.branch_id', $branchId)
             )
             ->pluck('uuid')
@@ -837,7 +866,7 @@ class SyncService
      */
     private function changedPayments(string $status, ?Carbon $sinceAt): array
     {
-        $zoneId = TenantContext::currentZoneId();
+        $zoneIds = TenantContext::currentZoneIds();
         $branchId = TenantContext::currentBranchId();
 
         return Payment::query()
@@ -847,9 +876,9 @@ class SyncService
             // tracks its own queued payments), not every payment ever — that payload
             // never finished downloading on 3G.
             ->where('updated_at', '>=', $sinceAt ?? now()->subDays(self::FULL_PULL_PAYMENT_DAYS))
-            ->when($zoneId !== null, fn ($query) => $query->whereHas('customer', fn ($inner) => $inner->where('zone_id', $zoneId)))
+            ->when($zoneIds !== null, fn ($query) => $query->whereHas('customer', fn ($inner) => $inner->whereIn('zone_id', $zoneIds)))
             ->when(
-                $zoneId === null && $branchId !== null,
+                $zoneIds === null && $branchId !== null,
                 fn ($query) => $query->where('payments.branch_id', $branchId)
             )
             ->get()

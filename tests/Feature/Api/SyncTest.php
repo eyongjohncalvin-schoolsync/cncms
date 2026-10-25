@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\Service;
 use App\Models\User;
 use App\Models\Voucher;
+use App\Models\Zone;
 use App\Services\NotificationService;
 use Database\Factories\AgentFactory;
 use Database\Factories\CustomerFactory;
@@ -757,7 +758,7 @@ class SyncTest extends TestCase
         $a = $this->customer();
         $b = $this->customer();
 
-        $token = $this->tokenForRole('agent');
+        $token = $this->tokenForAgentCovering(Zone::query()->findOrFail($a->zone_id), Zone::query()->findOrFail($b->zone_id));
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")
             ->getJson('/api/v1/sync/pull');
@@ -791,7 +792,7 @@ class SyncTest extends TestCase
         $tv = Service::query()->where('slug', 'tv')->firstOrFail();
         $customer->subscriptions()->create(['service_id' => $tv->id, 'price' => 5000]);
 
-        $token = $this->tokenForRole('agent');
+        $token = $this->tokenForAgentCovering(Zone::query()->findOrFail($customer->zone_id));
 
         $response = $this->withHeader('Authorization', "Bearer {$token}")->getJson('/api/v1/sync/pull');
 

@@ -96,9 +96,7 @@ class PaymentPolicy
         // permission; the agent zone-scoped branch stays an additive OR
         // (agent is NOT seeded `payments.verify` — see Wave 2 rules).
         return $this->context->can('payments.verify')
-            || ($this->context->role === 'agent'
-                && $this->context->zoneId !== null
-                && $payment->customer->zone_id === $this->context->zoneId);
+            || $this->context->isAgentCovering($payment->customer->zone_id);
     }
 
     /**

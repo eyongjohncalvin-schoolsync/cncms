@@ -72,9 +72,10 @@ interface CustomerRepositoryInterface
      * `suspended`/`passive` customers are handled through the ordinary
      * manual disconnect flow rather than the automatic arrears monitor.
      *
+     * @param  int|list<int>|null  $zoneIds  one zone, the zones an agent covers, or null for every zone
      * @return Collection<int, Customer>
      */
-    public function activeWithLatestManuscript(?int $zoneId = null): Collection;
+    public function activeWithLatestManuscript(int|array|null $zoneIds = null): Collection;
 
     /**
      * Customers matching an explicit list of uuids, scoped to the caller's

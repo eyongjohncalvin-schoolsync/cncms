@@ -7,6 +7,9 @@ namespace Tests\Feature\Api\Concerns;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Models\Zone;
+use App\Services\ZoneCoverageService;
+use Database\Factories\AgentFactory;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -69,5 +72,22 @@ trait InteractsWithTenantRoles
         TenantUser::query()->where('user_id', $user->id)->update(['role' => $role, 'branch_id' => $branchId]);
 
         return $user->createToken('api')->plainTextToken;
+    }
+
+    /**
+     * The seeded owner as a field agent covering exactly these zones (the
+     * first is their home zone), and an API token for them. Their own Agent
+     * row is created — an agent with no Agent row covers nothing.
+     */
+    protected function tokenForAgentCovering(Zone ...$zones): string
+    {
+        $token = $this->tokenForRole('agent');
+        $agent = AgentFactory::new()->create(['zone_id' => $zones[0]->id, 'user_id' => User::query()->where('email', 'kelvin@shalomtech.dev')->value('id')]);
+
+        foreach (array_slice($zones, 1) as $zone) {
+            app(ZoneCoverageService::class)->addZone($agent, $zone, null);
+        }
+
+        return $token;
     }
 }

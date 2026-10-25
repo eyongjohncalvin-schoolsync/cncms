@@ -67,11 +67,12 @@ final class CustomerEligibilityService
     ) {}
 
     /**
-     * @param  ?int  $zoneId  Restrict to one zone (agent scoping / the
-     *                        office zone filter), or null for every zone.
+     * @param  int|list<int>|null  $zoneId  Restrict to one zone (the office zone
+     *                                      filter), the zones an agent covers,
+     *                                      or null for every zone.
      * @return Collection<int, array<string, mixed>>
      */
-    public function eligibleForDisconnection(?int $zoneId = null, ?Carbon $asOf = null): Collection
+    public function eligibleForDisconnection(int|array|null $zoneId = null, ?Carbon $asOf = null): Collection
     {
         $asOf ??= Carbon::now();
 

@@ -34,6 +34,7 @@ class ManuscriptService
     public function __construct(
         private readonly ManuscriptRepositoryInterface $manuscripts,
         private readonly ZoneRepositoryInterface $zones,
+        private readonly ZoneCoverageService $coverage,
     ) {}
 
     /**
@@ -183,7 +184,11 @@ class ManuscriptService
         // The billing branch's MoMo number and contacts (branches v2 D4) — the manuscript's, so a customer who moved mid-period still pays the branch that billed them (D11).
         $company = Company::forBranch($manuscript?->branch_id ?? $customer->branch_id);
 
-        return $this->buildBillData($customer, $manuscript, $period, $company, $company?->logoDataUri(), CustomerChargeService::openBalancesByKind([$customer->id])[$customer->id] ?? []);
+        return $this->buildBillData(
+            $customer, $manuscript, $period, $company, $company?->logoDataUri(),
+            CustomerChargeService::openBalancesByKind([$customer->id])[$customer->id] ?? [],
+            $this->coverage->responsibleNames([(int) $customer->zone_id])[(int) $customer->zone_id] ?? null,
+        );
     }
 
     /**
@@ -229,6 +234,8 @@ class ManuscriptService
         // re-installation balances, each printed as its own line
         // (docs/plans/installation-and-promotions.md).
         $chargeBalances = CustomerChargeService::openBalancesByKind($customers->pluck('id')->all());
+        // Each zone's responsible collector, printed on its bills — one query.
+        $collectors = $this->coverage->responsibleNames($customers->pluck('zone_id')->map(fn ($id): int => (int) $id)->unique()->values()->all());
 
         $bills = [];
 
@@ -241,7 +248,7 @@ class ManuscriptService
 
             // Each bill carries its customer's branch's MoMo number and
             // contacts (branches v2 D4); the logo is company-wide, read once.
-            $bills[] = $this->buildBillData($customer, $manuscript, $period, Company::forBranch($manuscript->branch_id ?? $customer->branch_id) ?? $company, $logoDataUri, $chargeBalances[$customer->id] ?? []);
+            $bills[] = $this->buildBillData($customer, $manuscript, $period, Company::forBranch($manuscript->branch_id ?? $customer->branch_id) ?? $company, $logoDataUri, $chargeBalances[$customer->id] ?? [], $collectors[(int) $customer->zone_id] ?? null);
         }
 
         return $bills;
@@ -270,12 +277,12 @@ class ManuscriptService
             $manuscript = $customer->latestManuscript;
 
             return [
-                ...$this->buildBillData($customer, $manuscript, null, $company, $logoDataUri),
+                ...$this->buildBillData($customer, $manuscript, null, $company, $logoDataUri, collectorName: $this->coverage->responsibleNames([(int) $customer->zone_id])[(int) $customer->zone_id] ?? null),
                 'is_sample' => false,
             ];
         }
 
-        $placeholderZone = new Zone(['name' => 'SAMPLE ZONE', 'town' => 'KUMBA 3']);
+        $placeholderZone = new Zone(['name' => 'SAMPLE ZONE']);
         $placeholderCustomer = new Customer([
             'name' => 'Sample Customer',
             'location' => 'Sample Location',
@@ -296,7 +303,7 @@ class ManuscriptService
         ]);
 
         return [
-            ...$this->buildBillData($placeholderCustomer, $placeholderManuscript, null, $company, $logoDataUri),
+            ...$this->buildBillData($placeholderCustomer, $placeholderManuscript, null, $company, $logoDataUri, collectorName: 'SAMPLE COLLECTOR'),
             'is_sample' => true,
         ];
     }
@@ -347,7 +354,10 @@ class ManuscriptService
      *
      * @param  array<string, string>  $chargeBalances  one-off charge kind => balance still owed
      */
-    private function buildBillData(Customer $customer, Manuscript $manuscript, ?string $period, ?Company $company, ?string $logoDataUri, array $chargeBalances = []): array
+    /**
+     * @param  ?string  $collectorName  the zone's responsible collector (ZoneCoverageService::responsibleNames()), printed on the bill
+     */
+    private function buildBillData(Customer $customer, Manuscript $manuscript, ?string $period, ?Company $company, ?string $logoDataUri, array $chargeBalances = [], ?string $collectorName = null): array
     {
         $customer->loadMissing('zone');
 
@@ -372,6 +382,7 @@ class ManuscriptService
             'account_code' => $this->accountCode($customer),
             'bill_number' => $this->billNumber($customer, $billPeriod),
             'logo_data_uri' => $logoDataUri,
+            'collector_name' => $collectorName,
             // Unpaid installation fee — printed as its own line, NEVER
             // added to total_bill or arrears (D1). '0.00' = nothing owed.
             'installation_balance' => $chargeBalances[CustomerCharge::KIND_INSTALLATION] ?? '0.00',

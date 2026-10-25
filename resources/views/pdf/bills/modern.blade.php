@@ -184,6 +184,9 @@
                     <tr><td class="mb-label">Customer</td><td>{{ $customer->name }}</td></tr>
                     <tr><td class="mb-label">Account Code</td><td>{{ $account_code }}</td></tr>
                     <tr><td class="mb-label">Zone</td><td>{{ $customer->zone?->name }}</td></tr>
+                    @if (! empty($collector_name))
+                        <tr><td class="mb-label">Collector</td><td>{{ $collector_name }}</td></tr>
+                    @endif
                     <tr><td class="mb-label">Location</td><td>{{ $customer->location }}</td></tr>
                     @if ($customer->phone)
                         <tr><td class="mb-label">Tel</td><td>{{ $customer->phone }}</td></tr>

@@ -11,8 +11,9 @@
     template's cells.
 
     Expects: $company, $customer, $manuscript, $period_label, $deadline,
-    $account_code, $bill_number, $logo_data_uri, and optionally $is_sample
-    (bool, only set by ManuscriptService::sampleBillData()).
+    $account_code, $bill_number, $logo_data_uri, optionally $collector_name
+    (the zone's responsible collector; the line is left out when it has none)
+    and $is_sample (bool, only set by ManuscriptService::sampleBillData()).
 --}}
 <style>
     .bill-classic {
@@ -182,6 +183,12 @@
             <td class="bc-label">Zone</td>
             <td>{{ $customer->zone?->name }}</td>
         </tr>
+        @if (! empty($collector_name))
+            <tr>
+                <td class="bc-label">Collector</td>
+                <td>{{ $collector_name }}</td>
+            </tr>
+        @endif
         <tr>
             <td class="bc-label">Location</td>
             <td>{{ $customer->location }}</td>
