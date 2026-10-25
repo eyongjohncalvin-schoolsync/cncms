@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\Branch;
 use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
+use App\Models\Scopes\BranchScope;
 use App\Models\Tenant;
+use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Services\ManuscriptGenerationBatchService;
 use App\Support\ScheduledTasks\ManuscriptChunkDataResolver;
+use App\Support\TenantContext;
+use Database\Factories\BranchFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
@@ -376,6 +381,29 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
             CommandRun::query()->where('command', 'manuscript:calculate')->where('period', $period)->count(),
             'the second click must not have created a competing CommandRun row.'
         );
+    }
+
+    /**
+     * The real monthly run passes no customer list: it bills every activated
+     * customer company-wide, whichever branch triggered it (branches v2 D5) —
+     * including when an admin fenced to headquarters starts it. Regression:
+     * the "every branch" exemption once named BranchScope without importing
+     * it, so it silently exempted nothing and only headquarters was billed.
+     */
+    public function test_a_run_started_from_headquarters_bills_every_branch(): void
+    {
+        $headquartersZone = ZoneFactory::new()->create(['branch_id' => Branch::headquartersId()]);
+        $bueaZone = ZoneFactory::new()->create(['branch_id' => BranchFactory::new()->create(['name' => 'Buea'])->id]);
+        CustomerFactory::new()->create(['zone_id' => $headquartersZone->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+        $bueaCustomer = CustomerFactory::new()->create(['zone_id' => $bueaZone->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+
+        app()->instance(TenantContext::class, new TenantContext(new TenantUser, 'admin', Branch::headquartersId()));
+
+        $commandRun = $this->batches->dispatch('2026-06', scheduledTask: null, autoPublish: false);
+
+        $billed = array_map('intval', array_keys($commandRun->fresh()->computed_result['customers']));
+        $this->assertContains($bueaCustomer->id, $billed);
+        $this->assertCount(Customer::query()->withoutGlobalScope(BranchScope::class)->activated()->count(), $billed);
     }
 
     public function test_the_batch_actually_chunks_into_multiple_independent_jobs(): void

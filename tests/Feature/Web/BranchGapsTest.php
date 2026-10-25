@@ -24,6 +24,7 @@ use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Mail;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -170,6 +171,18 @@ class BranchGapsTest extends TestCase
 
         $this->post("/settings/salaries/{$pending->uuid}/approve")->assertSessionHasErrors('salary');
         $this->assertSame(StaffSalary::STATUS_PENDING, $pending->fresh()->status);
+    }
+
+    public function test_a_fenced_manager_hands_receipt_books_to_their_branch_staff_only(): void
+    {
+        $bueaStaff = $this->staff('terence@shalomtech.dev', $this->buea->id);
+        $hqStaff = $this->staff('patience@shalomtech.dev', null);
+
+        $this->as('admin', $this->buea->id);
+
+        $this->get('/receipt-stock')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('holders', fn ($holders) => collect($holders)->pluck('id')->contains($bueaStaff->user_id)
+                && ! collect($holders)->pluck('id')->contains($hqStaff->user_id)));
     }
 
     private function staff(string $email, ?int $branchId): TenantUser

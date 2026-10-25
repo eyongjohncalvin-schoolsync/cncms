@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\Agent;
 use App\Models\FieldDevice;
 use App\Models\PaymentReceipt;
 use App\Models\ReceiptBlock;

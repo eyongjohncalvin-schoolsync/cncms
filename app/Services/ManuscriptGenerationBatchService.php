@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\ScheduledTask;
+use App\Models\Scopes\BranchScope;
 use App\Support\BranchLookup;
 use App\Support\DetectsUniqueViolation;
 use Illuminate\Bus\Batch;
