@@ -1,24 +1,30 @@
 import { InputHTMLAttributes, forwardRef } from 'react';
+import { InfoTip } from './InfoTip';
 
 interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string;
     error?: string;
+    /** Short help text shown in an ⓘ tooltip beside the label. */
+    tip?: string;
     /** Small helper line under the field. Hidden while `error` is showing. */
     hint?: string;
 }
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
-    ({ label, error, hint, className = '', id, ...props }, ref) => (
+    ({ label, error, tip, hint, className = '', id, ...props }, ref) => (
         <div className="flex flex-col gap-1.5">
             {label && (
-                <label htmlFor={id} className="text-sm font-medium text-slate-700">
-                    {label}
-                    {props.required && (
-                        <span className="ml-0.5 text-red-500" aria-hidden="true">
-                            *
-                        </span>
-                    )}
-                </label>
+                <div className="flex items-center gap-1">
+                    <label htmlFor={id} className="text-sm font-medium text-slate-700">
+                        {label}
+                        {props.required && (
+                            <span className="ml-0.5 text-red-500" aria-hidden="true">
+                                *
+                            </span>
+                        )}
+                    </label>
+                    {tip && <InfoTip text={tip} label={`About ${label}`} />}
+                </div>
             )}
             <input
                 ref={ref}

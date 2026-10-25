@@ -9,9 +9,11 @@ import type { Branch, PaginatedResponse } from '@/types';
 
 interface BranchesIndexProps {
     branches: PaginatedResponse<Branch>;
+    /** Whether the viewer may edit branches (shows the setup links). */
+    can_manage: boolean;
 }
 
-export default function BranchesIndex({ branches }: BranchesIndexProps) {
+export default function BranchesIndex({ branches, can_manage }: BranchesIndexProps) {
     return (
         <AppLayout title="Branches">
             <Head title="Branches" />
@@ -51,9 +53,23 @@ export default function BranchesIndex({ branches }: BranchesIndexProps) {
                                             <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">HQ</span>
                                         )}
                                     </Td>
-                                    <Td>{branch.zone_count ?? 0}</Td>
+                                    <Td>
+                                        <span className="inline-flex flex-wrap items-center gap-2">
+                                            {branch.zone_count ?? 0}
+                                            {can_manage && (branch.zone_count ?? 0) === 0 && (
+                                                <Link
+                                                    href={`/branches/${branch.uuid}/setup`}
+                                                    className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100"
+                                                >
+                                                    <IconPlus size={12} stroke={2} aria-hidden="true" />
+                                                    Add zones
+                                                </Link>
+                                            )}
+                                        </span>
+                                    </Td>
                                     <Td>
                                         <Dropdown label={`Actions for ${branch.name}`}>
+                                            {can_manage && <DropdownItem href={`/branches/${branch.uuid}/setup`}>Set up</DropdownItem>}
                                             <DropdownItem href={`/branches/${branch.uuid}/edit`}>Edit</DropdownItem>
                                             {!branch.is_headquarters && (
                                                 <DropdownItem href={`/branches/${branch.uuid}/settings`}>Details, fees &amp; prices</DropdownItem>

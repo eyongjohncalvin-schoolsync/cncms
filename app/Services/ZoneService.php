@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ZoneService
@@ -77,6 +78,21 @@ class ZoneService
         Cache::forget('zones:all');
 
         return $zone;
+    }
+
+    /**
+     * The branch setup page's quick-add: every name through createInBranch()
+     * (same cache invalidation and Auditable audit row as a single create),
+     * all in one transaction — one failing insert keeps none of the batch.
+     *
+     * @param  array<int, string>  $names  already validated and normalised
+     * @return Collection<int, Zone>
+     */
+    public function createManyInBranch(int $branchId, array $names): Collection
+    {
+        return DB::transaction(fn (): Collection => new Collection(
+            array_map(fn (string $name): Zone => $this->createInBranch($branchId, new ZoneData(name: $name)), $names),
+        ));
     }
 
     public function update(Zone $zone, ZoneData $data): Zone

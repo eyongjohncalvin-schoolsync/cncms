@@ -9,9 +9,11 @@ import type { Branch } from '@/types';
 
 interface ZonesCreateProps {
     branches: Branch[];
+    /** Preselected from `?branch=<uuid>` (e.g. a branch's setup page), when valid. */
+    selected_branch_uuid: string | null;
 }
 
-export default function ZonesCreate({ branches }: ZonesCreateProps) {
+export default function ZonesCreate({ branches, selected_branch_uuid }: ZonesCreateProps) {
     return (
         <AppLayout title="Add Zone" breadcrumbs={[{ label: 'Zones', href: '/zones' }, { label: 'Add Zone' }]}>
             <Head title="Add Zone" />
@@ -29,14 +31,32 @@ export default function ZonesCreate({ branches }: ZonesCreateProps) {
                     <Form action="/zones" method="post" className="flex flex-col gap-4">
                         {({ errors, processing }) => (
                             <>
-                                <TextInput id="name" name="name" label="Name" error={errors.name} required className="uppercase" autoCapitalize="characters" />
+                                <TextInput
+                                    id="name"
+                                    name="name"
+                                    label="Name"
+                                    error={errors.name}
+                                    required
+                                    className="uppercase"
+                                    autoCapitalize="characters"
+                                    maxLength={25}
+                                    tip="Zones are the areas your agents collect in. Use a short name, up to 25 letters."
+                                />
 
                                 {/* Only shown once there's an actual choice to make — a
                                     lone "Main Branch" is applied automatically server-side
                                     (see ZoneService::resolveBranchId), so a single-branch
                                     tenant never has to make this decision at all. */}
                                 {branches.length > 1 && (
-                                    <SelectInput id="branch_uuid" name="branch_uuid" label="Branch" error={errors.branch_uuid} required>
+                                    <SelectInput
+                                        id="branch_uuid"
+                                        name="branch_uuid"
+                                        label="Branch"
+                                        defaultValue={selected_branch_uuid ?? ''}
+                                        error={errors.branch_uuid}
+                                        required
+                                        tip="Each zone belongs to one branch: the town whose office looks after it."
+                                    >
                                         <option value="">Select a branch</option>
                                         {branches.map((branch) => (
                                             <option key={branch.uuid} value={branch.uuid}>

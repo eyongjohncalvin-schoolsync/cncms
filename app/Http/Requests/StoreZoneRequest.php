@@ -27,10 +27,23 @@ class StoreZoneRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:25', new UniqueUpperCaseLabel('zones')],
+            'name' => self::nameRules(),
             // Branches v2: a fenced manager's zones are always in their own branch.
             'branch_uuid' => ['nullable', 'uuid', 'exists:branches,uuid', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
         ];
+    }
+
+    /**
+     * The rules one new zone name must pass, judged on the value after
+     * UpperCaseLabel::normalise(). Shared with StoreBranchZonesRequest (the
+     * branch setup page's quick-add) so a batch judges every name exactly
+     * like a single create.
+     *
+     * @return array<int, mixed>
+     */
+    public static function nameRules(): array
+    {
+        return ['required', 'string', 'max:25', new UniqueUpperCaseLabel('zones')];
     }
 
     /**

@@ -46,6 +46,7 @@ export default function ZonesEdit({ zone, branches }: ZonesEditProps) {
                                     required
                                     className="uppercase"
                                     autoCapitalize="characters"
+                                    tip="Zones are the areas your agents collect in. Use a short name, up to 25 letters."
                                 />
 
                                 {branches.length > 1 && (
@@ -56,6 +57,7 @@ export default function ZonesEdit({ zone, branches }: ZonesEditProps) {
                                         defaultValue={zone.branch_uuid ?? ''}
                                         error={errors.branch_uuid}
                                         required
+                                        tip="Each zone belongs to one branch. A zone with customers or agents cannot move branch."
                                     >
                                         <option value="">Select a branch</option>
                                         {branches.map((branch) => (

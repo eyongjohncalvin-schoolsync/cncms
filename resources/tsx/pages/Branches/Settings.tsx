@@ -7,6 +7,7 @@ import { Table, TableBody, TableHead, Td, Th } from '@/components/ui/Table';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { TextInput } from '@/components/ui/TextInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { InfoTip } from '@/components/ui/InfoTip';
 
 interface PricedItem {
     uuid: string;
@@ -121,12 +122,12 @@ function PriceRow({ branchUuid, target, item, label }: { branchUuid: string; tar
     );
 }
 
-const CONTACT_FIELDS: { name: Overridable; label: string; type?: string }[] = [
+const CONTACT_FIELDS: { name: Overridable; label: string; type?: string; tip?: string }[] = [
     { name: 'location', label: 'Address' },
     { name: 'phone', label: 'Phone' },
     { name: 'email', label: 'Email', type: 'email' },
     { name: 'tech_number', label: 'Technician line' },
-    { name: 'momo_number', label: 'MoMo number' },
+    { name: 'momo_number', label: 'MoMo number', tip: 'Customers of this branch pay into this number. It is printed on their bills.' },
     { name: 'momo_name', label: 'MoMo account name' },
 ];
 
@@ -190,6 +191,7 @@ export default function BranchSettings({ branch, headquarters, can_manage_branch
                                         defaultValue={branch[field.name] ?? ''}
                                         placeholder={placeholder(field.name)}
                                         error={errors[field.name]}
+                                        tip={field.tip}
                                     />
                                 ))}
                             </CardBody>
@@ -219,7 +221,7 @@ export default function BranchSettings({ branch, headquarters, can_manage_branch
                                     A lower fee than headquarters' is allowed — towns with competition may charge less.
                                 </p>
                                 {can_manage_branches && (
-                                    <SelectInput id="sends_to_hq" name="sends_to_hq" label="Sends its money to headquarters" defaultValue={branch.sends_to_hq} error={errors.sends_to_hq}>
+                                    <SelectInput id="sends_to_hq" name="sends_to_hq" label="Sends its money to headquarters" defaultValue={branch.sends_to_hq} error={errors.sends_to_hq} tip="How often this branch hands the money it collects over to headquarters.">
                                         <option value="off">No schedule</option>
                                         <option value="weekly">Every week</option>
                                         <option value="monthly">Every month</option>
@@ -240,10 +242,21 @@ export default function BranchSettings({ branch, headquarters, can_manage_branch
 
             <Card className="animate-fade-up mt-8 max-w-4xl">
                 <CardHeader>
-                    <h3 className="text-sm font-semibold text-slate-900">Prices</h3>
+                    <div className="flex items-center gap-1">
+                        <h3 className="text-sm font-semibold text-slate-900">Prices</h3>
+                        <InfoTip
+                            label="About branch prices"
+                            text="Type a price only where this town charges differently from headquarters. Empty means headquarters' price."
+                        />
+                    </div>
                     <p className="mt-1 text-xs text-slate-500">
                         Headquarters' price applies unless this branch sets its own. Leave the price empty and save to go
                         back to headquarters' price. Every change needs a reason and is kept below.
+                        <InfoTip
+                            className="ml-1"
+                            label="About the reason"
+                            text="Say why the price changed, e.g. competition in town. It is kept in the price history below."
+                        />
                     </p>
                 </CardHeader>
                 <CardBody>

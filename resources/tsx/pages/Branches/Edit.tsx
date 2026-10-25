@@ -42,6 +42,7 @@ export default function BranchesEdit({ branch }: BranchesEditProps) {
                                     defaultValue={branch.name}
                                     error={errors.name}
                                     required
+                                    tip="A branch is one town you work in, e.g. BUEA. The name is saved in capitals."
                                 />
 
                                 <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center">

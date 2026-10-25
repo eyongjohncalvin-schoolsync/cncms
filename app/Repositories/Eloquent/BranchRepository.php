@@ -6,7 +6,9 @@ namespace App\Repositories\Eloquent;
 
 use App\DataTransferObjects\BranchData;
 use App\Models\Branch;
+use App\Models\Scopes\BranchScope;
 use App\Repositories\Contracts\BranchRepositoryInterface;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 
@@ -15,7 +17,9 @@ class BranchRepository implements BranchRepositoryInterface
     public function paginate(int $perPage): LengthAwarePaginator
     {
         return Branch::query()
-            ->withCount('zones')
+            // Headquarters (including an admin fenced to the HQ branch) sees
+            // every branch's zone count; anyone else only their own branch's.
+            ->withCount(['zones' => fn ($query) => app(TenantContext::class)->actsForCompany() ? $query->withoutGlobalScope(BranchScope::class) : $query])
             ->orderBy('name')
             ->paginate($perPage);
     }

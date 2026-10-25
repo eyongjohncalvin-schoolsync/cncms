@@ -107,7 +107,7 @@ class BranchTest extends TestCase
 
         $response = $this->post('/branches', ['name' => 'Buea Branch']);
 
-        $response->assertRedirect('/branches');
+        $response->assertRedirect('/branches/'.Branch::query()->where('name', 'BUEA BRANCH')->sole()->uuid.'/setup');
         $response->assertSessionHas('success');
         $this->assertDatabaseHas('branches', ['name' => 'BUEA BRANCH']);
     }
@@ -118,7 +118,7 @@ class BranchTest extends TestCase
 
         $response = $this->post('/branches', ['name' => 'Douala Branch']);
 
-        $response->assertRedirect('/branches');
+        $response->assertRedirect('/branches/'.Branch::query()->where('name', 'DOUALA BRANCH')->sole()->uuid.'/setup');
         $this->assertDatabaseHas('branches', ['name' => 'DOUALA BRANCH']);
     }
 

@@ -15,9 +15,11 @@ use App\Models\Zone;
 use App\Services\BranchService;
 use App\Services\ZoneImportService;
 use App\Services\ZoneService;
+use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -65,12 +67,27 @@ class ZoneController extends Controller
         ]);
     }
 
-    public function create(): Response
+    /**
+     * `?branch=<uuid>` (from a branch's setup page) preselects that branch
+     * when it exists and is one the caller may put zones in; anything else
+     * is ignored.
+     */
+    public function create(Request $request, TenantContext $context): Response
     {
         $this->authorize('create', Zone::class);
 
+        $requested = $request->query('branch');
+        $selected = is_string($requested) && Str::isUuid($requested)
+            ? $this->branches->all()->firstWhere('uuid', $requested)
+            : null;
+
+        if ($selected !== null && $context->isFenced() && $selected->id !== $context->branchId) {
+            $selected = null;
+        }
+
         return Inertia::render('Zones/Create', [
             'branches' => $this->branchesForSelect(),
+            'selected_branch_uuid' => $selected?->uuid,
         ]);
     }
 
@@ -238,6 +255,12 @@ class ZoneController extends Controller
      */
     private function branchesForSelect(): array
     {
+        // A fenced user's zones always land in their own branch
+        // (ZoneService::resolveBranchId), so they get no picker at all.
+        if (app(TenantContext::class)->isFenced()) {
+            return [];
+        }
+
         return $this->branches->all()
             ->map(fn ($branch) => ['uuid' => $branch->uuid, 'name' => $branch->name])
             ->values()
