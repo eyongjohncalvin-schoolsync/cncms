@@ -174,7 +174,7 @@ added 2026-10-25 — builds before that have no updater and must install
 | Change | How it ships | Agent action |
 |---|---|---|
 | JS/TS only (bug fix, copy, screen logic) | `cd mobile && npm run publish:update -- "what changed"` | none — downloads in the background, applies on the next app open |
-| New native module, permission, SDK/Expo bump, app icon | bump `version` in `mobile/app.config.ts`, `eas build --platform android --profile preview`, then on the server `bash ~/cncms.tech/deploy/scripts/publish-apk.sh "<apk link>" <version>` | tap the blue "Version X is available" banner, install |
+| New native module, permission, SDK/Expo bump, app icon | bump `version` in `mobile/app.config.ts`, `eas build --platform android --profile preview`, put the version and APK link in `deploy/mobile-release.json`, commit, then **Deploy** — the deploy script publishes it (`publish-apk.sh --from-release-file`) | tap the blue "Version X is available" banner, install |
 
 - Always publish with `npm run publish:update`, never a bare `eas update`:
   `eas update` ignores eas.json's build `env`, so a bare run would bake the

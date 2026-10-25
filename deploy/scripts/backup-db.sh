@@ -16,12 +16,15 @@ FILE="${DEST}/cncms-${STAMP}.sql.gz"
 
 mkdir -p "$DEST"
 
+# The site's PHP when the server has several (e.g. PHP_BIN=php8.5).
+PHP_BIN="${PHP_BIN:-php}"
+
 # Reads DB creds from the app .env with Laravel's own parser (phpdotenv) —
 # parse_ini_file() silently fails on ordinary Laravel .env lines and the
 # script then fell back to the wrong user with no password.
 cd "$APP_DIR"
 env_value() {
-  php -r 'require "vendor/autoload.php"; $e = Dotenv\Dotenv::createArrayBacked(getcwd())->load(); echo $e[$argv[1]] ?? $argv[2];' "$1" "$2"
+  "$PHP_BIN" -r 'require "vendor/autoload.php"; $e = Dotenv\Dotenv::createArrayBacked(getcwd())->load(); echo $e[$argv[1]] ?? $argv[2];' "$1" "$2"
 }
 export PGPASSWORD="$(env_value DB_PASSWORD '')"
 DB="$(env_value DB_DATABASE cncms)"

@@ -81,7 +81,7 @@ directory `/public`.
   ```bash
   set -e   # any failed step (e.g. a migration) stops the deploy and Ploi marks it failed
   cd {SITE_DIRECTORY}
-  bash deploy/scripts/backup-db.sh   # a fresh backup before every deploy — no backup, no deploy
+  PHP_BIN={SITE_PHP} bash deploy/scripts/backup-db.sh   # a fresh backup before every deploy — no backup, no deploy
   git pull origin {BRANCH}
   {SITE_COMPOSER} install --no-interaction --prefer-dist --optimize-autoloader --no-dev
   npm ci && npm run build
@@ -89,6 +89,7 @@ directory `/public`.
   {SITE_PHP} artisan tenants:migrate --force
   {SITE_PHP} artisan optimize
   {SITE_PHP} artisan queue:restart
+  PHP_BIN={SITE_PHP} bash deploy/scripts/publish-apk.sh --from-release-file   # new agent APK, if deploy/mobile-release.json names one
   {RELOAD_PHP_FPM}
   echo "Deployed $(git rev-parse --short HEAD)"
   ```
