@@ -236,6 +236,8 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN promo TEXT' },
     // The customer's branch, so an offer is sold at that branch's price.
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN branch_uuid TEXT' },
+    // Old debt still unpaid as the server counts it (every collector's payments), at cached_at.
+    { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN unpaid_debt REAL' },
 ];
 
 /**

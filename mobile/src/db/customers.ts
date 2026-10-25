@@ -71,10 +71,11 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
     await db.withTransactionAsync(async () => {
         for (const customer of customers) {
             await db.runAsync(
-                `INSERT INTO customers (uuid, name, phone, bill, location, level, status, zone_uuid, cached_at, total_arrears, credit, services, promo, branch_uuid)
-                 VALUES ($uuid, $name, $phone, $bill, $location, $level, $status, $zone_uuid, $cached_at, $total_arrears, $credit, $services, $promo, $branch_uuid)
+                `INSERT INTO customers (uuid, name, phone, bill, location, level, status, zone_uuid, cached_at, total_arrears, credit, services, promo, branch_uuid, unpaid_debt)
+                 VALUES ($uuid, $name, $phone, $bill, $location, $level, $status, $zone_uuid, $cached_at, $total_arrears, $credit, $services, $promo, $branch_uuid, $unpaid_debt)
                  ON CONFLICT(uuid) DO UPDATE SET
                     branch_uuid = excluded.branch_uuid,
+                    unpaid_debt = excluded.unpaid_debt,
                     name = excluded.name,
                     phone = excluded.phone,
                     bill = excluded.bill,
@@ -102,6 +103,7 @@ export async function upsertCustomers(customers: SyncPullCustomer[]): Promise<vo
                     $services: JSON.stringify(customer.services ?? []),
                     $promo: JSON.stringify(promoOf(customer)),
                     $branch_uuid: customer.branch_uuid ?? null,
+                    $unpaid_debt: customer.unpaid_debt === null || customer.unpaid_debt === undefined ? null : Number(customer.unpaid_debt),
                 },
             );
         }

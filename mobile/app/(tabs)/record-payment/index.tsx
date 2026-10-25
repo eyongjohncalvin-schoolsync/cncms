@@ -312,9 +312,14 @@ export default function RecordPaymentScreen() {
             return;
         }
 
-        // Old debt still unpaid: cached arrears less what this phone took this month.
-        void getPaidThisMonthOnPhone(customer.uuid, startOfBusinessMonthIso(new Date())).then((paid) =>
-            setUnpaidDebt(Math.max(0, (customer.total_arrears ?? 0) - paid)),
+        // Old debt still unpaid: the server's figure (every collector's
+        // payments counted) less what this phone took since it was fetched.
+        // Older servers send none — then cached arrears less this month's.
+        const serverDebt = customer.unpaid_debt;
+        const since = serverDebt !== null && serverDebt !== undefined ? customer.cached_at : startOfBusinessMonthIso(new Date());
+
+        void getPaidThisMonthOnPhone(customer.uuid, since).then((paid) =>
+            setUnpaidDebt(Math.max(0, (serverDebt ?? customer.total_arrears ?? 0) - paid)),
         );
     }, [customer?.uuid]);
 
@@ -751,12 +756,12 @@ export default function RecordPaymentScreen() {
                         </View>
                         {selectedOffer && unpaidDebt > 0 ? (
                             <Text style={styles.arrearsNote}>
-                                Collect {formatFcfa(Number(selectedOffer.price) + unpaidDebt)}: {formatFcfa(unpaidDebt)} clears the old debt,{' '}
-                                {formatFcfa(Number(selectedOffer.price))} buys {selectedOffer.name} ({selectedOffer.months} months).
+                                Collect {formatFcfa(offerPriceFor(selectedOffer, customer?.branch_uuid) + unpaidDebt)}: {formatFcfa(unpaidDebt)} clears the old debt,{' '}
+                                {formatFcfa(offerPriceFor(selectedOffer, customer?.branch_uuid))} buys {selectedOffer.name} ({selectedOffer.months} months).
                             </Text>
                         ) : selectedOffer ? (
                             <Text style={styles.arrearsNote}>
-                                {selectedOffer.name}: {selectedOffer.months} months for {formatFcfa(Number(selectedOffer.price))} — amount and months are fixed.
+                                {selectedOffer.name}: {selectedOffer.months} months for {formatFcfa(offerPriceFor(selectedOffer, customer?.branch_uuid))} — amount and months are fixed.
                             </Text>
                         ) : null}
                     </View>

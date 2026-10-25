@@ -19,6 +19,7 @@ use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -296,21 +297,40 @@ class PaymentService
      */
     private function unpaidDebt(Customer $customer): string
     {
-        $customer->loadMissing('latestManuscript');
-        $arrears = (string) ($customer->latestManuscript?->total_arrears ?? '0');
-        $credit = (string) ($customer->latestManuscript?->credit ?? '0');
+        return self::unpaidDebts(collect([$customer]))[$customer->id];
+    }
 
-        $paidSince = (string) Payment::query()
-            ->where('customer_id', $customer->id)
+    /**
+     * unpaidDebt() for many customers in one query — the web payment form
+     * and the phone's customer download show the same figure the server
+     * checks an offer payment against.
+     *
+     * @param  Collection<int, Customer>  $customers
+     * @return array<int, string> customer id => unpaid debt (never negative)
+     */
+    public static function unpaidDebts(Collection $customers): array
+    {
+        $customers->each(fn (Customer $customer) => $customer->loadMissing('latestManuscript'));
+
+        $paidSince = Payment::query()
+            ->whereIn('customer_id', $customers->pluck('id'))
             ->subscription()
             ->whereNull('processed_at')
             ->whereNull('prepayment_offer_id')
             ->where('verification_status', '!=', 'rejected')
-            ->sum('amount');
+            ->groupBy('customer_id')
+            ->selectRaw('customer_id, sum(amount) as paid')
+            ->pluck('paid', 'customer_id');
 
-        $debt = bcsub(bcsub($arrears, $credit, 2), $paidSince, 2);
+        return $customers->mapWithKeys(function (Customer $customer) use ($paidSince): array {
+            $debt = bcsub(
+                bcsub((string) ($customer->latestManuscript?->total_arrears ?? '0'), (string) ($customer->latestManuscript?->credit ?? '0'), 2),
+                (string) ($paidSince[$customer->id] ?? '0'),
+                2,
+            );
 
-        return bccomp($debt, '0', 2) > 0 ? $debt : '0.00';
+            return [$customer->id => bccomp($debt, '0', 2) > 0 ? $debt : '0.00'];
+        })->all();
     }
 
     /** Whether the customer's installation free months still run this month (or haven't started billing yet). */

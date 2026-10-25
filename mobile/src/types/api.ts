@@ -296,6 +296,8 @@ export interface SyncPullCustomer {
     zone_uuid: string | null;
     /** The customer's branch (offers are sold at its price). Absent from older servers. */
     branch_uuid?: string | null;
+    /** Old debt still unpaid, every collector's payments counted (PaymentService::unpaidDebts()). Absent from older servers. */
+    unpaid_debt?: string | null;
     /**
      * From the customer's `latestManuscript` (App\Models\Customer),
      * eager-loaded alongside `zone` in SyncService::upsertedCustomers() —

@@ -13,6 +13,7 @@ use App\Models\Customer;
 use App\Models\CustomerSubscription;
 use App\Models\Expenditure;
 use App\Models\FieldInstallation;
+use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\Scopes\BranchScope;
 use App\Models\Service;
@@ -804,6 +805,11 @@ class SyncService
             ->with(['zone', 'latestManuscript', 'subscriptions.service', 'subscriptions.serviceVariant'])
             ->when($sinceAt, fn ($query) => $query->where(fn ($inner) => $inner
                 ->where('updated_at', '>=', $sinceAt)
+                // Their debt moved (a payment recorded, verified or reversed;
+                // a bill written) though the customer row didn't: the phone
+                // needs the new unpaid_debt.
+                ->orWhereIn('id', Payment::query()->withoutGlobalScope(BranchScope::class)->where('updated_at', '>=', $sinceAt)->select('customer_id'))
+                ->orWhereIn('id', Manuscript::query()->withoutGlobalScope(BranchScope::class)->where('updated_at', '>=', $sinceAt)->select('customer_id'))
                 ->when($newZoneIds !== [], fn ($orNew) => $orNew->orWhereIn('zone_id', $newZoneIds))))
             ->when($zoneIds !== null, fn ($query) => $query->whereIn('zone_id', $zoneIds))
             ->when(
@@ -818,6 +824,7 @@ class SyncService
         $serviceNames = Service::query()->pluck('name', 'id');
         $currentPeriod = BusinessTimezone::currentPeriod();
         $branchUuids = Branch::query()->pluck('uuid', 'id');
+        $unpaidDebts = PaymentService::unpaidDebts($customers);
 
         return $customers
             ->map(fn (Customer $customer): array => [
@@ -833,6 +840,10 @@ class SyncService
                 'branch_uuid' => $branchUuids[$customer->branch_id] ?? null,
                 'total_arrears' => $customer->latestManuscript?->total_arrears,
                 'credit' => $customer->latestManuscript?->credit,
+                // Old debt still unpaid — every collector's payments counted
+                // (PaymentService::unpaidDebts(), what an offer payment is
+                // checked against). The phone takes off what it collected since.
+                'unpaid_debt' => $unpaidDebts[$customer->id],
                 'services' => $customer->subscriptions->map(fn (CustomerSubscription $row): array => [
                     'service_uuid' => $row->service->uuid,
                     'service_name' => $row->service->name,

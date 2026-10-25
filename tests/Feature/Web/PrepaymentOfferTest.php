@@ -296,6 +296,25 @@ class PrepaymentOfferTest extends TestCase
             ->assertJsonFragment(['uuid' => $this->offer->uuid, 'months' => 4, 'price' => '10000.00']);
     }
 
+    public function test_the_phone_gets_the_real_unpaid_debt_and_hears_when_it_moves(): void
+    {
+        // Owes 6,000 on the last bill; another collector already took 2,000.
+        ManuscriptFactory::new()->withArrears(6000)->create(['customer_id' => $this->customer->id, 'period' => Carbon::now()->subMonthNoOverflow()->format('Y-m')]);
+        PaymentFactory::new()->create(['customer_id' => $this->customer->id, 'amount' => 2000, 'frequency' => 'monthly', 'verification_status' => 'verified']);
+        $token = $this->tokenForRole('manager');
+
+        $first = $this->withToken($token)->getJson('/api/v1/sync/pull')->assertOk();
+        $this->assertSame('4000.00', collect($first->json('changes.customers.upserted'))->firstWhere('uuid', $this->customer->uuid)['unpaid_debt']);
+
+        // A later payment by someone else: the customer row is untouched, yet the next sync resends it.
+        $since = $first->json('synced_at');
+        $this->travel(1)->minutes();
+        PaymentFactory::new()->create(['customer_id' => $this->customer->id, 'amount' => 1500, 'frequency' => 'monthly', 'verification_status' => 'verified']);
+
+        $next = collect($this->withToken($token)->getJson('/api/v1/sync/pull?since='.urlencode($since))->assertOk()->json('changes.customers.upserted'));
+        $this->assertSame('2500.00', $next->firstWhere('uuid', $this->customer->uuid)['unpaid_debt'] ?? null);
+    }
+
     public function test_the_phone_can_sell_at_the_customers_branch_price(): void
     {
         // An HQ manager's phone selling to a BUEA customer must ask BUEA's price, as the server charges.

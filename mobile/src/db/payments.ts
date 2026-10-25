@@ -279,9 +279,11 @@ export async function getSameAmountRecentlyForCustomer(customerUuid: string, amo
 }
 
 /**
- * What this phone collected from the customer since the business month began
- * (not rejected, not offers) — taken off their cached arrears so an agent can
- * collect old debt and then sell a prepayment offer in the same visit.
+ * What this phone collected from the customer since $sinceIso (not rejected,
+ * not offers) — taken off the server's unpaid debt (since the customer was
+ * last fetched), or off cached arrears (since the business month began, on
+ * older servers), so an agent can collect old debt and then sell a
+ * prepayment offer in the same visit.
  */
 export async function getPaidThisMonthOnPhone(customerUuid: string, monthStartIso: string): Promise<number> {
     const db = await getDatabase();

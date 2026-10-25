@@ -41,6 +41,12 @@ export interface LocalCustomer {
     promo?: string | null;
     /** The customer's branch — offers are sold at its price. `null` until the next pull refreshes the row. */
     branch_uuid?: string | null;
+    /**
+     * Old debt still unpaid as the server counted it at `cached_at` — every
+     * collector's payments included. `null` from older servers / before the
+     * next pull refreshes the row.
+     */
+    unpaid_debt?: number | null;
 }
 
 export interface LocalPayment {
