@@ -16,7 +16,7 @@ import {
 import { cacheFormData, getCachedFormData, refreshFormData } from '../src/db/formCache';
 import { insertLocalInstallation } from '../src/db/installations';
 import { findLocalDuplicates } from '../src/db/customers';
-import { getMyZoneUuid } from '../src/db/zones';
+import { getMyZoneUuids } from '../src/db/zones';
 import { issueFieldReceipt, type IssuedFieldReceipt } from '../src/fieldReceipts/receiptStock';
 import { formatReceiptCode, receiptCheckUrl } from '../src/utils/receiptCode';
 import { generateUuid } from '../src/utils/uuid';
@@ -179,11 +179,22 @@ export default function CustomerCreateScreen() {
                   .catch(() => fromCache())
             : fromCache();
 
+        // An agent registers customers in their own zones only (the server
+        // refuses others), so the picker offers just those once known — and
+        // picks it when there is only one.
         void source
-            .then(() => getMyZoneUuid())
-            .then((zone) => {
-                if (zone) {
-                    setZoneUuid((current) => current ?? zone);
+            .then(() => getMyZoneUuids())
+            .then((mine) => {
+                if (mine.length > 0) {
+                    setZones((all) => {
+                        const own = all.filter((zone) => mine.includes(zone.uuid));
+
+                        return own.length > 0 ? own : all;
+                    });
+                }
+
+                if (mine.length === 1) {
+                    setZoneUuid((current) => current ?? mine[0]);
                 }
 
                 setPhase((current) => (current === 'loading' ? 'ready' : current));

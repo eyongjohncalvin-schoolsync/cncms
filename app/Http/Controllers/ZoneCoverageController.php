@@ -9,6 +9,9 @@ use App\Models\Agent;
 use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Scopes\BranchScope;
+use App\Models\User;
+use App\Models\Zone;
+use App\Services\TechnicianService;
 use App\Services\ZoneCoverageService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
@@ -28,7 +31,7 @@ use Inertia\Response;
  */
 class ZoneCoverageController extends Controller
 {
-    public function index(Request $request, TenantContext $context, ZoneCoverageService $coverage): Response
+    public function index(Request $request, TenantContext $context, ZoneCoverageService $coverage, TechnicianService $technicians): Response
     {
         $this->authorize('viewAny', Agent::class);
 
@@ -42,7 +45,50 @@ class ZoneCoverageController extends Controller
             ...$coverage->overview($branch),
             'can_manage' => $request->user()->can('update', Agent::class),
             'can_edit_limit' => $this->canEditLimit($request, $branch),
+            // Technicians' usual zones — a hint for complaint assignment, set
+            // by whoever assigns complaints.
+            'technicians' => $context->can('complaints.assign') ? $this->technicians($branch, $technicians) : [],
         ]);
+    }
+
+    /**
+     * A technician's usual zones in the branch become exactly these; none
+     * means they work anywhere.
+     */
+    public function updateTechnician(Request $request, TenantContext $context, TechnicianService $technicians): RedirectResponse
+    {
+        abort_unless($context->can('complaints.assign'), 403);
+
+        $data = $request->validate([
+            'branch_uuid' => ['required', 'uuid'],
+            'user_uuid' => ['required', 'uuid'],
+            'zone_uuids' => ['present', 'array', 'max:500'],
+            'zone_uuids.*' => ['uuid', 'distinct'],
+        ]);
+        $branch = $this->branchFor($data['branch_uuid'], $context, strict: true);
+        $technician = User::query()->where('uuid', $data['user_uuid'])->firstOrFail();
+
+        $technicians->setZones($technician, $branch, $data['zone_uuids'], $request->user());
+
+        return redirect()->route('zones.coverage', ['branch' => $branch->uuid])->with('success', "{$technician->name}'s zones saved.");
+    }
+
+    /**
+     * @return list<array{uuid: string, name: string, role: string, open: int, zones: list<string>}>
+     */
+    private function technicians(Branch $branch, TechnicianService $technicians): array
+    {
+        $zoneUuids = Zone::query()->withoutGlobalScope(BranchScope::class)->where('branch_id', $branch->id)->pluck('uuid', 'id');
+
+        return $technicians->forBranch($branch)
+            ->map(fn (array $technician): array => [
+                'uuid' => $technician['uuid'],
+                'name' => $technician['name'],
+                'role' => $technician['role'],
+                'open' => $technician['open'],
+                'zones' => array_values(array_filter(array_map(fn (int $id): ?string => $zoneUuids[$id] ?? null, $technician['zone_ids']))),
+            ])
+            ->values()->all();
     }
 
     public function update(UpdateZoneCoverageRequest $request, TenantContext $context, ZoneCoverageService $coverage): RedirectResponse

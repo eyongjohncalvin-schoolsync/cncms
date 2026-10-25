@@ -85,7 +85,11 @@ class AgentService
      */
     public function findForUser(int $userId): Agent
     {
-        $agent = $this->agents->findByUserId($userId, ['zone']);
+        $agent = $this->agents->findByUserId($userId, [
+            'zone',
+            // Every zone they cover, for the app's profile and zones screens.
+            'coverage' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)->with(['zone' => fn ($zone) => $zone->withoutGlobalScope(BranchScope::class)]),
+        ]);
 
         if (! $agent) {
             throw new ModelNotFoundException("No agent record found for user [{$userId}].");

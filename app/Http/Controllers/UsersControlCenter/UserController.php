@@ -65,6 +65,11 @@ class UserController extends Controller
             ->with(['user', 'branch'])
             ->get();
 
+        // Agent-role accounts that can't work yet: no agent profile, or one
+        // that covers no zone (they would log in to an empty app). Two queries.
+        $agentUserIds = $tenantUsers->where('role', 'agent')->pluck('user_id')->all();
+        $agentProfiles = Agent::query()->withoutGlobalScope(BranchScope::class)->whereIn('user_id', $agentUserIds)->withCount('coverage')->get(['id', 'user_id'])->keyBy('user_id');
+
         // Branches v2 D8: salaries for whoever may set them — two queries for the whole list.
         $canSetSalaries = $this->context->can('salaries.manage');
         $salaries = $canSetSalaries ? $this->salaries->summaryFor($tenantUsers->pluck('user_id')->map(fn ($id): int => (int) $id)->all()) : [];
@@ -78,6 +83,11 @@ class UserController extends Controller
                 : [],
             'users' => $tenantUsers->map(fn (TenantUser $tenantUser): array => [
                 'salary' => $salaries[(int) $tenantUser->user_id] ?? null,
+                'agent_setup' => $tenantUser->role !== 'agent' ? null : match (true) {
+                    ! $agentProfiles->has($tenantUser->user_id) => 'no_profile',
+                    $agentProfiles[$tenantUser->user_id]->coverage_count === 0 => 'no_zones',
+                    default => null,
+                },
                 'id' => $tenantUser->id,
                 'role' => $tenantUser->role,
                 'job_title' => $tenantUser->job_title,

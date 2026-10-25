@@ -22,8 +22,11 @@ export interface AgentMeApi {
     name: string;
     location: string | null;
     phone: string | null;
+    /** Their home zone — what builds before 1.0.1 show. */
     zone_uuid: string | null;
     zone_name: string | null;
+    /** Every zone they cover (servers from 2026-10-25 on; absent on older ones). */
+    zones?: { uuid: string; name: string; role: 'responsible' | 'helper' }[];
     /** Numeric string (Postgres DECIMAL cast to string by Eloquent), like `customers.bill` elsewhere in this app. */
     salary: string | null;
     email: string | null;

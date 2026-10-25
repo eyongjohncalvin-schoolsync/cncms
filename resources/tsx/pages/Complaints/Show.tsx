@@ -20,7 +20,24 @@ interface ComplaintsShowProps {
     // ComplaintEscalationService's 48h business rule are the real gates.
     can_notify_investors: boolean;
     investor_notice_sent_at: string | null;
+    can_assign: boolean;
+    /** Best first (App\Services\TechnicianService::suggestionsFor()). */
+    assignees: ComplaintAssignee[];
 }
+
+interface ComplaintAssignee {
+    uuid: string;
+    name: string;
+    role: string;
+    open: number;
+    reason: 'covers' | 'anywhere' | 'elsewhere';
+}
+
+const ASSIGNEE_GROUPS: { reason: ComplaintAssignee['reason']; label: string }[] = [
+    { reason: 'covers', label: 'Covers this zone' },
+    { reason: 'anywhere', label: 'Works anywhere' },
+    { reason: 'elsewhere', label: 'Other technicians' },
+];
 
 export default function ComplaintsShow({
     complaint,
@@ -28,6 +45,8 @@ export default function ComplaintsShow({
     can_link_duplicate,
     can_notify_investors,
     investor_notice_sent_at,
+    can_assign = false,
+    assignees = [],
 }: ComplaintsShowProps) {
     return (
         <AppLayout title="Complaint Detail" breadcrumbs={[{ label: 'Complaints', href: '/complaints' }, { label: complaint.title }]}>
@@ -92,6 +111,17 @@ export default function ComplaintsShow({
                             )}
                         </CardBody>
                     </Card>
+
+                    {can_assign && (
+                        <Card className="animate-fade-up" style={{ animationDelay: '175ms' }}>
+                            <CardHeader>
+                                <h3 className="text-sm font-semibold text-slate-900">{complaint.assigned_to_name ? 'Reassign' : 'Assign'}</h3>
+                            </CardHeader>
+                            <CardBody>
+                                <AssignForm complaint={complaint} assignees={assignees} />
+                            </CardBody>
+                        </Card>
+                    )}
 
                     {can_link_duplicate && !complaint.duplicate_of_uuid && complaint.status !== 'resolved' && (
                         <Card className="animate-fade-up" style={{ animationDelay: '200ms' }}>
@@ -215,6 +245,62 @@ function NotifyInvestorsButton({ complaint }: { complaint: Complaint }) {
                 {processing ? 'Notifying…' : 'Notify Investors'}
             </Button>
         </div>
+    );
+}
+
+/**
+ * Who takes the complaint. Suggested in order — the complaint's zone's
+ * technicians, then those who work anywhere, then the rest — each with how
+ * many open complaints they already hold, so work goes to whoever is free.
+ */
+function AssignForm({ complaint, assignees }: { complaint: Complaint; assignees: ComplaintAssignee[] }) {
+    const best = assignees[0];
+    const { data, setData, post, processing, errors } = useForm({ assignee_uuid: best?.uuid ?? '' });
+
+    if (assignees.length === 0) {
+        return <p className="text-sm text-slate-500">Nobody in this branch can take complaints yet — give a role the “Resolve complaints” permission first.</p>;
+    }
+
+    function submit(event: FormEvent) {
+        event.preventDefault();
+        post(`/complaints/${complaint.uuid}/assign`, { preserveScroll: true });
+    }
+
+    return (
+        <form onSubmit={submit} className="flex flex-col gap-3">
+            <label htmlFor="assignee" className="text-sm font-medium text-slate-700">
+                Technician
+            </label>
+            <select
+                id="assignee"
+                value={data.assignee_uuid}
+                onChange={(event) => setData('assignee_uuid', event.target.value)}
+                className="min-h-[40px] rounded-lg border-slate-300 text-sm focus:border-blue-500 focus:ring-blue-500"
+            >
+                {ASSIGNEE_GROUPS.map(({ reason, label }) => {
+                    const group = assignees.filter((assignee) => assignee.reason === reason);
+
+                    return group.length === 0 ? null : (
+                        <optgroup key={reason} label={label}>
+                            {group.map((assignee) => (
+                                <option key={assignee.uuid} value={assignee.uuid}>
+                                    {assignee.name} — {assignee.role} · {assignee.open} open
+                                </option>
+                            ))}
+                        </optgroup>
+                    );
+                })}
+            </select>
+            {errors.assignee_uuid && <p className="text-sm text-red-600">{errors.assignee_uuid}</p>}
+            {best?.reason === 'covers' && (
+                <p className="text-xs text-slate-500">
+                    Suggested: {best.name} covers this zone and has {best.open} open complaint{best.open === 1 ? '' : 's'}.
+                </p>
+            )}
+            <Button type="submit" disabled={processing || data.assignee_uuid === ''} className="self-start">
+                {processing ? 'Assigning…' : complaint.assigned_to_name ? 'Reassign' : 'Assign'}
+            </Button>
+        </form>
     );
 }
 

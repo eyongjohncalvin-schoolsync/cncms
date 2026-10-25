@@ -20,6 +20,20 @@ import { getDatabase } from './database';
  * role (whose cached customers, if any, aren't zone-scoped the same way) —
  * callers should treat `null` as "not yet known," not an error.
  */
+/**
+ * Every zone this device's agent covers (an agent may cover several — the
+ * server sends the customers of all of them), from the same synced
+ * `customers` cache as getMyZoneUuid() below. A covered zone with no
+ * customers yet isn't listed; an empty list means "not yet known".
+ */
+export async function getMyZoneUuids(): Promise<string[]> {
+    const db = await getDatabase();
+
+    const rows = await db.getAllAsync<{ zone_uuid: string }>('SELECT DISTINCT zone_uuid FROM customers WHERE zone_uuid IS NOT NULL');
+
+    return rows.map((row) => row.zone_uuid);
+}
+
 export async function getMyZoneUuid(): Promise<string | null> {
     const db = await getDatabase();
 

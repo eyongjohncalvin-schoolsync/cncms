@@ -17,6 +17,7 @@ use App\Models\Customer;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\ComplaintEscalationService;
 use App\Services\ComplaintService;
+use App\Services\TechnicianService;
 use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -176,6 +177,10 @@ class ComplaintController extends Controller
                 && $investorNoticeRow === null
                 && $this->escalations->isInvestorNoticeArmed($complaint),
             'investor_notice_sent_at' => $investorNoticeRow?->escalated_at?->toIso8601String(),
+            // Who to give it to, best first: the zone's technicians, then
+            // those who work anywhere — each with their open complaints.
+            'can_assign' => $canAssign = $this->context->can('complaints.assign') && $complaint->status !== 'resolved',
+            'assignees' => $canAssign ? app(TechnicianService::class)->suggestionsFor($complaint) : [],
         ]);
     }
 

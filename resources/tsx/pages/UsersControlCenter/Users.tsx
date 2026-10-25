@@ -1,4 +1,4 @@
-import { Form, Head, router } from '@inertiajs/react';
+import { Form, Head, Link, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import { IconEdit, IconInfoCircle, IconUsersGroup } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -199,6 +199,15 @@ export default function UsersControlCenterUsers({
                                                         <span className="text-xs text-slate-400">No job title set</span>
                                                     )}
                                                 </div>
+                                                {tenantUser.agent_setup && (
+                                                    // An agent who can't work yet: the app would show them nothing.
+                                                    <Link
+                                                        href={tenantUser.agent_setup === 'no_profile' ? '/agents/create' : '/zones/coverage'}
+                                                        className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800 ring-1 ring-inset ring-red-200 hover:bg-red-100"
+                                                    >
+                                                        {tenantUser.agent_setup === 'no_profile' ? 'No agent profile — set up' : 'No zones — give zones'} →
+                                                    </Link>
+                                                )}
                                             </div>
                                         </div>
                                     </Td>

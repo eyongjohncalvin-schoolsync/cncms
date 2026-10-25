@@ -36,6 +36,12 @@ class AgentMeResource extends JsonResource
             'phone' => $this->phone,
             'zone_uuid' => $this->whenLoaded('zone', fn () => $this->zone->uuid),
             'zone_name' => $this->whenLoaded('zone', fn () => $this->zone->name),
+            // Every zone they cover (app 1.0.1+); zone_uuid/zone_name above stay
+            // as their home zone for older builds.
+            'zones' => $this->whenLoaded('coverage', fn () => $this->coverage
+                ->sortBy(fn ($row) => $row->zone?->name)
+                ->map(fn ($row): array => ['uuid' => $row->zone?->uuid, 'name' => $row->zone?->name, 'role' => $row->role])
+                ->values()->all()),
             'salary' => $this->salary,
             'email' => $this->email,
             'dob' => $this->dob,

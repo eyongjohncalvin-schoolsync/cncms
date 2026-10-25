@@ -217,6 +217,12 @@ class ComplaintService
             throw ValidationException::withMessages(['assignee_uuid' => ['The selected user does not exist.']]);
         }
 
+        // Only someone of this company who resolves complaints, and works in
+        // the complaint's branch (fenced to it or to no branch).
+        if (! app(TechnicianService::class)->canBeAssigned($assignee, $complaint->branch_id)) {
+            throw ValidationException::withMessages(['assignee_uuid' => ["{$assignee->name} can't take complaints of this branch."]]);
+        }
+
         return $this->complaints->update($complaint, ['assigned_to' => $assignee->id]);
     }
 

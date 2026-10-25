@@ -143,7 +143,18 @@ export default function AgentProfileScreen() {
             <Card>
                 <Text style={styles.sectionTitle}>Zone assignment</Text>
                 <View style={styles.fieldList}>
-                    <DetailRow label="Zone" value={profile.zone_name ?? '—'} />
+                    {profile.zones && profile.zones.length > 0 ? (
+                        // Every zone they cover; "responsible" ones print their name on the bills.
+                        profile.zones.map((zone) => (
+                            <DetailRow
+                                key={zone.uuid}
+                                label={profile.zones && profile.zones.length > 1 ? 'Zone' : 'Your zone'}
+                                value={`${zone.name}${zone.role === 'responsible' ? ' · responsible' : ' · helper'}`}
+                            />
+                        ))
+                    ) : (
+                        <DetailRow label="Zone" value={profile.zone_name ?? '—'} />
+                    )}
                     <DetailRow label="Location" value={profile.location ?? '—'} last />
                 </View>
             </Card>

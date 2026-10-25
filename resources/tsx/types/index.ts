@@ -929,6 +929,8 @@ export interface TenantUserRow {
      * row). Settings/Users.tsx renders this checkbox on every row.
      */
     is_investor: boolean;
+    /** An agent-role account that can't work yet: no agent profile, or no zones. Null otherwise. */
+    agent_setup?: 'no_profile' | 'no_zones' | null;
 }
 
 export type CommandRunStatus = 'queued' | 'pending_review' | 'published' | 'failed' | 'rolled_back';

@@ -3,7 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { Stack, useFocusEffect } from 'expo-router';
 import { useAuth } from '../src/auth/AuthContext';
 import { fetchZones, type ZoneApi } from '../src/api/zones';
-import { getMyZoneUuid } from '../src/db/zones';
+import { getMyZoneUuids } from '../src/db/zones';
 import { isNetworkError, extractErrorMessage } from '../src/api/client';
 import { getSyncState, subscribeSyncState } from '../src/sync/syncStore';
 import { Card } from '../src/components/ui/Card';
@@ -40,7 +40,7 @@ export default function ZonesScreen() {
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [zones, setZones] = useState<ZoneApi[]>([]);
-    const [myZoneUuid, setMyZoneUuid] = useState<string | null>(null);
+    const [myZoneUuids, setMyZoneUuids] = useState<string[]>([]);
     const phaseRef = useRef<Phase>('loading');
 
     const load = useCallback(() => {
@@ -55,9 +55,9 @@ export default function ZonesScreen() {
         setErrorMessage(null);
 
         // Local cache read (fast, offline-safe) alongside the live zones
-        // call — a stale/missing myZoneUuid never blocks the directory list
-        // below from rendering.
-        void getMyZoneUuid().then(setMyZoneUuid);
+        // call — stale/missing zones never block the directory list below
+        // from rendering.
+        void getMyZoneUuids().then(setMyZoneUuids);
 
         fetchZones()
             .then((response) => {
@@ -91,8 +91,9 @@ export default function ZonesScreen() {
         }, [load]),
     );
 
-    const myZone = zones.find((zone) => zone.uuid === myZoneUuid) ?? null;
-    const otherZones = zones.filter((zone) => zone.uuid !== myZoneUuid);
+    // An agent may cover several zones (management decides).
+    const myZones = zones.filter((zone) => myZoneUuids.includes(zone.uuid));
+    const otherZones = zones.filter((zone) => !myZoneUuids.includes(zone.uuid));
 
     if (phase === 'loading') {
         return (
@@ -131,18 +132,20 @@ export default function ZonesScreen() {
             <Stack.Screen options={{ title: 'Zones' }} />
 
             <View style={styles.section}>
-                <Text style={styles.sectionTitle}>My zone</Text>
-                {role === 'agent' && myZone ? (
-                    <Card variant="filled">
-                        <Text style={styles.heroEyebrow}>YOUR ZONE</Text>
-                        <Text style={styles.heroName}>{myZone.name}</Text>
-                        <Text style={styles.heroTown}>{myZone.town}</Text>
-                    </Card>
+                <Text style={styles.sectionTitle}>{myZones.length > 1 ? `My zones (${myZones.length})` : 'My zone'}</Text>
+                {role === 'agent' && myZones.length > 0 ? (
+                    myZones.map((zone) => (
+                        <Card key={zone.uuid} variant="filled">
+                            <Text style={styles.heroEyebrow}>{myZones.length > 1 ? 'ONE OF YOUR ZONES' : 'YOUR ZONE'}</Text>
+                            <Text style={styles.heroName}>{zone.name}</Text>
+                            <Text style={styles.heroTown}>{zone.town}</Text>
+                        </Card>
+                    ))
                 ) : (
                     <Card style={styles.itemCard}>
                         <Text style={styles.emptyHint}>
                             {role === 'agent'
-                                ? "Your zone will show here once your customer list has synced."
+                                ? 'Your zones will show here once your customer list has synced.'
                                 : "Zone assignment is per-agent — this account isn't scoped to a single zone."}
                         </Text>
                     </Card>

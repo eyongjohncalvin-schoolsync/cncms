@@ -11,6 +11,7 @@ Route::get('zones', [ZoneController::class, 'index'])->name('zones.index');
 Route::get('zones/coverage', [ZoneCoverageController::class, 'index'])->name('zones.coverage');
 Route::patch('zones/coverage', [ZoneCoverageController::class, 'update'])->name('zones.coverage.update');
 Route::put('zones/coverage/limit', [ZoneCoverageController::class, 'updateLimit'])->name('zones.coverage.limit');
+Route::put('zones/coverage/technicians', [ZoneCoverageController::class, 'updateTechnician'])->name('zones.coverage.technicians');
 Route::get('zones/create', [ZoneController::class, 'create'])->name('zones.create');
 Route::post('zones', [ZoneController::class, 'store'])->name('zones.store');
 Route::post('zones/import', [ZoneController::class, 'import'])->name('zones.import');

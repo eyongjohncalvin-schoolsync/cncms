@@ -32,6 +32,16 @@ interface ZoneCoverageProps {
     headquarters_limit: number | null;
     can_manage: boolean;
     can_edit_limit: boolean;
+    /** Only for whoever assigns complaints; empty otherwise. */
+    technicians?: Technician[];
+}
+
+interface Technician {
+    uuid: string;
+    name: string;
+    role: string;
+    open: number;
+    zones: string[];
 }
 
 type Filter = { kind: 'all' } | { kind: 'uncovered' } | { kind: 'agent'; uuid: string };
@@ -63,7 +73,18 @@ function formatCustomers(value: number): string {
  * (@/lib/zoneCoverage). Tick boxes and dropdowns only — no dragging — so it
  * works the same with a mouse, a keyboard or a finger.
  */
-export default function ZoneCoverage({ branch, branches, zones, agents, limit, branch_limit, headquarters_limit, can_manage, can_edit_limit }: ZoneCoverageProps) {
+export default function ZoneCoverage({
+    branch,
+    branches,
+    zones,
+    agents,
+    limit,
+    branch_limit,
+    headquarters_limit,
+    can_manage,
+    can_edit_limit,
+    technicians = [],
+}: ZoneCoverageProps) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [filter, setFilter] = useState<Filter>({ kind: 'all' });
     const [search, setSearch] = useState('');
@@ -412,6 +433,8 @@ export default function ZoneCoverage({ branch, branches, zones, agents, limit, b
                 )}
             </Card>
 
+            {technicians.length > 0 && <TechniciansCard branchUuid={branch.uuid} technicians={technicians} zones={zones} />}
+
             {can_manage && selected.size > 0 && (
                 <BulkBar
                     count={selected.size}
@@ -435,6 +458,81 @@ export default function ZoneCoverage({ branch, branches, zones, agents, limit, b
                 onConfirm={confirm}
             />
         </AppLayout>
+    );
+}
+
+/**
+ * Technicians' usual zones — only a hint for who is suggested first when a
+ * complaint is assigned, never a limit on what they can work on. None means
+ * they work anywhere. Saved at once (no preview: nothing about money or
+ * access changes).
+ */
+function TechniciansCard({ branchUuid, technicians, zones }: { branchUuid: string; technicians: Technician[]; zones: CoverageZone[] }) {
+    const zoneNames = new Map(zones.map((zone) => [zone.uuid, zone.name]));
+
+    function save(technician: Technician, zoneUuids: string[]) {
+        router.put('/zones/coverage/technicians', { branch_uuid: branchUuid, user_uuid: technician.uuid, zone_uuids: zoneUuids }, { preserveScroll: true });
+    }
+
+    return (
+        <Card className="mt-4">
+            <CardHeader>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    Technicians
+                    <InfoTip
+                        label="About technicians' zones"
+                        text="Give a technician their usual zones and they are suggested first for complaints there. A technician with no zones works anywhere. Any complaint can still go to anyone."
+                    />
+                </h3>
+            </CardHeader>
+            <ul className="divide-y divide-slate-100">
+                {technicians.map((technician) => {
+                    const available = zones.filter((zone) => !technician.zones.includes(zone.uuid));
+
+                    return (
+                        <li key={technician.uuid} className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center">
+                            <div className="md:w-72">
+                                <p className="text-sm font-semibold text-slate-900">{technician.name}</p>
+                                <p className="text-xs text-slate-500">
+                                    {technician.role} · {technician.open} open complaint{technician.open === 1 ? '' : 's'}
+                                </p>
+                            </div>
+                            <div className="flex flex-1 flex-wrap items-center gap-2">
+                                {technician.zones.length === 0 && <Badge tone="blue">Works anywhere</Badge>}
+                                {technician.zones.map((zoneUuid) => (
+                                    <span key={zoneUuid} className="inline-flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-3 pr-1 text-xs font-medium text-slate-700">
+                                        {zoneNames.get(zoneUuid) ?? 'Zone'}
+                                        <button
+                                            type="button"
+                                            onClick={() => save(technician, technician.zones.filter((uuid) => uuid !== zoneUuid))}
+                                            aria-label={`Remove ${zoneNames.get(zoneUuid) ?? 'zone'} from ${technician.name}`}
+                                            className="inline-flex h-6 w-6 items-center justify-center rounded-full hover:bg-slate-200"
+                                        >
+                                            <IconX size={14} />
+                                        </button>
+                                    </span>
+                                ))}
+                                {available.length > 0 && (
+                                    <select
+                                        aria-label={`Add a usual zone for ${technician.name}`}
+                                        value=""
+                                        onChange={(event) => event.target.value !== '' && save(technician, [...technician.zones, event.target.value])}
+                                        className="min-h-[36px] rounded-full border-dashed border-slate-300 py-1 text-xs text-slate-600 focus:border-blue-500 focus:ring-blue-500"
+                                    >
+                                        <option value="">+ Zone</option>
+                                        {available.map((zone) => (
+                                            <option key={zone.uuid} value={zone.uuid}>
+                                                {zone.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                            </div>
+                        </li>
+                    );
+                })}
+            </ul>
+        </Card>
     );
 }
 
