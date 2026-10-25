@@ -81,6 +81,7 @@ directory `/public`.
   ```bash
   set -e   # any failed step (e.g. a migration) stops the deploy and Ploi marks it failed
   cd {SITE_DIRECTORY}
+  bash deploy/scripts/backup-db.sh   # a fresh backup before every deploy — no backup, no deploy
   git pull origin {BRANCH}
   {SITE_COMPOSER} install --no-interaction --prefer-dist --optimize-autoloader --no-dev
   npm ci && npm run build
@@ -123,13 +124,18 @@ php {SITE_DIRECTORY}/artisan schedule:run
 This drives `tasks:run-due` (every 15 min) and the 07:00 cash-alerts
 digest. Both skip themselves during a maintenance window.
 
-Nightly database backup: server → Cron jobs, `15 3 * * *`:
+Nightly database backup: server → Cron jobs, `15 3 * * *`, **as the site
+user** (with site isolation that is the site's own user, e.g.
+`cncms-eyyyd`, not `ploi` — the script reads that user's `.env`):
 
 ```
-{SITE_DIRECTORY}/deploy/scripts/backup-db.sh
+bash {SITE_DIRECTORY}/deploy/scripts/backup-db.sh
 ```
 
-It writes to `~/backups/cncms` and keeps 14 days. **Copy those off the
+It writes to `~/backups/cncms` and keeps 14 days. Check the folder the
+morning after setting it up: before 2026-10-25 the script misread `.env`
+and failed every run without saying so. The deploy script above also takes
+one before every deploy. **Copy those off the
 server** (rsync from your own machine, or Ploi's backup feature if your
 plan includes it), along with `storage/` (logos and issued receipt PDFs
 can't be regenerated). A lost VPS without an off-server copy means lost data.
