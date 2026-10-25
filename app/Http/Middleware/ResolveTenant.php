@@ -135,6 +135,14 @@ class ResolveTenant
             $response->headers->set('X-Maintenance-Ends-At', $window->ends_at->toIso8601String());
         }
 
+        // The mobile app's "new version available" banner: the current
+        // build (config/agent-app.php) and where to get it. Read from config,
+        // so no query — two short headers on every response.
+        if (($downloadUrl = config('agent-app.android_url')) !== null && $downloadUrl !== '') {
+            $response->headers->set('X-App-Latest-Version', (string) config('agent-app.version'));
+            $response->headers->set('X-App-Download-Url', (string) $downloadUrl);
+        }
+
         return $response;
     }
 }

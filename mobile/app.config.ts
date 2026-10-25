@@ -13,7 +13,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     name: 'CNCMS Field Agent',
     slug: 'cncms-mobile',
     scheme: 'cncms',
-    version: '1.0.0',
+    // Keep in step with AGENT_APP_VERSION on the server: a lower installed
+    // version shows agents the "new version available" banner.
+    version: '1.0.1',
+    // Over-the-air updates (expo-updates): a JS-only change published with
+    // `eas update` reaches phones on their next app open. The fingerprint
+    // policy means an update only ever lands on a build with the same native
+    // code — anything native (a new module, a permission) needs a new APK.
+    runtimeVersion: { policy: 'fingerprint' },
+    updates: {
+        url: 'https://u.expo.dev/71316a4b-46b5-4f19-83f5-5c54a5bc62b0',
+        checkAutomatically: 'ON_LOAD',
+        // Open at once with what the phone has; a new update downloads in the
+        // background and applies on the next open — never a wait on slow data.
+        fallbackToCacheTimeout: 0,
+    },
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light', // dark mode deliberately deferred — mobile-app-react-native.md §6

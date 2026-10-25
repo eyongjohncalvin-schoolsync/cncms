@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { API_BASE_URL } from './config';
 import { getCurrentToken } from '../auth/tokenState';
+import { setAppUpdateState } from '../maintenance/appUpdateStore';
 import { setMaintenanceState } from '../maintenance/maintenanceStore';
 import { isAnnouncingEndpoint } from '../utils/maintenanceState';
 import { REQUEST_TIMEOUT_MS } from '../utils/syncTuning';
@@ -57,6 +58,15 @@ apiClient.interceptors.response.use(
             const endsAt = response.headers['x-maintenance-ends-at'];
 
             setMaintenanceState(startsAt && endsAt ? { startsAt: String(startsAt), endsAt: String(endsAt) } : null);
+        }
+
+        // The current APK (src/utils/appUpdate.ts) — kept when a response
+        // doesn't carry it, so one header-less endpoint never hides the banner.
+        const latestVersion = response.headers['x-app-latest-version'];
+        const downloadUrl = response.headers['x-app-download-url'];
+
+        if (latestVersion && downloadUrl) {
+            setAppUpdateState({ latestVersion: String(latestVersion), downloadUrl: String(downloadUrl) });
         }
 
         return response;

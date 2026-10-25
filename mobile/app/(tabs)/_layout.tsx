@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Tabs } from 'expo-router';
 import { SyncStatusStrip } from '../../src/components/ui/SyncStatusStrip';
 import { EmergencyBanner } from '../../src/components/ui/EmergencyBanner';
+import { AppUpdateBanner } from '../../src/components/ui/AppUpdateBanner';
 import { MaintenanceBanner } from '../../src/components/ui/MaintenanceBanner';
 import { getNotificationsState, subscribeNotificationsState } from '../../src/notifications/notificationStore';
 import { colors } from '../../src/theme/colors';
@@ -76,6 +77,7 @@ export default function TabsLayout() {
             <SafeAreaView edges={['top']} style={styles.stripSafeArea}>
                 <EmergencyBanner />
                 <MaintenanceBanner />
+                <AppUpdateBanner />
                 <SyncStatusStrip />
             </SafeAreaView>
 

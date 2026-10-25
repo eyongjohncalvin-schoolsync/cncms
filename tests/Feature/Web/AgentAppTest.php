@@ -93,4 +93,25 @@ class AgentAppTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page->where('android_url', null));
     }
+
+    public function test_api_responses_tell_the_app_which_version_is_current(): void
+    {
+        config(['agent-app.android_url' => 'https://cncms.tech/downloads/cncms-agent.apk', 'agent-app.version' => '1.0.1']);
+
+        $this->withToken($this->tokenForRole('agent'))
+            ->getJson('/api/v1/auth/me')
+            ->assertOk()
+            ->assertHeader('X-App-Latest-Version', '1.0.1')
+            ->assertHeader('X-App-Download-Url', 'https://cncms.tech/downloads/cncms-agent.apk');
+    }
+
+    public function test_without_a_download_the_app_is_not_told_to_update(): void
+    {
+        config(['agent-app.android_url' => null]);
+
+        $this->withToken($this->tokenForRole('agent'))
+            ->getJson('/api/v1/auth/me')
+            ->assertOk()
+            ->assertHeaderMissing('X-App-Latest-Version');
+    }
 }
