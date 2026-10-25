@@ -174,15 +174,18 @@ added 2026-10-25 — builds before that have no updater and must install
 | Change | How it ships | Agent action |
 |---|---|---|
 | JS/TS only (bug fix, copy, screen logic) | `cd mobile && npm run publish:update -- "what changed"` | none — downloads in the background, applies on the next app open |
-| New native module, permission, SDK/Expo bump, app icon | bump `version` in `mobile/app.config.ts`, `eas build --platform android --profile preview`, replace `public/downloads/cncms-agent.apk`, then set `AGENT_APP_VERSION` + `AGENT_APP_UPDATED_ON` and `php artisan config:cache` | tap the blue "Version X is available" banner, install |
+| New native module, permission, SDK/Expo bump, app icon | bump `version` in `mobile/app.config.ts`, `eas build --platform android --profile preview`, then on the server `bash ~/cncms.tech/deploy/scripts/publish-apk.sh "<apk link>" <version>` | tap the blue "Version X is available" banner, install |
 
 - Always publish with `npm run publish:update`, never a bare `eas update`:
   `eas update` ignores eas.json's build `env`, so a bare run would bake the
   development API address into the update and stop every phone syncing.
 - The runtime version is the native **fingerprint**: an update only lands
   on builds with identical native code, so it can never crash an older APK.
-- Order for a new APK: put the new file in place **first**, then raise
-  `AGENT_APP_VERSION` — the banner links straight to the download.
+- `publish-apk.sh` checks the download is a real APK (size, zip, manifest,
+  not the file already live), keeps the last 3 as backups, swaps the file in,
+  and only then raises `AGENT_APP_VERSION` / `AGENT_APP_UPDATED_ON` and runs
+  `config:cache` — the banner links straight to the download, so the number
+  must never go up before the file. It prints the undo command.
 - The banner compares the installed APK's own version (over-the-air updates
   never change it) with `AGENT_APP_VERSION`, sent on every API response as
   `X-App-Latest-Version` / `X-App-Download-Url` (`ResolveTenant`).
