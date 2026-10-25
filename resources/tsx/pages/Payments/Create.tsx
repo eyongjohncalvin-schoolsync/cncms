@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Head, Link, useForm, usePage } from '@inertiajs/react';
+import { Head, Link, useForm } from '@inertiajs/react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -10,7 +10,7 @@ import { InfoTip } from '@/components/ui/InfoTip';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { PaymentMethodFields } from '@/components/shared/PaymentMethodFields';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Customer, CustomerRecentPayment, PageProps, PaymentFrequency, PaymentMethod } from '@/types';
+import type { Customer, CustomerRecentPayment, PaymentFrequency, PaymentMethod } from '@/types';
 
 function frequencyLabel(freq: PaymentFrequency): string {
     return freq === 'monthly' ? 'Monthly' : freq === 'months' ? 'Multi-month' : 'Yearly';
@@ -176,8 +176,6 @@ export default function PaymentsCreate({ customers, has_receipt_book = false, pr
 }
 
 function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: Customer[]; hasReceiptBook: boolean; offers: PrepaymentOfferOption[] }) {
-    const permissions = usePage<PageProps>().props.auth.user?.permissions ?? [];
-    const canLeaveArrearsDue = permissions.includes('*') || permissions.includes('arrears.approve');
     const [search, setSearch] = useState('');
 
     const { data, setData, post, processing, errors } = useForm({
@@ -331,27 +329,15 @@ function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: C
             return null;
         }
 
-        if (data.clear_arrears_first) {
-            const cleared = Math.min(amount, selectedArrears);
-            const months = Math.floor((amount - cleared) / rate);
-
-            return `Clears ${formatCurrency(cleared)} of arrears, then covers ~${months} prepaid month(s).`;
-        }
-
+        // Debt first, then up to the months paid for; the rest is credit.
+        const cleared = Math.min(amount, selectedArrears);
         const intended = data.frequency === 'yearly' ? 12 : Number(data.months) || 0;
-        const months = Math.min(intended, Math.floor(amount / rate));
+        const affordable = Math.floor((amount - cleared) / rate);
+        const months = intended > 0 ? Math.min(intended, affordable) : affordable;
+        const credit = amount - cleared - months * rate;
 
-        return `Covers ${months} prepaid month(s); ${formatCurrency(selectedArrears)} arrears stays due.`;
-    }, [showClearArrearsToggle, selectedCustomer, data.amount, data.months, data.frequency, data.clear_arrears_first, selectedArrears]);
-
-    // Back to the default whenever the toggle stops being relevant, so a
-    // later prepayment never inherits an earlier override.
-    useEffect(() => {
-        if (!showClearArrearsToggle && !data.clear_arrears_first) {
-            setData('clear_arrears_first', true);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [showClearArrearsToggle]);
+        return `Clears ${formatCurrency(cleared)} of debt, then covers ${months} prepaid month(s)${credit > 0 ? `; ${formatCurrency(credit)} stays as credit` : ''}.`;
+    }, [showClearArrearsToggle, selectedCustomer, data.amount, data.months, data.frequency, selectedArrears]);
 
     function selectCustomer(uuid: string) {
         setData((current) => {
@@ -509,22 +495,10 @@ function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: C
 
                         {showClearArrearsToggle && (
                             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                                <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
-                                    <input
-                                        type="checkbox"
-                                        checked={data.clear_arrears_first}
-                                        disabled={!canLeaveArrearsDue}
-                                        onChange={(e) => setData('clear_arrears_first', e.target.checked)}
-                                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600 disabled:opacity-60"
-                                    />
-                                    <span>
-                                        Clear the {formatCurrency(selectedArrears)} arrears first, then buy prepaid months with the rest
-                                    </span>
-                                </label>
-                                {!canLeaveArrearsDue && (
-                                    <p className="mt-1 pl-6 text-xs text-slate-500">A prepayment always pays off arrears first. Only an admin can leave arrears unpaid.</p>
-                                )}
-                                {prepaymentSplit && <p className="mt-2 pl-6 text-xs text-slate-500">{prepaymentSplit}</p>}
+                                <p className="text-sm font-medium text-slate-700">
+                                    The {formatCurrency(selectedArrears)} debt is cleared first; the rest buys prepaid months.
+                                </p>
+                                {prepaymentSplit && <p className="mt-1 text-xs text-slate-500">{prepaymentSplit}</p>}
                             </div>
                         )}
 

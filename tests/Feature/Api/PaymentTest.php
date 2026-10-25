@@ -203,8 +203,9 @@ class PaymentTest extends TestCase
         $this->assertTrue($response->json('data.clear_arrears_first'));
     }
 
-    public function test_an_arrears_approver_can_leave_arrears_due_on_a_prepayment(): void
+    public function test_not_even_an_arrears_approver_can_leave_arrears_due_on_a_prepayment(): void
     {
+        // Owner's rule (2026-10-25): debts are cleared before any prepayment.
         $customer = $this->customer();
 
         $response = $this->withHeader('Authorization', 'Bearer '.$this->tokenForRole('manager'))
@@ -213,7 +214,7 @@ class PaymentTest extends TestCase
             ]);
 
         $response->assertCreated();
-        $this->assertFalse($response->json('data.clear_arrears_first'));
+        $this->assertTrue($response->json('data.clear_arrears_first'));
     }
 
     public function test_an_agent_cannot_leave_arrears_due_on_a_prepayment(): void

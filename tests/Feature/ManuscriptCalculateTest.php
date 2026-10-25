@@ -423,10 +423,11 @@ class ManuscriptCalculateTest extends TestCase
         $this->assertEqualsWithDelta(2500.0, (float) $r7->credit, 0.001);
     }
 
-    public function test_drawdown_clear_arrears_first_toggle(): void
+    public function test_drawdown_always_clears_debt_first(): void
     {
-        // Q1: ON pays down arrears then buys fewer months; OFF leaves the
-        // debt standing and buys the full N.
+        // Owner's rule (2026-10-25): debt is cleared before any prepayment —
+        // even a payment stored with the old "leave arrears due" flag off.
+        // The rest buys up to the months paid for; anything over is credit.
         $on = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
         $off = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
 
@@ -436,7 +437,7 @@ class ManuscriptCalculateTest extends TestCase
         }
 
         $this->drawdownPayment($on, 6, 2500, clearArrearsFirst: true);   // 15,000: 5k clears debt, 10k = 4 months
-        $this->drawdownPayment($off, 6, 2500, clearArrearsFirst: false); // 15,000: 6 months, 5k debt stays
+        $this->drawdownPayment($off, 2, 2500, clearArrearsFirst: false, amount: 15000); // 15,000: 5k clears debt, 2 months paid for, 5k credit
 
         $rOn = $this->runAndPersist($on, '2026-03');
         $this->assertEqualsWithDelta(0.0, (float) $rOn->totalArrears, 0.001, 'debt cleared');
@@ -444,9 +445,9 @@ class ManuscriptCalculateTest extends TestCase
         $this->assertEqualsWithDelta(0.0, (float) $rOn->totalBill, 0.001);
 
         $rOff = $this->runAndPersist($off, '2026-03');
-        $this->assertEqualsWithDelta(5000.0, (float) $rOff->totalArrears, 0.001, 'debt still standing');
-        $this->assertSame(5, $rOff->prepaidMonthsRemaining, 'full 6 bought minus this period');
-        $this->assertEqualsWithDelta(5000.0, (float) $rOff->totalBill, 0.001, 'old debt shows; no new monthly charge');
+        $this->assertEqualsWithDelta(0.0, (float) $rOff->totalArrears, 0.001, 'debt cleared anyway');
+        $this->assertSame(1, $rOff->prepaidMonthsRemaining, 'the 2 months paid for, minus this period');
+        $this->assertEqualsWithDelta(5000.0, (float) $rOff->credit, 0.001, 'money over the months paid for is credit');
     }
 
     public function test_a_drawdown_prepaid_customer_keeps_their_months_across_disconnection(): void

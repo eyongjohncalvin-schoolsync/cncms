@@ -1142,6 +1142,9 @@ class PaymentTest extends TestCase
         $this->assertSame('months', $payment->frequency);
         $this->assertSame(5, $payment->months);
         $this->assertNull($payment->expiration_date);
+        // Same rules as recording a prepayment: debt first, the bill locked as its rate.
+        $this->assertTrue($payment->clear_arrears_first);
+        $this->assertSame((string) $customer->bill, (string) $payment->prepaid_rate);
     }
 
     public function test_edit_page_renders_for_a_manager(): void

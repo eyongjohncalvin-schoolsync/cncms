@@ -340,25 +340,37 @@ final class ManuscriptCalculator
             $prepaidMonths = $previousPrepaidMonths;
             $prepaidRate = $previousPrepaidRate;
 
-            // 1. Absorb each new prepayment (Q1 toggle handled per payment).
+            // 1. Owner's rule: debt is cleared before anything is prepaid. Any
+            //    ordinary payment this period pays the debt first (a customer
+            //    who paid their debt, then bought an offer the same month,
+            //    gets the whole offer); what it doesn't need is credit.
+            $otherIncome = $eligibleVerifiedPayments
+                ->reject(fn (Payment $payment): bool => $drawdownPayments->contains($payment) || $servicePayments->contains($payment))
+                ->reduce(
+                    fn (string $carry, Payment $payment): string => $this->add($carry, $this->normalize((string) $payment->amount)),
+                    '0.00',
+                );
+            $paidDown = $this->compare($arrears, '0.00') <= 0 ? '0.00' : ($this->compare($otherIncome, $arrears) < 0 ? $otherIncome : $arrears);
+            $arrears = $this->sub($arrears, $paidDown);
+            $credit = $this->add($credit, $this->sub($otherIncome, $paidDown));
+
+            // 2. Each prepayment then clears whatever debt is left, and only
+            //    the rest buys months — up to the months the customer paid
+            //    for (the office checks those when it verifies); anything
+            //    over is credit.
             foreach ($drawdownPayments as $payment) {
                 $amount = $this->normalize((string) $payment->amount);
                 $rate = $this->normalize((string) ($payment->prepaid_rate ?? $customer->bill));
                 $intendedMonths = $payment->frequency === 'yearly' ? 12 : (int) ($payment->months ?? 0);
 
-                if ($payment->clear_arrears_first) {
-                    $outstanding = $this->compare($arrears, $credit) > 0 ? $this->sub($arrears, $credit) : '0.00';
-                    $cleared = $this->compare($amount, $outstanding) < 0 ? $amount : $outstanding;
-                    $arrears = $this->sub($arrears, $cleared);
-                    if ($this->compare($arrears, '0.00') < 0) {
-                        $arrears = '0.00';
-                    }
-                    $spendable = $this->sub($amount, $cleared);
-                    $cap = PHP_INT_MAX;
-                } else {
-                    $spendable = $amount;
-                    $cap = $intendedMonths;
+                $outstanding = $this->compare($arrears, $credit) > 0 ? $this->sub($arrears, $credit) : '0.00';
+                $cleared = $this->compare($amount, $outstanding) < 0 ? $amount : $outstanding;
+                $arrears = $this->sub($arrears, $cleared);
+                if ($this->compare($arrears, '0.00') < 0) {
+                    $arrears = '0.00';
                 }
+                $spendable = $this->sub($amount, $cleared);
+                $cap = $intendedMonths > 0 ? $intendedMonths : PHP_INT_MAX;
 
                 $offerPrice = $this->normalize((string) ($payment->offer_price ?? $payment->amount));
 
@@ -393,17 +405,7 @@ final class ManuscriptCalculator
                 }
             }
 
-            // 2. Any other eligible payment this period is ordinary income
-            //    against the debt/credit ledger — a customer paying down old
-            //    arrears while prepaid.
-            $otherIncome = $eligibleVerifiedPayments
-                ->reject(fn (Payment $payment): bool => $drawdownPayments->contains($payment) || $servicePayments->contains($payment))
-                ->reduce(
-                    fn (string $carry, Payment $payment): string => $this->add($carry, $this->normalize((string) $payment->amount)),
-                    '0.00',
-                );
-
-            // 3. Net position WITHOUT this period's monthly charge when a
+            // 3. Net position (the ordinary income was already netted in step 1) WITHOUT this period's monthly charge when a
             //    prepaid month covers it; WITH it when the window is already
             //    empty (a new prepayment too small to buy a whole month). A
             //    month with nothing charged (free, or covered per service)
@@ -412,7 +414,7 @@ final class ManuscriptCalculator
             $chargeThisPeriod = $coveredThisPeriod ? '0.00' : $billDue;
 
             $net = $this->add(
-                $this->add($this->sub($arrears, $credit), $this->sub($chargeThisPeriod, $otherIncome)),
+                $this->add($this->sub($arrears, $credit), $chargeThisPeriod),
                 $adjustmentNet,
             );
             [$totalArrears, $creditOut] = $this->splitNet($net);

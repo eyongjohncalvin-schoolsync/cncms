@@ -633,8 +633,16 @@ class PaymentService
 
         $attributes = $data->toAttributes();
 
-        if ($data->clearArrearsFirst !== null) {
+        // Corrected into a prepayment: same rules as recording one (debt
+        // first, the bill locked as its rate).
+        $frequency = $data->frequency ?? $payment->frequency;
+        if (in_array($frequency, ['months', 'yearly'], true)) {
             $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
+            if ($payment->prepaid_rate === null) {
+                $attributes['prepaid_rate'] = (string) $payment->customer->bill;
+            }
+        } elseif ($data->clearArrearsFirst !== null) {
+            unset($attributes['clear_arrears_first']);
         }
 
         if ($data->frequency !== null || $data->months !== null) {
@@ -781,19 +789,13 @@ class PaymentService
     }
 
     /**
-     * A prepayment pays off what the customer owes first; only the rest buys
-     * prepaid months (owner's rule, 2026-10: "a prepaid customer can't have
-     * arrears"). Leaving the arrears due is an explicit override reserved
-     * for someone who may approve arrears decisions (`arrears.approve`) —
-     * anyone else, including an agent's phone or an older mobile build that
-     * still sends `false`, always clears arrears first.
+     * A prepayment always pays off what the customer owes first; only the
+     * rest buys prepaid months (owner's rule, 2026-10-25: "debts should be
+     * cleared before any prepayment"). No override — whatever a form or an
+     * older phone sends. ManuscriptCalculator applies the same rule.
      */
     private function clearsArrearsFirst(PaymentData $data): bool
     {
-        if ($data->clearArrearsFirst === false && $this->context->can('arrears.approve')) {
-            return false;
-        }
-
         return true;
     }
 

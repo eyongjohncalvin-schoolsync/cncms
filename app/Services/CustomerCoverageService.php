@@ -78,7 +78,9 @@ class CustomerCoverageService
             }
 
             $rate = bcadd((string) ($payment->prepaid_rate ?? $bill), '0', 2);
-            $cap = $payment->clear_arrears_first ? PHP_INT_MAX : ($payment->frequency === 'yearly' ? 12 : (int) $payment->months);
+            // Same as the bill run: up to the months paid for (none recorded = what the money buys).
+            $intendedMonths = $payment->frequency === 'yearly' ? 12 : (int) $payment->months;
+            $cap = $intendedMonths > 0 ? $intendedMonths : PHP_INT_MAX;
             $wholeBill += $plan->monthsBought($from, bcadd((string) $payment->amount, '0', 2), $rate, $cap, $wholeBill, $bill)['months'];
         }
 

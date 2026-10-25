@@ -201,6 +201,28 @@ class PrepaymentOfferTest extends TestCase
         $this->assertSame('0.00', $result->totalArrears);
     }
 
+    public function test_debt_paid_separately_first_still_gets_the_whole_offer_at_the_bill_run(): void
+    {
+        // Owes 4,000; pays 4,000, then buys the 5,000-for-3-months offer. The
+        // debt payment clears the debt, so the offer gets all its months.
+        $offer = PrepaymentOfferFactory::new()->create(['months' => 3, 'price' => 5000]);
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'bill' => 2000, 'others' => 0, 'status' => 'active']);
+        $period = BusinessTimezone::currentPeriod();
+        $previous = ManuscriptFactory::new()->create(['customer_id' => $customer->id, 'period' => Carbon::createFromFormat('!Y-m', $period)->subMonthNoOverflow()->format('Y-m'), 'bill' => 2000, 'total_arrears' => 4000, 'credit' => 0]);
+        $debt = PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 4000, 'frequency' => 'monthly', 'verification_status' => 'verified']);
+        $offerPayment = PaymentFactory::new()->create([
+            'customer_id' => $customer->id, 'amount' => 5000, 'frequency' => 'months', 'months' => 3, 'offer_price' => 5000,
+            'prepaid_rate' => '2000', 'clear_arrears_first' => true, 'prepayment_offer_id' => $offer->id,
+            'verification_status' => 'verified', 'expiration_date' => null,
+        ]);
+
+        $result = (new ManuscriptCalculator)->calculate($customer->fresh(), $period, $previous, collect([$debt, $offerPayment]), collect());
+
+        $this->assertSame(2, $result->prepaidMonthsRemaining, 'Three months bought, this month uses one.');
+        $this->assertSame('0.00', $result->totalArrears);
+        $this->assertSame('0.00', $result->credit);
+    }
+
     public function test_headquarters_keeps_the_offer_list(): void
     {
         $this->as('admin');
