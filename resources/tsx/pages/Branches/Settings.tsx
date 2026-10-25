@@ -20,6 +20,8 @@ interface PricedItem {
 interface PriceList {
     services: (PricedItem & { variants: PricedItem[] })[];
     offers: PricedItem[];
+    /** Prepayment offers on sale ("4 months for 10,000"). */
+    prepayment_offers?: PricedItem[];
 }
 
 interface PriceChange {
@@ -30,7 +32,7 @@ interface PriceChange {
     by: string | null;
 }
 
-type PriceTarget = 'service' | 'variant' | 'offer';
+type PriceTarget = 'service' | 'variant' | 'offer' | 'prepayment_offer';
 
 type Overridable =
     | 'location'
@@ -65,7 +67,8 @@ function PriceRow({ branchUuid, target, item, label }: { branchUuid: string; tar
         target_uuid: item.uuid,
         price: item.branch_price ?? '',
         reason: '',
-        apply_to_subscribers: target !== 'offer',
+        // Only a service's or option's price can be applied to existing subscribers.
+        apply_to_subscribers: target === 'service' || target === 'variant',
     });
 
     function submit(event: FormEvent) {
@@ -103,7 +106,7 @@ function PriceRow({ branchUuid, target, item, label }: { branchUuid: string; tar
                     onChange={(e) => form.setData('reason', e.target.value)}
                     error={form.errors.reason}
                 />
-                {target !== 'offer' && (
+                {(target === 'service' || target === 'variant') && (
                     <label className="flex items-center gap-2 text-xs text-slate-600">
                         <input
                             type="checkbox"
@@ -274,6 +277,9 @@ export default function BranchSettings({ branch, headquarters, can_manage_branch
                     ])}
                     {prices.offers.map((offer) => (
                         <PriceRow key={offer.uuid} branchUuid={branch.uuid} target="offer" item={offer} label={`Installation: ${offer.name}`} />
+                    ))}
+                    {(prices.prepayment_offers ?? []).map((offer) => (
+                        <PriceRow key={offer.uuid} branchUuid={branch.uuid} target="prepayment_offer" item={offer} label={`Prepayment offer: ${offer.name}`} />
                     ))}
                 </CardBody>
             </Card>

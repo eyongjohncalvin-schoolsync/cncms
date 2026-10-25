@@ -9,6 +9,7 @@ use App\Http\Controllers\SettingsCompanyController;
 use App\Http\Controllers\SettingsInstallationOfferController;
 use App\Http\Controllers\SettingsLocaleController;
 use App\Http\Controllers\SettingsNotificationController;
+use App\Http\Controllers\SettingsPrepaymentOfferController;
 use App\Http\Controllers\SettingsServiceController;
 use Illuminate\Support\Facades\Route;
 
@@ -98,6 +99,12 @@ Route::patch('settings/installation-offers/cap', [SettingsInstallationOfferContr
 Route::patch('settings/installation-offers/one-off-fees', [SettingsInstallationOfferController::class, 'updateOneOffFees'])->name('settings.installation-offers.one-off-fees');
 Route::patch('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'update'])->name('settings.installation-offers.update');
 Route::delete('settings/installation-offers/{installationOffer}', [SettingsInstallationOfferController::class, 'destroy'])->name('settings.installation-offers.destroy');
+
+// Prepayment offers ("4 months for 10,000") — `payments.offers` via PrepaymentOfferPolicy.
+Route::get('settings/prepayment-offers', [SettingsPrepaymentOfferController::class, 'index'])->name('settings.prepayment-offers.index');
+Route::post('settings/prepayment-offers', [SettingsPrepaymentOfferController::class, 'store'])->name('settings.prepayment-offers.store');
+Route::patch('settings/prepayment-offers/{prepaymentOffer}', [SettingsPrepaymentOfferController::class, 'update'])->name('settings.prepayment-offers.update');
+Route::delete('settings/prepayment-offers/{prepaymentOffer}', [SettingsPrepaymentOfferController::class, 'destroy'])->name('settings.prepayment-offers.destroy');
 
 // Salaries (branches v2 D8): headquarters' grades and approvals; a person's
 // salary is set from the Users Control Center.

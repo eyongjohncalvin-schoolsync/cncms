@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Branch;
 use App\Models\BranchPrice;
 use App\Models\InstallationOffer;
+use App\Models\PrepaymentOffer;
 use App\Models\Service;
 use App\Models\ServiceVariant;
 use App\Models\User;
@@ -30,7 +31,10 @@ class BranchPriceService
 
     public const string TARGET_OFFER = 'offer';
 
-    public const array TARGETS = [self::TARGET_SERVICE, self::TARGET_VARIANT, self::TARGET_OFFER];
+    /** A prepayment offer ("4 months for 10,000"). */
+    public const string TARGET_PREPAYMENT_OFFER = 'prepayment_offer';
+
+    public const array TARGETS = [self::TARGET_SERVICE, self::TARGET_VARIANT, self::TARGET_OFFER, self::TARGET_PREPAYMENT_OFFER];
 
     public function __construct(
         private readonly CustomerSubscriptionService $subscriptions,
@@ -54,6 +58,7 @@ class BranchPriceService
                 'service_id' => $target instanceof Service ? $target->id : null,
                 'service_variant_id' => $target instanceof ServiceVariant ? $target->id : null,
                 'installation_offer_id' => $target instanceof InstallationOffer ? $target->id : null,
+                'prepayment_offer_id' => $target instanceof PrepaymentOffer ? $target->id : null,
                 'price' => $price,
                 'reason' => $reason,
                 'set_by' => $actor->id,
@@ -62,7 +67,7 @@ class BranchPriceService
             BranchPrices::flush();
             $repriced = 0;
 
-            if ($applyToSubscribers && ! $target instanceof InstallationOffer) {
+            if ($applyToSubscribers && ($target instanceof Service || $target instanceof ServiceVariant)) {
                 $prices = BranchPrices::for($branch->id);
                 $repriced = $target instanceof Service
                     ? $this->subscriptions->applyPriceToBranchSubscribers($branch->id, $target->id, null, $prices->service($target))
@@ -82,18 +87,19 @@ class BranchPriceService
     {
         return BranchPrice::query()
             ->where('branch_id', $branch->id)
-            ->with(['service:id,name', 'variant:id,name,service_id', 'variant.service:id,name', 'installationOffer:id,name', 'setBy:id,name'])
+            ->with(['service:id,name', 'variant:id,name,service_id', 'variant.service:id,name', 'installationOffer:id,name', 'prepaymentOffer:id,name', 'setBy:id,name'])
             ->latest('id')
             ->limit($limit)
             ->get();
     }
 
-    private function resolveTarget(string $targetType, string $targetUuid): Service|ServiceVariant|InstallationOffer
+    private function resolveTarget(string $targetType, string $targetUuid): Service|ServiceVariant|InstallationOffer|PrepaymentOffer
     {
         $target = match ($targetType) {
             self::TARGET_SERVICE => Service::query()->where('uuid', $targetUuid)->first(),
             self::TARGET_VARIANT => ServiceVariant::query()->where('uuid', $targetUuid)->first(),
             self::TARGET_OFFER => InstallationOffer::query()->where('uuid', $targetUuid)->first(),
+            self::TARGET_PREPAYMENT_OFFER => PrepaymentOffer::query()->where('uuid', $targetUuid)->first(),
             default => null,
         };
 

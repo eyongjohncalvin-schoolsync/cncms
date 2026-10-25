@@ -164,6 +164,8 @@ export interface SyncPushPaymentItem {
     /** Why a second payment for the customer this month is fine (PaymentService::flagPossibleDuplicate()). */
     duplicate_reason?: 'advance' | 'arrears' | 'refund' | 'other' | null;
     duplicate_note?: string | null;
+    /** A prepayment offer sold in the field (PaymentService::applyPrepaymentOffer()). */
+    prepayment_offer_uuid?: string | null;
 }
 
 /**

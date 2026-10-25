@@ -222,6 +222,8 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     // Why a second payment for the customer this month is fine (the agent confirmed it).
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN duplicate_reason TEXT' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN duplicate_note TEXT' },
+    // The prepayment offer sold with the payment ("4 months for 10,000").
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN prepayment_offer_uuid TEXT' },
     // "Request a bon" (docs/plans/expenditures-and-spending-controls.md): the
     // `expenditures` outbox now holds bon requests — who is paid, whether it
     // was already paid out of the agent's collections, and the BC- number

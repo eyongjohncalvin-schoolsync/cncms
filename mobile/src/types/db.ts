@@ -68,6 +68,8 @@ export interface LocalPayment {
     /** Why a second payment for the customer this month is fine, as the agent confirmed it (null when it isn't one). */
     duplicate_reason?: DuplicateReason | null;
     duplicate_note?: string | null;
+    /** The prepayment offer sold (its months and price are fixed). */
+    prepayment_offer_uuid?: string | null;
     sync_status: SyncStatus;
     sync_error: string | null;
     sync_attempts: number;
@@ -205,4 +207,11 @@ export interface LocalInstallation {
  * 3): zones, the service catalogue and the installation options, refreshed
  * on sync and whenever the form opens online. JSON-encoded API payloads.
  */
-export type SyncMetaKey = 'last_sync_at' | 'device_id' | 'agent_zone_uuid' | 'cache_zones' | 'cache_service_catalogue' | 'cache_installation_options';
+export type SyncMetaKey =
+    | 'last_sync_at'
+    | 'device_id'
+    | 'agent_zone_uuid'
+    | 'cache_zones'
+    | 'cache_service_catalogue'
+    | 'cache_installation_options'
+    | 'cache_prepayment_offers';

@@ -38,6 +38,8 @@ use LogicException;
     'service_months',
     // A possible repeat of an earlier payment that month — see DUPLICATE_REASONS.
     'duplicate_of_id', 'duplicate_reason', 'duplicate_note',
+    // The prepayment offer it bought (PaymentService::applyPrepaymentOffer()).
+    'prepayment_offer_id',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model
@@ -181,6 +183,12 @@ class Payment extends Model
             'collected_at' => 'datetime',
             'recorded_offline' => 'boolean',
         ];
+    }
+
+    /** The prepayment offer this payment bought, if any. */
+    public function prepaymentOffer(): BelongsTo
+    {
+        return $this->belongsTo(PrepaymentOffer::class);
     }
 
     /** The earlier payment that month this one may repeat. */

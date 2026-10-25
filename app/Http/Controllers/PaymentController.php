@@ -11,15 +11,18 @@ use App\Http\Requests\StoreBulkPaymentRequest;
 use App\Http\Requests\StorePaymentRequest;
 use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
+use App\Models\Branch;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\PaymentVerification;
+use App\Models\PrepaymentOffer;
 use App\Models\ReceiptBlock;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
 use App\Services\ReceiptEmailService;
+use App\Support\BranchPrices;
 use App\Support\PaymentReceiptLink;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
@@ -180,11 +183,25 @@ class PaymentController extends Controller
                 // Current arrears — drives the "clear arrears first" toggle on a
                 // months/yearly prepayment (references/prepayment-drawdown.md Q1).
                 'total_arrears' => (string) ($customer->latestManuscript?->total_arrears ?? '0'),
+                // Prices prepayment offers by the customer's branch (from the branch memo, no query).
+                'branch_uuid' => Branch::allMemoized()->get($customer->branch_id)?->uuid,
             ])
             ->values();
 
         return Inertia::render('Payments/Create', [
             'customers' => $customers,
+            // Prepayment offers on sale today, each with its price per branch
+            // (headquarters' price unless a branch sets its own).
+            'prepayment_offers' => PrepaymentOffer::query()->available()->orderBy('months')->get()
+                ->map(fn (PrepaymentOffer $offer): array => [
+                    'uuid' => $offer->uuid,
+                    'name' => $offer->name,
+                    'months' => $offer->months,
+                    'price' => (string) $offer->price,
+                    'branch_prices' => Branch::allMemoized()
+                        ->mapWithKeys(fn (Branch $branch): array => [$branch->uuid => BranchPrices::for($branch->id)->prepaymentOfferPrice($offer)])
+                        ->all(),
+                ])->values()->all(),
             // Cash controls: show the "receipt book number" field only to
             // someone actually holding an open printed book.
             'has_receipt_book' => ReceiptBlock::query()

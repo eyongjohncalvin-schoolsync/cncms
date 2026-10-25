@@ -76,6 +76,12 @@ enum Permission: string
      * gated. Seeded to the same roles that hold payments.verify.
      */
     case PaymentsIssueReceipt = 'payments.issue_receipt';
+    /**
+     * Prepayment offers ("4 months for 10,000"): set headquarters' list in
+     * Settings. Collectors only pick an offer when recording a payment
+     * (payments.create); a branch's own price for one is branches.settings.
+     */
+    case PaymentsOffers = 'payments.offers';
 
     // ---- Manuscripts -------------------------------------------------
     case ManuscriptsView = 'manuscripts.view';

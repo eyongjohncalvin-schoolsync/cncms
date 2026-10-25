@@ -7,10 +7,13 @@ namespace App\Services;
 use App\DataTransferObjects\PaymentData;
 use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\PrepaymentOffer;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\Billing\FreeMonthPlan;
 use App\Support\BranchLookup;
+use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -170,6 +173,7 @@ class PaymentService
             $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
         }
 
+        $attributes = $this->applyPrepaymentOffer($customer, $data, $attributes);
         $attributes = $this->flagPossibleDuplicate($customer, $data, $attributes);
 
         if ($data->receiptNumber !== null) {
@@ -203,6 +207,103 @@ class PaymentService
         }
 
         return $payment;
+    }
+
+    /**
+     * A payment made under a prepayment offer ("4 months for 10,000") buys
+     * exactly the offer's months for exactly its price in the customer's
+     * branch — no amount is ever inflated to make months come out right
+     * (App\Services\ManuscriptCalculator honours the offer's months). Only
+     * for a customer with no unpaid debt, and not during installation free
+     * months.
+     *
+     * At the counter those rules refuse the payment. From an offline phone
+     * the cash was already collected, so it is never refused: a payment that
+     * breaks one is recorded under the offer but left pending for the office;
+     * an offer that no longer exists falls back to an ordinary prepayment.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function applyPrepaymentOffer(Customer $customer, PaymentData $data, array $attributes): array
+    {
+        if ($data->prepaymentOfferUuid === null) {
+            return $attributes;
+        }
+
+        $offline = (bool) $data->recordedOffline;
+        $offer = PrepaymentOffer::query()
+            ->where('uuid', $data->prepaymentOfferUuid)
+            // At the counter it must be on sale today; a phone may have sold it offline just before it ended.
+            ->when(! $offline, fn ($query) => $query->available())
+            ->first();
+
+        if ($offer === null) {
+            if (! $offline) {
+                throw ValidationException::withMessages(['prepayment_offer_uuid' => 'That offer is not available today.']);
+            }
+
+            return [...$attributes, 'verification_status' => 'pending'];
+        }
+
+        $price = BranchPrices::for($customer->branch_id)->prepaymentOfferPrice($offer);
+        $problem = match (true) {
+            ($data->purpose ?? Payment::PURPOSE_SUBSCRIPTION) !== Payment::PURPOSE_SUBSCRIPTION => 'An offer only pays for the monthly bill.',
+            bccomp((string) $data->amount, $price, 2) !== 0 => "{$offer->name} costs ".number_format((float) $price, 0, '.', ',').' FCFA — record exactly that amount.',
+            bccomp($debt = $this->unpaidDebt($customer), '0', 2) > 0 => "{$customer->name} still owes ".number_format((float) $debt, 0, '.', ',').' FCFA. Collect the old debt first, then sell the offer.',
+            $this->inInstallationFreeMonths($customer) => "{$customer->name} is still in free months from their installation — sell the offer once they end.",
+            default => null,
+        };
+
+        if ($problem !== null && ! $offline) {
+            throw ValidationException::withMessages(['prepayment_offer_uuid' => $problem]);
+        }
+
+        return [
+            ...$attributes,
+            'prepayment_offer_id' => $offer->id,
+            'frequency' => 'months',
+            'months' => $offer->months,
+            'expiration_date' => $this->computeExpirationDate('months', $offer->months),
+            // What each of its months is worth (display, and any later credit draw).
+            'prepaid_rate' => bcdiv($price, (string) $offer->months, 2),
+            'clear_arrears_first' => false,
+            'verification_status' => $problem !== null ? 'pending' : ($attributes['verification_status'] ?? 'pending'),
+        ];
+    }
+
+    /**
+     * Old debt still unpaid: the last bill run's arrears, less any credit and
+     * the payments recorded since (not rejected) — so a collector can take
+     * the debt and then sell an offer in the same visit.
+     */
+    private function unpaidDebt(Customer $customer): string
+    {
+        $customer->loadMissing('latestManuscript');
+        $arrears = (string) ($customer->latestManuscript?->total_arrears ?? '0');
+        $credit = (string) ($customer->latestManuscript?->credit ?? '0');
+
+        $paidSince = (string) Payment::query()
+            ->where('customer_id', $customer->id)
+            ->subscription()
+            ->whereNull('processed_at')
+            ->whereNull('prepayment_offer_id')
+            ->where('verification_status', '!=', 'rejected')
+            ->sum('amount');
+
+        $debt = bcsub(bcsub($arrears, $credit, 2), $paidSince, 2);
+
+        return bccomp($debt, '0', 2) > 0 ? $debt : '0.00';
+    }
+
+    /** Whether the customer's installation free months still run this month (or haven't started billing yet). */
+    private function inInstallationFreeMonths(Customer $customer): bool
+    {
+        $plan = FreeMonthPlan::forCustomer($customer);
+        $period = BusinessTimezone::currentPeriod();
+
+        return ! $plan->isEmpty()
+            && ($plan->beforeBillingStarts($period) || $plan->allServicesFree($period) || $plan->freeServiceIds($period) !== []);
     }
 
     /**

@@ -89,6 +89,7 @@ class SyncPushRequest extends FormRequest
             // (anything else, or nothing, is stored as `unconfirmed`).
             'changes.payments.*.duplicate_reason' => ['nullable', 'string', 'max:20'],
             'changes.payments.*.duplicate_note' => ['nullable', 'string', 'max:255'],
+            'changes.payments.*.prepayment_offer_uuid' => ['nullable', 'uuid'],
 
             // "Request a bon" from the phone
             // (docs/plans/expenditures-and-spending-controls.md, item 2) —

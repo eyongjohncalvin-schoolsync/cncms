@@ -6,6 +6,7 @@ namespace App\Support;
 
 use App\Models\Branch;
 use App\Models\InstallationOffer;
+use App\Models\PrepaymentOffer;
 use App\Models\Service;
 use App\Models\ServiceVariant;
 use Illuminate\Support\Facades\DB;
@@ -27,11 +28,13 @@ final class BranchPrices
      * @param  array<int, string>  $services  service id => price
      * @param  array<int, string>  $variants  service variant id => price
      * @param  array<int, string>  $offers  installation offer id => fee
+     * @param  array<int, string>  $prepaymentOffers  prepayment offer id => price
      */
     private function __construct(
         private readonly array $services = [],
         private readonly array $variants = [],
         private readonly array $offers = [],
+        private readonly array $prepaymentOffers = [],
     ) {}
 
     public static function for(?int $branchId): self
@@ -87,16 +90,27 @@ final class BranchPrices
         return array_key_exists($offerId, $this->offers);
     }
 
+    /** A prepayment offer's price in this branch ($offer->price unless the branch sets its own). */
+    public function prepaymentOfferPrice(PrepaymentOffer $offer): string
+    {
+        return $this->prepaymentOffers[$offer->id] ?? self::money($offer->price);
+    }
+
+    public function overridesPrepaymentOffer(int $offerId): bool
+    {
+        return array_key_exists($offerId, $this->prepaymentOffers);
+    }
+
     private static function load(int $branchId): self
     {
         // Latest change per target; a NULL price there means "back to headquarters".
         $rows = DB::table('branch_prices')
-            ->selectRaw('DISTINCT ON (service_id, service_variant_id, installation_offer_id) service_id, service_variant_id, installation_offer_id, price')
+            ->selectRaw('DISTINCT ON (service_id, service_variant_id, installation_offer_id, prepayment_offer_id) service_id, service_variant_id, installation_offer_id, prepayment_offer_id, price')
             ->where('branch_id', $branchId)
-            ->orderByRaw('service_id, service_variant_id, installation_offer_id, id DESC')
+            ->orderByRaw('service_id, service_variant_id, installation_offer_id, prepayment_offer_id, id DESC')
             ->get();
 
-        $services = $variants = $offers = [];
+        $services = $variants = $offers = $prepaymentOffers = [];
 
         foreach ($rows as $row) {
             if ($row->price === null) {
@@ -106,11 +120,12 @@ final class BranchPrices
             match (true) {
                 $row->service_id !== null => $services[(int) $row->service_id] = self::money($row->price),
                 $row->service_variant_id !== null => $variants[(int) $row->service_variant_id] = self::money($row->price),
-                default => $offers[(int) $row->installation_offer_id] = self::money($row->price),
+                $row->installation_offer_id !== null => $offers[(int) $row->installation_offer_id] = self::money($row->price),
+                default => $prepaymentOffers[(int) $row->prepayment_offer_id] = self::money($row->price),
             };
         }
 
-        return new self($services, $variants, $offers);
+        return new self($services, $variants, $offers, $prepaymentOffers);
     }
 
     private static function money(mixed $value): string

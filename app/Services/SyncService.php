@@ -421,6 +421,8 @@ class SyncService
                 // phone asked them (1.0.1+), else `unconfirmed`. Never refused.
                 'duplicate_reason' => in_array($item['duplicate_reason'] ?? null, Payment::DUPLICATE_REASONS_PICKABLE, true) ? $item['duplicate_reason'] : 'unconfirmed',
                 'duplicate_note' => $item['duplicate_note'] ?? null,
+                // A prepayment offer sold in the field (never refused offline — see PaymentService::applyPrepaymentOffer()).
+                'prepayment_offer_uuid' => $item['prepayment_offer_uuid'] ?? null,
             ]);
 
             // The branch-scoped customer resolved up front, when there is

@@ -28,6 +28,8 @@ export interface NewLocalPaymentInput {
     /** Set when the agent confirmed a second payment for the customer this month. */
     duplicate_reason?: DuplicateReason | null;
     duplicate_note?: string | null;
+    /** A prepayment offer sold with it. */
+    prepayment_offer_uuid?: string | null;
 }
 
 /** Writes a new outbox row for a payment recorded offline-first. Screens
@@ -57,6 +59,7 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
         receipt_issued_at: input.receipt_issued_at ?? null,
         duplicate_reason: input.duplicate_reason ?? null,
         duplicate_note: input.duplicate_note?.trim() ? input.duplicate_note.trim() : null,
+        prepayment_offer_uuid: input.prepayment_offer_uuid ?? null,
         sync_status: 'queued',
         sync_error: null,
         sync_attempts: 0,
@@ -69,12 +72,12 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
             (local_uuid, server_uuid, customer_uuid, amount, credit, frequency, months, clear_arrears_first,
              verification_status, rejection_reason, receipt_local_uri, receipt_server_path,
              method, method_reference, receipt_number, security_code, receipt_issued_at,
-             duplicate_reason, duplicate_note,
+             duplicate_reason, duplicate_note, prepayment_offer_uuid,
              sync_status, sync_error, sync_attempts, created_at, updated_at)
          VALUES ($local_uuid, $server_uuid, $customer_uuid, $amount, $credit, $frequency, $months, $clear_arrears_first,
              $verification_status, $rejection_reason, $receipt_local_uri, $receipt_server_path,
              $method, $method_reference, $receipt_number, $security_code, $receipt_issued_at,
-             $duplicate_reason, $duplicate_note,
+             $duplicate_reason, $duplicate_note, $prepayment_offer_uuid,
              $sync_status, $sync_error, $sync_attempts, $created_at, $updated_at)`,
         {
             $local_uuid: row.local_uuid,
@@ -96,6 +99,7 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
             $receipt_issued_at: row.receipt_issued_at,
             $duplicate_reason: row.duplicate_reason ?? null,
             $duplicate_note: row.duplicate_note ?? null,
+            $prepayment_offer_uuid: row.prepayment_offer_uuid ?? null,
             $sync_status: row.sync_status,
             $sync_error: row.sync_error,
             $sync_attempts: row.sync_attempts,
@@ -254,6 +258,23 @@ export async function getPaymentThisMonthForCustomer(customerUuid: string, month
     );
 
     return row ?? null;
+}
+
+/**
+ * What this phone collected from the customer since the business month began
+ * (not rejected, not offers) — taken off their cached arrears so an agent can
+ * collect old debt and then sell a prepayment offer in the same visit.
+ */
+export async function getPaidThisMonthOnPhone(customerUuid: string, monthStartIso: string): Promise<number> {
+    const db = await getDatabase();
+
+    const row = await db.getFirstAsync<{ total: number | null }>(
+        `SELECT SUM(amount) AS total FROM payments
+         WHERE customer_uuid = ? AND verification_status != 'rejected' AND prepayment_offer_uuid IS NULL AND created_at >= ?`,
+        [customerUuid, monthStartIso],
+    );
+
+    return row?.total ?? 0;
 }
 
 export async function getLastPaymentForCustomer(customerUuid: string): Promise<LocalPayment | null> {

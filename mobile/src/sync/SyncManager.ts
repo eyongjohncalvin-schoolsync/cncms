@@ -44,6 +44,7 @@ import {
     markInstallationSynced,
 } from '../db/installations';
 import { refreshFormData } from '../db/formCache';
+import { refreshPrepaymentOffers } from '../api/prepaymentOffers';
 import { OLD_SERVER_MESSAGE, serverAcceptsInstallations, type FieldInstallationItem } from '../utils/fieldInstallation';
 import { isFinalUploadFailure, withJitter } from '../utils/syncTuning';
 import type { SyncPushBonRequestItem, SyncPushComplaintItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
@@ -389,6 +390,8 @@ class SyncManagerImpl {
             // A second payment this month the agent confirmed (else the server flags it "unconfirmed").
             duplicate_reason: payment.duplicate_reason ?? null,
             duplicate_note: payment.duplicate_note ?? null,
+            // A prepayment offer sold in the field (the server re-checks it).
+            prepayment_offer_uuid: payment.prepayment_offer_uuid ?? null,
         }));
 
         // "Request a bon" (docs/plans/expenditures-and-spending-controls.md):
@@ -551,6 +554,8 @@ class SyncManagerImpl {
 
         try {
             await refreshFormData();
+            // Prepayment offers, for selling one offline on Record Payment.
+            await refreshPrepaymentOffers();
             this.formCacheRefreshedThisSession = true;
         } catch {
             // Swallowed deliberately — retried on the next sync.

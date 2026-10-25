@@ -34,7 +34,14 @@ import { amountInEnglish, amountInFrench } from '../../../src/utils/amountInWord
 import { generateUuid } from '../../../src/utils/uuid';
 import { issueFieldReceipt, type IssuedFieldReceipt } from '../../../src/fieldReceipts/receiptStock';
 import { getAllCustomers, getCustomerByUuid } from '../../../src/db/customers';
-import { getLastPaymentForCustomer, getPaymentByLocalUuid, getPaymentThisMonthForCustomer, insertLocalPayment } from '../../../src/db/payments';
+import {
+    getLastPaymentForCustomer,
+    getPaidThisMonthOnPhone,
+    getPaymentByLocalUuid,
+    getPaymentThisMonthForCustomer,
+    insertLocalPayment,
+} from '../../../src/db/payments';
+import { getCachedPrepaymentOffers, refreshPrepaymentOffers, type PrepaymentOfferApi } from '../../../src/api/prepaymentOffers';
 import type { DuplicateReason, LocalCustomer, LocalPayment } from '../../../src/types/db';
 import { DUPLICATE_REASONS, isDuplicateConfirmationComplete, startOfBusinessMonthIso } from '../../../src/utils/duplicatePayment';
 import { syncManager } from '../../../src/sync/SyncManager';
@@ -133,6 +140,18 @@ export default function RecordPaymentScreen() {
     const [duplicateReason, setDuplicateReason] = useState<DuplicateReason | null>(null);
     const [duplicateNote, setDuplicateNote] = useState('');
     const scrollRef = useRef<ScrollView>(null);
+    // Prepayment offers ("4 months for 10,000"), cached for offline selling.
+    const [offers, setOffers] = useState<PrepaymentOfferApi[]>([]);
+    const [offerUuid, setOfferUuid] = useState<string | null>(null);
+    const [unpaidDebt, setUnpaidDebt] = useState(0);
+    const selectedOffer = offers.find((offer) => offer.uuid === offerUuid) ?? null;
+
+    useEffect(() => {
+        void getCachedPrepaymentOffers().then(setOffers);
+        void refreshPrepaymentOffers()
+            .then(setOffers)
+            .catch(() => undefined);
+    }, []);
     const [stage, setStage] = useState<Stage>('form');
     const [confirmedPayment, setConfirmedPayment] = useState<LocalPayment | null>(null);
     const [confirmSynced, setConfirmSynced] = useState(false);
@@ -280,10 +299,34 @@ export default function RecordPaymentScreen() {
         setDuplicateNote('');
     }
 
-    // A confirmed repeat belongs to one customer only.
+    // A confirmed repeat, and a chosen offer, belong to one customer only.
     useEffect(() => {
         clearDuplicateCheck();
+        setOfferUuid(null);
+
+        if (!customer) {
+            setUnpaidDebt(0);
+            return;
+        }
+
+        // Old debt still unpaid: cached arrears less what this phone took this month.
+        void getPaidThisMonthOnPhone(customer.uuid, startOfBusinessMonthIso(new Date())).then((paid) =>
+            setUnpaidDebt(Math.max(0, (customer.total_arrears ?? 0) - paid)),
+        );
     }, [customer?.uuid]);
+
+    function chooseOffer(offer: PrepaymentOfferApi | null) {
+        setOfferUuid(offer?.uuid ?? null);
+
+        if (offer) {
+            setFrequency('months');
+            setMonths(String(offer.months));
+            setAmount(String(Math.round(Number(offer.price))));
+        } else {
+            setFrequency('monthly');
+            setMonths('');
+        }
+    }
 
     const monthsNumber = months.trim() === '' ? null : Number(months);
     const guideAmount = customer ? calculateGuideAmount(customer.bill, frequency, monthsNumber) : null;
@@ -371,6 +414,7 @@ export default function RecordPaymentScreen() {
                 receipt_local_uri: receiptUri,
                 duplicate_reason: duplicateOf !== null ? duplicateReason : null,
                 duplicate_note: duplicateOf !== null && duplicateReason === 'other' ? duplicateNote : null,
+                prepayment_offer_uuid: selectedOffer?.uuid ?? null,
             });
 
             // "Immediately after each local write (if online)" trigger —
@@ -676,16 +720,55 @@ export default function RecordPaymentScreen() {
                     ) : null}
                 </Card>
 
+                {/* 2b. Prepayment offers — picking one fixes the amount and the months. */}
+                {offers.length > 0 ? (
+                    <View style={styles.fieldGroup}>
+                        <Text style={styles.fieldLabel}>Prepayment offer (optional)</Text>
+                        <View style={[styles.segmented, styles.segmentedWrap]}>
+                            {[null, ...offers].map((offer) => {
+                                const active = (offer?.uuid ?? null) === offerUuid;
+                                const blocked = offer !== null && unpaidDebt > 0;
+
+                                return (
+                                    <Pressable
+                                        key={offer?.uuid ?? 'none'}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ selected: active, disabled: blocked }}
+                                        disabled={blocked}
+                                        onPress={() => chooseOffer(offer)}
+                                        style={[styles.segmentedOption, styles.methodOption, active && styles.segmentedOptionActive, blocked && styles.offerBlocked]}
+                                    >
+                                        <Text style={[styles.segmentedLabel, active && styles.segmentedLabelActive]}>
+                                            {offer ? `${offer.months} months · ${formatFcfa(Number(offer.price))}` : 'No offer'}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+                        {unpaidDebt > 0 ? (
+                            <Text style={styles.arrearsNote}>
+                                {customer.name} still owes {formatFcfa(unpaidDebt)}. Collect that first as a normal payment, then sell the offer.
+                            </Text>
+                        ) : selectedOffer ? (
+                            <Text style={styles.arrearsNote}>
+                                {selectedOffer.name}: {selectedOffer.months} months for {formatFcfa(Number(selectedOffer.price))} — amount and months are fixed.
+                            </Text>
+                        ) : null}
+                    </View>
+                ) : null}
+
                 {/* 3. Amount field — the single dominant visual element */}
                 <View style={styles.amountSection}>
-                    <Pressable
-                        accessibilityRole="button"
-                        onPress={() => setAmount(String(Math.round(customer.bill)))}
-                        style={styles.billChip}
-                        hitSlop={8}
-                    >
-                        <Text style={styles.billChipLabel}>Use bill amount: {formatFcfa(customer.bill)}</Text>
-                    </Pressable>
+                    {!selectedOffer ? (
+                        <Pressable
+                            accessibilityRole="button"
+                            onPress={() => setAmount(String(Math.round(customer.bill)))}
+                            style={styles.billChip}
+                            hitSlop={8}
+                        >
+                            <Text style={styles.billChipLabel}>Use bill amount: {formatFcfa(customer.bill)}</Text>
+                        </Pressable>
+                    ) : null}
                     <UiTextInput
                         label="Amount (FCFA)"
                         value={amount}
@@ -693,12 +776,14 @@ export default function RecordPaymentScreen() {
                         keyboardType="number-pad"
                         placeholder="0"
                         autoFocus
+                        editable={!selectedOffer}
                         style={styles.amountInput}
                         error={validation.errors.amount}
                     />
                 </View>
 
-                {/* 4. Frequency — segmented control */}
+                {/* 4. Frequency — segmented control (fixed by an offer) */}
+                {!selectedOffer ? (
                 <View style={styles.fieldGroup}>
                     <Text style={styles.fieldLabel}>Frequency</Text>
                     <View style={styles.segmented}>
@@ -721,9 +806,10 @@ export default function RecordPaymentScreen() {
                         })}
                     </View>
                 </View>
+                ) : null}
 
-                {/* 5. Months — conditional on Multi-month */}
-                {frequency === 'months' ? (
+                {/* 5. Months — conditional on Multi-month (fixed by an offer) */}
+                {frequency === 'months' && !selectedOffer ? (
                     <UiTextInput
                         label="Number of months"
                         value={months}
@@ -736,7 +822,7 @@ export default function RecordPaymentScreen() {
 
                 {/* 5b. Arrears are cleared first on any prepayment to a
                     customer who owes (owner's rule) — stated, not a choice. */}
-                {(frequency === 'months' || frequency === 'yearly') && arrears > 0 ? (
+                {(frequency === 'months' || frequency === 'yearly') && arrears > 0 && !selectedOffer ? (
                     <Text style={styles.arrearsNote}>
                         The {formatFcfa(arrears)} arrears are paid off first; the rest buys prepaid months.
                     </Text>
@@ -948,6 +1034,7 @@ const styles = StyleSheet.create({
     duplicateReasonSelected: { backgroundColor: colors.status.offlineDot },
     duplicateReasonLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.status.offlineFg },
     duplicateReasonLabelSelected: { color: colors.surface },
+    offerBlocked: { opacity: 0.4 },
     fieldLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
     segmented: { flexDirection: 'row', backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.xs, gap: spacing.xs },
     segmentedOption: {

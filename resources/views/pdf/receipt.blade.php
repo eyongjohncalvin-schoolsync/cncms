@@ -38,7 +38,7 @@
     $title = $r['title'] ?? 'PAYMENT RECEIPT';
     $installation = $r['installation'] ?? null;
     $description = $purpose === 'subscription'
-        ? 'Cable subscription' . ($months > 1 ? " ({$months} months)" : '')
+        ? 'Cable subscription' . (! empty($payment['offer']) ? " — {$payment['offer']}" : '') . ($months > 1 ? " ({$months} months)" : '')
         : ($r['description'] ?? ucfirst(str_replace('_', ' ', $purpose)));
     if ($purpose !== 'subscription') {
         $methodText = '—';

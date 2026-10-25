@@ -12,8 +12,10 @@ use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
 use App\Http\Resources\PaymentResource;
 use App\Models\Payment;
+use App\Models\PrepaymentOffer;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
+use App\Support\BranchPrices;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -47,6 +49,26 @@ class PaymentController extends Controller
         $payment = $this->payments->findOrFail($payment->uuid);
 
         return (new PaymentResource($payment))->response();
+    }
+
+    /**
+     * Prepayment offers on sale today, at the price of the caller's branch
+     * (the agent's, or headquarters'). The phone caches them so an agent can
+     * sell one offline; the server re-checks each payment when it syncs.
+     */
+    public function prepaymentOffers(): JsonResponse
+    {
+        $this->authorize('create', Payment::class);
+
+        $prices = BranchPrices::current();
+
+        return response()->json(['data' => PrepaymentOffer::query()->available()->orderBy('months')->get()
+            ->map(fn (PrepaymentOffer $offer): array => [
+                'uuid' => $offer->uuid,
+                'name' => $offer->name,
+                'months' => $offer->months,
+                'price' => $prices->prepaymentOfferPrice($offer),
+            ])->values()->all()]);
     }
 
     public function store(StorePaymentRequest $request): JsonResponse

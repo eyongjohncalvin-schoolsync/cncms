@@ -459,6 +459,8 @@ class PaymentReceiptService
                 'method' => $payment->frequency,
                 'frequency' => $payment->frequency,
                 'months' => $payment->months,
+                // The prepayment offer it bought ("4 MONTHS PROMO"), printed with the months.
+                'offer' => $payment->prepayment_offer_id !== null ? $payment->loadMissing('prepaymentOffer')->prepaymentOffer?->name : null,
                 'periods' => $isSubscription ? $this->coveredPeriods($payment) : [],
                 'expiration_date' => $payment->expiration_date?->toDateString(),
                 'momo_ref' => $payment->verification?->momo_ref,

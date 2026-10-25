@@ -101,7 +101,7 @@
             <tr><td class="k">For</td><td class="v">{{ $r['description'] ?? ucfirst(str_replace('_', ' ', $purpose)) }}</td></tr>
         @endif
         @if(!empty($r['invoice']['number']))<tr><td class="k">For bill</td><td class="v">{{ $r['invoice']['number'] }}</td></tr>@endif
-        @if($isPrepayment)<tr><td class="k">Prepaid</td><td class="v">{{ $months }} month(s)</td></tr>@endif
+        @if($isPrepayment)<tr><td class="k">Prepaid</td><td class="v">{{ $months }} month(s){{ ! empty($payment['offer']) ? ' — '.$payment['offer'] : '' }}</td></tr>@endif
         @if(!empty($payment['paid_by_label']))<tr><td class="k">Paid by</td><td class="v">{{ $payment['paid_by_label'] }}</td></tr>@endif
         @if(!empty($payment['method_reference']))<tr><td class="k">Txn ID</td><td class="v">{{ $payment['method_reference'] }}</td></tr>@endif
         @if(!empty($payment['momo_ref']))<tr><td class="k">MOMO ref</td><td class="v">{{ $payment['momo_ref'] }}</td></tr>@endif

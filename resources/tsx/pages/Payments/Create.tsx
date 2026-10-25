@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { InfoTip } from '@/components/ui/InfoTip';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { PaymentMethodFields } from '@/components/shared/PaymentMethodFields';
 import { formatCurrency } from '@/lib/formatCurrency';
@@ -19,6 +20,22 @@ interface PaymentsCreateProps {
     customers: Customer[];
     /** The signed-in user holds an open system-printed receipt book (cash controls). */
     has_receipt_book?: boolean;
+    /** Prepayment offers on sale today (Settings → Prepayment offers). */
+    prepayment_offers?: PrepaymentOfferOption[];
+}
+
+interface PrepaymentOfferOption {
+    uuid: string;
+    name: string;
+    months: number;
+    /** Headquarters' price… */
+    price: string;
+    /** …unless the customer's branch sets its own (branch uuid => price). */
+    branch_prices: Record<string, string>;
+}
+
+function offerPriceFor(offer: PrepaymentOfferOption, customer: Customer | undefined): string {
+    return (customer?.branch_uuid && offer.branch_prices[customer.branch_uuid]) || offer.price;
 }
 
 const frequencyOptions: { value: PaymentFrequency; label: string }[] = [
@@ -113,7 +130,7 @@ function MissingCustomerNote() {
     );
 }
 
-export default function PaymentsCreate({ customers, has_receipt_book = false }: PaymentsCreateProps) {
+export default function PaymentsCreate({ customers, has_receipt_book = false, prepayment_offers = [] }: PaymentsCreateProps) {
     const [mode, setMode] = useState<'single' | 'bulk'>('single');
     const payableCustomers = useMemo(() => customers.filter(isPayable), [customers]);
 
@@ -149,12 +166,16 @@ export default function PaymentsCreate({ customers, has_receipt_book = false }: 
                 </div>
             </div>
 
-            {mode === 'single' ? <SinglePaymentForm customers={payableCustomers} hasReceiptBook={has_receipt_book} /> : <BulkPaymentForm customers={payableCustomers} />}
+            {mode === 'single' ? (
+                <SinglePaymentForm customers={payableCustomers} hasReceiptBook={has_receipt_book} offers={prepayment_offers} />
+            ) : (
+                <BulkPaymentForm customers={payableCustomers} />
+            )}
         </AppLayout>
     );
 }
 
-function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[]; hasReceiptBook: boolean }) {
+function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: Customer[]; hasReceiptBook: boolean; offers: PrepaymentOfferOption[] }) {
     const permissions = usePage<PageProps>().props.auth.user?.permissions ?? [];
     const canLeaveArrearsDue = permissions.includes('*') || permissions.includes('arrears.approve');
     const [search, setSearch] = useState('');
@@ -175,7 +196,10 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
         // month (errors.duplicate) and the collector says why it's fine.
         duplicate_reason: '',
         duplicate_note: '',
+        // A prepayment offer: when set, its price and months are fixed.
+        prepayment_offer_uuid: '',
     });
+    const selectedOffer = offers.find((offer) => offer.uuid === data.prepayment_offer_uuid);
     // Set by the server, not a form field: "already paid this month" (PaymentService::flagPossibleDuplicate()).
     const duplicateError = (errors as Record<string, string | undefined>).duplicate;
 
@@ -288,7 +312,8 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
     // customer who currently owes.
     const isPrepayment = data.frequency === 'months' || data.frequency === 'yearly';
     const selectedArrears = selectedCustomer ? Number(selectedCustomer.total_arrears ?? 0) : 0;
-    const showClearArrearsToggle = isPrepayment && selectedArrears > 0;
+    // An offer is only for a customer with no debt, so it never splits off arrears.
+    const showClearArrearsToggle = isPrepayment && selectedArrears > 0 && !selectedOffer;
 
     // A read-only preview of how the payment splits, mirroring the mobile
     // Record Payment screen's guide. Never auto-fills anything.
@@ -337,6 +362,8 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
                 // A confirmed repeat belongs to one customer only.
                 duplicate_reason: '',
                 duplicate_note: '',
+                // An offer's price depends on the customer's branch: pick it again.
+                prepayment_offer_uuid: '',
             };
         });
     }
@@ -388,6 +415,45 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
                             <MissingCustomerNote />
                         </div>
 
+                        {offers.length > 0 && selectedCustomer && (
+                            // A prepayment offer fixes the amount and the months — nothing to round up by hand.
+                            <div className="flex flex-col gap-1">
+                                <label htmlFor="prepayment_offer_uuid" className="flex items-center gap-1 text-sm font-medium text-slate-700">
+                                    Prepayment offer (optional)
+                                    <InfoTip
+                                        label="About prepayment offers"
+                                        text="Months paid ahead at a special price. Picking one fixes the amount and the months. Only for a customer with no unpaid debt."
+                                    />
+                                </label>
+                                <select
+                                    id="prepayment_offer_uuid"
+                                    value={data.prepayment_offer_uuid}
+                                    onChange={(e) => {
+                                        const offer = offers.find((option) => option.uuid === e.target.value);
+                                        setData((current) =>
+                                            offer
+                                                ? { ...current, prepayment_offer_uuid: offer.uuid, frequency: 'months', months: String(offer.months), amount: offerPriceFor(offer, selectedCustomer), clear_arrears_first: false }
+                                                : { ...current, prepayment_offer_uuid: '', frequency: 'monthly', months: '', amount: selectedCustomer.bill },
+                                        );
+                                    }}
+                                    className="min-h-[40px] rounded-lg border-slate-300 text-sm focus:border-blue-500 focus:ring-blue-500"
+                                >
+                                    <option value="">No offer — a normal payment</option>
+                                    {offers.map((offer) => (
+                                        <option key={offer.uuid} value={offer.uuid}>
+                                            {offer.name} — {offer.months} months for {formatCurrency(Number(offerPriceFor(offer, selectedCustomer)))}
+                                        </option>
+                                    ))}
+                                </select>
+                                {errors.prepayment_offer_uuid && <p className="text-sm text-red-600">{errors.prepayment_offer_uuid}</p>}
+                                {selectedOffer && selectedArrears > 0 && (
+                                    <p className="text-xs text-amber-700">
+                                        {selectedCustomer.name} owes {formatCurrency(selectedArrears)} from before. Collect that first (as a normal payment), then sell the offer.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <TextInput
                             id="amount"
                             label="Amount (FCFA)"
@@ -397,6 +463,8 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
                             value={data.amount}
                             onChange={(e) => setData('amount', e.target.value)}
                             error={errors.amount}
+                            readOnly={Boolean(selectedOffer)}
+                            hint={selectedOffer ? `Fixed by the offer: ${selectedOffer.months} months.` : undefined}
                             required
                         />
                         {amountBelowBill && (
@@ -405,15 +473,17 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
                             </p>
                         )}
 
-                        <FrequencySelector
-                            label="Frequency"
-                            value={data.frequency}
-                            onChange={(freq) => setData('frequency', freq)}
-                            error={errors.frequency}
-                            required
-                        />
+                        {!selectedOffer && (
+                            <FrequencySelector
+                                label="Frequency"
+                                value={data.frequency}
+                                onChange={(freq) => setData('frequency', freq)}
+                                error={errors.frequency}
+                                required
+                            />
+                        )}
 
-                        {data.frequency === 'months' && (
+                        {!selectedOffer && data.frequency === 'months' && (
                             <TextInput
                                 id="months"
                                 label="Number of months"

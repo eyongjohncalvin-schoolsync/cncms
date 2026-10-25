@@ -73,6 +73,8 @@ class StorePaymentRequest extends FormRequest
             // Confirming a second payment this month (PaymentService::flagPossibleDuplicate()).
             'duplicate_reason' => ['nullable', 'string', Rule::in(Payment::DUPLICATE_REASONS_PICKABLE)],
             'duplicate_note' => ['nullable', 'required_if:duplicate_reason,other', 'string', 'max:255'],
+            // A prepayment offer (PaymentService::applyPrepaymentOffer() fixes its months and checks its price).
+            'prepayment_offer_uuid' => ['nullable', 'uuid'],
         ];
     }
 }

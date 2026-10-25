@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * price hands the target back to headquarters' catalogue price. Read through
  * App\Support\BranchPrices; written by App\Services\BranchPriceService.
  */
-#[Fillable(['branch_id', 'service_id', 'service_variant_id', 'installation_offer_id', 'price', 'reason', 'set_by'])]
+#[Fillable(['branch_id', 'service_id', 'service_variant_id', 'installation_offer_id', 'prepayment_offer_id', 'price', 'reason', 'set_by'])]
 class BranchPrice extends Model
 {
     use Auditable, HasUuid;
@@ -49,6 +49,11 @@ class BranchPrice extends Model
     public function installationOffer(): BelongsTo
     {
         return $this->belongsTo(InstallationOffer::class);
+    }
+
+    public function prepaymentOffer(): BelongsTo
+    {
+        return $this->belongsTo(PrepaymentOffer::class);
     }
 
     // Cross-schema — User is pinned to the central connection.

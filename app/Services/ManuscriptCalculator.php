@@ -360,7 +360,13 @@ final class ManuscriptCalculator
                     $cap = $intendedMonths;
                 }
 
-                if ($hasPlan) {
+                if ($payment->prepayment_offer_id !== null && (int) $payment->months > 0) {
+                    // A prepayment offer ("4 months for 10,000") buys exactly
+                    // its months for exactly its price — never divided by a
+                    // rate, so 5,000 for 3 months is 3 months, no cents left.
+                    $monthsBought = (int) $payment->months;
+                    $cost = $spendable;
+                } elseif ($hasPlan) {
                     // D7: the advance covers exactly what is charged each
                     // month — fully free months are skipped, a partly free
                     // month costs only its charged part.

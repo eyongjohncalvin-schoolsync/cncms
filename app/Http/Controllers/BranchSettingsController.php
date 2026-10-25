@@ -10,6 +10,7 @@ use App\Models\Branch;
 use App\Models\BranchPrice;
 use App\Models\Company;
 use App\Models\InstallationOffer;
+use App\Models\PrepaymentOffer;
 use App\Models\Service;
 use App\Models\ServiceVariant;
 use App\Services\BranchPriceService;
@@ -117,6 +118,14 @@ class BranchSettingsController extends Controller
                     'hq_price' => number_format((float) $offer->fee, 2, '.', ''),
                     'branch_price' => $prices->overridesOffer($offer->id) ? $prices->offerFee($offer) : null,
                 ])->values()->all(),
+            // Prepayment offers on sale ("4 months for 10,000") — a branch may sell at its own price.
+            'prepayment_offers' => PrepaymentOffer::query()->available(BusinessTimezone::today())->orderBy('months')->get()
+                ->map(fn (PrepaymentOffer $offer): array => [
+                    'uuid' => $offer->uuid,
+                    'name' => "{$offer->name} ({$offer->months} months)",
+                    'hq_price' => number_format((float) $offer->price, 2, '.', ''),
+                    'branch_price' => $prices->overridesPrepaymentOffer($offer->id) ? $prices->prepaymentOfferPrice($offer) : null,
+                ])->values()->all(),
         ];
     }
 
@@ -130,7 +139,8 @@ class BranchSettingsController extends Controller
             'item' => match (true) {
                 $change->service_id !== null => (string) $change->service?->name,
                 $change->service_variant_id !== null => trim($change->variant?->service?->name.' — '.$change->variant?->name, ' —'),
-                default => 'Installation: '.$change->installationOffer?->name,
+                $change->installation_offer_id !== null => 'Installation: '.$change->installationOffer?->name,
+                default => 'Prepayment offer: '.$change->prepaymentOffer?->name,
             },
             'price' => $change->price !== null ? (string) $change->price : null,
             'reason' => $change->reason,

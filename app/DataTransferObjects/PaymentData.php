@@ -72,6 +72,9 @@ final readonly class PaymentData
         // when PaymentService finds an earlier payment that month.
         public ?string $duplicateReason = null,
         public ?string $duplicateNote = null,
+        // A prepayment offer the customer bought ("4 months for 10,000") —
+        // PaymentService fixes the months and checks the price.
+        public ?string $prepaymentOfferUuid = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -99,6 +102,9 @@ final readonly class PaymentData
             duplicateReason: $data['duplicate_reason'] ?? null,
             duplicateNote: isset($data['duplicate_note']) && trim((string) $data['duplicate_note']) !== ''
                 ? trim((string) $data['duplicate_note'])
+                : null,
+            prepaymentOfferUuid: isset($data['prepayment_offer_uuid']) && is_string($data['prepayment_offer_uuid']) && $data['prepayment_offer_uuid'] !== ''
+                ? $data['prepayment_offer_uuid']
                 : null,
         );
     }
