@@ -40,6 +40,7 @@ interface InstallationOffersProps {
     offers: OfferRow[];
     services: ServiceOption[];
     max_free_months: number;
+    compensation_months_without_approval: number;
     one_off_fees: { relocation_fee: string | null; reinstallation_fee: string | null };
 }
 
@@ -50,9 +51,9 @@ interface InstallationOffersProps {
  * on free months per grant. Anything below an offer's fee or beyond its
  * months needs admin/owner approval on the customer.
  */
-export default function InstallationOffers({ offers, services, max_free_months, one_off_fees }: InstallationOffersProps) {
+export default function InstallationOffers({ offers, services, max_free_months, compensation_months_without_approval, one_off_fees }: InstallationOffersProps) {
     const [modal, setModal] = useState<{ offer: OfferRow | null } | null>(null);
-    const cap = useForm({ max_free_months: max_free_months });
+    const cap = useForm({ max_free_months: max_free_months, compensation_months_without_approval: compensation_months_without_approval });
     const fees = useForm({ relocation_fee: one_off_fees.relocation_fee ?? '', reinstallation_fee: one_off_fees.reinstallation_fee ?? '' });
 
     return (
@@ -101,10 +102,25 @@ export default function InstallationOffers({ offers, services, max_free_months, 
                                 error={cap.errors.max_free_months}
                             />
                         </div>
+                        <div className="w-64">
+                            <TextInput
+                                id="compensation_months_without_approval"
+                                type="number"
+                                min="0"
+                                max="12"
+                                label="Compensation without approval (months a year per customer)"
+                                value={String(cap.data.compensation_months_without_approval)}
+                                onChange={(e) => cap.setData('compensation_months_without_approval', Number(e.target.value))}
+                                error={cap.errors.compensation_months_without_approval}
+                            />
+                        </div>
                         <Button type="submit" variant="secondary" disabled={cap.processing}>
-                            Save cap
+                            Save limits
                         </Button>
-                        <p className="text-xs text-slate-500">Applies to offers, installation grants and compensation alike.</p>
+                        <p className="text-xs text-slate-500">
+                            The cap applies to offers, installation grants and compensation alike. Compensation above the yearly allowance — and any zone or
+                            branch-wide compensation — waits for an admin's approval. 0 = always ask.
+                        </p>
                     </form>
                 </CardBody>
             </Card>

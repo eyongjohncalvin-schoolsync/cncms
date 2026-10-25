@@ -147,13 +147,18 @@ class FreeMonthGrantService
 
     /**
      * Free months for poor service (D12) — every service or the ones named,
-     * one row per service so each lands on its own timeline (D20). Always
-     * waits for someone else's approval.
+     * one row per service so each lands on its own timeline (D20).
+     *
+     * Owner's rule (2026-10-25): whoever asks may give one customer up to
+     * the company's `compensation_months_without_approval` a year on their
+     * own — those start straight away. Anything beyond it, and every
+     * zone- or branch-wide compensation ($batchId), waits for someone
+     * else's approval.
      *
      * @param  list<int>|null  $serviceIds  null = every service the customer holds
      * @return Collection<int, FreeMonthGrant>
      */
-    public function requestCompensation(Customer $customer, ?array $serviceIds, int $months, string $note, User $actor, ?int $arrearsAdjustmentId = null): Collection
+    public function requestCompensation(Customer $customer, ?array $serviceIds, int $months, string $note, User $actor, ?int $arrearsAdjustmentId = null, ?int $batchId = null): Collection
     {
         $this->assertWithinCap([$months]);
 
@@ -165,17 +170,50 @@ class FreeMonthGrantService
 
         $groupUuid = (string) Str::uuid();
 
-        return collect($serviceIds)->map(fn (int $serviceId): FreeMonthGrant => FreeMonthGrant::query()->create([
+        $grants = collect($serviceIds)->map(fn (int $serviceId): FreeMonthGrant => FreeMonthGrant::query()->create([
             'group_uuid' => $groupUuid,
             'customer_id' => $customer->id,
             'service_id' => $serviceId,
             'arrears_adjustment_id' => $arrearsAdjustmentId,
+            'compensation_batch_id' => $batchId,
             'reason' => FreeMonthGrant::REASON_COMPENSATION,
             'note' => $note,
             'months' => $months,
             'status' => FreeMonthGrant::STATUS_PENDING_APPROVAL,
             'requested_by' => $actor->id,
         ]))->values();
+
+        if ($batchId === null && $months <= self::monthsWithoutApproval() - $this->monthsGivenWithoutApproval($customer)) {
+            return $this->approveGroup($groupUuid, $actor);
+        }
+
+        return $grants;
+    }
+
+    /** Free months one customer may be given a year without approval (0 = always ask). */
+    public static function monthsWithoutApproval(): int
+    {
+        return max(0, (int) (Company::cached()?->compensation_months_without_approval ?? 1));
+    }
+
+    /**
+     * Compensation months this customer was given this year without anyone
+     * else approving (asked and decided by the same person, outside a batch)
+     * — one count per request, whatever the number of services in it.
+     */
+    public function monthsGivenWithoutApproval(Customer $customer): int
+    {
+        return (int) FreeMonthGrant::query()
+            ->where('customer_id', $customer->id)
+            ->where('reason', FreeMonthGrant::REASON_COMPENSATION)
+            ->where('status', FreeMonthGrant::STATUS_APPROVED)
+            ->whereNull('compensation_batch_id')
+            ->whereColumn('decided_by', 'requested_by')
+            ->where('decided_at', '>=', now()->startOfYear())
+            ->groupBy('group_uuid')
+            ->selectRaw('max(months) as months')
+            ->get()
+            ->sum('months');
     }
 
     /**

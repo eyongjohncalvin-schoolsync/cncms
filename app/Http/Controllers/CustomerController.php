@@ -957,6 +957,10 @@ class CustomerController extends Controller
             ])->values()->all(),
             'can_request' => $user->can('create', FreeMonthGrant::class) && ! $customer->trashed(),
             'max_months' => FreeMonthGrantService::maxMonths(),
+            // Months the asker may still give this customer this year on their own (the rest wait for approval).
+            'months_without_approval_left' => max(0, FreeMonthGrantService::monthsWithoutApproval() - app(FreeMonthGrantService::class)->monthsGivenWithoutApproval($customer)),
+            // For "% off the monthly bill" → write-off amount.
+            'bill' => (string) $customer->bill,
             'services' => $customer->subscriptions
                 ->filter(fn (CustomerSubscription $row): bool => $row->service_variant_id === null)
                 ->map(fn (CustomerSubscription $row): array => ['uuid' => (string) $row->service?->uuid, 'name' => (string) $row->service?->name])

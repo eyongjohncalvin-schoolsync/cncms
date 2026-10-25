@@ -25,6 +25,8 @@ class UpdateFreeMonthsCapRequest extends FormRequest
     {
         return [
             'max_free_months' => ['required', 'integer', 'min:1', 'max:12'],
+            // Free months one customer may be given a year without approval (0 = always ask).
+            'compensation_months_without_approval' => ['sometimes', 'integer', 'min:0', 'max:12'],
         ];
     }
 }

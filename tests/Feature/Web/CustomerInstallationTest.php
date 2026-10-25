@@ -6,6 +6,7 @@ namespace Tests\Feature\Web;
 
 use App\Models\ArrearsAdjustment;
 use App\Models\CommandRun;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerCharge;
 use App\Models\FreeMonthGrant;
@@ -58,6 +59,10 @@ class CustomerInstallationTest extends TestCase
         $this->tv->update(['price' => 2500]);
         $this->internet = Service::query()->where('slug', 'internet')->firstOrFail();
         $this->internet->update(['price' => 2500, 'active' => true]);
+        // These tests follow compensation through approval; the yearly
+        // allowance without approval is covered in CompensationTest.
+        Company::query()->firstOrFail()->update(['compensation_months_without_approval' => 0]);
+        Company::forgetCache();
     }
 
     private function actAs(string $email, string $role): User

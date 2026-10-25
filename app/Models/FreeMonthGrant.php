@@ -47,6 +47,7 @@ use Illuminate\Support\Carbon;
     'group_uuid', 'customer_id', 'service_id', 'customer_charge_id', 'installation_offer_id', 'arrears_adjustment_id',
     'reason', 'note', 'months', 'standard_months', 'status', 'start_period',
     'requested_by', 'decided_by', 'decided_at', 'rejection_reason', 'cancelled_at', 'cancel_reason',
+    'compensation_batch_id',
 ])]
 #[RouteKey('uuid')]
 class FreeMonthGrant extends Model
@@ -109,6 +110,12 @@ class FreeMonthGrant extends Model
     public function arrearsAdjustment(): BelongsTo
     {
         return $this->belongsTo(ArrearsAdjustment::class);
+    }
+
+    /** A zone- or branch-wide compensation this request is part of. */
+    public function compensationBatch(): BelongsTo
+    {
+        return $this->belongsTo(CompensationBatch::class);
     }
 
     // Cross-schema — User is pinned to the central connection.

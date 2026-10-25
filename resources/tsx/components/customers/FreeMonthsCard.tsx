@@ -129,6 +129,7 @@ function CompensationModal({
         service_uuids: [],
         write_off_amount: '',
     });
+    const [percent, setPercent] = useState('');
 
     const submit = (event: FormEvent) => {
         event.preventDefault();
@@ -146,8 +147,11 @@ function CompensationModal({
         <Modal open={open} onClose={onClose} title="Give free months (compensation)">
             <form onSubmit={submit} className="flex flex-col gap-4">
                 <p className="text-sm text-slate-600">
-                    For poor service. Someone else with approval rights must confirm. Each service&apos;s months are added after its existing free and
-                    paid months, so nothing already paid is lost.
+                    For poor service.{' '}
+                    {freeMonths.months_without_approval_left > 0
+                        ? `Up to ${freeMonths.months_without_approval_left} month${freeMonths.months_without_approval_left === 1 ? '' : 's'} start straight away; more waits for an admin's approval.`
+                        : "An admin must approve — this customer's yearly allowance without approval is used."}{' '}
+                    Each service&apos;s months are added after its existing free and paid months, so nothing already paid is lost.
                 </p>
                 <TextInput
                     id="free-months"
@@ -182,15 +186,42 @@ function CompensationModal({
                     </fieldset>
                 )}
                 <TextInput id="free-reason" label="Reason" required value={data.reason} onChange={(e) => setData('reason', e.target.value)} error={errors.reason} />
-                <TextInput
-                    id="free-write-off"
-                    label="Also write off arrears (FCFA, optional)"
-                    type="number"
-                    min="0"
-                    value={data.write_off_amount}
-                    onChange={(e) => setData('write_off_amount', e.target.value)}
-                    error={errors.write_off_amount}
-                />
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                    <div className="sm:w-40">
+                        <TextInput
+                            id="free-percent"
+                            label="% off the bill"
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={percent}
+                            onChange={(e) => {
+                                setPercent(e.target.value);
+                                const pct = Number(e.target.value);
+                                const bill = Number(freeMonths.bill);
+                                setData('write_off_amount', pct > 0 && bill > 0 ? String(Math.round((bill * Math.min(pct, 100)) / 100)) : '');
+                            }}
+                        />
+                    </div>
+                    <div className="sm:flex-1">
+                        <TextInput
+                            id="free-write-off"
+                            label="Also write off arrears (FCFA, optional)"
+                            type="number"
+                            min="0"
+                            value={data.write_off_amount}
+                            onChange={(e) => {
+                                setPercent('');
+                                setData('write_off_amount', e.target.value);
+                            }}
+                            error={errors.write_off_amount}
+                        />
+                    </div>
+                </div>
+                <p className="-mt-2 text-xs text-slate-500">
+                    The write-off is an arrears adjustment: it always goes for approval. % off is worked out on the monthly bill of{' '}
+                    {Number(freeMonths.bill).toLocaleString()} FCFA.
+                </p>
                 <div className="flex justify-end gap-2">
                     <Button type="button" variant="secondary" onClick={onClose}>
                         Cancel

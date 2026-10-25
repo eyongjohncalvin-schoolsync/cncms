@@ -17,6 +17,7 @@ import {
     IconDeviceMobile,
     IconShieldLock,
     IconScale,
+    IconGift,
     IconBook2,
     IconSend,
     IconReceipt,
@@ -141,6 +142,10 @@ const auditNavItem = { href: '/audit/logs', labelKey: 'common.audit_log', icon: 
 // `arrears.approve` OR `audit.view` (it used to be an Audit Log sub-tab).
 const arrearsAdjustmentsNavItem = { href: '/arrears-adjustments', labelKey: 'common.arrears_adjustments', icon: IconScale, accent: 'purple' as const };
 
+// Compensation (free months for poor service, zone/branch-wide) —
+// CompensationBatchPolicy::viewAny → `installations.manage` or `installations.approve`.
+const compensationNavItem = { href: '/compensation', labelKey: 'common.compensation', icon: IconGift, accent: 'pink' as const };
+
 // Opening balances — OpeningBalanceBatchPolicy::viewAny → any of the three
 // `opening_balances.*` permissions.
 const openingBalancesNavItem = { href: '/opening-balances', labelKey: 'common.opening_balances', icon: IconBook2, accent: 'emerald' as const };
@@ -218,6 +223,7 @@ export function buildVisibleNavItems(permissions: string[] = [], branchFenced = 
         ...(can('manuscripts.view') ? [agentAppNavItem] : []),
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
         ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
+        ...(canAny('installations.manage', 'installations.approve') ? [compensationNavItem] : []),
         ...(canAny('opening_balances.view', 'opening_balances.enter', 'opening_balances.approve') ? [openingBalancesNavItem] : []),
         ...(can('receipts.manage_stock') ? [receiptStockNavItem] : []),
         ...(canAny('cash.view', 'cash.receive') ? [cashBookNavItem] : []),

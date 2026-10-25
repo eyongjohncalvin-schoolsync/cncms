@@ -34,7 +34,7 @@ class FreeMonthGrantController extends Controller
     {
         $validated = $request->validated();
 
-        DB::transaction(function () use ($validated, $customer, $request): void {
+        $grants = DB::transaction(function () use ($validated, $customer, $request) {
             $adjustmentId = null;
 
             if (! empty($validated['write_off_amount'])) {
@@ -52,8 +52,14 @@ class FreeMonthGrantController extends Controller
                 ? Service::query()->whereIn('uuid', $validated['service_uuids'])->pluck('id')->map(fn ($id): int => (int) $id)->all()
                 : null;
 
-            $this->grants->requestCompensation($customer, $serviceIds, (int) $validated['months'], $validated['reason'], $request->user(), $adjustmentId);
+            return $this->grants->requestCompensation($customer, $serviceIds, (int) $validated['months'], $validated['reason'], $request->user(), $adjustmentId);
         });
+
+        $writeOff = ! empty($validated['write_off_amount']) ? ' The arrears write-off waits for approval.' : '';
+
+        if ($grants->first()?->status === FreeMonthGrant::STATUS_APPROVED) {
+            return back()->with('success', 'Free months given — from '.Carbon::createFromFormat('!Y-m', (string) $grants->min('start_period'))->format('M Y').'.'.$writeOff);
+        }
 
         return back()->with('success', 'Free months requested. Someone else must approve them'.(! empty($validated['write_off_amount']) ? ' (and the arrears write-off).' : '.'));
     }

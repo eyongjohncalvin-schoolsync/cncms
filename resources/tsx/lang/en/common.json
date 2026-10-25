@@ -15,6 +15,7 @@
         "resources": "Resources",
         "audit_log": "Audit Log",
         "arrears_adjustments": "Arrears Adjustments",
+        "compensation": "Compensation",
         "opening_balances": "Opening Balances",
         "receipt_stock": "Receipt Stock",
         "cash_book": "Cash Book",

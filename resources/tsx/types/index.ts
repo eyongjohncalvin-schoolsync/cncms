@@ -715,6 +715,10 @@ export interface CustomerFreeMonths {
     grants: FreeMonthGrantRow[];
     can_request: boolean;
     max_months: number;
+    /** Months the asker may still give this customer this year without approval. */
+    months_without_approval_left: number;
+    /** The monthly bill, for "% off" → write-off amount. */
+    bill: string;
     services: { uuid: string; name: string }[];
 }
 

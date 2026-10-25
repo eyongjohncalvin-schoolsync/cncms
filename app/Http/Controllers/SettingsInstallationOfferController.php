@@ -62,6 +62,7 @@ class SettingsInstallationOfferController extends Controller
                 ->values()
                 ->all(),
             'max_free_months' => FreeMonthGrantService::maxMonths(),
+            'compensation_months_without_approval' => FreeMonthGrantService::monthsWithoutApproval(),
             'one_off_fees' => [
                 'relocation_fee' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_RELOCATION),
                 'reinstallation_fee' => CustomerRelocationService::defaultFee(CustomerCharge::KIND_REINSTALLATION),
@@ -94,10 +95,10 @@ class SettingsInstallationOfferController extends Controller
 
     public function updateCap(UpdateFreeMonthsCapRequest $request): RedirectResponse
     {
-        Company::query()->firstOrFail()->update(['max_free_months' => (int) $request->validated('max_free_months')]);
+        Company::query()->firstOrFail()->update(array_map('intval', $request->safe()->only(['max_free_months', 'compensation_months_without_approval'])));
         Company::forgetCache();
 
-        return redirect()->route('settings.installation-offers.index')->with('success', 'Free-month cap saved.');
+        return redirect()->route('settings.installation-offers.index')->with('success', 'Free-month limits saved.');
     }
 
     /** Default relocation and re-installation fees (null = no default). */
