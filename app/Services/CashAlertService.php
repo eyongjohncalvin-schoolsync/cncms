@@ -178,18 +178,22 @@ class CashAlertService
      */
     private function possibleDuplicatePayments(): array
     {
+        // Waiting for a decision — and, for the record, this month's repeats
+        // verified on the spot because the payment bore the reason out.
         $payments = Payment::query()
             ->forBranch(TenantContext::currentBranchId())
             ->whereNotNull('duplicate_of_id')
-            ->where('verification_status', 'pending')
+            ->where(fn ($query) => $query->where('verification_status', 'pending')
+                ->orWhere(fn ($verified) => $verified->where('verification_status', 'verified')->where('created_at', '>=', Carbon::now(BusinessTimezone::WAT)->startOfMonth()->setTimezone('UTC'))))
             ->with(['customer:id,uuid,name', 'recordedBy:id,name'])
             ->latest('id')->limit(100)
-            ->get(['id', 'uuid', 'customer_id', 'amount', 'recorded_by', 'duplicate_reason', 'created_at']);
+            ->get(['id', 'uuid', 'customer_id', 'amount', 'recorded_by', 'duplicate_reason', 'verification_status', 'created_at']);
 
-        return $this->alert('possible_duplicate_payments', 'warning', 'Possible duplicate payments', 'A second payment for the same customer this month. Open each one, compare it with the first, then approve or reject it.',
+        return $this->alert('possible_duplicate_payments', 'warning', 'Possible duplicate payments', 'A second payment for the same customer this month. Open the pending ones, compare each with the first, then approve or reject it. Verified ones were borne out by the payment itself (a real prepayment, or debt owed) and are listed for the record.',
             $payments->map(fn (Payment $payment): array => [
                 'label' => ($payment->customer?->name ?? 'Customer').' — '.($payment->recordedBy?->name ?? 'unknown collector'),
-                'detail' => Payment::DUPLICATE_REASONS[$payment->duplicate_reason] ?? 'Possible duplicate',
+                'detail' => (Payment::DUPLICATE_REASONS[$payment->duplicate_reason] ?? 'Possible duplicate')
+                    .($payment->verification_status === 'verified' ? ' · verified on the spot' : ' · waiting for the office'),
                 'amount' => (string) $payment->amount,
                 'link' => "/payments/{$payment->uuid}",
             ])->all());

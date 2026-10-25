@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\CashAlertService;
 use App\Support\TenantContext;
 use Database\Factories\CustomerFactory;
+use Database\Factories\ManuscriptFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -70,6 +71,44 @@ class DuplicatePaymentTest extends TestCase
         $this->assertSame('pending', $second->verification_status, 'Never verified on the spot, even by the office.');
     }
 
+    public function test_paying_ahead_is_verified_on_the_spot_only_for_a_real_prepayment(): void
+    {
+        $this->as('manager');
+        $this->pay();
+
+        // A real 2-month prepayment: borne out, verified like any payment.
+        $this->pay(['duplicate_reason' => 'advance', 'amount' => 5000, 'frequency' => 'months', 'months' => 2])->assertSessionHasNoErrors();
+        $this->assertSame('verified', $this->payments()->latest('id')->first()->verification_status);
+
+        // "Advance" on a plain monthly payment proves nothing: the office checks it.
+        $this->pay(['duplicate_reason' => 'advance', 'amount' => 3000])->assertSessionHasNoErrors();
+        $this->assertSame('pending', $this->payments()->latest('id')->first()->verification_status);
+    }
+
+    public function test_the_same_amount_within_three_days_always_goes_to_the_office(): void
+    {
+        $this->as('manager');
+        $this->pay(['amount' => 5000, 'frequency' => 'months', 'months' => 2]);
+
+        $this->pay(['duplicate_reason' => 'advance', 'amount' => 5000, 'frequency' => 'months', 'months' => 2])->assertSessionHasNoErrors();
+
+        $this->assertSame('pending', $this->payments()->latest('id')->first()->verification_status);
+    }
+
+    public function test_paying_old_debt_is_verified_on_the_spot_only_when_the_debt_is_real(): void
+    {
+        ManuscriptFactory::new()->withArrears(4000)->create(['customer_id' => $this->customer->id]);
+        $this->as('manager');
+        $this->pay();
+
+        $this->pay(['duplicate_reason' => 'arrears', 'amount' => 4000])->assertSessionHasNoErrors();
+        $this->assertSame('verified', $this->payments()->latest('id')->first()->verification_status, '4,000 of debt owed.');
+
+        // More than the debt plus this month's bill: the office checks it.
+        $this->pay(['duplicate_reason' => 'arrears', 'amount' => 9000])->assertSessionHasNoErrors();
+        $this->assertSame('pending', $this->payments()->latest('id')->first()->verification_status);
+    }
+
     public function test_other_needs_a_note(): void
     {
         $this->as('manager');
@@ -106,7 +145,8 @@ class DuplicatePaymentTest extends TestCase
         $this->assertSame(['synced', 'synced'], collect($results)->pluck('status')->all(), 'Cash already collected is never refused.');
         $this->assertSame('unconfirmed', Payment::query()->where('local_uuid', $unconfirmed)->value('duplicate_reason'));
         $this->assertSame('advance', Payment::query()->where('local_uuid', $confirmed)->value('duplicate_reason'));
-        $this->assertSame(['pending'], Payment::query()->whereIn('local_uuid', [$unconfirmed, $confirmed])->distinct()->pluck('verification_status')->all());
+        $this->assertSame('pending', Payment::query()->where('local_uuid', $unconfirmed)->value('verification_status'), 'Unconfirmed goes to the office.');
+        $this->assertSame('verified', Payment::query()->where('local_uuid', $confirmed)->value('verification_status'), 'A real 2-month prepayment bears "paying ahead" out.');
     }
 
     public function test_two_payments_in_one_sync_flag_the_second_against_the_first(): void

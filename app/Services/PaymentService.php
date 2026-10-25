@@ -234,13 +234,58 @@ class PaymentService
             throw ValidationException::withMessages(['duplicate' => $this->describeEarlier($customer, $earlier, (string) $data->amount)]);
         }
 
+        $reason = array_key_exists($data->duplicateReason, Payment::DUPLICATE_REASONS) ? $data->duplicateReason : 'unconfirmed';
+
         return [
             ...$attributes,
             'duplicate_of_id' => $earlier->id,
-            'duplicate_reason' => array_key_exists($data->duplicateReason, Payment::DUPLICATE_REASONS) ? $data->duplicateReason : 'unconfirmed',
+            'duplicate_reason' => $reason,
             'duplicate_note' => $data->duplicateNote,
-            'verification_status' => 'pending',
+            // Still flagged either way; only its verification differs.
+            'verification_status' => $this->reasonIsBorneOut($customer, $data, $attributes, $reason, $earlier)
+                ? ($attributes['verification_status'] ?? 'pending')
+                : 'pending',
         ];
+    }
+
+    /**
+     * Whether the payment itself proves the collector's reason, so it may be
+     * verified on the spot like any payment (if its recorder may verify):
+     *  - "paying ahead" on a real prepayment (months/yearly);
+     *  - "old debt" when the customer owes at least that much beyond this
+     *    month's bill.
+     * Never for the same amount within 3 days of the earlier payment (the
+     * classic double entry), nor for refund / other / unconfirmed — those go
+     * to the office. Cash controls still catch a faked repeat at handover.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function reasonIsBorneOut(Customer $customer, PaymentData $data, array $attributes, string $reason, Payment $earlier): bool
+    {
+        if ($this->isLikelyDoubleEntry($earlier, (string) $data->amount, $data->collectedAt)) {
+            return false;
+        }
+
+        return match ($reason) {
+            'advance' => in_array($attributes['frequency'] ?? null, ['months', 'yearly'], true),
+            'arrears' => (function () use ($customer, $data): bool {
+                $customer->loadMissing('latestManuscript');
+                $owed = bcadd((string) ($customer->latestManuscript?->total_arrears ?? '0'), (string) $customer->bill, 2);
+
+                return bccomp((string) ($customer->latestManuscript?->total_arrears ?? '0'), '0', 2) > 0
+                    && bccomp((string) $data->amount, $owed, 2) <= 0;
+            })(),
+            default => false,
+        };
+    }
+
+    /** The same amount as the earlier payment, within 3 days of it. */
+    private function isLikelyDoubleEntry(Payment $earlier, string $amount, ?string $collectedAt): bool
+    {
+        $earlierAt = Carbon::parse($earlier->collected_at ?? $earlier->created_at);
+        $thisAt = $collectedAt !== null ? Carbon::parse($collectedAt) : Carbon::now();
+
+        return bccomp((string) $earlier->amount, $amount, 2) === 0 && $earlierAt->diffInDays($thisAt, true) <= 3;
     }
 
     /**
@@ -335,9 +380,8 @@ class PaymentService
             $earlier->receipt?->receipt_number !== null ? "receipt {$earlier->receipt->receipt_number}" : null,
             $earlier->recordedBy?->name !== null ? "recorded by {$earlier->recordedBy->name}" : null,
         ]);
-        $sameAmountRecently = bccomp((string) $earlier->amount, $amount, 2) === 0 && $when->diffInDays(Carbon::now(), true) <= 3;
 
-        return ($sameAmountRecently ? 'Possible double entry: ' : '')
+        return ($this->isLikelyDoubleEntry($earlier, $amount, null) ? 'Possible double entry: ' : '')
             ."{$customer->name} already paid ".number_format((float) $earlier->amount, 0, '.', ',').' FCFA on '.$when->format('j M')
             .($details !== [] ? ' ('.implode(', ', $details).')' : '')
             .'. Say why another payment this month is fine, or cancel.';
