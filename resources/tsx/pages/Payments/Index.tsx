@@ -23,6 +23,8 @@ interface PaymentsIndexProps {
     payments: PaginatedResponse<Payment>;
     filters: {
         verification_status: VerificationStatus | null;
+        // The "Possible duplicates" tab (second payments in a month).
+        duplicates?: boolean;
         frequency: PaymentFrequency | null;
         // Matches the payment's customer's name (partial, case-insensitive)
         // or phone (partial) — same 'search' filter/idiom as
@@ -41,14 +43,19 @@ interface PaymentsIndexProps {
         pending: number;
         verified: number;
         rejected: number;
+        // Possible duplicates still waiting for the office.
+        duplicates?: number;
     };
 }
 
-const tabs: { key: 'all' | VerificationStatus; label: string }[] = [
+type TabKey = 'all' | VerificationStatus | 'duplicates';
+
+const tabs: { key: TabKey; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'pending', label: 'Pending' },
     { key: 'verified', label: 'Verified' },
     { key: 'rejected', label: 'Rejected' },
+    { key: 'duplicates', label: 'Possible duplicates' },
 ];
 
 // Each tab carries its own semantic color (pending = amber, verified =
@@ -56,7 +63,7 @@ const tabs: { key: 'all' | VerificationStatus; label: string }[] = [
 // active — a "Pending" count should read as genuinely amber, not just
 // gray-with-a-blue-active-state. The count pill stays tone-tinted even at
 // rest so it doesn't fade to plain gray when the tab isn't selected.
-const tabAccents: Record<'all' | VerificationStatus, { activeTab: string; activeCount: string; restCount: string }> = {
+const tabAccents: Record<TabKey, { activeTab: string; activeCount: string; restCount: string }> = {
     all: {
         activeTab: 'bg-blue-600 text-white shadow-sm shadow-blue-600/20',
         activeCount: 'bg-blue-500 text-white',
@@ -76,6 +83,11 @@ const tabAccents: Record<'all' | VerificationStatus, { activeTab: string; active
         activeTab: 'bg-red-600 text-white shadow-sm shadow-red-600/20',
         activeCount: 'bg-red-500 text-white',
         restCount: 'bg-red-100 text-red-700',
+    },
+    duplicates: {
+        activeTab: 'bg-orange-600 text-white shadow-sm shadow-orange-600/20',
+        activeCount: 'bg-orange-500 text-white',
+        restCount: 'bg-orange-100 text-orange-700',
     },
 };
 
@@ -104,7 +116,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
     const [search, setSearch] = useState(filters.search ?? '');
     const debouncedSearch = useDebounce(search, 300);
 
-    const activeTab = filters.verification_status ?? 'all';
+    const activeTab: TabKey = filters.duplicates ? 'duplicates' : (filters.verification_status ?? 'all');
 
     const isAllTime = filters.scope === 'all';
     // <input type="month"> wants "YYYY-MM" — `filters.from` is always a full
@@ -195,11 +207,12 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
         });
     }
 
-    function goToTab(key: 'all' | VerificationStatus) {
+    function goToTab(key: TabKey) {
         router.get(
             '/payments',
             {
-                verification_status: key === 'all' ? undefined : key,
+                verification_status: key === 'all' || key === 'duplicates' ? undefined : key,
+                duplicates: key === 'duplicates' ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
                 search: filters.search ?? undefined,
             },
@@ -218,6 +231,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
             '/payments',
             {
                 verification_status: filters.verification_status ?? undefined,
+                duplicates: filters.duplicates ? 1 : undefined,
                 frequency: value || undefined,
                 search: filters.search ?? undefined,
             },
@@ -243,6 +257,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 '/payments',
                 {
                     verification_status: filters.verification_status ?? undefined,
+                duplicates: filters.duplicates ? 1 : undefined,
                     frequency: filters.frequency ?? undefined,
                     search: debouncedSearch || undefined,
                     ...(isAllTime
@@ -280,6 +295,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
             '/payments',
             {
                 verification_status: filters.verification_status ?? undefined,
+                duplicates: filters.duplicates ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
                 search: filters.search ?? undefined,
                 from: `${value}-01`,
@@ -303,6 +319,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
             '/payments',
             {
                 verification_status: filters.verification_status ?? undefined,
+                duplicates: filters.duplicates ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
                 search: filters.search ?? undefined,
                 scope: 'all',
@@ -325,6 +342,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
             '/payments',
             {
                 verification_status: filters.verification_status ?? undefined,
+                duplicates: filters.duplicates ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
                 search: filters.search ?? undefined,
             },
@@ -375,7 +393,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 <div className="flex flex-wrap items-center gap-1">
                     {isFiltering && <LoadingSpinner className="mr-1 h-4 w-4 text-slate-400" />}
                     {tabs.map((tab) => {
-                        const count = statusCounts[tab.key];
+                        const count = statusCounts[tab.key] ?? 0;
                         const active = activeTab === tab.key;
                         const accent = tabAccents[tab.key];
 

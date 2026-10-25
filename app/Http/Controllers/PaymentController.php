@@ -60,6 +60,8 @@ class PaymentController extends Controller
         $filters = $request->only([
             'customer_uuid', 'zone_uuid', 'verification_status', 'frequency', 'recorded_offline', 'from', 'to', 'search',
         ]);
+        // The "Possible duplicates" tab: second payments in a month.
+        $filters['duplicates'] = $request->boolean('duplicates');
 
         // Default view = current calendar month only. Payments accumulate
         // forever and this table has no archival/retention step, so with no
@@ -102,6 +104,7 @@ class PaymentController extends Controller
             ],
             'filters' => [
                 'verification_status' => $filters['verification_status'] ?? null,
+                'duplicates' => $filters['duplicates'],
                 'frequency' => $filters['frequency'] ?? null,
                 'search' => $filters['search'] ?? null,
                 // Echoed back so the page can render an accurate "Showing:
@@ -136,6 +139,9 @@ class PaymentController extends Controller
                 'pending' => $this->payments->pendingVerificationCount(),
                 'verified' => Payment::query()->forBranch(TenantContext::currentBranchId())->where('verification_status', 'verified')->count(),
                 'rejected' => Payment::query()->forBranch(TenantContext::currentBranchId())->where('verification_status', 'rejected')->count(),
+                // Possible duplicates still waiting for the office — the tab
+                // itself lists every flagged one in the period.
+                'duplicates' => Payment::query()->forBranch(TenantContext::currentBranchId())->whereNotNull('duplicate_of_id')->where('verification_status', 'pending')->count(),
             ],
         ]);
     }

@@ -220,6 +220,20 @@ class DuplicatePaymentTest extends TestCase
         $this->assertSame(1, app(CashAlertService::class)->counts()['possible_duplicate_payments'] ?? 0);
     }
 
+    public function test_the_payments_page_has_a_possible_duplicates_tab(): void
+    {
+        $this->as('manager');
+        $this->pay();
+        $this->pay(['duplicate_reason' => 'refund']);
+        $flagged = $this->payments()->whereNotNull('duplicate_of_id')->sole();
+
+        $this->as('admin');
+        $this->get('/payments?duplicates=1')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('filters.duplicates', true)
+            ->where('payments.data', fn ($rows) => collect($rows)->pluck('uuid')->all() === [$flagged->uuid])
+            ->where('statusCounts.duplicates', fn ($count) => $count >= 1));
+    }
+
     private function pay(array $extra = []): TestResponse
     {
         return $this->post('/payments', [

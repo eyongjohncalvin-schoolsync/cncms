@@ -27,6 +27,7 @@ class PaymentRepository implements PaymentRepositoryInterface
                 $filters['verification_status'] ?? null,
                 fn ($query, $status) => $query->where('verification_status', $status)
             )
+            ->when($filters['duplicates'] ?? false, fn ($query) => $query->whereNotNull('duplicate_of_id'))
             ->when($filters['frequency'] ?? null, fn ($query, $frequency) => $query->where('frequency', $frequency))
             ->when($filters['recorded_offline'] ?? null, fn ($query, bool $recordedOffline) => $query->where('recorded_offline', $recordedOffline))
             ->when($filters['from'] ?? null, fn ($query, $from) => $query->whereDate('created_at', '>=', $from))
