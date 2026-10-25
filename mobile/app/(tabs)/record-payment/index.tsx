@@ -44,6 +44,7 @@ import {
 import { getCachedPrepaymentOffers, refreshPrepaymentOffers, type PrepaymentOfferApi } from '../../../src/api/prepaymentOffers';
 import type { DuplicateReason, LocalCustomer, LocalPayment } from '../../../src/types/db';
 import { DUPLICATE_REASONS, isDuplicateConfirmationComplete, startOfBusinessMonthIso } from '../../../src/utils/duplicatePayment';
+import { splitPrepayment } from '../../../src/utils/prepaymentSplit';
 import { syncManager } from '../../../src/sync/SyncManager';
 
 const FREQUENCIES: Array<{ value: PaymentFrequency; label: string }> = [
@@ -321,7 +322,8 @@ export default function RecordPaymentScreen() {
         if (offer) {
             setFrequency('months');
             setMonths(String(offer.months));
-            setAmount(String(Math.round(Number(offer.price))));
+            // Old debt first, then the offer — one payment.
+            setAmount(String(Math.round(Number(offer.price) + unpaidDebt)));
         } else {
             setFrequency('monthly');
             setMonths('');
@@ -727,16 +729,14 @@ export default function RecordPaymentScreen() {
                         <View style={[styles.segmented, styles.segmentedWrap]}>
                             {[null, ...offers].map((offer) => {
                                 const active = (offer?.uuid ?? null) === offerUuid;
-                                const blocked = offer !== null && unpaidDebt > 0;
 
                                 return (
                                     <Pressable
                                         key={offer?.uuid ?? 'none'}
                                         accessibilityRole="button"
-                                        accessibilityState={{ selected: active, disabled: blocked }}
-                                        disabled={blocked}
+                                        accessibilityState={{ selected: active }}
                                         onPress={() => chooseOffer(offer)}
-                                        style={[styles.segmentedOption, styles.methodOption, active && styles.segmentedOptionActive, blocked && styles.offerBlocked]}
+                                        style={[styles.segmentedOption, styles.methodOption, active && styles.segmentedOptionActive]}
                                     >
                                         <Text style={[styles.segmentedLabel, active && styles.segmentedLabelActive]}>
                                             {offer ? `${offer.months} months · ${formatFcfa(Number(offer.price))}` : 'No offer'}
@@ -745,9 +745,10 @@ export default function RecordPaymentScreen() {
                                 );
                             })}
                         </View>
-                        {unpaidDebt > 0 ? (
+                        {selectedOffer && unpaidDebt > 0 ? (
                             <Text style={styles.arrearsNote}>
-                                {customer.name} still owes {formatFcfa(unpaidDebt)}. Collect that first as a normal payment, then sell the offer.
+                                Collect {formatFcfa(Number(selectedOffer.price) + unpaidDebt)}: {formatFcfa(unpaidDebt)} clears the old debt,{' '}
+                                {formatFcfa(Number(selectedOffer.price))} buys {selectedOffer.name} ({selectedOffer.months} months).
                             </Text>
                         ) : selectedOffer ? (
                             <Text style={styles.arrearsNote}>
@@ -820,12 +821,25 @@ export default function RecordPaymentScreen() {
                     />
                 ) : null}
 
-                {/* 5b. Arrears are cleared first on any prepayment to a
-                    customer who owes (owner's rule) — stated, not a choice. */}
-                {(frequency === 'months' || frequency === 'yearly') && arrears > 0 && !selectedOffer ? (
-                    <Text style={styles.arrearsNote}>
-                        The {formatFcfa(arrears)} arrears are paid off first; the rest buys prepaid months.
-                    </Text>
+                {/* 5b. What a prepayment buys: old debt first (owner's rule,
+                    not a choice), then whole months at the bill, the rest credit. */}
+                {(frequency === 'months' || frequency === 'yearly') && !selectedOffer && validation.amountValue !== null ? (
+                    (() => {
+                        const split = splitPrepayment(
+                            validation.amountValue,
+                            unpaidDebt,
+                            customer.bill,
+                            frequency === 'yearly' ? 12 : validation.monthsValue,
+                        );
+
+                        return (
+                            <Text style={styles.arrearsNote}>
+                                {split.debtCleared > 0 ? `${formatFcfa(split.debtCleared)} clears the old debt, then ` : ''}
+                                {split.months} month(s) at {formatFcfa(customer.bill)}
+                                {split.credit > 0 ? `; ${formatFcfa(split.credit)} is kept as credit.` : '.'}
+                            </Text>
+                        );
+                    })()
                 ) : null}
 
                 {/* 5c. Paid by — cash / MTN MoMo / Orange Money / bank (cash
@@ -1034,7 +1048,6 @@ const styles = StyleSheet.create({
     duplicateReasonSelected: { backgroundColor: colors.status.offlineDot },
     duplicateReasonLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.status.offlineFg },
     duplicateReasonLabelSelected: { color: colors.surface },
-    offerBlocked: { opacity: 0.4 },
     fieldLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
     segmented: { flexDirection: 'row', backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.xs, gap: spacing.xs },
     segmentedOption: {

@@ -38,8 +38,9 @@ use LogicException;
     'service_months',
     // A possible repeat of an earlier payment that month — see DUPLICATE_REASONS.
     'duplicate_of_id', 'duplicate_reason', 'duplicate_note',
-    // The prepayment offer it bought (PaymentService::applyPrepaymentOffer()).
-    'prepayment_offer_id',
+    // The prepayment offer it bought, and that offer's price then
+    // (PaymentService::applyPrepaymentOffer()); the rest of the amount cleared old debt.
+    'prepayment_offer_id', 'offer_price',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model

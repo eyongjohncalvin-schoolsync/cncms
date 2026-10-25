@@ -312,6 +312,8 @@ function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: C
     // customer who currently owes.
     const isPrepayment = data.frequency === 'months' || data.frequency === 'yearly';
     const selectedArrears = selectedCustomer ? Number(selectedCustomer.total_arrears ?? 0) : 0;
+    // Debt still unpaid after anything collected since the last bill run — what an offer collects first.
+    const unpaidDebt = selectedCustomer ? Number(selectedCustomer.unpaid_debt ?? 0) : 0;
     // An offer is only for a customer with no debt, so it never splits off arrears.
     const showClearArrearsToggle = isPrepayment && selectedArrears > 0 && !selectedOffer;
 
@@ -432,7 +434,15 @@ function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: C
                                         const offer = offers.find((option) => option.uuid === e.target.value);
                                         setData((current) =>
                                             offer
-                                                ? { ...current, prepayment_offer_uuid: offer.uuid, frequency: 'months', months: String(offer.months), amount: offerPriceFor(offer, selectedCustomer), clear_arrears_first: false }
+                                                ? {
+                                                      ...current,
+                                                      prepayment_offer_uuid: offer.uuid,
+                                                      frequency: 'months',
+                                                      months: String(offer.months),
+                                                      // Old debt first, then the offer — one payment.
+                                                      amount: String(Number(offerPriceFor(offer, selectedCustomer)) + unpaidDebt),
+                                                      clear_arrears_first: true,
+                                                  }
                                                 : { ...current, prepayment_offer_uuid: '', frequency: 'monthly', months: '', amount: selectedCustomer.bill },
                                         );
                                     }}
@@ -446,9 +456,10 @@ function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: C
                                     ))}
                                 </select>
                                 {errors.prepayment_offer_uuid && <p className="text-sm text-red-600">{errors.prepayment_offer_uuid}</p>}
-                                {selectedOffer && selectedArrears > 0 && (
+                                {selectedOffer && unpaidDebt > 0 && (
                                     <p className="text-xs text-amber-700">
-                                        {selectedCustomer.name} owes {formatCurrency(selectedArrears)} from before. Collect that first (as a normal payment), then sell the offer.
+                                        Collect {formatCurrency(Number(data.amount))}: {formatCurrency(unpaidDebt)} clears {selectedCustomer.name}&apos;s old debt,{' '}
+                                        {formatCurrency(Number(offerPriceFor(selectedOffer, selectedCustomer)))} buys {selectedOffer.name}.
                                     </p>
                                 )}
                             </div>

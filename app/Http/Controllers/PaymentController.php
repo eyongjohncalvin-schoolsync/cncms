@@ -167,6 +167,17 @@ class PaymentController extends Controller
         // CustomerRepository::findByUuid().
         $customers = $this->customers->allMatching([]);
         $customers->load(['zone', 'latestManuscript']);
+        // Paid since the last bill run (one grouped query) — what's left of
+        // the old debt, so an offer can collect "debt + offer" in one payment.
+        $paidSince = Payment::query()
+            ->whereIn('customer_id', $customers->pluck('id'))
+            ->subscription()
+            ->whereNull('processed_at')
+            ->whereNull('prepayment_offer_id')
+            ->where('verification_status', '!=', 'rejected')
+            ->groupBy('customer_id')
+            ->selectRaw('customer_id, sum(amount) as paid')
+            ->pluck('paid', 'customer_id');
 
         $customers = $customers
             ->map(fn (Customer $customer): array => [
@@ -185,6 +196,8 @@ class PaymentController extends Controller
                 'total_arrears' => (string) ($customer->latestManuscript?->total_arrears ?? '0'),
                 // Prices prepayment offers by the customer's branch (from the branch memo, no query).
                 'branch_uuid' => Branch::allMemoized()->get($customer->branch_id)?->uuid,
+                // Old debt still unpaid (PaymentService::unpaidDebt(), same rule): an offer collects it first.
+                'unpaid_debt' => number_format(max(0, (float) ($customer->latestManuscript?->total_arrears ?? 0) - (float) ($customer->latestManuscript?->credit ?? 0) - (float) ($paidSince[$customer->id] ?? 0)), 2, '.', ''),
             ])
             ->values();
 

@@ -66,7 +66,7 @@ class PrepaymentOfferTest extends TestCase
         $this->assertSame('months', $payment->frequency);
         $this->assertSame(4, (int) $payment->months);
         $this->assertSame('2500.00', (string) $payment->prepaid_rate);
-        $this->assertFalse((bool) $payment->clear_arrears_first);
+        $this->assertSame('10000.00', (string) $payment->offer_price);
     }
 
     public function test_the_amount_must_be_the_offers_price(): void
@@ -75,16 +75,68 @@ class PrepaymentOfferTest extends TestCase
         $this->assertSame(0, Payment::query()->where('customer_id', $this->customer->id)->count());
     }
 
-    public function test_an_offer_needs_no_unpaid_debt_but_debt_paid_today_counts(): void
+    public function test_a_customer_who_owes_pays_the_debt_and_the_offer_in_one_payment(): void
     {
         ManuscriptFactory::new()->withArrears(2000)->create(['customer_id' => $this->customer->id, 'period' => Carbon::now()->subMonthNoOverflow()->format('Y-m')]);
 
+        // The offer price alone isn't enough: the debt comes first.
         $this->payOffer()->assertSessionHasErrors('prepayment_offer_uuid');
+        $this->assertStringContainsString('Collect 12,000 FCFA', (string) session('errors')->first('prepayment_offer_uuid'));
 
-        // The collector takes the debt first, then sells the offer in the same visit.
+        $this->payOffer(['amount' => 12000])->assertSessionHasNoErrors();
+
+        $payment = Payment::query()->where('customer_id', $this->customer->id)->sole();
+        $this->assertSame('10000.00', (string) $payment->offer_price);
+        $this->assertTrue((bool) $payment->clear_arrears_first, 'The debt is cleared first.');
+    }
+
+    public function test_the_payment_form_knows_what_is_still_owed(): void
+    {
+        ManuscriptFactory::new()->withArrears(6000)->create(['customer_id' => $this->customer->id, 'period' => Carbon::now()->subMonthNoOverflow()->format('Y-m')]);
+        $this->post('/payments', ['customer_uuid' => $this->customer->uuid, 'amount' => 4000, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
+
+        // Owed 6,000, paid 4,000 since the bill run: 2,000 left, so the offer collects 12,000.
+        $this->get('/payments/create')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('customers', fn ($customers) => collect($customers)->firstWhere('uuid', $this->customer->uuid)['unpaid_debt'] === '2000.00'));
+    }
+
+    public function test_debt_paid_earlier_in_the_same_visit_counts(): void
+    {
+        ManuscriptFactory::new()->withArrears(2000)->create(['customer_id' => $this->customer->id, 'period' => Carbon::now()->subMonthNoOverflow()->format('Y-m')]);
+
         $this->post('/payments', ['customer_uuid' => $this->customer->uuid, 'amount' => 2000, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
         $this->payOffer(['duplicate_reason' => 'advance'])->assertSessionHasNoErrors();
+
         $this->assertNotNull(Payment::query()->where('customer_id', $this->customer->id)->whereNotNull('prepayment_offer_id')->first());
+    }
+
+    public function test_the_bill_run_clears_the_debt_then_gives_the_offers_months(): void
+    {
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'bill' => 3000, 'others' => 0, 'status' => 'active']);
+        $period = BusinessTimezone::currentPeriod();
+        $previous = ManuscriptFactory::new()->create(['customer_id' => $customer->id, 'period' => Carbon::createFromFormat('!Y-m', $period)->subMonthNoOverflow()->format('Y-m'), 'bill' => 3000, 'total_arrears' => 2000, 'credit' => 0]);
+
+        // Paid as expected: 2,000 debt + 10,000 offer.
+        $result = (new ManuscriptCalculator)->calculate($customer->fresh(), $period, $previous, collect([$this->offerPayment($customer, '12000')]), collect());
+        $this->assertSame('0.00', $result->totalArrears);
+        $this->assertSame(3, $result->prepaidMonthsRemaining, 'Four months bought, this month uses one.');
+        $this->assertSame('0.00', $result->credit);
+
+        // The debt was bigger than the collector saw: 9,000 left can't buy the
+        // 10,000 offer, so it is an ordinary prepayment at the offer's rate.
+        $previous->update(['total_arrears' => 3000]);
+        $short = (new ManuscriptCalculator)->calculate($customer->fresh(), $period, $previous->fresh(), collect([$this->offerPayment($customer, '12000')]), collect());
+        $this->assertSame(2, $short->prepaidMonthsRemaining, '9,000 at 2,500 buys three months; this month uses one.');
+        $this->assertSame('1500.00', $short->credit);
+    }
+
+    private function offerPayment(Customer $customer, string $amount): Payment
+    {
+        return PaymentFactory::new()->create([
+            'customer_id' => $customer->id, 'amount' => $amount, 'frequency' => 'months', 'months' => 4,
+            'prepaid_rate' => '2500.00', 'offer_price' => '10000.00', 'clear_arrears_first' => true,
+            'prepayment_offer_id' => $this->offer->id, 'verification_status' => 'verified', 'expiration_date' => null,
+        ]);
     }
 
     public function test_an_offer_out_of_its_dates_is_refused_at_the_counter(): void

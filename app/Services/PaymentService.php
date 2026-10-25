@@ -213,8 +213,10 @@ class PaymentService
      * A payment made under a prepayment offer ("4 months for 10,000") buys
      * exactly the offer's months for exactly its price in the customer's
      * branch — no amount is ever inflated to make months come out right
-     * (App\Services\ManuscriptCalculator honours the offer's months). Only
-     * for a customer with no unpaid debt, and not during installation free
+     * (App\Services\ManuscriptCalculator honours the offer's months). A
+     * customer who still owes pays the debt in the same payment: the amount
+     * is the debt plus the offer's price, the debt is cleared first and the
+     * offer buys its months with the rest. Not during installation free
      * months.
      *
      * At the counter those rules refuse the payment. From an offline phone
@@ -247,10 +249,14 @@ class PaymentService
         }
 
         $price = BranchPrices::for($customer->branch_id)->prepaymentOfferPrice($offer);
+        // Old debt is cleared first, in the same payment: the amount is the debt plus the offer.
+        $debt = $this->unpaidDebt($customer);
+        $total = bcadd($debt, $price, 2);
         $problem = match (true) {
             ($data->purpose ?? Payment::PURPOSE_SUBSCRIPTION) !== Payment::PURPOSE_SUBSCRIPTION => 'An offer only pays for the monthly bill.',
-            bccomp((string) $data->amount, $price, 2) !== 0 => "{$offer->name} costs ".number_format((float) $price, 0, '.', ',').' FCFA — record exactly that amount.',
-            bccomp($debt = $this->unpaidDebt($customer), '0', 2) > 0 => "{$customer->name} still owes ".number_format((float) $debt, 0, '.', ',').' FCFA. Collect the old debt first, then sell the offer.',
+            bccomp((string) $data->amount, $total, 2) !== 0 => bccomp($debt, '0', 2) > 0
+                ? "{$customer->name} owes ".$this->fcfa($debt).'. Collect '.$this->fcfa($total).": {$this->fcfa($debt)} clears the debt, {$this->fcfa($price)} buys {$offer->name}."
+                : "{$offer->name} costs {$this->fcfa($price)} — record exactly that amount.",
             $this->inInstallationFreeMonths($customer) => "{$customer->name} is still in free months from their installation — sell the offer once they end.",
             default => null,
         };
@@ -267,9 +273,16 @@ class PaymentService
             'expiration_date' => $this->computeExpirationDate('months', $offer->months),
             // What each of its months is worth (display, and any later credit draw).
             'prepaid_rate' => bcdiv($price, (string) $offer->months, 2),
-            'clear_arrears_first' => false,
+            'offer_price' => $price,
+            // Any old debt in the amount is paid off first; the offer buys its months with the rest.
+            'clear_arrears_first' => true,
             'verification_status' => $problem !== null ? 'pending' : ($attributes['verification_status'] ?? 'pending'),
         ];
+    }
+
+    private function fcfa(string $amount): string
+    {
+        return number_format((float) $amount, 0, '.', ',').' FCFA';
     }
 
     /**

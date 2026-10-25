@@ -275,6 +275,8 @@ export interface Customer {
     months_overdue?: number;
     /** The customer's branch — Payments/Create prices prepayment offers by it. */
     branch_uuid?: string | null;
+    /** Old debt still unpaid (Payments/Create): a prepayment offer collects it first. */
+    unpaid_debt?: string;
     /**
      * Customer archiving (customer-deletion deliberation, 2026-08-29).
      * `has_billing_history` decides "Archive customer" vs "Delete row" in

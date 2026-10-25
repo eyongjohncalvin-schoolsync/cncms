@@ -360,12 +360,18 @@ final class ManuscriptCalculator
                     $cap = $intendedMonths;
                 }
 
-                if ($payment->prepayment_offer_id !== null && (int) $payment->months > 0) {
+                $offerPrice = $this->normalize((string) ($payment->offer_price ?? $payment->amount));
+
+                if ($payment->prepayment_offer_id !== null && (int) $payment->months > 0 && $this->compare($spendable, $offerPrice) >= 0) {
                     // A prepayment offer ("4 months for 10,000") buys exactly
                     // its months for exactly its price — never divided by a
                     // rate, so 5,000 for 3 months is 3 months, no cents left.
+                    // Any old debt in the payment was cleared just above; if
+                    // what is left can't cover the offer (the debt was bigger
+                    // than the collector saw), it falls through to an ordinary
+                    // prepayment below — the office already holds such a payment.
                     $monthsBought = (int) $payment->months;
-                    $cost = $spendable;
+                    $cost = $offerPrice;
                 } elseif ($hasPlan) {
                     // D7: the advance covers exactly what is charged each
                     // month — fully free months are skipped, a partly free
