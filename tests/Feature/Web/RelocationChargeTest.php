@@ -121,14 +121,14 @@ class RelocationChargeTest extends TestCase
         $this->assertSame(CustomerCharge::STATUS_OPEN, $charge->status);
         $this->assertSame($fromZone->id, $charge->from_zone_id);
         $this->assertSame($toZone->id, $charge->to_zone_id);
-        $this->assertSame('Fiango', $charge->from_location);
-        $this->assertSame('Mbonge Road', $charge->to_location);
+        $this->assertSame('FIANGO', $charge->from_location);
+        $this->assertSame('MBONGE ROAD', $charge->to_location);
         $this->assertSame('Moved near the market', $charge->note);
         $this->assertSame('3000.00', $charge->balance());
 
         $customer->refresh();
         $this->assertSame($toZone->id, $customer->zone_id, 'Same account, new zone.');
-        $this->assertSame('Mbonge Road', $customer->location);
+        $this->assertSame('MBONGE ROAD', $customer->location);
 
         $payment = Payment::query()->where('customer_charge_id', $charge->id)->sole();
         $this->assertSame(Payment::PURPOSE_INSTALLATION, $payment->purpose);
@@ -152,7 +152,7 @@ class RelocationChargeTest extends TestCase
             ->component('Customers/Show')
             ->where('customer.one_off_charges.balance', '3000.00')
             ->where('customer.one_off_charges.charges.0.kind', 'relocation')
-            ->where('customer.one_off_charges.charges.0.to_location', 'Mbonge Road')
+            ->where('customer.one_off_charges.charges.0.to_location', 'MBONGE ROAD')
             ->where('customer.one_off_charges.charges.0.to_zone_name', $toZone->name)
             ->where('customer.one_off_charges.default_fees.relocation', '5000.00')
             ->where('customer.one_off_charges.can_relocate', true)
@@ -169,7 +169,7 @@ class RelocationChargeTest extends TestCase
 
         $this->assertSame($customer->zone_id, $charge->to_zone_id);
         $this->assertSame($customer->zone_id, $customer->fresh()->zone_id);
-        $this->assertSame('Mbonge Road', $customer->fresh()->location);
+        $this->assertSame('MBONGE ROAD', $customer->fresh()->location);
     }
 
     public function test_relocating_to_an_unknown_zone_changes_nothing(): void
@@ -182,7 +182,7 @@ class RelocationChargeTest extends TestCase
 
         $this->assertSame(0, CustomerCharge::query()->where('customer_id', $customer->id)->count());
         $this->assertSame(0, Payment::query()->where('customer_id', $customer->id)->count());
-        $this->assertSame('Fiango', $customer->fresh()->location);
+        $this->assertSame('FIANGO', $customer->fresh()->location);
     }
 
     public function test_a_relocation_needs_the_new_address(): void
@@ -205,7 +205,7 @@ class RelocationChargeTest extends TestCase
         $this->assertSame('7500.00', (string) $charge->amount);
         $this->assertSame(CustomerCharge::STATUS_PAID, $charge->status, 'Paid in full at once.');
         $this->assertNull($charge->to_location);
-        $this->assertSame('Fiango', $customer->fresh()->location);
+        $this->assertSame('FIANGO', $customer->fresh()->location);
         $this->assertSame($customer->zone_id, $customer->fresh()->zone_id);
 
         $payment = Payment::query()->where('customer_charge_id', $charge->id)->sole();
@@ -249,7 +249,7 @@ class RelocationChargeTest extends TestCase
         $customer = $this->customer();
 
         $this->post("/customers/{$customer->uuid}/relocation", ['location' => 'Mbonge Road', 'fee' => 3000])->assertSessionHasErrors('reason');
-        $this->assertSame('Fiango', $customer->fresh()->location, 'Nothing moves when the fee is refused.');
+        $this->assertSame('FIANGO', $customer->fresh()->location, 'Nothing moves when the fee is refused.');
 
         $charge = $this->relocate($customer, ['fee' => 3000, 'reason' => 'Neighbour discount', 'paid_now' => 3000, 'method' => 'cash']);
 
@@ -535,7 +535,7 @@ class RelocationChargeTest extends TestCase
         $this->post("/customers/{$customer->uuid}/reinstallation", [])->assertSessionHas('error');
 
         $this->assertSame(0, CustomerCharge::query()->where('customer_id', $customer->id)->count());
-        $this->assertSame('Fiango', $customer->fresh()->location);
+        $this->assertSame('FIANGO', $customer->fresh()->location);
     }
 
     public function test_an_admin_sets_the_default_fees_and_a_manager_cannot(): void

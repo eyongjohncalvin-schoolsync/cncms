@@ -98,7 +98,7 @@ class ReceiptEmailTest extends TestCase
             'email' => ' Mail@Example.com ', 'preferred_channel' => 'email',
         ])->assertRedirect();
 
-        $customer = Customer::query()->where('name', 'Mail Customer')->sole();
+        $customer = Customer::query()->where('name', 'MAIL CUSTOMER')->sole();
         $this->assertSame('mail@example.com', $customer->email);
         $this->assertSame('email', $customer->preferred_channel);
 

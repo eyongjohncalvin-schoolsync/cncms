@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\HasUpperCaseLabels;
 use App\Models\Concerns\HasUuid;
 use App\Support\BusinessTimezone;
 use App\Traits\Auditable;
@@ -38,10 +39,20 @@ use Illuminate\Support\Carbon;
 #[RouteKey('uuid')]
 class Customer extends Model
 {
-    use Auditable, BelongsToBranch, HasUuid, SoftDeletes;
+    use Auditable, BelongsToBranch, HasUpperCaseLabels, HasUuid, SoftDeletes;
 
     /** customers.activation_status of a field registration awaiting the office (phase 3). */
     public const string ACTIVATION_PENDING = 'pending';
+
+    /**
+     * Name and location are stored upper-case (see HasUpperCaseLabels). Never
+     * unique — homonyms are real people. Email, phone, notes and codes are
+     * left exactly as typed.
+     */
+    protected function upperCaseLabels(): array
+    {
+        return ['name', 'location'];
+    }
 
     protected function casts(): array
     {

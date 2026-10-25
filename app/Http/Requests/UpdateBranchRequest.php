@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Rules\UniqueUpperCaseLabel;
+use App\Support\UpperCaseLabel;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class UpdateBranchRequest extends FormRequest
 {
@@ -22,8 +23,16 @@ class UpdateBranchRequest extends FormRequest
         return [
             'name' => [
                 'required', 'string', 'max:50',
-                Rule::unique('branches', 'name')->ignore($this->route('branch')),
+                new UniqueUpperCaseLabel('branches', ignore: $this->route('branch')),
             ],
         ];
+    }
+
+    /** See StoreBranchRequest::prepareForValidation(). */
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('name'))) {
+            $this->merge(['name' => UpperCaseLabel::normalise($this->input('name'))]);
+        }
     }
 }

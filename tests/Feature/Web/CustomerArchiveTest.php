@@ -113,6 +113,19 @@ class CustomerArchiveTest extends TestCase
         $this->assertDatabaseHas('customers', ['id' => $customer->id, 'deleted_at' => null]);
     }
 
+    public function test_the_typed_name_may_differ_in_case_and_spacing(): void
+    {
+        $this->actingAsRole('manager');
+        $customer = $this->customerWithHistory();
+
+        $this->patch("/customers/{$customer->uuid}/archive", [
+            'name' => '  '.str_replace(' ', '   ', mb_strtolower($customer->name)).' ',
+            'reason' => 'Moved away',
+        ])->assertSessionHasNoErrors();
+
+        $this->assertSoftDeleted('customers', ['id' => $customer->id]);
+    }
+
     public function test_archive_requires_a_reason(): void
     {
         $this->actingAsRole('manager');

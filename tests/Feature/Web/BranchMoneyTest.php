@@ -163,7 +163,7 @@ class BranchMoneyTest extends TestCase
         $this->assertSame('15000.00', (string) Budget::query()->where('branch_id', $this->buea->id)->where('category_id', $category->id)->value('amount'));
 
         $this->get('/resources/budgets')->assertInertia(fn (Assert $page) => $page
-            ->where('grid.branch', 'Buea')
+            ->where('grid.branch', 'BUEA')
             ->where('grid.rows', fn ($rows) => collect($rows)->firstWhere('uuid', $category->uuid)['budget'] === '15000.00'));
     }
 

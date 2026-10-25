@@ -9,6 +9,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use Database\Factories\BranchFactory;
 use Database\Factories\ZoneFactory;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -66,12 +67,12 @@ class BranchTest extends TestCase
         $branches = DB::connection('tenant')->table('branches')->get();
 
         $this->assertCount(1, $branches);
-        $this->assertSame('Main Branch', $branches->first()->name);
+        $this->assertSame('MAIN BRANCH', $branches->first()->name);
     }
 
     public function test_every_existing_zone_and_company_is_backfilled_to_main_branch(): void
     {
-        $mainBranchId = DB::connection('tenant')->table('branches')->where('name', 'Main Branch')->value('id');
+        $mainBranchId = DB::connection('tenant')->table('branches')->where('is_headquarters', true)->value('id');
 
         $this->assertNotNull($mainBranchId);
 
@@ -108,7 +109,7 @@ class BranchTest extends TestCase
 
         $response->assertRedirect('/branches');
         $response->assertSessionHas('success');
-        $this->assertDatabaseHas('branches', ['name' => 'Buea Branch']);
+        $this->assertDatabaseHas('branches', ['name' => 'BUEA BRANCH']);
     }
 
     public function test_admin_can_create_a_branch(): void
@@ -118,7 +119,7 @@ class BranchTest extends TestCase
         $response = $this->post('/branches', ['name' => 'Douala Branch']);
 
         $response->assertRedirect('/branches');
-        $this->assertDatabaseHas('branches', ['name' => 'Douala Branch']);
+        $this->assertDatabaseHas('branches', ['name' => 'DOUALA BRANCH']);
     }
 
     /**
@@ -167,6 +168,39 @@ class BranchTest extends TestCase
         $response->assertSessionHasErrors(['name']);
     }
 
+    public function test_store_saves_the_name_upper_case_trimmed_and_collapsed(): void
+    {
+        $this->actingAsRole('super');
+
+        $this->post('/branches', ['name' => '  bnorm   Ébolowa  '])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('branches', ['name' => 'BNORM ÉBOLOWA']);
+    }
+
+    public function test_store_rejects_a_branch_name_that_differs_only_in_case(): void
+    {
+        $this->actingAsRole('super');
+
+        BranchFactory::new()->create(['name' => 'Case Dup Branch']);
+
+        $this->post('/branches', ['name' => 'case dup BRANCH'])->assertSessionHasErrors(['name']);
+
+        $this->assertSame(1, Branch::query()->where('name', 'CASE DUP BRANCH')->count());
+    }
+
+    public function test_update_rejects_a_case_only_duplicate_but_allows_its_own_name_in_another_case(): void
+    {
+        $this->actingAsRole('super');
+
+        BranchFactory::new()->create(['name' => 'Taken Case Branch']);
+        $branch = BranchFactory::new()->create(['name' => 'Own Case Branch']);
+
+        $this->patch("/branches/{$branch->uuid}", ['name' => 'taken case branch'])->assertSessionHasErrors(['name']);
+        $this->patch("/branches/{$branch->uuid}", ['name' => 'own case branch'])->assertSessionHasNoErrors();
+
+        $this->assertSame('OWN CASE BRANCH', $branch->fresh()->name);
+    }
+
     public function test_guests_are_redirected_to_login(): void
     {
         $this->get('/branches')->assertRedirect('/login');
@@ -183,7 +217,7 @@ class BranchTest extends TestCase
     {
         $this->actingAsRole('manager');
 
-        $mainBranchId = DB::connection('tenant')->table('branches')->where('name', 'Main Branch')->value('id');
+        $mainBranchId = DB::connection('tenant')->table('branches')->where('is_headquarters', true)->value('id');
 
         $response = $this->post('/zones', ['name' => 'ZDEFAULT (NO BRANCH)']);
 
@@ -255,7 +289,7 @@ class BranchTest extends TestCase
         $branch = BranchFactory::new()->create(['name' => 'Branch With Zones']);
         ZoneFactory::new()->create(['branch_id' => $branch->id]);
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
 
         Branch::query()->where('id', $branch->id)->delete();
     }
@@ -271,7 +305,7 @@ class BranchTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Branches/Edit')
                 ->where('branch.uuid', $branch->uuid)
-                ->where('branch.name', 'Edit Target Branch'));
+                ->where('branch.name', 'EDIT TARGET BRANCH'));
     }
 
     public function test_super_can_update_a_branch_name(): void
@@ -284,7 +318,7 @@ class BranchTest extends TestCase
 
         $response->assertRedirect('/branches');
         $response->assertSessionHas('success');
-        $this->assertDatabaseHas('branches', ['id' => $branch->id, 'name' => 'New Branch Name']);
+        $this->assertDatabaseHas('branches', ['id' => $branch->id, 'name' => 'NEW BRANCH NAME']);
     }
 
     public function test_update_fails_validation_on_duplicate_branch_name(): void
@@ -297,7 +331,7 @@ class BranchTest extends TestCase
         $response = $this->patch("/branches/{$branch->uuid}", ['name' => 'Taken Branch Name']);
 
         $response->assertSessionHasErrors(['name']);
-        $this->assertDatabaseHas('branches', ['id' => $branch->id, 'name' => 'Branch To Rename']);
+        $this->assertDatabaseHas('branches', ['id' => $branch->id, 'name' => 'BRANCH TO RENAME']);
     }
 
     /**
@@ -356,7 +390,7 @@ class BranchTest extends TestCase
         $this->patch("/branches/{$branch->uuid}", ['name' => 'Should Not Apply'])->assertForbidden();
         $this->delete("/branches/{$branch->uuid}")->assertForbidden();
 
-        $this->assertDatabaseHas('branches', ['id' => $branch->id, 'name' => "Guarded Branch ({$role})"]);
+        $this->assertDatabaseHas('branches', ['id' => $branch->id, 'name' => $branch->name]);
 
         // viewAny (index) stays open to every role per BranchPolicy — this
         // edit/update/destroy pass must not narrow that.

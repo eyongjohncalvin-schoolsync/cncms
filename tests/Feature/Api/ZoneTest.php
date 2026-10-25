@@ -110,6 +110,46 @@ class ZoneTest extends TestCase
         $response->assertStatus(422)->assertJsonValidationErrors(['name']);
     }
 
+    public function test_create_saves_the_name_upper_case_trimmed_and_collapsed(): void
+    {
+        $token = $this->tokenForRole('super');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/zones', ['name' => '  zapi   bonduma é '])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'ZAPI BONDUMA É');
+
+        $this->assertDatabaseHas('zones', ['name' => 'ZAPI BONDUMA É']);
+    }
+
+    public function test_create_rejects_a_name_that_differs_only_in_case(): void
+    {
+        ZoneFactory::new()->create(['name' => 'ZAPI-DUP']);
+        $token = $this->tokenForRole('super');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/zones', ['name' => 'Zapi-Dup'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['name']);
+    }
+
+    public function test_update_rejects_a_case_only_duplicate_but_allows_its_own_name_in_another_case(): void
+    {
+        ZoneFactory::new()->create(['name' => 'ZAPI-TAKEN']);
+        $zone = ZoneFactory::new()->create(['name' => 'ZAPI-MINE']);
+        $token = $this->tokenForRole('super');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/zones/{$zone->uuid}", ['name' => 'zapi-taken'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['name']);
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->patchJson("/api/v1/zones/{$zone->uuid}", ['name' => 'zapi-mine'])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'ZAPI-MINE');
+    }
+
     public function test_agent_cannot_create_a_zone(): void
     {
         $token = $this->tokenForRole('agent');

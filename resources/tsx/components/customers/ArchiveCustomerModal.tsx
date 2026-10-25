@@ -49,7 +49,8 @@ export function ArchiveCustomerModal({ open, onClose, customer }: ArchiveCustome
 
     if (!customer) return null;
 
-    const nameMatches = data.name.trim() === customer.name;
+    // Names are stored upper-case; casing and spacing in the typed name don't count.
+    const nameMatches = data.name.trim().replace(/\s+/g, ' ').toUpperCase() === customer.name;
     const reasonFilled = data.reason.trim().length >= 3;
     const canSubmit = nameMatches && reasonFilled && !processing;
 
@@ -105,7 +106,7 @@ export function ArchiveCustomerModal({ open, onClose, customer }: ArchiveCustome
 
                 <div className="flex flex-col gap-1">
                     <label htmlFor="archive-name" className="text-sm font-medium text-slate-700">
-                        This customer has billing history. Type their name exactly to confirm:
+                        This customer has billing history. Type their name to confirm:
                     </label>
                     <input
                         id="archive-name"

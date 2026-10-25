@@ -125,6 +125,27 @@ class ZoneImportTest extends TestCase
         $this->assertDatabaseHas('zones', ['name' => 'ZIMP-NEW']);
     }
 
+    public function test_imported_names_are_saved_upper_case_and_case_only_duplicates_are_rejected(): void
+    {
+        $this->actingAsRole('manager');
+
+        ZoneFactory::new()->create(['name' => 'ZIMP-CASE']);
+
+        $file = $this->spreadsheet([
+            ['name' => '  zimp   lower é '],  // new — stored normalised
+            ['name' => 'Zimp-Case'],          // case-only duplicate of an existing zone
+            ['name' => 'ZIMP LOWER É'],       // case-only duplicate of row 2 in the same file
+        ], ['name']);
+
+        $this->post('/zones/import', ['file' => $file])
+            ->assertSessionHas('import', fn (array $import): bool => $import['succeeded_count'] === 1
+                && $import['failed_count'] === 2
+                && array_column($import['failed'], 'row') === [3, 4]);
+
+        $this->assertDatabaseHas('zones', ['name' => 'ZIMP LOWER É']);
+        $this->assertSame(1, Zone::query()->where('name', 'ZIMP-CASE')->count());
+    }
+
     public function test_agent_gets_a_403_importing_zones(): void
     {
         $this->actingAsRole('agent');

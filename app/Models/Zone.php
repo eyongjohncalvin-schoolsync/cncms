@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUpperCaseLabels;
 use App\Models\Concerns\HasUuid;
 use App\Models\Scopes\BranchScope;
 use App\Traits\Auditable;
@@ -17,12 +18,18 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class Zone extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, HasUpperCaseLabels, HasUuid;
 
     /** A branch-fenced user only ever sees their own branch's zones (branches v2 §5). */
     protected static function booted(): void
     {
         static::addGlobalScope(new BranchScope);
+    }
+
+    /** Zone names are stored upper-case (see HasUpperCaseLabels). */
+    protected function upperCaseLabels(): array
+    {
+        return ['name'];
     }
 
     public function branch(): BelongsTo

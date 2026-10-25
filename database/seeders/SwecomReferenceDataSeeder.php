@@ -24,8 +24,8 @@ class SwecomReferenceDataSeeder extends Seeder
         'THR01 (3/CORNERS)', 'TR 03', 'AR01(JUNCTION)', 'AR02(HANS)', 'AR03(SEC)',
         'AR04', 'AR 05 (BELMONT)', 'GARE 1', 'LR R01 (LADUMA ROAD)', 'LR R02',
         'M R01 (DODO)', 'M R02', 'M R03 (OIL MILL)', 'M R04 (JERUME)', 'MA R01',
-        'MA R02(ELDER)', 'T R01', 'T R02 (BAPTIST)', 'T R03 (BENJI)', 'T R04 (weldering)',
-        'T R05(BELTHA)', 'T R06(UNCLE ETA)', 'T R07(school)', 'TRANSMITTER', 'MAHOLE 6',
+        'MA R02(ELDER)', 'T R01', 'T R02 (BAPTIST)', 'T R03 (BENJI)', 'T R04 (WELDERING)',
+        'T R05(BELTHA)', 'T R06(UNCLE ETA)', 'T R07(SCHOOL)', 'TRANSMITTER', 'MAHOLE 6',
         'NDIFANG', 'BI', 'TANCHA SCHOOL', 'BANGA FARM',
     ];
 
@@ -47,7 +47,7 @@ class SwecomReferenceDataSeeder extends Seeder
     public function run(): void
     {
         $now = now();
-        $branchId = (int) DB::table('branches')->where('name', 'Main Branch')->value('id');
+        $branchId = (int) DB::table('branches')->where('is_headquarters', true)->value('id');
         $existing = DB::table('zones')->pluck('name')->all();
 
         $missing = array_values(array_diff(self::ZONES, $existing));

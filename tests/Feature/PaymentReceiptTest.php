@@ -188,7 +188,7 @@ class PaymentReceiptTest extends TestCase
 
         $customer->update(['name' => 'Renamed Later']);
 
-        $this->assertSame('Original Name', $receipt->fresh()->snapshot['customer']['name']);
+        $this->assertSame('ORIGINAL NAME', $receipt->fresh()->snapshot['customer']['name']);
     }
 
     public function test_pdf_renders_a_non_empty_pdf_and_caches_it(): void

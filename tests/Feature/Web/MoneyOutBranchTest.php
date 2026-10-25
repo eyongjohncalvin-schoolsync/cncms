@@ -48,7 +48,7 @@ class MoneyOutBranchTest extends TestCase
         Mail::fake();
 
         $this->category = ExpenseCategoryFactory::new()->create(['name' => 'Fuel']);
-        $this->mainBranch = Branch::query()->where('name', 'Main Branch')->firstOrFail();
+        $this->mainBranch = Branch::query()->where('is_headquarters', true)->firstOrFail();
         TenantUser::query()->where('tenant_id', 'swecom')->update(['is_investor' => false]);
         Company::query()->update(['voucher_approval_limit' => '200000', 'voucher_daily_limit' => null, 'monthly_spending_cap' => null]);
         Company::forgetCache();

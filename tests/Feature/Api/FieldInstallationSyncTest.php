@@ -220,7 +220,7 @@ class FieldInstallationSyncTest extends TestCase
         $this->assertSame([[
             'local_uuid' => $item['local_uuid'],
             'customer_uuid' => $item['customer_uuid'],
-            'customer_name' => $item['name'],
+            'customer_name' => mb_strtoupper($item['name']),
             'status' => 'pending',
             'reason' => null,
             'possible_duplicate' => false,

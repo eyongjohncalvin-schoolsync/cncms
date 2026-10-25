@@ -170,7 +170,7 @@ class CustomerBulkBillUpdateTest extends TestCase
             'preview' => [
                 [
                     'customer_uuid' => $customer->uuid,
-                    'name' => 'Preview Only Customer',
+                    'name' => 'PREVIEW ONLY CUSTOMER',
                     'current_bill' => '2500.00',
                     'new_bill' => '3000.00',
                 ],

@@ -111,7 +111,7 @@ class CustomerInstallationTest extends TestCase
 
     private function created(string $name = 'New Installation Customer'): Customer
     {
-        return Customer::query()->where('name', $name)->latest('id')->firstOrFail();
+        return Customer::query()->where('name', mb_strtoupper($name))->latest('id')->firstOrFail();
     }
 
     private function bill(Customer $customer, string $period): Manuscript
@@ -535,6 +535,6 @@ class CustomerInstallationTest extends TestCase
 
         $this->postJson('/customers/installation-preview', [...$this->form(name: 'Someone Else'), 'phone' => '677123456'])
             ->assertOk()
-            ->assertJsonPath('duplicates.0.name', 'Ebai Ndip');
+            ->assertJsonPath('duplicates.0.name', 'EBAI NDIP');
     }
 }

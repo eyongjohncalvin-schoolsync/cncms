@@ -10,6 +10,7 @@ use App\Imports\CustomersImport;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\BranchLookup;
+use App\Support\UpperCaseLabel;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
@@ -76,7 +77,9 @@ final class CustomerImportService
 
         // 29 zones, cached for an hour by ZoneService::all() — one lookup
         // for the whole file rather than a query per row.
-        $zonesByName = $this->zones->all()->keyBy('name');
+        // Keyed and looked up by the normalised name, so a sheet's "thr01"
+        // finds the stored "THR01" (zone names are upper-case, UpperCaseLabel).
+        $zonesByName = $this->zones->all()->keyBy(fn ($zone): string => (string) UpperCaseLabel::normalise($zone->name));
         BranchLookup::remember($zonesByName);
 
         $succeeded = [];
@@ -111,7 +114,7 @@ final class CustomerImportService
                 continue;
             }
 
-            $zone = $zonesByName->get($zoneName);
+            $zone = $zonesByName->get(UpperCaseLabel::normalise($zoneName));
 
             if ($zone === null) {
                 // Deliberately does NOT auto-create the zone or silently

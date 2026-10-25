@@ -121,14 +121,15 @@ class CustomerImportTest extends TestCase
         });
 
         $this->assertDatabaseHas('customers', [
-            'name' => 'CIMP Customer A',
+            'name' => 'CIMP CUSTOMER A',
+            'location' => 'MAIN STREET',
             'zone_id' => $zone->id,
             'bill' => 2500,
             'others' => 1500,
             'phone' => '677440670',
         ]);
         $this->assertDatabaseHas('customers', [
-            'name' => 'CIMP Customer B',
+            'name' => 'CIMP CUSTOMER B',
             'zone_id' => $zone->id,
             'bill' => 5000,
             'level' => 'Vip',
@@ -174,8 +175,24 @@ class CustomerImportTest extends TestCase
                 && str_contains($import['failed'][0]['reason'], 'THIS ZONE DOES NOT EXIST');
         });
 
-        $this->assertDatabaseHas('customers', ['name' => 'CIMP Good Row', 'zone_id' => $zone->id]);
-        $this->assertDatabaseMissing('customers', ['name' => 'CIMP Bad Zone Row']);
+        $this->assertDatabaseHas('customers', ['name' => 'CIMP GOOD ROW', 'zone_id' => $zone->id]);
+        $this->assertDatabaseMissing('customers', ['name' => 'CIMP BAD ZONE ROW']);
+    }
+
+    public function test_a_zone_typed_in_another_case_still_matches_and_labels_are_stored_upper_case(): void
+    {
+        $this->actingAsRole('manager');
+
+        $zone = ZoneFactory::new()->create(['name' => 'CIMP-CASE ZONE']);
+
+        $file = $this->spreadsheet([
+            ['name' => ' cimp  lower row ', 'zone' => 'cimp-case  zone', 'location' => 'molyko é', 'bill' => 2500, 'others' => 0, 'status' => 'active'],
+        ]);
+
+        $this->post('/customers/import', ['file' => $file])
+            ->assertSessionHas('import', fn (array $import): bool => $import['succeeded_count'] === 1 && $import['failed_count'] === 0);
+
+        $this->assertDatabaseHas('customers', ['name' => 'CIMP LOWER ROW', 'location' => 'MOLYKO É', 'zone_id' => $zone->id]);
     }
 
     public function test_agent_gets_a_403_importing_customers(): void
@@ -189,7 +206,7 @@ class CustomerImportTest extends TestCase
         ]);
 
         $this->post('/customers/import', ['file' => $file])->assertForbidden();
-        $this->assertDatabaseMissing('customers', ['name' => 'CIMP Forbidden']);
+        $this->assertDatabaseMissing('customers', ['name' => 'CIMP FORBIDDEN']);
     }
 
     public function test_worker_gets_a_403_importing_customers(): void
@@ -203,7 +220,7 @@ class CustomerImportTest extends TestCase
         ]);
 
         $this->post('/customers/import', ['file' => $file])->assertForbidden();
-        $this->assertDatabaseMissing('customers', ['name' => 'CIMP Forbidden Worker']);
+        $this->assertDatabaseMissing('customers', ['name' => 'CIMP FORBIDDEN WORKER']);
     }
 
     /**

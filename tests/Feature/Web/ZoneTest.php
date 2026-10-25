@@ -9,6 +9,7 @@ use App\Models\User;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -182,5 +183,60 @@ class ZoneTest extends TestCase
     public function test_guests_are_redirected_to_login(): void
     {
         $this->get('/zones')->assertRedirect('/login');
+    }
+
+    public function test_store_saves_the_name_upper_case_trimmed_and_collapsed(): void
+    {
+        $this->actingAsRole('manager');
+
+        $this->post('/zones', ['name' => "  zn-norm   Molyko\té  "])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('zones', ['name' => 'ZN-NORM MOLYKO É']);
+        $this->assertDatabaseMissing('zones', ['name' => 'zn-norm Molyko é']);
+    }
+
+    public function test_store_rejects_a_name_that_differs_only_in_case(): void
+    {
+        $this->actingAsRole('manager');
+
+        ZoneFactory::new()->create(['name' => 'ZCASE-DUP']);
+
+        $this->post('/zones', ['name' => 'zcase-dup'])->assertSessionHasErrors(['name']);
+        $this->post('/zones', ['name' => ' ZCase-Dup '])->assertSessionHasErrors(['name']);
+
+        $this->assertSame(1, DB::table('zones')->whereRaw('upper(name) = ?', ['ZCASE-DUP'])->count());
+    }
+
+    public function test_store_rejects_a_name_colliding_with_a_legacy_mixed_case_row(): void
+    {
+        $this->actingAsRole('manager');
+
+        // A row the normalise migration had to leave alone (written raw, bypassing the model).
+        DB::table('zones')->insert(['branch_id' => DB::table('branches')->value('id'), 'name' => 'Zlegacy-Mixed']);
+
+        $this->post('/zones', ['name' => 'ZLEGACY-MIXED'])->assertSessionHasErrors(['name']);
+    }
+
+    public function test_update_rejects_a_name_that_differs_only_in_case_from_another_zone(): void
+    {
+        $this->actingAsRole('manager');
+
+        ZoneFactory::new()->create(['name' => 'ZUPD-TAKEN']);
+        $zone = ZoneFactory::new()->create(['name' => 'ZUPD-MINE']);
+
+        $this->patch("/zones/{$zone->uuid}", ['name' => 'zupd-taken'])->assertSessionHasErrors(['name']);
+
+        $this->assertSame('ZUPD-MINE', $zone->fresh()->name);
+    }
+
+    public function test_update_to_its_own_name_in_another_case_is_allowed(): void
+    {
+        $this->actingAsRole('manager');
+
+        $zone = ZoneFactory::new()->create(['name' => 'ZSELF-CASE']);
+
+        $this->patch("/zones/{$zone->uuid}", ['name' => 'zself-case'])->assertSessionHasNoErrors()->assertRedirect('/zones');
+
+        $this->assertSame('ZSELF-CASE', $zone->fresh()->name);
     }
 }

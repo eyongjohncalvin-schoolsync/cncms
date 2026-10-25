@@ -9,6 +9,7 @@ use App\Http\Requests\StoreZoneRequest;
 use App\Imports\ZonesImport;
 use App\Models\Upload;
 use App\Models\User;
+use App\Support\UpperCaseLabel;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
@@ -30,7 +31,7 @@ use Throwable;
  * Processing rows one at a time (rather than validating the whole sheet
  * up front) is deliberate: it makes in-file duplicate names self-detect
  * for free — row 2 "Z01" is created, so row 5's "Z01" trips the same
- * `unique:zones,name` rule its already-inserted sibling would trip against
+ * zone-name unique rule its already-inserted sibling would trip against
  * the database, with no extra bookkeeping needed here.
  */
 final class ZoneImportService
@@ -111,14 +112,13 @@ final class ZoneImportService
         return ['succeeded' => $succeeded, 'failed' => $failed, 'upload_uuid' => $upload->uuid];
     }
 
+    /**
+     * Normalised before validating, as StoreZoneRequest::prepareForValidation()
+     * does for a typed name, so the unique check judges the stored value
+     * ("thr01" is rejected when "THR01" exists). Blank -> null.
+     */
     private function clean(mixed $value): ?string
     {
-        if ($value === null) {
-            return null;
-        }
-
-        $value = trim((string) $value);
-
-        return $value === '' ? null : $value;
+        return $value === null ? null : UpperCaseLabel::normalise((string) $value);
     }
 }

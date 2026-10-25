@@ -163,7 +163,7 @@ class BillBatchTest extends TestCase
         $this->assertSame(2, BillBatch::query()->where('period', $period)->latest('id')->firstOrFail()->total_bills);
 
         $recipients = app(ManuscriptService::class)->billRecipients(['period' => $period, 'zone_uuid' => $zone->uuid])['customers'];
-        $this->assertSame(['Owes', 'Prepaid but owes old debt'], $recipients->pluck('name')->all());
+        $this->assertSame(['OWES', 'PREPAID BUT OWES OLD DEBT'], $recipients->pluck('name')->all());
     }
 
     public function test_generate_explains_when_nobody_has_anything_to_pay(): void

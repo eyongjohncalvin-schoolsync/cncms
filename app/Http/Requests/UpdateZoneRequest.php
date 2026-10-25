@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Rules\UniqueUpperCaseLabel;
 use App\Support\TenantContext;
+use App\Support\UpperCaseLabel;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -23,10 +25,18 @@ class UpdateZoneRequest extends FormRequest
         return [
             'name' => [
                 'sometimes', 'required', 'string', 'max:25',
-                Rule::unique('zones', 'name')->ignore($this->route('zone')),
+                new UniqueUpperCaseLabel('zones', ignore: $this->route('zone')),
             ],
             // Branches v2: a fenced manager's zones are always in their own branch.
             'branch_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:branches,uuid', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
         ];
+    }
+
+    /** See StoreZoneRequest::prepareForValidation(). */
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('name'))) {
+            $this->merge(['name' => UpperCaseLabel::normalise($this->input('name'))]);
+        }
     }
 }

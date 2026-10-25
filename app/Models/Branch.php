@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Models\Concerns\HasUpperCaseLabels;
 use App\Models\Concerns\HasUuid;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -28,7 +29,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[RouteKey('uuid')]
 class Branch extends Model
 {
-    use Auditable, HasUuid;
+    use Auditable, HasUpperCaseLabels, HasUuid;
 
     /** Company settings a branch may override; same column names on both tables. */
     /** How often a branch sends its money to headquarters (branches v2 D6). */
@@ -54,6 +55,12 @@ class Branch extends Model
         // Company::forBranch() views are built from these rows.
         static::saved(static fn () => [self::flushMemo(), Company::flushMemo()]);
         static::deleted(static fn () => [self::flushMemo(), Company::flushMemo()]);
+    }
+
+    /** Branch names are stored upper-case (see HasUpperCaseLabels); `location` is not. */
+    protected function upperCaseLabels(): array
+    {
+        return ['name'];
     }
 
     protected function casts(): array

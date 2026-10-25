@@ -19,6 +19,7 @@ use App\Models\Zone;
 use App\Support\Billing\FreeMonthPlan;
 use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
+use App\Support\UpperCaseLabel;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -99,7 +100,9 @@ class CustomerInstallationService
                 }
 
                 if (mb_strlen($name) >= 3) {
-                    $query->orWhereRaw('lower(name) = ?', [mb_strtolower($name)]);
+                    // Names are stored normalised (UpperCaseLabel); upper() on
+                    // both sides also catches a legacy mixed-case row.
+                    $query->orWhereRaw('upper(name) = upper(?)', [UpperCaseLabel::normalise($name)]);
                 }
             })
             ->limit(5)

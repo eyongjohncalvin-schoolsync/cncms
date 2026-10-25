@@ -95,7 +95,7 @@ class CustomerImportSeedsManuscriptArrearsTest extends TestCase
         $this->assertCount(1, $result['succeeded']);
         $this->assertSame([], $result['failed']);
 
-        $customer = Customer::query()->where('name', 'Manuscript Import Customer')->firstOrFail();
+        $customer = Customer::query()->where('name', 'MANUSCRIPT IMPORT CUSTOMER')->firstOrFail();
 
         // Before manuscript:calculate: the seed balance landed exactly on
         // customers.others, untouched.

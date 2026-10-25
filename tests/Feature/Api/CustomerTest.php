@@ -88,6 +88,27 @@ class CustomerTest extends TestCase
         $this->assertDatabaseHas('customers', ['name' => 'JANE DOE', 'zone_id' => $zone->id]);
     }
 
+    public function test_create_saves_name_and_location_upper_case(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $token = $this->tokenForRole('manager');
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/customers', [
+                'zone_uuid' => $zone->uuid,
+                'name' => ' jane  doe ',
+                'location' => 'molyko é',
+                'phone' => '677123459',
+                'bill' => 2500,
+                'level' => 'normal',
+                'status' => 'active',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'JANE DOE');
+
+        $this->assertDatabaseHas('customers', ['zone_id' => $zone->id, 'name' => 'JANE DOE', 'location' => 'MOLYKO É']);
+    }
+
     public function test_admin_can_update_a_customer(): void
     {
         $zone = ZoneFactory::new()->create();

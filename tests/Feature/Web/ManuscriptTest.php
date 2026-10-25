@@ -113,7 +113,7 @@ class ManuscriptTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Manuscripts/Index')
                 ->has('manuscripts.data', 1)
-                ->where('manuscripts.data.0.customer_name', 'Zephaniah Ndip'));
+                ->where('manuscripts.data.0.customer_name', 'ZEPHANIAH NDIP'));
     }
 
     public function test_manager_can_export_the_manuscript_register_as_a_pdf(): void
@@ -287,7 +287,7 @@ class ManuscriptTest extends TestCase
             ->values()
             ->all();
 
-        $this->assertSame(['amy', 'Zoe', 'Bob'], $ordered);
+        $this->assertSame(['AMY', 'ZOE', 'BOB'], $ordered);
     }
 
     /**

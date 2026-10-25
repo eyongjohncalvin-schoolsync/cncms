@@ -44,6 +44,8 @@ export default function ZonesEdit({ zone, branches }: ZonesEditProps) {
                                     defaultValue={zone.name}
                                     error={errors.name}
                                     required
+                                    className="uppercase"
+                                    autoCapitalize="characters"
                                 />
 
                                 {branches.length > 1 && (

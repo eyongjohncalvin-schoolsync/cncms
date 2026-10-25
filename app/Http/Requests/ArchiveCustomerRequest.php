@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Support\UpperCaseLabel;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -34,9 +35,20 @@ class ArchiveCustomerRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', Rule::in([$this->route('customer')->name])],
+            'name' => ['required', 'string', Rule::in([UpperCaseLabel::normalise($this->route('customer')->name)])],
             'reason' => ['required', 'string', 'min:3', 'max:1000'],
         ];
+    }
+
+    /**
+     * Names are stored upper-case (App\Support\UpperCaseLabel), so the typed
+     * confirmation is compared the same way — casing and spacing don't count.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('name'))) {
+            $this->merge(['name' => UpperCaseLabel::normalise($this->input('name'))]);
+        }
     }
 
     /**
@@ -45,7 +57,7 @@ class ArchiveCustomerRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'name.in' => 'The name you typed does not match this customer exactly.',
+            'name.in' => 'The name you typed does not match this customer.',
         ];
     }
 }

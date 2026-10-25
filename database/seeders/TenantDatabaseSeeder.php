@@ -36,11 +36,13 @@ class TenantDatabaseSeeder extends Seeder
     /**
      * The "Main Branch" row is seeded by the branches table's own creation
      * migration (2026_08_24_160000_create_branches_table.php), which always
-     * runs before seeding in the tenant provisioning pipeline.
+     * runs before seeding in the tenant provisioning pipeline; found by
+     * is_headquarters, not by name, since branch names are stored upper-case
+     * ("MAIN BRANCH") once 2026_10_25 normalise migration has run.
      */
     private function mainBranchId(): int
     {
-        return (int) DB::table('branches')->where('name', 'Main Branch')->value('id');
+        return (int) DB::table('branches')->where('is_headquarters', true)->value('id');
     }
 
     private function seedExpenseCategories(): void

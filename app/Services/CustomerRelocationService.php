@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\CustomerCharge;
 use App\Models\Payment;
 use App\Models\User;
+use App\Support\UpperCaseLabel;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -60,7 +61,8 @@ class CustomerRelocationService
                 'from_zone_id' => $fromZoneId,
                 'to_zone_id' => $toZoneId,
                 'from_location' => $fromLocation,
-                'to_location' => $data->toLocation,
+                // Recorded exactly as the customer's new address will be stored.
+                'to_location' => UpperCaseLabel::normalise($data->toLocation),
             ]);
 
             $moved = $this->customers->update($customer, new CustomerData(

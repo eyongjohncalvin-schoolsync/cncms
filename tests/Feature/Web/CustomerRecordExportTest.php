@@ -144,7 +144,7 @@ class CustomerRecordExportTest extends TestCase
             'company' => Company::cached(),
         ])->render();
 
-        $this->assertStringContainsString('CREX Test Customer', $html);
+        $this->assertStringContainsString('CREX TEST CUSTOMER', $html);
         $this->assertStringContainsString('7,654.00', $html);   // the payment
         $this->assertStringContainsString('4,321.00', $html);   // manuscript arrears
     }

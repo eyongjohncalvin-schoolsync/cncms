@@ -29,7 +29,7 @@ export default function ZonesCreate({ branches }: ZonesCreateProps) {
                     <Form action="/zones" method="post" className="flex flex-col gap-4">
                         {({ errors, processing }) => (
                             <>
-                                <TextInput id="name" name="name" label="Name" error={errors.name} required />
+                                <TextInput id="name" name="name" label="Name" error={errors.name} required className="uppercase" autoCapitalize="characters" />
 
                                 {/* Only shown once there's an actual choice to make — a
                                     lone "Main Branch" is applied automatically server-side

@@ -61,7 +61,7 @@ class BranchGapsTest extends TestCase
         $this->post('/zones', ['name' => 'Molyko', 'code' => 'MLK', 'branch_uuid' => $this->headquarters->uuid])->assertSessionHasErrors('branch_uuid');
 
         $this->post('/zones', ['name' => 'Molyko', 'code' => 'MLK'])->assertSessionHasNoErrors();
-        $this->assertSame($this->buea->id, Zone::query()->where('name', 'Molyko')->sole()->branch_id);
+        $this->assertSame($this->buea->id, Zone::query()->where('name', 'MOLYKO')->sole()->branch_id);
     }
 
     public function test_a_zone_with_customers_keeps_its_branch(): void

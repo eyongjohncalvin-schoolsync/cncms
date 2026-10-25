@@ -84,7 +84,7 @@ class BillWhatsappMessageTest extends TestCase
         $response->assertJsonPath('data.reason', null);
 
         $message = $response->json('data.message');
-        $this->assertStringContainsString('Ashu Peter', $message);
+        $this->assertStringContainsString('ASHU PETER', $message);
         // total_bill = 7500, formatted with a thousands separator.
         $this->assertStringContainsString('7,500', $message);
         $this->assertStringContainsString('676876509/672528022', $message);

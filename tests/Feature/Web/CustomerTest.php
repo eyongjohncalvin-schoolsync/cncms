@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Message;
 use App\Models\Payment;
@@ -248,6 +249,64 @@ class CustomerTest extends TestCase
         PaymentFactory::new()->create(['customer_id' => $customer->id]);
 
         $this->getJson("/customers/{$customer->uuid}/last-payment")->assertOk();
+    }
+
+    public function test_store_saves_name_and_location_upper_case_and_never_upper_cases_email_or_notes(): void
+    {
+        $this->actingAsRole('manager');
+
+        $zone = ZoneFactory::new()->create();
+
+        $this->post('/customers', [
+            'zone_uuid' => $zone->uuid,
+            'name' => '  jane   ébénézer doe ',
+            'location' => ' behind  the market ',
+            'email' => 'Jane.Doe@Example.com',
+            'description' => 'Blue gate, ask for Mama',
+            'phone' => '677123457',
+            'bill' => 2500,
+            'level' => 'normal',
+            'status' => 'active',
+        ])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('customers', [
+            'zone_id' => $zone->id,
+            'name' => 'JANE ÉBÉNÉZER DOE',
+            'location' => 'BEHIND THE MARKET',
+            'email' => 'jane.doe@example.com', // lower-cased by the existing email handling, never upper-cased
+            'description' => 'Blue gate, ask for Mama',
+            'level' => 'normal',
+        ]);
+    }
+
+    public function test_customer_names_are_not_unique_homonyms_are_allowed(): void
+    {
+        $this->actingAsRole('manager');
+
+        $zone = ZoneFactory::new()->create();
+        CustomerFactory::new()->create(['zone_id' => $zone->id, 'name' => 'CTEST HOMONYM']);
+
+        $this->post('/customers', [
+            'zone_uuid' => $zone->uuid,
+            'name' => 'ctest homonym',
+            'phone' => '677123458',
+            'bill' => 2500,
+            'level' => 'normal',
+            'status' => 'active',
+        ])->assertSessionHasNoErrors();
+
+        $this->assertSame(2, Customer::query()->where('zone_id', $zone->id)->where('name', 'CTEST HOMONYM')->count());
+    }
+
+    public function test_update_saves_name_and_location_upper_case(): void
+    {
+        $this->actingAsRole('manager');
+
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'status' => 'active']);
+
+        $this->patch("/customers/{$customer->uuid}", ['name' => 'ctest  renamed', 'location' => 'new town'])->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('customers', ['id' => $customer->id, 'name' => 'CTEST RENAMED', 'location' => 'NEW TOWN']);
     }
 
     public function test_manager_can_edit_and_update_a_customer(): void
