@@ -16,7 +16,7 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'voucher_approval_limit', 'voucher_daily_limit', 'monthly_spending_cap', 'remittance_deadline_hours', 'advance_settlement_days', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page', 'max_free_months', 'relocation_fee', 'reinstallation_fee'])]
+#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'voucher_approval_limit', 'voucher_daily_limit', 'monthly_spending_cap', 'remittance_deadline_hours', 'advance_settlement_days', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page', 'max_free_months', 'relocation_fee', 'reinstallation_fee', 'agent_customer_limit'])]
 #[RouteKey('uuid')]
 class Company extends Model implements HasMedia
 {
@@ -52,6 +52,7 @@ class Company extends Model implements HasMedia
             'advance_settlement_days' => 'integer',
             'cash_controls_start_date' => 'date',
             'bills_per_page' => 'integer',
+            'agent_customer_limit' => 'integer',
             // Default relocation / re-installation fees; null = no default.
             'relocation_fee' => 'decimal:2',
             'reinstallation_fee' => 'decimal:2',

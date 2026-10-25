@@ -1,12 +1,13 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
-import { IconPlus, IconTrash, IconUpload } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconUpload, IconUsersGroup } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { TextInput } from '@/components/ui/TextInput';
 import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
 import { Pagination } from '@/components/ui/Pagination';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Dropdown, DropdownItem } from '@/components/ui/Dropdown';
 import { ImportModal } from '@/components/shared/ImportModal';
@@ -110,6 +111,15 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                     <p className="mt-1 text-sm text-slate-500">Manage the billing zones customers are grouped into.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                    {hasPermission(auth.user?.permissions, 'agents.view') && (
+                        <Link
+                            href="/zones/coverage"
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+                        >
+                            <IconUsersGroup size={18} stroke={2} />
+                            Zone coverage
+                        </Link>
+                    )}
                     <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
                         <IconUpload size={18} stroke={2} />
                         Import
@@ -195,6 +205,7 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                             )}
                             <Th>Name</Th>
                             <Th>Branch</Th>
+                            <Th>Collector</Th>
                             <Th>Customers</Th>
                             <Th>Actions</Th>
                         </TableHead>
@@ -214,6 +225,7 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                                     )}
                                     <Td className="font-medium text-slate-900">{zone.name}</Td>
                                     <Td>{zone.branch_name ?? '—'}</Td>
+                                    <Td>{zone.collector_name ?? <Badge tone="red">No collector</Badge>}</Td>
                                     <Td>{customerCount}</Td>
                                     <Td>
                                         <Dropdown label={`Actions for ${zone.name}`}>

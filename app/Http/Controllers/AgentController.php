@@ -8,8 +8,10 @@ use App\DataTransferObjects\AgentData;
 use App\Http\Requests\StoreAgentRequest;
 use App\Http\Requests\UpdateAgentRequest;
 use App\Models\Agent;
+use App\Models\Company;
 use App\Models\Zone;
 use App\Services\AgentService;
+use App\Services\ZoneCoverageService;
 use App\Services\ZoneService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,15 +31,21 @@ class AgentController extends Controller
         private readonly ZoneService $zones,
     ) {}
 
-    public function index(Request $request): Response
+    public function index(Request $request, ZoneCoverageService $coverage): Response
     {
         $this->authorize('viewAny', Agent::class);
 
         $filters = $request->only(['zone_uuid', 'status']);
 
         $paginated = $this->agents->list($filters, 25);
+        // Zones covered and workload for the whole page in one query.
+        $workloads = $coverage->workloadsOf(collect($paginated->items())->map(fn (Agent $agent): int => $agent->id)->all());
 
         $paginated->through(fn (Agent $agent): array => [
+            'zones_covered' => $workloads[$agent->id]['zones'] ?? 0,
+            'customers_covered' => (int) round($workloads[$agent->id]['customers'] ?? 0),
+            'customer_limit' => Company::forBranch($agent->branch_id)?->agent_customer_limit,
+            'workload_status' => ZoneCoverageService::status($workloads[$agent->id]['customers'] ?? 0.0, Company::forBranch($agent->branch_id)?->agent_customer_limit),
             'uuid' => $agent->uuid,
             'name' => $agent->name,
             'location' => $agent->location,

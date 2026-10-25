@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Fillable([
     'name', 'code', 'location', 'phone', 'email', 'tech_number', 'momo_number', 'momo_name',
-    'reconnection_fine', 'relocation_fee', 'reinstallation_fee', 'sends_to_hq',
+    'reconnection_fine', 'relocation_fee', 'reinstallation_fee', 'sends_to_hq', 'agent_customer_limit',
 ])]
 #[RouteKey('uuid')]
 class Branch extends Model
@@ -38,6 +38,8 @@ class Branch extends Model
     public const array OVERRIDABLE = [
         'location', 'phone', 'email', 'tech_number', 'momo_number', 'momo_name',
         'reconnection_fine', 'relocation_fee', 'reinstallation_fee',
+        // Customers per field agent before the Zone coverage screen says "busy".
+        'agent_customer_limit',
     ];
 
     /**

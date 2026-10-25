@@ -108,6 +108,20 @@ export function ChangeZoneModal({ agent, zones, onClose }: { agent: Agent | null
                                 </p>
                             </div>
 
+                            {(agent.zones_covered ?? 0) > 1 && (
+                                <div className="flex gap-3 rounded-lg bg-red-50 p-3 ring-1 ring-inset ring-red-200">
+                                    <IconAlertTriangle size={20} stroke={1.75} className="mt-0.5 shrink-0 text-red-600" />
+                                    <p className="text-sm text-red-900">
+                                        {agent.name} covers <strong>{agent.zones_covered} zones</strong> today. Moving them here means they cover this one zone only. To share zones
+                                        instead, use{' '}
+                                        <a href="/zones/coverage" className="font-semibold underline underline-offset-2">
+                                            Zone coverage
+                                        </a>
+                                        .
+                                    </p>
+                                </div>
+                            )}
+
                             {destinationHasOtherAgent && (
                                 <div className="flex gap-3 rounded-lg bg-amber-100 p-3 ring-1 ring-inset ring-amber-300">
                                     <IconAlertTriangle size={20} stroke={1.75} className="mt-0.5 shrink-0 text-amber-600" />

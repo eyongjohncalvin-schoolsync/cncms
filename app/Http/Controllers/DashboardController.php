@@ -12,6 +12,7 @@ use App\Services\ManuscriptService;
 use App\Services\PaymentService;
 use App\Services\ResourcesDashboardService;
 use App\Services\SpendingControlService;
+use App\Services\ZoneCoverageService;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
@@ -88,6 +89,11 @@ class DashboardController extends Controller
             // open it (cash.view), and deferred so the dashboard never waits.
             'cash_alerts' => app(TenantContext::class)->can('cash.view')
                 ? Inertia::defer(fn (): int => array_sum($this->cashAlerts->counts()))
+                : null,
+            // Zones nobody is accountable for (no active responsible collector)
+            // — for whoever manages agents. Deferred like the cash alerts.
+            'uncovered_zones' => app(TenantContext::class)->can('agents.manage')
+                ? Inertia::defer(fn (): int => app(ZoneCoverageService::class)->uncoveredZoneCount())
                 : null,
             // Spending this month (docs/plans/expenditures-and-spending-controls.md,
             // items 5–6): deficit, cap use, budget warnings — for whoever sees

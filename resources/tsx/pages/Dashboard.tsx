@@ -20,6 +20,8 @@ interface DashboardProps {
     period: string;
     /** Cash controls: open cash alerts (deferred; null when the viewer can't see them). */
     cash_alerts?: number | null;
+    /** Zones with no active responsible collector (deferred; only for agents.manage). */
+    uncovered_zones?: number | null;
     /** docs/plans/expenditures-and-spending-controls.md, items 5–6 — deferred, P&L viewers only. */
     spending?: {
         period: string;
@@ -46,7 +48,7 @@ interface DashboardProps {
     };
 }
 
-export default function Dashboard({ period, stats, cash_alerts, spending }: DashboardProps) {
+export default function Dashboard({ period, stats, cash_alerts, uncovered_zones, spending }: DashboardProps) {
     // Memoized so the derived hint string isn't recomputed on every render
     // (e.g. re-renders triggered by unrelated layout/navigation state) —
     // only when the stats payload itself changes.
@@ -80,6 +82,19 @@ export default function Dashboard({ period, stats, cash_alerts, spending }: Dash
                         <strong>{cash_alerts}</strong> cash control alert{cash_alerts === 1 ? '' : 's'} need attention — cash not handed over, shortages, unsigned vouchers…
                     </span>
                     <span className="font-semibold">Review →</span>
+                </Link>
+            )}
+
+            {typeof uncovered_zones === 'number' && uncovered_zones > 0 && (
+                <Link
+                    href="/zones/coverage"
+                    className="mb-4 flex items-center justify-between rounded-lg border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800 hover:bg-red-100"
+                >
+                    <span>
+                        <strong>{uncovered_zones}</strong> zone{uncovered_zones === 1 ? ' has' : 's have'} no active collector — nobody is accountable for their money, and
+                        their bills print no collector.
+                    </span>
+                    <span className="font-semibold">Zone coverage →</span>
                 </Link>
             )}
 

@@ -56,6 +56,8 @@ interface ManuscriptsIndexProps {
     summary: ManuscriptSummary;
     zones: Zone[];
     billBatches: BillBatch[];
+    /** Zones with no active responsible collector — warned about before generating bills. */
+    uncoveredZones?: number;
 }
 
 function formatBytes(bytes: number): string {
@@ -81,7 +83,7 @@ function upcomingPeriod(): string {
     return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export default function ManuscriptsIndex({ period, filters, manuscripts, summary, zones, billBatches }: ManuscriptsIndexProps) {
+export default function ManuscriptsIndex({ period, filters, manuscripts, summary, zones, billBatches, uncoveredZones = 0 }: ManuscriptsIndexProps) {
     const { auth } = usePage<PageProps>().props;
     // RBAC v2 Wave 4: display affordances from the shared permission matrix
     // (auth.user.permissions), each mirroring the matching ManuscriptPolicy
@@ -205,6 +207,16 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
     const [generatingBills, setGeneratingBills] = useState(false);
 
     function generateBills() {
+        // A warning, never a block: management may print anyway.
+        if (
+            uncoveredZones > 0 &&
+            !confirm(
+                `${uncoveredZones} zone${uncoveredZones === 1 ? ' has' : 's have'} no active collector, so their bills will print no collector name. Generate the bills anyway?`,
+            )
+        ) {
+            return;
+        }
+
         router.post(
             '/manuscripts/bills/generate',
             {

@@ -212,6 +212,8 @@ export interface Zone {
     agent_names?: string[];
     branch_uuid?: string | null;
     branch_name?: string | null;
+    /** The zone's responsible collector (Zones list only); null when it has none. */
+    collector_name?: string | null;
 }
 
 export interface Branch {
@@ -1308,6 +1310,11 @@ export interface Agent {
     children: number | null;
     status: 'active' | 'inactive';
     last_sync_at: string | null;
+    /** Zones they cover and customers they look after (App\Services\ZoneCoverageService) — Agents list only. */
+    zones_covered?: number;
+    customers_covered?: number;
+    customer_limit?: number | null;
+    workload_status?: 'normal' | 'busy' | 'overloaded' | null;
 }
 
 export type ComplaintCategory = 'operational' | 'customer';

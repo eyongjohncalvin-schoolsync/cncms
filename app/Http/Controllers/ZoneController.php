@@ -13,6 +13,7 @@ use App\Http\Requests\StoreZoneRequest;
 use App\Http\Requests\UpdateZoneRequest;
 use App\Models\Zone;
 use App\Services\BranchService;
+use App\Services\ZoneCoverageService;
 use App\Services\ZoneImportService;
 use App\Services\ZoneService;
 use App\Support\TenantContext;
@@ -47,11 +48,13 @@ class ZoneController extends Controller
         $filters = $request->only(['search']);
 
         $paginator = $this->zones->list($filters, 15);
+        // Each zone's responsible collector, one query for the page.
+        $collectors = app(ZoneCoverageService::class)->responsibleNames(collect($paginator->items())->map(fn (Zone $zone): int => $zone->id)->all());
 
         return Inertia::render('Zones/Index', [
             'zones' => [
                 'data' => collect($paginator->items())
-                    ->map(fn (Zone $zone) => $this->shapeZone($zone))
+                    ->map(fn (Zone $zone) => [...$this->shapeZone($zone), 'collector_name' => $collectors[$zone->id] ?? null])
                     ->all(),
                 'links' => $paginator->linkCollection()->toArray(),
                 'meta' => [

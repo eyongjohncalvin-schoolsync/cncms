@@ -16,6 +16,7 @@ use App\Services\ManuscriptGenerationBatchService;
 use App\Services\ManuscriptPreRunReviewService;
 use App\Services\ManuscriptService;
 use App\Services\SendQueueService;
+use App\Services\ZoneCoverageService;
 use App\Services\ZoneService;
 use App\Support\ResolvesCommandRunBatchProgress;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -92,6 +93,8 @@ class ManuscriptController extends Controller
             // the page with router.reload({ only: ['billBatches'] }) while
             // any run is still queued/processing.
             'billBatches' => $this->billBatchesForPeriod($period),
+            // Bills of these zones would print no collector — warned before generating.
+            'uncoveredZones' => app(ZoneCoverageService::class)->uncoveredZoneCount(),
         ]);
     }
 

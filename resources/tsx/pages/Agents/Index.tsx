@@ -1,6 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
-import { IconMapPinCog, IconUserPlus } from '@tabler/icons-react';
+import { IconMapPinCog, IconUserPlus, IconUsersGroup } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card } from '@/components/ui/Card';
 import { Table, TableHead, TableBody, Th, Td } from '@/components/ui/Table';
@@ -77,15 +77,24 @@ export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps
                     <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-900">Agents</h1>
                     <p className="mt-1 text-sm text-slate-500">Field agents assigned to zones, their salaries, and sync status.</p>
                 </div>
-                {canManage && (
+                <div className="flex flex-wrap items-center gap-2">
                     <Link
-                        href="/agents/create"
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                        href="/zones/coverage"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
                     >
-                        <IconUserPlus size={18} stroke={2} />
-                        Add Agent
+                        <IconUsersGroup size={18} stroke={2} />
+                        Zone coverage
                     </Link>
-                )}
+                    {canManage && (
+                        <Link
+                            href="/agents/create"
+                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                        >
+                            <IconUserPlus size={18} stroke={2} />
+                            Add Agent
+                        </Link>
+                    )}
+                </div>
             </div>
 
             <div
@@ -132,7 +141,8 @@ export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps
                         <TableHead>
                             <Th>Name</Th>
                             <Th>Phone</Th>
-                            <Th>Zone</Th>
+                            <Th>Zones</Th>
+                            <Th>Workload</Th>
                             <Th>Salary</Th>
                             <Th>Status</Th>
                             <Th>Last Sync</Th>
@@ -143,7 +153,24 @@ export default function AgentsIndex({ filters, agents, zones }: AgentsIndexProps
                                 <tr key={agent.uuid} className="transition-colors hover:bg-slate-50">
                                     <Td className="font-medium text-slate-900">{agent.name}</Td>
                                     <Td className="whitespace-nowrap">{agent.phone}</Td>
-                                    <Td>{agent.zone_name ?? '—'}</Td>
+                                    <Td>
+                                        {(agent.zones_covered ?? 0) === 0 ? (
+                                            <Badge tone="red">No zones</Badge>
+                                        ) : (agent.zones_covered ?? 0) === 1 ? (
+                                            (agent.zone_name ?? '1 zone')
+                                        ) : (
+                                            `${agent.zones_covered} zones`
+                                        )}
+                                    </Td>
+                                    <Td className="whitespace-nowrap">
+                                        {(agent.customers_covered ?? 0).toLocaleString('en-US')} customers
+                                        {agent.customer_limit ? ` / ${agent.customer_limit}` : ''}{' '}
+                                        {agent.workload_status && (
+                                            <Badge tone={agent.workload_status === 'overloaded' ? 'red' : agent.workload_status === 'busy' ? 'yellow' : 'green'}>
+                                                {agent.workload_status === 'overloaded' ? 'Overloaded' : agent.workload_status === 'busy' ? 'Busy' : 'Normal'}
+                                            </Badge>
+                                        )}
+                                    </Td>
                                     <Td className="whitespace-nowrap">{formattedSalary}</Td>
                                     <Td>
                                         <Badge tone={agent.status === 'active' ? 'green' : 'slate'}>{agent.status}</Badge>
