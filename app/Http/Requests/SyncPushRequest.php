@@ -85,6 +85,10 @@ class SyncPushRequest extends FormRequest
             'changes.payments.*.receipt_number' => ['nullable', 'string', 'max:30'],
             'changes.payments.*.security_code' => ['nullable', 'string', 'max:12'],
             'changes.payments.*.receipt_issued_at' => ['nullable', 'string', 'max:40'],
+            // The agent's answer to "already paid this month — why another?"
+            // (anything else, or nothing, is stored as `unconfirmed`).
+            'changes.payments.*.duplicate_reason' => ['nullable', 'string', 'max:20'],
+            'changes.payments.*.duplicate_note' => ['nullable', 'string', 'max:255'],
 
             // "Request a bon" from the phone
             // (docs/plans/expenditures-and-spending-controls.md, item 2) —

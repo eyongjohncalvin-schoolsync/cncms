@@ -386,6 +386,9 @@ class SyncManagerImpl {
             receipt_number: payment.receipt_number,
             security_code: payment.security_code,
             receipt_issued_at: payment.receipt_issued_at,
+            // A second payment this month the agent confirmed (else the server flags it "unconfirmed").
+            duplicate_reason: payment.duplicate_reason ?? null,
+            duplicate_note: payment.duplicate_note ?? null,
         }));
 
         // "Request a bon" (docs/plans/expenditures-and-spending-controls.md):

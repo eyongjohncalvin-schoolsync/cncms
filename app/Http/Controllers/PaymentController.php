@@ -255,7 +255,7 @@ class PaymentController extends Controller
         // not a repository contract change) purely so Payments/Show.tsx can
         // offer an "Adjust Arrears" entry point without a page navigation —
         // see this feature's design doc, 2026-08-27 addendum.
-        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier', 'receipt']);
+        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier', 'receipt', 'duplicateOf.receipt', 'duplicateOf.recordedBy']);
 
         return Inertia::render('Payments/Show', [
             'payment' => $this->formatPayment($payment),
@@ -393,6 +393,21 @@ class PaymentController extends Controller
             'collected_at' => $payment->collected_at?->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),
             'verification' => $payment->verification ? $this->formatVerification($payment->verification) : null,
+            // A second payment for the customer that month (PaymentService::flagPossibleDuplicate()).
+            'possible_duplicate' => $payment->isPossibleDuplicate(),
+            'duplicate_reason' => $payment->duplicate_reason !== null ? (Payment::DUPLICATE_REASONS[$payment->duplicate_reason] ?? $payment->duplicate_reason) : null,
+            'duplicate_note' => $payment->duplicate_note,
+            // The earlier payment to compare it with — Show only, where it is loaded.
+            'duplicate_of' => $payment->relationLoaded('duplicateOf') && $payment->duplicateOf
+                ? [
+                    'uuid' => $payment->duplicateOf->uuid,
+                    'amount' => (string) $payment->duplicateOf->amount,
+                    'collected_at' => ($payment->duplicateOf->collected_at ?? $payment->duplicateOf->created_at)?->toIso8601String(),
+                    'verification_status' => $payment->duplicateOf->verification_status,
+                    'receipt_number' => $payment->duplicateOf->receipt?->receipt_number,
+                    'recorded_by_name' => $payment->duplicateOf->recordedBy?->name,
+                ]
+                : null,
             // Lightweight receipt indicator for Payments/Index.tsx's column
             // (and harmless on Show, which reads the richer top-level
             // `receipt` prop instead). Null when no receipt has been issued.

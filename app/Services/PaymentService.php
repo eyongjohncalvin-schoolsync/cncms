@@ -11,15 +11,25 @@ use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
 use App\Support\BranchLookup;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class PaymentService
 {
+    /**
+     * Earlier payments of a batch (primeEarlierPayments()), keyed
+     * "customerId|Y-m"; null outside a batch, when each check queries.
+     *
+     * @var array<string, ?Payment>|null
+     */
+    private ?array $earlierMemo = null;
+
     public function __construct(
         private readonly PaymentRepositoryInterface $payments,
         private readonly CustomerRepositoryInterface $customers,
@@ -160,6 +170,8 @@ class PaymentService
             $attributes['clear_arrears_first'] = $this->clearsArrearsFirst($data);
         }
 
+        $attributes = $this->flagPossibleDuplicate($customer, $data, $attributes);
+
         if ($data->receiptNumber !== null) {
             $payment = $this->createWithFieldReceipt($customer, $data, $attributes);
 
@@ -169,11 +181,14 @@ class PaymentService
                 $payment->customerCharge?->refreshStatus();
             }
 
+            $this->rememberEarlier($payment);
+
             return $payment;
         }
 
         $payment = $this->payments->create($customer->id, $attributes);
         $payment->setRelation('customer', $customer);
+        $this->rememberEarlier($payment);
 
         // A verified instalment may settle its installation charge.
         if ($payment->verification_status === 'verified') {
@@ -188,6 +203,144 @@ class PaymentService
         }
 
         return $payment;
+    }
+
+    /**
+     * A second subscription payment for the customer in the same month (by
+     * when it was collected) may be a double entry. Without a reason it is
+     * refused with a description of the earlier payment, so the collector
+     * confirms why it is fine; with one — or `unconfirmed`, which offline
+     * sync sends because a phone can't see other collectors' payments — it is
+     * recorded but flagged and left pending: never verified on the spot,
+     * someone else decides. Customers do pay twice in a month (ahead, old
+     * debt), so this asks — it never blocks money that was really collected.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function flagPossibleDuplicate(Customer $customer, PaymentData $data, array $attributes): array
+    {
+        if (($data->purpose ?? Payment::PURPOSE_SUBSCRIPTION) !== Payment::PURPOSE_SUBSCRIPTION) {
+            return $attributes;
+        }
+
+        $earlier = $this->earlierPaymentThisMonth($customer, $data->collectedAt);
+
+        if ($earlier === null) {
+            return $attributes;
+        }
+
+        if ($data->duplicateReason === null) {
+            throw ValidationException::withMessages(['duplicate' => $this->describeEarlier($customer, $earlier, (string) $data->amount)]);
+        }
+
+        return [
+            ...$attributes,
+            'duplicate_of_id' => $earlier->id,
+            'duplicate_reason' => array_key_exists($data->duplicateReason, Payment::DUPLICATE_REASONS) ? $data->duplicateReason : 'unconfirmed',
+            'duplicate_note' => $data->duplicateNote,
+            'verification_status' => 'pending',
+        ];
+    }
+
+    /**
+     * For a batch (offline sync): the earlier payments of every customer and
+     * month in it, in one query, so the duplicate check reads memory instead
+     * of the database once per payment. Payments the batch creates join it,
+     * so two copies inside one push are caught too. forgetEarlierPayments()
+     * ends it.
+     *
+     * @param  list<int>  $customerIds
+     * @param  list<?string>  $collectedAts
+     */
+    public function primeEarlierPayments(array $customerIds, array $collectedAts): void
+    {
+        $months = collect($collectedAts === [] ? [null] : $collectedAts)
+            ->map(fn (?string $at): Carbon => ($at !== null ? Carbon::parse($at) : Carbon::now())->setTimezone(BusinessTimezone::WAT));
+
+        $this->earlierMemo = [];
+
+        if ($customerIds === []) {
+            return;
+        }
+
+        Payment::query()
+            ->with(['receipt', 'recordedBy'])
+            ->whereIn('customer_id', $customerIds)
+            ->subscription()
+            ->where('verification_status', '!=', 'rejected')
+            ->whereRaw('coalesce(collected_at, created_at) between ? and ?', [
+                $months->min()->copy()->startOfMonth()->setTimezone('UTC'),
+                $months->max()->copy()->endOfMonth()->setTimezone('UTC'),
+            ])
+            ->orderByRaw('coalesce(collected_at, created_at) asc')
+            ->get()
+            ->each(fn (Payment $payment) => $this->rememberEarlier($payment));
+
+        // Every (customer, month) of the batch is now known: absent = none.
+        foreach ($customerIds as $customerId) {
+            foreach ($months as $month) {
+                $this->earlierMemo[$customerId.'|'.$month->format('Y-m')] ??= null;
+            }
+        }
+    }
+
+    public function forgetEarlierPayments(): void
+    {
+        $this->earlierMemo = null;
+    }
+
+    /**
+     * The customer's latest subscription payment (not rejected) collected in
+     * the same calendar month (business time) as $collectedAt, or now.
+     */
+    public function earlierPaymentThisMonth(Customer $customer, ?string $collectedAt): ?Payment
+    {
+        $moment = ($collectedAt !== null ? Carbon::parse($collectedAt) : Carbon::now())->setTimezone(BusinessTimezone::WAT);
+        $key = $customer->id.'|'.$moment->format('Y-m');
+
+        if ($this->earlierMemo !== null && array_key_exists($key, $this->earlierMemo)) {
+            return $this->earlierMemo[$key];
+        }
+
+        return Payment::query()
+            ->with(['receipt', 'recordedBy'])
+            ->where('customer_id', $customer->id)
+            ->subscription()
+            ->where('verification_status', '!=', 'rejected')
+            ->whereRaw('coalesce(collected_at, created_at) between ? and ?', [
+                $moment->copy()->startOfMonth()->setTimezone('UTC'),
+                $moment->copy()->endOfMonth()->setTimezone('UTC'),
+            ])
+            ->orderByRaw('coalesce(collected_at, created_at) desc')
+            ->first();
+    }
+
+    /** Keeps a batch's memo current (the latest payment per customer and month wins). */
+    private function rememberEarlier(Payment $payment): void
+    {
+        if ($this->earlierMemo === null || ! $payment->isSubscription() || $payment->verification_status === 'rejected') {
+            return;
+        }
+
+        $month = Carbon::parse($payment->collected_at ?? $payment->created_at)->setTimezone(BusinessTimezone::WAT)->format('Y-m');
+        $this->earlierMemo[$payment->customer_id.'|'.$month] = $payment;
+    }
+
+    /** "ABANG already paid 2,500 FCFA on 12 Oct (receipt 000231, recorded by DIVINE). …" */
+    private function describeEarlier(Customer $customer, Payment $earlier, string $amount): string
+    {
+        $when = Carbon::parse($earlier->collected_at ?? $earlier->created_at)->setTimezone(BusinessTimezone::WAT);
+        $details = array_filter([
+            $earlier->receipt?->receipt_number !== null ? "receipt {$earlier->receipt->receipt_number}" : null,
+            $earlier->recordedBy?->name !== null ? "recorded by {$earlier->recordedBy->name}" : null,
+        ]);
+        $sameAmountRecently = bccomp((string) $earlier->amount, $amount, 2) === 0 && $when->diffInDays(Carbon::now(), true) <= 3;
+
+        return ($sameAmountRecently ? 'Possible double entry: ' : '')
+            ."{$customer->name} already paid ".number_format((float) $earlier->amount, 0, '.', ',').' FCFA on '.$when->format('j M')
+            .($details !== [] ? ' ('.implode(', ', $details).')' : '')
+            .'. Say why another payment this month is fine, or cancel.';
     }
 
     /**

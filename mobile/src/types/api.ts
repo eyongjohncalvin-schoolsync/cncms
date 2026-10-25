@@ -161,6 +161,9 @@ export interface SyncPushPaymentItem {
     receipt_number?: string | null;
     security_code?: string | null;
     receipt_issued_at?: string | null;
+    /** Why a second payment for the customer this month is fine (PaymentService::flagPossibleDuplicate()). */
+    duplicate_reason?: 'advance' | 'arrears' | 'refund' | 'other' | null;
+    duplicate_note?: string | null;
 }
 
 /**

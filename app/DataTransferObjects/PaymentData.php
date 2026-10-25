@@ -67,6 +67,11 @@ final readonly class PaymentData
         // at that service's locked price — [{service_id, months, rate}]. Set
         // only by AppServicesCustomerInstallationService.
         public ?array $serviceMonths = null,
+        // Why a second subscription payment in the same month is fine
+        // (Payment::DUPLICATE_REASONS) and, for "other", a note. Only used
+        // when PaymentService finds an earlier payment that month.
+        public ?string $duplicateReason = null,
+        public ?string $duplicateNote = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -91,6 +96,10 @@ final readonly class PaymentData
                 : null,
             securityCode: $data['security_code'] ?? null,
             receiptIssuedAt: $data['receipt_issued_at'] ?? null,
+            duplicateReason: $data['duplicate_reason'] ?? null,
+            duplicateNote: isset($data['duplicate_note']) && trim((string) $data['duplicate_note']) !== ''
+                ? trim((string) $data['duplicate_note'])
+                : null,
         );
     }
 

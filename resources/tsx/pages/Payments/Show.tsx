@@ -209,6 +209,29 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                 </div>
             </div>
 
+            {payment.possible_duplicate && (
+                // Compare with the first payment this month before approving or rejecting.
+                <div role="alert" className="mb-4 max-w-3xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">Possible duplicate — the customer already paid this month.</p>
+                    {payment.duplicate_of && (
+                        <p className="mt-1">
+                            Earlier payment:{' '}
+                            <Link href={`/payments/${payment.duplicate_of.uuid}`} className="font-semibold underline underline-offset-2">
+                                {formatCurrency(Number(payment.duplicate_of.amount))}
+                                {payment.duplicate_of.collected_at && ` on ${new Date(payment.duplicate_of.collected_at).toLocaleDateString()}`}
+                            </Link>
+                            {payment.duplicate_of.receipt_number && ` · receipt ${payment.duplicate_of.receipt_number}`}
+                            {payment.duplicate_of.recorded_by_name && ` · recorded by ${payment.duplicate_of.recorded_by_name}`} · {payment.duplicate_of.verification_status}
+                        </p>
+                    )}
+                    <p className="mt-1">
+                        Reason given: <strong>{payment.duplicate_reason ?? '—'}</strong>
+                        {payment.duplicate_note && ` — “${payment.duplicate_note}”`}
+                    </p>
+                    <p className="mt-2 text-xs text-amber-800">It can only be approved by someone in the office other than the person who recorded it.</p>
+                </div>
+            )}
+
             <div className="mb-4 grid max-w-3xl grid-cols-1 gap-4 animate-fade-up sm:grid-cols-2" style={{ animationDelay: '100ms' }}>
                 <StatCard label="Amount" value={formatted.amount} icon={<IconCash size={20} stroke={1.75} />} tone="green" />
                 <StatCard label="Credit" value={formatted.credit} icon={<IconWallet size={20} stroke={1.75} />} tone="blue" />

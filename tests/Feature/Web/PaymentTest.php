@@ -672,12 +672,12 @@ class PaymentTest extends TestCase
      * site. A network retry or a double-click on the submit button before
      * the page navigates away sends two structurally identical requests,
      * and nothing on this path stops both from creating a Payment row. This
-     * test documents the ACTUAL current behavior for the audit report — it
-     * is not asserting the desired behavior. If a fix lands (e.g. a
-     * client-generated idempotency key mirroring local_uuid), this
-     * assertion should flip to expecting exactly 1 row.
+     * test documented that for the audit report. The fix landed 2026-10-25
+     * (PaymentService::flagPossibleDuplicate()): a second subscription
+     * payment in the same month is refused until the collector says why it
+     * is fine, so a double-submit now creates exactly one row.
      */
-    public function test_two_identical_back_to_back_web_submissions_both_create_a_payment(): void
+    public function test_two_identical_back_to_back_web_submissions_create_only_one_payment(): void
     {
         $customer = $this->customer();
 
@@ -690,12 +690,12 @@ class PaymentTest extends TestCase
         ];
 
         $this->post('/payments', $payload)->assertRedirect('/payments');
-        $this->post('/payments', $payload)->assertRedirect('/payments');
+        $this->post('/payments', $payload)->assertSessionHasErrors('duplicate');
 
         $this->assertSame(
-            2,
+            1,
             Payment::query()->where('customer_id', $customer->id)->count(),
-            'AUDIT: the web payment-entry route has no idempotency protection — a double-submit/retry creates two payment rows.'
+            'A double-submit must not create a second payment unless the collector confirms it.'
         );
     }
 

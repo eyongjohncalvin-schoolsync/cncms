@@ -85,6 +85,14 @@ function FrequencySelector({
 // to do by seeing it in the list — better to keep the picker showing only
 // customers they can actually record a payment for than to let them pick
 // one and discover the problem via a validation error.
+/** Mirrors App\Models\Payment::DUPLICATE_REASONS_PICKABLE. */
+const DUPLICATE_REASONS: { value: string; label: string }[] = [
+    { value: 'advance', label: 'Paying next month(s) in advance' },
+    { value: 'arrears', label: 'Paying old debt' },
+    { value: 'refund', label: "Customer's mistake — will be refunded" },
+    { value: 'other', label: 'Other' },
+];
+
 function isPayable(customer: Customer): boolean {
     return customer.status !== 'disconnected' && customer.status !== 'suspended';
 }
@@ -163,7 +171,13 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
         method: 'cash' as PaymentMethod,
         method_reference: '',
         receipt_number: '',
+        // Only sent after the server says the customer already paid this
+        // month (errors.duplicate) and the collector says why it's fine.
+        duplicate_reason: '',
+        duplicate_note: '',
     });
+    // Set by the server, not a form field: "already paid this month" (PaymentService::flagPossibleDuplicate()).
+    const duplicateError = (errors as Record<string, string | undefined>).duplicate;
 
     const filteredCustomers = useMemo(() => {
         const term = search.trim().toLowerCase();
@@ -320,6 +334,9 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
                 ...current,
                 customer_uuid: uuid,
                 amount: customer && current.frequency === 'monthly' ? customer.bill : current.amount,
+                // A confirmed repeat belongs to one customer only.
+                duplicate_reason: '',
+                duplicate_note: '',
             };
         });
     }
@@ -462,15 +479,52 @@ function SinglePaymentForm({ customers, hasReceiptBook }: { customers: Customer[
                             error={errors.credit}
                         />
 
+                        {duplicateError && (
+                            // The customer already paid this month: say why another payment is fine.
+                            <div role="alert" className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                                <p className="font-semibold">{duplicateError}</p>
+                                <fieldset className="flex flex-col gap-2">
+                                    <legend className="mb-1 font-medium">Why is another payment fine?</legend>
+                                    {DUPLICATE_REASONS.map((reason) => (
+                                        <label key={reason.value} className="flex items-center gap-2">
+                                            <input
+                                                type="radio"
+                                                name="duplicate_reason"
+                                                value={reason.value}
+                                                checked={data.duplicate_reason === reason.value}
+                                                onChange={() => setData('duplicate_reason', reason.value)}
+                                                className="h-4 w-4 border-amber-400 text-amber-600 focus:ring-amber-600"
+                                            />
+                                            {reason.label}
+                                        </label>
+                                    ))}
+                                </fieldset>
+                                {data.duplicate_reason === 'other' && (
+                                    <TextInput
+                                        id="duplicate_note"
+                                        label="What happened?"
+                                        value={data.duplicate_note}
+                                        onChange={(e) => setData('duplicate_note', e.target.value)}
+                                        error={errors.duplicate_note}
+                                    />
+                                )}
+                                <p className="text-xs text-amber-800">It will be recorded but not verified yet — someone else in the office checks it against the first payment.</p>
+                            </div>
+                        )}
+
                         <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
                             <Link href="/payments" className="w-full sm:w-auto">
                                 <Button type="button" variant="secondary" className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
                                     Cancel
                                 </Button>
                             </Link>
-                            <Button type="submit" disabled={processing} className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto">
+                            <Button
+                                type="submit"
+                                disabled={processing || (Boolean(duplicateError) && data.duplicate_reason === '')}
+                                className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
+                            >
                                 {processing && <LoadingSpinner className="h-4 w-4" />}
-                                {processing ? 'Saving…' : 'Record Payment'}
+                                {processing ? 'Saving…' : duplicateError ? 'Record anyway' : 'Record Payment'}
                             </Button>
                         </div>
                     </CardBody>

@@ -57,6 +57,7 @@ class CashAlertService
 
         return array_values(array_filter([
             $this->cashNotHandedOver($deadlineHours),
+            $this->possibleDuplicatePayments(),
             $this->handoversNotReceived($deadlineHours),
             $this->openShortages(),
             $this->walletLinesNotFound(),
@@ -167,6 +168,30 @@ class CashAlertService
                 'detail' => "{$row->payments} payment(s) since ".Carbon::parse($row->oldest)->format('d M H:i'),
                 'amount' => number_format((float) $row->total, 2, '.', ''),
                 'link' => null,
+            ])->all());
+    }
+
+    /**
+     * A second payment for the same customer in the same month, waiting for
+     * someone to compare it with the first — and, over time, which collector
+     * keeps recording them (PaymentService::flagPossibleDuplicate()).
+     */
+    private function possibleDuplicatePayments(): array
+    {
+        $payments = Payment::query()
+            ->forBranch(TenantContext::currentBranchId())
+            ->whereNotNull('duplicate_of_id')
+            ->where('verification_status', 'pending')
+            ->with(['customer:id,uuid,name', 'recordedBy:id,name'])
+            ->latest('id')->limit(100)
+            ->get(['id', 'uuid', 'customer_id', 'amount', 'recorded_by', 'duplicate_reason', 'created_at']);
+
+        return $this->alert('possible_duplicate_payments', 'warning', 'Possible duplicate payments', 'A second payment for the same customer this month. Open each one, compare it with the first, then approve or reject it.',
+            $payments->map(fn (Payment $payment): array => [
+                'label' => ($payment->customer?->name ?? 'Customer').' — '.($payment->recordedBy?->name ?? 'unknown collector'),
+                'detail' => Payment::DUPLICATE_REASONS[$payment->duplicate_reason] ?? 'Possible duplicate',
+                'amount' => (string) $payment->amount,
+                'link' => "/payments/{$payment->uuid}",
             ])->all());
     }
 

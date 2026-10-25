@@ -95,6 +95,13 @@ class PaymentPolicy
         // RBAC v2: the office gate is now the `payments.verify` catalog
         // permission; the agent zone-scoped branch stays an additive OR
         // (agent is NOT seeded `payments.verify` — see Wave 2 rules).
+        // A possible duplicate is for the office, and never for whoever
+        // recorded it (the owner excepted) — a second person decides.
+        if ($payment->isPossibleDuplicate()) {
+            return $this->context->can('payments.verify')
+                && ($payment->recorded_by !== $user->id || $this->context->isSuper());
+        }
+
         return $this->context->can('payments.verify')
             || $this->context->isAgentCovering($payment->customer->zone_id);
     }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -34,8 +34,9 @@ import { amountInEnglish, amountInFrench } from '../../../src/utils/amountInWord
 import { generateUuid } from '../../../src/utils/uuid';
 import { issueFieldReceipt, type IssuedFieldReceipt } from '../../../src/fieldReceipts/receiptStock';
 import { getAllCustomers, getCustomerByUuid } from '../../../src/db/customers';
-import { getLastPaymentForCustomer, getPaymentByLocalUuid, insertLocalPayment } from '../../../src/db/payments';
-import type { LocalCustomer, LocalPayment } from '../../../src/types/db';
+import { getLastPaymentForCustomer, getPaymentByLocalUuid, getPaymentThisMonthForCustomer, insertLocalPayment } from '../../../src/db/payments';
+import type { DuplicateReason, LocalCustomer, LocalPayment } from '../../../src/types/db';
+import { DUPLICATE_REASONS, isDuplicateConfirmationComplete, startOfBusinessMonthIso } from '../../../src/utils/duplicatePayment';
 import { syncManager } from '../../../src/sync/SyncManager';
 
 const FREQUENCIES: Array<{ value: PaymentFrequency; label: string }> = [
@@ -126,6 +127,12 @@ export default function RecordPaymentScreen() {
     const [issuedReceipt, setIssuedReceipt] = useState<IssuedFieldReceipt | null>(null);
 
     const [submitting, setSubmitting] = useState(false);
+    // A payment for this customer already on this phone this month: the agent
+    // says why another is fine before it is saved (src/utils/duplicatePayment.ts).
+    const [duplicateOf, setDuplicateOf] = useState<LocalPayment | null>(null);
+    const [duplicateReason, setDuplicateReason] = useState<DuplicateReason | null>(null);
+    const [duplicateNote, setDuplicateNote] = useState('');
+    const scrollRef = useRef<ScrollView>(null);
     const [stage, setStage] = useState<Stage>('form');
     const [confirmedPayment, setConfirmedPayment] = useState<LocalPayment | null>(null);
     const [confirmSynced, setConfirmSynced] = useState(false);
@@ -264,7 +271,19 @@ export default function RecordPaymentScreen() {
         setLastPayment(null);
         setSearch('');
         setSearchResults([]);
+        clearDuplicateCheck();
     }
+
+    function clearDuplicateCheck() {
+        setDuplicateOf(null);
+        setDuplicateReason(null);
+        setDuplicateNote('');
+    }
+
+    // A confirmed repeat belongs to one customer only.
+    useEffect(() => {
+        clearDuplicateCheck();
+    }, [customer?.uuid]);
 
     const monthsNumber = months.trim() === '' ? null : Number(months);
     const guideAmount = customer ? calculateGuideAmount(customer.bill, frequency, monthsNumber) : null;
@@ -312,6 +331,20 @@ export default function RecordPaymentScreen() {
         setSubmitting(true);
 
         try {
+            // Already paid this month (on this phone)? Ask why before saving.
+            if (duplicateOf === null) {
+                const earlier = await getPaymentThisMonthForCustomer(customer.uuid, startOfBusinessMonthIso(new Date()));
+
+                if (earlier !== null) {
+                    setDuplicateOf(earlier);
+                    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+
+                    return;
+                }
+            } else if (!isDuplicateConfirmationComplete(duplicateReason, duplicateNote)) {
+                return;
+            }
+
             // Cash controls: take this collector's next system-issued receipt
             // number and sign it before the payment is written, so the
             // receipt the customer sees is the one the server will check.
@@ -336,6 +369,8 @@ export default function RecordPaymentScreen() {
                 // 2026-10); only an admin can override that, on the web.
                 clear_arrears_first: frequency === 'months' || frequency === 'yearly',
                 receipt_local_uri: receiptUri,
+                duplicate_reason: duplicateOf !== null ? duplicateReason : null,
+                duplicate_note: duplicateOf !== null && duplicateReason === 'other' ? duplicateNote : null,
             });
 
             // "Immediately after each local write (if online)" trigger —
@@ -544,11 +579,11 @@ export default function RecordPaymentScreen() {
     }
 
     const arrears = customer.total_arrears ?? 0;
-    const submitDisabled = !validation.valid || submitting;
+    const submitDisabled = !validation.valid || submitting || (duplicateOf !== null && !isDuplicateConfirmationComplete(duplicateReason, duplicateNote));
 
     return (
         <View style={styles.flex}>
-            <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
                 {/* 0. Change customer — the only way back to search/pick a
                     different customer once one is selected (see
                     handleChangeCustomer()'s doc comment). */}
@@ -776,12 +811,46 @@ export default function RecordPaymentScreen() {
                         <Button title="Add photo" variant="secondary" onPress={handleAddPhoto} />
                     )}
                 </View>
+
+                {/* 8. Already paid this month — say why another payment is fine. */}
+                {duplicateOf ? (
+                    <View style={styles.duplicateCard} accessibilityRole="alert">
+                        <Text style={styles.duplicateTitle}>
+                            {customer?.name ?? 'This customer'} already paid {formatFcfa(duplicateOf.amount)} on{' '}
+                            {new Date(duplicateOf.created_at).toLocaleDateString()}
+                            {duplicateOf.receipt_number ? ` (receipt ${duplicateOf.receipt_number})` : ''}.
+                        </Text>
+                        <Text style={styles.duplicateHint}>Why is another payment fine?</Text>
+                        <View style={styles.duplicateReasons}>
+                            {DUPLICATE_REASONS.map((reason) => {
+                                const selected = duplicateReason === reason.value;
+
+                                return (
+                                    <Pressable
+                                        key={reason.value}
+                                        accessibilityRole="radio"
+                                        accessibilityState={{ selected }}
+                                        onPress={() => setDuplicateReason(reason.value)}
+                                        style={[styles.duplicateReason, selected && styles.duplicateReasonSelected]}
+                                    >
+                                        <Text style={[styles.duplicateReasonLabel, selected && styles.duplicateReasonLabelSelected]}>{reason.label}</Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+                        {duplicateReason === 'other' ? (
+                            <UiTextInput label="What happened?" value={duplicateNote} onChangeText={setDuplicateNote} placeholder="A short note for the office" />
+                        ) : null}
+                        <Text style={styles.duplicateHint}>It is saved, but the office checks it against the first payment before it counts.</Text>
+                        <Button title="Cancel this payment" variant="secondary" onPress={clearDuplicateCheck} />
+                    </View>
+                ) : null}
             </ScrollView>
 
             {/* 8. Submit — full-width, thumb zone, always visible */}
             <View style={styles.footer}>
                 <Button
-                    title={submitting ? 'Saving…' : 'Record Payment'}
+                    title={submitting ? 'Saving…' : duplicateOf ? 'Record anyway' : 'Record Payment'}
                     size="large"
                     loading={submitting}
                     disabled={submitDisabled}
@@ -855,6 +924,30 @@ const styles = StyleSheet.create({
     },
 
     fieldGroup: { gap: spacing.sm },
+    // Amber, like offline: a check to make, not an error.
+    duplicateCard: {
+        gap: spacing.sm,
+        padding: spacing.md,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.status.offlineDot,
+        backgroundColor: colors.status.offlineBg,
+    },
+    duplicateTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.status.offlineFg },
+    duplicateHint: { fontSize: fontSize.sm, color: colors.status.offlineFg },
+    duplicateReasons: { gap: spacing.xs },
+    duplicateReason: {
+        minHeight: touchTarget.floor,
+        justifyContent: 'center',
+        paddingHorizontal: spacing.md,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.status.offlineDot,
+        backgroundColor: colors.surface,
+    },
+    duplicateReasonSelected: { backgroundColor: colors.status.offlineDot },
+    duplicateReasonLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.status.offlineFg },
+    duplicateReasonLabelSelected: { color: colors.surface },
     fieldLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
     segmented: { flexDirection: 'row', backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: spacing.xs, gap: spacing.xs },
     segmentedOption: {

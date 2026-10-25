@@ -83,14 +83,23 @@ class SyncService
 
         $paymentLookups = $this->paymentPushLookups($changes['payments'] ?? []);
         BranchLookup::remember($paymentLookups['customers']);
+        // The "already paid this month?" check for the whole batch, in one query.
+        $this->payments->primeEarlierPayments(
+            $paymentLookups['payable']->map(fn (Customer $customer): int => (int) $customer->id)->values()->all(),
+            collect($changes['payments'] ?? [])->map(fn (mixed $item): ?string => is_array($item) && is_string($item['created_at'] ?? null) ? $item['created_at'] : null)->values()->all(),
+        );
 
-        foreach ($changes['payments'] ?? [] as $item) {
-            [$entry, $error] = $this->pushPayment($item, $deviceId, $paymentLookups);
-            $results['payments'][] = $entry;
+        try {
+            foreach ($changes['payments'] ?? [] as $item) {
+                [$entry, $error] = $this->pushPayment($item, $deviceId, $paymentLookups);
+                $results['payments'][] = $entry;
 
-            if ($error !== null) {
-                $errors[] = $error;
+                if ($error !== null) {
+                    $errors[] = $error;
+                }
             }
+        } finally {
+            $this->payments->forgetEarlierPayments();
         }
 
         foreach ($changes['bon_requests'] ?? [] as $item) {
@@ -407,6 +416,11 @@ class SyncService
                 'receipt_number' => $item['receipt_number'] ?? null,
                 'security_code' => $item['security_code'] ?? null,
                 'receipt_issued_at' => $item['receipt_issued_at'] ?? null,
+                // A second payment that month: the cash was collected, so it is
+                // always recorded — flagged, with the agent's reason when the
+                // phone asked them (1.0.1+), else `unconfirmed`. Never refused.
+                'duplicate_reason' => in_array($item['duplicate_reason'] ?? null, Payment::DUPLICATE_REASONS_PICKABLE, true) ? $item['duplicate_reason'] : 'unconfirmed',
+                'duplicate_note' => $item['duplicate_note'] ?? null,
             ]);
 
             // The branch-scoped customer resolved up front, when there is

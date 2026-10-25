@@ -219,6 +219,9 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_number TEXT' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN security_code TEXT' },
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN receipt_issued_at TEXT' },
+    // Why a second payment for the customer this month is fine (the agent confirmed it).
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN duplicate_reason TEXT' },
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN duplicate_note TEXT' },
     // "Request a bon" (docs/plans/expenditures-and-spending-controls.md): the
     // `expenditures` outbox now holds bon requests — who is paid, whether it
     // was already paid out of the agent's collections, and the BC- number

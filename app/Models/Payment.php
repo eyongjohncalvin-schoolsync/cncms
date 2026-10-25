@@ -36,6 +36,8 @@ use LogicException;
     // Installation phase 2 (D15): a "paid upfront" payment's months per
     // service, each at that service's locked price — [{service_id, months, rate}].
     'service_months',
+    // A possible repeat of an earlier payment that month — see DUPLICATE_REASONS.
+    'duplicate_of_id', 'duplicate_reason', 'duplicate_note',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model
@@ -66,6 +68,25 @@ class Payment extends Model
         self::PURPOSE_INSTALLATION => 'Installation',
         self::PURPOSE_TECHNICIAN_FEE => 'Technician motivation fee',
     ];
+
+    /**
+     * Why a second subscription payment in the same month is fine, as the
+     * collector confirmed it — or `unconfirmed` when an offline phone sent it
+     * without knowing of the earlier one. Either way it is never verified on
+     * the spot; someone else checks it.
+     *
+     * @var array<string, string>
+     */
+    public const array DUPLICATE_REASONS = [
+        'advance' => 'Paying next month(s) in advance',
+        'arrears' => 'Paying old debt',
+        'refund' => "Customer's mistake — will be refunded",
+        'other' => 'Other',
+        'unconfirmed' => 'Not confirmed (recorded offline)',
+    ];
+
+    /** The reasons a collector may pick (the system sets `unconfirmed`). */
+    public const array DUPLICATE_REASONS_PICKABLE = ['advance', 'arrears', 'refund', 'other'];
 
     /**
      * The heading printed on the receipt for each purpose.
@@ -160,6 +181,17 @@ class Payment extends Model
             'collected_at' => 'datetime',
             'recorded_offline' => 'boolean',
         ];
+    }
+
+    /** The earlier payment that month this one may repeat. */
+    public function duplicateOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'duplicate_of_id');
+    }
+
+    public function isPossibleDuplicate(): bool
+    {
+        return $this->duplicate_of_id !== null;
     }
 
     public function customer(): BelongsTo

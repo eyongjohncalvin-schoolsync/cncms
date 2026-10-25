@@ -1,5 +1,5 @@
 import { getDatabase } from './database';
-import type { LocalPayment, SyncStatus } from '../types/db';
+import type { DuplicateReason, LocalPayment, SyncStatus } from '../types/db';
 import type { SyncPullChangedPayment } from '../types/api';
 import { generateUuid } from '../utils/uuid';
 import { nowIso, startOfTodayIso } from '../utils/format';
@@ -25,6 +25,9 @@ export interface NewLocalPaymentInput {
     receipt_number?: string | null;
     security_code?: string | null;
     receipt_issued_at?: string | null;
+    /** Set when the agent confirmed a second payment for the customer this month. */
+    duplicate_reason?: DuplicateReason | null;
+    duplicate_note?: string | null;
 }
 
 /** Writes a new outbox row for a payment recorded offline-first. Screens
@@ -52,6 +55,8 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
         receipt_number: input.receipt_number ?? null,
         security_code: input.security_code ?? null,
         receipt_issued_at: input.receipt_issued_at ?? null,
+        duplicate_reason: input.duplicate_reason ?? null,
+        duplicate_note: input.duplicate_note?.trim() ? input.duplicate_note.trim() : null,
         sync_status: 'queued',
         sync_error: null,
         sync_attempts: 0,
@@ -64,10 +69,12 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
             (local_uuid, server_uuid, customer_uuid, amount, credit, frequency, months, clear_arrears_first,
              verification_status, rejection_reason, receipt_local_uri, receipt_server_path,
              method, method_reference, receipt_number, security_code, receipt_issued_at,
+             duplicate_reason, duplicate_note,
              sync_status, sync_error, sync_attempts, created_at, updated_at)
          VALUES ($local_uuid, $server_uuid, $customer_uuid, $amount, $credit, $frequency, $months, $clear_arrears_first,
              $verification_status, $rejection_reason, $receipt_local_uri, $receipt_server_path,
              $method, $method_reference, $receipt_number, $security_code, $receipt_issued_at,
+             $duplicate_reason, $duplicate_note,
              $sync_status, $sync_error, $sync_attempts, $created_at, $updated_at)`,
         {
             $local_uuid: row.local_uuid,
@@ -87,6 +94,8 @@ export async function insertLocalPayment(input: NewLocalPaymentInput): Promise<L
             $receipt_number: row.receipt_number,
             $security_code: row.security_code,
             $receipt_issued_at: row.receipt_issued_at,
+            $duplicate_reason: row.duplicate_reason ?? null,
+            $duplicate_note: row.duplicate_note ?? null,
             $sync_status: row.sync_status,
             $sync_error: row.sync_error,
             $sync_attempts: row.sync_attempts,
@@ -228,6 +237,25 @@ export async function getRecentPayments(limit = 50): Promise<LocalPayment[]> {
  * just entered it — screens should surface sync_status alongside it rather
  * than treating an unsynced row as absent.
  */
+/**
+ * The latest payment (not rejected) this phone holds for the customer since
+ * the business month began — what the Record Payment screen warns about
+ * before a second one. Only this phone's own payments; the server catches
+ * repeats across phones (PaymentService::flagPossibleDuplicate()).
+ */
+export async function getPaymentThisMonthForCustomer(customerUuid: string, monthStartIso: string): Promise<LocalPayment | null> {
+    const db = await getDatabase();
+
+    const row = await db.getFirstAsync<LocalPayment>(
+        `SELECT * FROM payments
+         WHERE customer_uuid = ? AND verification_status != 'rejected' AND created_at >= ?
+         ORDER BY created_at DESC LIMIT 1`,
+        [customerUuid, monthStartIso],
+    );
+
+    return row ?? null;
+}
+
 export async function getLastPaymentForCustomer(customerUuid: string): Promise<LocalPayment | null> {
     const db = await getDatabase();
 

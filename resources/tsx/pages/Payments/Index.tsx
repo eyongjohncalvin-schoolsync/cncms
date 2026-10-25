@@ -121,7 +121,8 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
     // it, same rule App\Services\PaymentVerificationService::verifyMany()
     // re-checks server-side.
     function matchesBill(payment: Payment): boolean {
-        return payment.verification_status === 'pending' && Number(payment.amount) === Number(payment.customer_bill);
+        // A possible duplicate is never bulk-verified: someone opens it.
+        return payment.verification_status === 'pending' && Number(payment.amount) === Number(payment.customer_bill) && !payment.possible_duplicate;
     }
 
     // Selection is scoped to whatever page/tab is currently visible — if the
@@ -539,6 +540,11 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                             </button>
                                         ) : (
                                             <VerificationBadge status={payment.verification_status} />
+                                        )}
+                                        {payment.possible_duplicate && (
+                                            <Link href={`/payments/${payment.uuid}`} className="ml-1 inline-block" title={payment.duplicate_reason ?? undefined}>
+                                                <Badge tone="yellow">Possible duplicate</Badge>
+                                            </Link>
                                         )}
                                     </Td>
                                     <Td>

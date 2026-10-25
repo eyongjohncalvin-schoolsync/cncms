@@ -429,6 +429,19 @@ export interface Payment {
     verification?: PaymentVerification | null;
     /** Lightweight receipt indicator (list rows). Null until issued. */
     receipt?: PaymentReceiptSummary | null;
+    /** A second payment for the customer that month — checked by someone other than its recorder. */
+    possible_duplicate?: boolean;
+    duplicate_reason?: string | null;
+    duplicate_note?: string | null;
+    /** The earlier payment to compare it with (Show only). */
+    duplicate_of?: {
+        uuid: string;
+        amount: string;
+        collected_at: string | null;
+        verification_status: string;
+        receipt_number: string | null;
+        recorded_by_name: string | null;
+    } | null;
 }
 
 export interface Manuscript {

@@ -59,6 +59,14 @@ class PaymentVerificationService
     {
         BranchLookup::remember([$payment]);
 
+        // The second lock behind PaymentPolicy::verify(): a possible
+        // duplicate is approved by the office, never by whoever recorded it
+        // (the owner excepted) — whatever path the approval came by.
+        if ($data->action === 'approve' && $payment->isPossibleDuplicate()
+            && (! $this->context->can('payments.verify') || ($payment->recorded_by === $actor->id && ! $this->context->isSuper()))) {
+            throw ValidationException::withMessages(['payment' => 'This may repeat an earlier payment — someone else in the office must approve it.']);
+        }
+
         DB::transaction(function () use ($payment, $data, $actor): void {
             $verification = $payment->relationLoaded('verification') && $payment->verification !== null
                 ? $payment->verification
@@ -178,6 +186,13 @@ class PaymentVerificationService
 
             if ($isAgent && ! $this->context->isAgentCovering($payment->customer->zone_id)) {
                 $skipped[$uuid] = 'Outside your zones.';
+
+                continue;
+            }
+
+            // Never in bulk: someone opens it and compares it with the earlier payment.
+            if ($payment->isPossibleDuplicate()) {
+                $skipped[$uuid] = 'May repeat an earlier payment this month — open it to check.';
 
                 continue;
             }

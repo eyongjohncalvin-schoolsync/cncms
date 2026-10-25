@@ -6,6 +6,9 @@
  */
 
 export type SyncStatus = 'queued' | 'syncing' | 'synced' | 'failed';
+
+/** Mirrors App\Models\Payment::DUPLICATE_REASONS_PICKABLE. */
+export type DuplicateReason = 'advance' | 'arrears' | 'refund' | 'other';
 export type VerificationStatus = 'pending' | 'verified' | 'rejected';
 
 export interface LocalCustomer {
@@ -62,6 +65,9 @@ export interface LocalPayment {
     receipt_number: string | null;
     security_code: string | null;
     receipt_issued_at: string | null;
+    /** Why a second payment for the customer this month is fine, as the agent confirmed it (null when it isn't one). */
+    duplicate_reason?: DuplicateReason | null;
+    duplicate_note?: string | null;
     sync_status: SyncStatus;
     sync_error: string | null;
     sync_attempts: number;

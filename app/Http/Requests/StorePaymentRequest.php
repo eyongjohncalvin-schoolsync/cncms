@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Payment;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * POST /payments. A `disconnected` or `suspended` customer must be
@@ -69,6 +70,9 @@ class StorePaymentRequest extends FormRequest
             'receipt_number' => ['nullable', 'string', 'max:30'],
             'security_code' => ['nullable', 'string', 'max:12'],
             'receipt_issued_at' => ['nullable', 'date'],
+            // Confirming a second payment this month (PaymentService::flagPossibleDuplicate()).
+            'duplicate_reason' => ['nullable', 'string', Rule::in(Payment::DUPLICATE_REASONS_PICKABLE)],
+            'duplicate_note' => ['nullable', 'required_if:duplicate_reason,other', 'string', 'max:255'],
         ];
     }
 }
