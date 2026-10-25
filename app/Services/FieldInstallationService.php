@@ -7,7 +7,6 @@ namespace App\Services;
 use App\DataTransferObjects\CustomerData;
 use App\DataTransferObjects\InstallationData;
 use App\DataTransferObjects\PaymentData;
-use App\DataTransferObjects\VerifyPaymentData;
 use App\Http\Middleware\BlockDuringImpersonation;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Models\Customer;
@@ -250,7 +249,7 @@ class FieldInstallationService
 
             foreach ($payments as $payment) {
                 $taken = bcadd($taken, (string) $payment->amount, 2);
-                $this->verifications->verify($payment, new VerifyPaymentData(action: 'reject', notes: "Field registration rejected: {$reason}"), $actor);
+                $this->verifications->voidForRefund($payment, "Field registration rejected: {$reason}", $actor);
             }
 
             $voucher = null;

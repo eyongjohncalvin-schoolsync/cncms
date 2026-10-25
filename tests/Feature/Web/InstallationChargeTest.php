@@ -151,15 +151,18 @@ class InstallationChargeTest extends TestCase
         $this->post("/installation-charges/{$charge->uuid}/payments", ['amount' => 1, 'method' => 'cash'])->assertForbidden();
     }
 
-    public function test_a_rejected_instalment_reopens_a_paid_charge(): void
+    public function test_a_reversed_instalment_reopens_a_paid_charge(): void
     {
+        // A verified payment is reversed (by someone other than its
+        // recorder), never plainly rejected.
         $this->manager();
         $charge = $this->openCharge($this->customer(), '5000');
         $this->post("/installation-charges/{$charge->uuid}/payments", ['amount' => 5000, 'method' => 'cash'])->assertSessionHasNoErrors();
         $this->assertSame(CustomerCharge::STATUS_PAID, $charge->fresh()->status);
 
         $payment = Payment::query()->where('customer_charge_id', $charge->id)->sole();
-        $this->post("/payments/{$payment->uuid}/verify", ['action' => 'reject', 'notes' => 'Counterfeit note'])->assertSessionHasNoErrors();
+        $this->admin();
+        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Counterfeit note'])->assertSessionHasNoErrors();
 
         $this->assertSame(CustomerCharge::STATUS_OPEN, $charge->fresh()->status);
         $this->assertSame('5000.00', $charge->fresh()->balance());

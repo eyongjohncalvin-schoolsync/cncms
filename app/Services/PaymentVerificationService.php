@@ -149,6 +149,24 @@ class PaymentVerificationService
     }
 
     /**
+     * Voids a payment whose money is being handed back through a refund bon
+     * (a rejected field registration — FieldInstallationService::reject()):
+     * rejected and its receipt voided whatever its status, and, when it was
+     * verified, marked reversed so it is never approved again. Unlike
+     * reverse(), no remittance or bill-run check: the refund settles it.
+     */
+    public function voidForRefund(Payment $payment, string $reason, User $actor): void
+    {
+        $wasVerified = $payment->verification_status === 'verified';
+
+        $this->applyDecision($payment, new VerifyPaymentData(action: 'reject', notes: $reason), $actor);
+
+        if ($wasVerified) {
+            $payment->update(['reversed_at' => Carbon::now(), 'reversed_by' => $actor->id, 'reversal_reason' => $reason]);
+        }
+    }
+
+    /**
      * verify()'s write path without its per-call report-cache flush and
      * fresh() reload, so verifyMany() can run it per payment and flush the
      * report cache once for the whole batch.
