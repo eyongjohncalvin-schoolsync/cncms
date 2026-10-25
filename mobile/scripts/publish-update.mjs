@@ -27,7 +27,8 @@ if (message === '') {
 const onWindows = process.platform === 'win32';
 const messageArg = onWindows ? `"${message.replace(/"/g, "'")}"` : message;
 
-const result = spawnSync('npx', ['eas-cli', 'update', '--channel', CHANNEL, '--message', messageArg, '--non-interactive'], {
+// Android only: agents' builds are Android APKs (no iOS or web build exists).
+const result = spawnSync('npx', ['eas-cli', 'update', '--channel', CHANNEL, '--environment', CHANNEL, '--platform', 'android', '--message', messageArg, '--non-interactive'], {
     stdio: 'inherit',
     shell: onWindows,
     env: { ...process.env, EXPO_PUBLIC_API_BASE_URL: API_BASE_URL },
