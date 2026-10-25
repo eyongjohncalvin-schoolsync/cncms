@@ -14,6 +14,8 @@ export interface PrepaymentOfferApi {
     months: number;
     /** Numeric string, this branch's price. */
     price: string;
+    /** Every branch's price, by branch uuid (absent from older servers). */
+    branch_prices?: Record<string, string>;
 }
 
 export async function fetchPrepaymentOffers(): Promise<PrepaymentOfferApi[]> {

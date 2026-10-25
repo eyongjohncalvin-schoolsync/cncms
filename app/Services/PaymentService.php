@@ -342,7 +342,8 @@ class PaymentService
             return $attributes;
         }
 
-        $earlier = $this->earlierPaymentThisMonth($customer, $data->collectedAt);
+        $earlier = $this->earlierPaymentThisMonth($customer, $data->collectedAt)
+            ?? $this->sameAmountAcrossMonthEnd($customer, (string) $data->amount, $data->collectedAt);
 
         if ($earlier === null) {
             return $attributes;
@@ -479,6 +480,34 @@ class PaymentService
             ->first();
     }
 
+    /**
+     * The classic double entry straddling a month end: the same amount on
+     * 31 Oct and again on 1 Nov is two months to earlierPaymentThisMonth().
+     * Only looked for in a month's first 3 days (the double-entry window),
+     * so most payments cost no extra query.
+     */
+    private function sameAmountAcrossMonthEnd(Customer $customer, string $amount, ?string $collectedAt): ?Payment
+    {
+        $moment = ($collectedAt !== null ? Carbon::parse($collectedAt) : Carbon::now())->setTimezone(BusinessTimezone::WAT);
+
+        if ($moment->day > 3) {
+            return null;
+        }
+
+        return Payment::query()
+            ->with(['receipt', 'recordedBy'])
+            ->where('customer_id', $customer->id)
+            ->subscription()
+            ->where('verification_status', '!=', 'rejected')
+            ->where('amount', $amount)
+            ->whereRaw('coalesce(collected_at, created_at) between ? and ?', [
+                $moment->copy()->subDays(3)->setTimezone('UTC'),
+                $moment->copy()->startOfMonth()->setTimezone('UTC'),
+            ])
+            ->orderByRaw('coalesce(collected_at, created_at) desc')
+            ->first();
+    }
+
     /** Keeps a batch's memo current (the latest payment per customer and month wins). */
     private function rememberEarlier(Payment $payment): void
     {
@@ -502,7 +531,7 @@ class PaymentService
         return ($this->isLikelyDoubleEntry($earlier, $amount, null) ? 'Possible double entry: ' : '')
             ."{$customer->name} already paid ".number_format((float) $earlier->amount, 0, '.', ',').' FCFA on '.$when->format('j M')
             .($details !== [] ? ' ('.implode(', ', $details).')' : '')
-            .'. Say why another payment this month is fine, or cancel.';
+            .'. Say why another payment is fine, or cancel.';
     }
 
     /**

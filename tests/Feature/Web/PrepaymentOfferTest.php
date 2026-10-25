@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Web;
 
 use App\Models\Branch;
+use App\Models\BranchPrice;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PrepaymentOffer;
@@ -293,6 +294,24 @@ class PrepaymentOfferTest extends TestCase
     {
         $this->withToken($this->tokenForRole('manager'))->getJson('/api/v1/payments/prepayment-offers')->assertOk()
             ->assertJsonFragment(['uuid' => $this->offer->uuid, 'months' => 4, 'price' => '10000.00']);
+    }
+
+    public function test_the_phone_can_sell_at_the_customers_branch_price(): void
+    {
+        // An HQ manager's phone selling to a BUEA customer must ask BUEA's price, as the server charges.
+        $buea = BranchFactory::new()->create(['name' => 'BUEA']);
+        BranchPrice::query()->create(['branch_id' => $buea->id, 'prepayment_offer_id' => $this->offer->id, 'price' => 9500, 'reason' => 'Competition']);
+        BranchPrices::flush();
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create(['branch_id' => $buea->id])->id, 'bill' => 3000, 'status' => 'active']);
+        $token = $this->tokenForRole('manager');
+
+        $offer = collect($this->withToken($token)->getJson('/api/v1/payments/prepayment-offers')->assertOk()->json('data'))->firstWhere('uuid', $this->offer->uuid);
+        $this->assertSame('10000.00', $offer['price'], "The caller's own branch.");
+        $this->assertSame('9500.00', $offer['branch_prices'][$buea->uuid]);
+
+        $pulled = collect($this->withToken($token)->getJson('/api/v1/sync/pull')->assertOk()->json('changes.customers.upserted'))
+            ->firstWhere('uuid', $customer->uuid);
+        $this->assertSame($buea->uuid, $pulled['branch_uuid']);
     }
 
     private function payOffer(array $extra = []): TestResponse

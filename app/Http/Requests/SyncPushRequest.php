@@ -66,30 +66,29 @@ class SyncPushRequest extends FormRequest
             'changes.installations.*.installation_receipt' => ['nullable', 'array'],
             'changes.installations.*.upfront_receipt' => ['nullable', 'array'],
 
+            // Shape only: every value rule is checked per item by
+            // App\Services\SyncService::PAYMENT_ITEM_RULES, so one bad
+            // payment (say an amount with three decimals) fails alone
+            // instead of 422-ing — and blocking — the phone's whole queue.
+            // Every key is listed so validated() keeps it.
             'changes.payments' => ['nullable', 'array'],
+            'changes.payments.*' => ['array'],
             'changes.payments.*.local_uuid' => ['required', 'uuid'],
-            'changes.payments.*.customer_uuid' => ['required', 'string'],
-            'changes.payments.*.amount' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
-            'changes.payments.*.credit' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
-            'changes.payments.*.frequency' => ['required', 'string', 'in:monthly,yearly,months'],
-            'changes.payments.*.months' => ['nullable', 'integer', 'min:1'],
-            'changes.payments.*.clear_arrears_first' => ['nullable', 'boolean'],
-            'changes.payments.*.created_at' => ['nullable', 'date'],
-            // Cash controls: shape-checked only — PaymentService rejects an
-            // unknown method or a MoMo payment without its ID per item, so
-            // one bad entry fails alone instead of 422-ing the whole batch.
-            'changes.payments.*.method' => ['nullable', 'string', 'max:20'],
-            'changes.payments.*.method_reference' => ['nullable', 'string', 'max:100'],
-            // Wave 2: the receipt the phone printed — checked per item by
-            // App\Services\FieldReceiptService.
-            'changes.payments.*.receipt_number' => ['nullable', 'string', 'max:30'],
-            'changes.payments.*.security_code' => ['nullable', 'string', 'max:12'],
-            'changes.payments.*.receipt_issued_at' => ['nullable', 'string', 'max:40'],
-            // The agent's answer to "already paid this month — why another?"
-            // (anything else, or nothing, is stored as `unconfirmed`).
-            'changes.payments.*.duplicate_reason' => ['nullable', 'string', 'max:20'],
-            'changes.payments.*.duplicate_note' => ['nullable', 'string', 'max:255'],
-            'changes.payments.*.prepayment_offer_uuid' => ['nullable', 'uuid'],
+            'changes.payments.*.customer_uuid' => ['nullable'],
+            'changes.payments.*.amount' => ['nullable'],
+            'changes.payments.*.credit' => ['nullable'],
+            'changes.payments.*.frequency' => ['nullable'],
+            'changes.payments.*.months' => ['nullable'],
+            'changes.payments.*.clear_arrears_first' => ['nullable'],
+            'changes.payments.*.created_at' => ['nullable'],
+            'changes.payments.*.method' => ['nullable'],
+            'changes.payments.*.method_reference' => ['nullable'],
+            'changes.payments.*.receipt_number' => ['nullable'],
+            'changes.payments.*.security_code' => ['nullable'],
+            'changes.payments.*.receipt_issued_at' => ['nullable'],
+            'changes.payments.*.duplicate_reason' => ['nullable'],
+            'changes.payments.*.duplicate_note' => ['nullable'],
+            'changes.payments.*.prepayment_offer_uuid' => ['nullable'],
 
             // "Request a bon" from the phone
             // (docs/plans/expenditures-and-spending-controls.md, item 2) —

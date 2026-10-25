@@ -294,6 +294,8 @@ export interface SyncPullCustomer {
     level: string | null;
     status: string;
     zone_uuid: string | null;
+    /** The customer's branch (offers are sold at its price). Absent from older servers. */
+    branch_uuid?: string | null;
     /**
      * From the customer's `latestManuscript` (App\Models\Customer),
      * eager-loaded alongside `zone` in SyncService::upsertedCustomers() —

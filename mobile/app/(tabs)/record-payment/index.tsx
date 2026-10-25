@@ -39,9 +39,11 @@ import {
     getPaidThisMonthOnPhone,
     getPaymentByLocalUuid,
     getPaymentThisMonthForCustomer,
+    getSameAmountRecentlyForCustomer,
     insertLocalPayment,
 } from '../../../src/db/payments';
 import { getCachedPrepaymentOffers, refreshPrepaymentOffers, type PrepaymentOfferApi } from '../../../src/api/prepaymentOffers';
+import { offerPriceFor } from '../../../src/utils/offerPrice';
 import type { DuplicateReason, LocalCustomer, LocalPayment } from '../../../src/types/db';
 import { DUPLICATE_REASONS, isDuplicateConfirmationComplete, startOfBusinessMonthIso } from '../../../src/utils/duplicatePayment';
 import { splitPrepayment } from '../../../src/utils/prepaymentSplit';
@@ -323,7 +325,7 @@ export default function RecordPaymentScreen() {
             setFrequency('months');
             setMonths(String(offer.months));
             // Old debt first, then the offer — one payment.
-            setAmount(String(Math.round(Number(offer.price) + unpaidDebt)));
+            setAmount(String(Math.round(offerPriceFor(offer, customer?.branch_uuid) + unpaidDebt)));
         } else {
             setFrequency('monthly');
             setMonths('');
@@ -378,7 +380,9 @@ export default function RecordPaymentScreen() {
         try {
             // Already paid this month (on this phone)? Ask why before saving.
             if (duplicateOf === null) {
-                const earlier = await getPaymentThisMonthForCustomer(customer.uuid, startOfBusinessMonthIso(new Date()));
+                const earlier =
+                    (await getPaymentThisMonthForCustomer(customer.uuid, startOfBusinessMonthIso(new Date()))) ??
+                    (await getSameAmountRecentlyForCustomer(customer.uuid, validation.amountValue, new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()));
 
                 if (earlier !== null) {
                     setDuplicateOf(earlier);
@@ -739,7 +743,7 @@ export default function RecordPaymentScreen() {
                                         style={[styles.segmentedOption, styles.methodOption, active && styles.segmentedOptionActive]}
                                     >
                                         <Text style={[styles.segmentedLabel, active && styles.segmentedLabelActive]}>
-                                            {offer ? `${offer.months} months · ${formatFcfa(Number(offer.price))}` : 'No offer'}
+                                            {offer ? `${offer.months} months · ${formatFcfa(offerPriceFor(offer, customer?.branch_uuid))}` : 'No offer'}
                                         </Text>
                                     </Pressable>
                                 );

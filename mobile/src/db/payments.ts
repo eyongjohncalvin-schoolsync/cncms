@@ -261,6 +261,24 @@ export async function getPaymentThisMonthForCustomer(customerUuid: string, month
 }
 
 /**
+ * The same amount for the customer within the last 3 days, whatever the month
+ * — the double entry that straddles a month end (31 Oct and again 1 Nov), as
+ * App\Services\PaymentService::sameAmountAcrossMonthEnd() checks on the server.
+ */
+export async function getSameAmountRecentlyForCustomer(customerUuid: string, amount: number, sinceIso: string): Promise<LocalPayment | null> {
+    const db = await getDatabase();
+
+    const row = await db.getFirstAsync<LocalPayment>(
+        `SELECT * FROM payments
+         WHERE customer_uuid = ? AND verification_status != 'rejected' AND amount = ? AND created_at >= ?
+         ORDER BY created_at DESC LIMIT 1`,
+        [customerUuid, amount, sinceIso],
+    );
+
+    return row ?? null;
+}
+
+/**
  * What this phone collected from the customer since the business month began
  * (not rejected, not offers) — taken off their cached arrears so an agent can
  * collect old debt and then sell a prepayment offer in the same visit.

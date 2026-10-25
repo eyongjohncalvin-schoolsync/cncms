@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\Expenditure;
 use App\Models\Payment;
 use App\Models\Service;
+use App\Models\SyncQueue;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\Zone;
@@ -19,6 +20,7 @@ use Database\Factories\ExpenseCategoryFactory;
 use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
@@ -439,6 +441,59 @@ class SyncTest extends TestCase
 
         $this->assertDatabaseHas('payments', ['uuid' => $good['server_uuid']]);
         $this->assertNotEmpty($response->json('errors'));
+    }
+
+    public function test_a_payment_with_a_bad_value_fails_alone_instead_of_blocking_the_whole_push(): void
+    {
+        // Three decimals used to 422 the whole push — and the phone retried
+        // the same queue forever, so nothing behind it ever synced.
+        $zone = ZoneFactory::new()->create();
+        $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'active']);
+        $other = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'active']);
+
+        $results = $this->withToken($this->tokenForRole('manager'))->postJson('/api/v1/sync/push', [
+            'device_id' => 'device-bad-value',
+            'changes' => ['payments' => [
+                ['local_uuid' => $bad = (string) Str::uuid(), 'customer_uuid' => $customer->uuid, 'amount' => '2500.555', 'frequency' => 'monthly'],
+                ['local_uuid' => $noMonths = (string) Str::uuid(), 'customer_uuid' => $customer->uuid, 'amount' => 5000, 'frequency' => 'months'],
+                ['local_uuid' => $good = (string) Str::uuid(), 'customer_uuid' => $other->uuid, 'amount' => 2500, 'frequency' => 'monthly'],
+            ]],
+        ])->assertOk()->json('results.payments');
+
+        $byUuid = collect($results)->keyBy('local_uuid');
+        $this->assertSame('failed', $byUuid[$bad]['status']);
+        $this->assertStringContainsString('amount', $byUuid[$bad]['error']);
+        $this->assertSame('failed', $byUuid[$noMonths]['status'], 'Months is required for a multi-month payment.');
+        $this->assertSame('synced', $byUuid[$good]['status']);
+        $this->assertSame(1, Payment::query()->whereIn('customer_id', [$customer->id, $other->id])->count());
+    }
+
+    public function test_an_impossible_collection_date_from_the_phone_is_replaced_by_the_server_time(): void
+    {
+        $zone = ZoneFactory::new()->create();
+        $customers = CustomerFactory::new()->count(3)->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'active']);
+        $sent = [now()->addDays(40), Carbon::parse('1970-01-01'), now()->subDays(2)->startOfSecond()];
+
+        $results = $this->withToken($this->tokenForRole('manager'))->postJson('/api/v1/sync/push', [
+            'device_id' => 'device-clock',
+            'changes' => ['payments' => $customers->values()->map(fn (Customer $customer, int $i): array => [
+                'local_uuid' => (string) Str::uuid(), 'customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly',
+                'created_at' => $sent[$i]->toIso8601String(),
+            ])->all()],
+        ])->assertOk()->json('results.payments');
+
+        $this->assertSame(['synced', 'synced', 'synced'], array_column($results, 'status'));
+        $collected = Payment::query()->whereIn('uuid', array_column($results, 'server_uuid'))->get()->keyBy('customer_id');
+
+        foreach ([0, 1] as $i) {
+            $this->assertLessThan(5, $collected[$customers[$i]->id]->collected_at->diffInMinutes(now(), true), 'A future or ancient date becomes now.');
+        }
+        $this->assertTrue($collected[$customers[2]->id]->collected_at->equalTo($sent[2]), 'A believable date is kept.');
+        $this->assertSame(
+            '1970-01-01T00:00:00+00:00',
+            SyncQueue::query()->where('local_uuid', $results[1]['local_uuid'])->sole()->payload['phone_created_at'],
+            'The phone\'s own date is kept for the record.',
+        );
     }
 
     /**

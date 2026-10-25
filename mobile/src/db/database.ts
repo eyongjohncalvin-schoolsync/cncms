@@ -234,6 +234,8 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     // Installation phase 2: the customer's promo state (first billed month,
     // FREE vs PREPAID, free months to come), JSON-encoded.
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN promo TEXT' },
+    // The customer's branch, so an offer is sold at that branch's price.
+    { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN branch_uuid TEXT' },
 ];
 
 /**

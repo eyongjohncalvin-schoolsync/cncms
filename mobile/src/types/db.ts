@@ -39,6 +39,8 @@ export interface LocalCustomer {
      * `parseLocalCustomerPromo()`. `null` for rows cached before the column.
      */
     promo?: string | null;
+    /** The customer's branch — offers are sold at its price. `null` until the next pull refreshes the row. */
+    branch_uuid?: string | null;
 }
 
 export interface LocalPayment {

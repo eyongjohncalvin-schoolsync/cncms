@@ -11,6 +11,7 @@ use App\Http\Requests\StorePaymentRequest;
 use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
 use App\Http\Resources\PaymentResource;
+use App\Models\Branch;
 use App\Models\Payment;
 use App\Models\PrepaymentOffer;
 use App\Services\PaymentService;
@@ -53,14 +54,18 @@ class PaymentController extends Controller
 
     /**
      * Prepayment offers on sale today, at the price of the caller's branch
-     * (the agent's, or headquarters'). The phone caches them so an agent can
-     * sell one offline; the server re-checks each payment when it syncs.
+     * (the agent's, or headquarters'), plus every branch's price
+     * (`branch_prices`, by branch uuid) — the phone sells at the customer's
+     * branch price, as the server charges (PaymentService::applyPrepaymentOffer()).
+     * The phone caches them so an agent can sell one offline; the server
+     * re-checks each payment when it syncs.
      */
     public function prepaymentOffers(): JsonResponse
     {
         $this->authorize('create', Payment::class);
 
         $prices = BranchPrices::current();
+        $branches = Branch::query()->get(['id', 'uuid']);
 
         return response()->json(['data' => PrepaymentOffer::query()->available()->orderBy('months')->get()
             ->map(fn (PrepaymentOffer $offer): array => [
@@ -68,6 +73,9 @@ class PaymentController extends Controller
                 'name' => $offer->name,
                 'months' => $offer->months,
                 'price' => $prices->prepaymentOfferPrice($offer),
+                'branch_prices' => $branches->mapWithKeys(fn (Branch $branch): array => [
+                    $branch->uuid => BranchPrices::for($branch->id)->prepaymentOfferPrice($offer),
+                ])->all(),
             ])->values()->all()]);
     }
 

@@ -16,6 +16,7 @@ use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -107,6 +108,21 @@ class DuplicatePaymentTest extends TestCase
         // More than the debt plus this month's bill: the office checks it.
         $this->pay(['duplicate_reason' => 'arrears', 'amount' => 9000])->assertSessionHasNoErrors();
         $this->assertSame('pending', $this->payments()->latest('id')->first()->verification_status);
+    }
+
+    public function test_the_same_amount_either_side_of_a_month_end_is_caught(): void
+    {
+        $this->as('manager');
+        $this->travelTo(Carbon::parse('2026-10-31 18:00', 'Africa/Lagos'));
+        $this->pay()->assertSessionHasNoErrors();
+
+        // 1 November: a new month, but the same 2,500 a day later — the classic double entry.
+        $this->travelTo(Carbon::parse('2026-11-01 09:00', 'Africa/Lagos'));
+        $this->pay()->assertSessionHasErrors('duplicate');
+
+        // A different amount in the new month is just this month's payment.
+        $this->pay(['amount' => 3000])->assertSessionHasNoErrors();
+        $this->assertNull($this->payments()->latest('id')->first()->duplicate_of_id);
     }
 
     public function test_old_debt_already_paid_off_proves_nothing(): void

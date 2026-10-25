@@ -7,6 +7,7 @@ namespace App\Services;
 use App\DataTransferObjects\ComplaintData;
 use App\DataTransferObjects\PaymentData;
 use App\Models\Agent;
+use App\Models\Branch;
 use App\Models\Complaint;
 use App\Models\Customer;
 use App\Models\CustomerSubscription;
@@ -28,6 +29,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -40,6 +42,42 @@ class SyncService
 {
     /** How far back a first / full pull sends payment verification results (mobile data). */
     private const int FULL_PULL_PAYMENT_DAYS = 60;
+
+    /**
+     * The oldest collection date a phone may report: a phone can be offline
+     * a while, but not across more than two billing months. Older (or in the
+     * future) means a wrong clock — the server's time is used instead.
+     */
+    private const int OLDEST_COLLECTION_DAYS = 62;
+
+    /**
+     * Each pushed payment's values, checked one at a time (pushPayment()) so
+     * one bad item fails alone — SyncPushRequest only checks the shape.
+     *
+     * @var array<string, list<string>>
+     */
+    private const array PAYMENT_ITEM_RULES = [
+        'customer_uuid' => ['required', 'string'],
+        'amount' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
+        'credit' => ['nullable', 'numeric', 'min:0', 'decimal:0,2'],
+        'frequency' => ['required', 'string', 'in:monthly,yearly,months'],
+        'months' => ['nullable', 'integer', 'min:1', 'max:120', 'required_if:frequency,months'],
+        'clear_arrears_first' => ['nullable', 'boolean'],
+        'created_at' => ['nullable', 'string'],
+        // Cash controls: an unknown method or a MoMo payment without its ID
+        // is refused by PaymentService.
+        'method' => ['nullable', 'string', 'max:20'],
+        'method_reference' => ['nullable', 'string', 'max:100'],
+        // The receipt the phone printed — checked by App\Services\FieldReceiptService.
+        'receipt_number' => ['nullable', 'string', 'max:30'],
+        'security_code' => ['nullable', 'string', 'max:12'],
+        'receipt_issued_at' => ['nullable', 'string', 'max:40'],
+        // The agent's answer to "already paid this month — why another?"
+        // (anything else, or nothing, is stored as `unconfirmed`).
+        'duplicate_reason' => ['nullable', 'string', 'max:20'],
+        'duplicate_note' => ['nullable', 'string', 'max:255'],
+        'prepayment_offer_uuid' => ['nullable', 'uuid'],
+    ];
 
     public function __construct(
         private readonly PaymentService $payments,
@@ -81,7 +119,23 @@ class SyncService
             }
         }
 
-        $paymentLookups = $this->paymentPushLookups($changes['payments'] ?? []);
+        // A phone's clock decides which month a payment lands in (and the
+        // duplicate check's window), so an impossible date is pulled back
+        // to the server's time before anything reads it.
+        $changes['payments'] = array_map(function (mixed $item): mixed {
+            if (! is_array($item)) {
+                return $item;
+            }
+
+            $bounded = $this->boundedCollectedAt($item['created_at'] ?? null);
+
+            // The phone's own value is kept beside it (the sync_queue payload) when it was replaced.
+            return $bounded === ($item['created_at'] ?? null)
+                ? $item
+                : [...$item, 'created_at' => $bounded, 'phone_created_at' => $item['created_at'] ?? null];
+        }, $changes['payments'] ?? []);
+
+        $paymentLookups = $this->paymentPushLookups($changes['payments']);
         BranchLookup::remember($paymentLookups['customers']);
         // The "already paid this month?" check for the whole batch, in one query.
         $this->payments->primeEarlierPayments(
@@ -378,6 +432,20 @@ class SyncService
         // pushPayment() method, so its reconnection-fine payment (recorded
         // while the customer is still `disconnected`) keeps working exactly
         // as it does today.
+        // One bad payment fails alone (SyncPushRequest checks only the shape).
+        $invalid = Validator::make($item, self::PAYMENT_ITEM_RULES);
+
+        if ($invalid->fails()) {
+            $message = implode(' ', $invalid->errors()->all());
+
+            $this->recordSyncQueue($deviceId, 'payment', null, $localUuid, $item, 'failed', $message);
+
+            return [
+                ['local_uuid' => $localUuid, 'status' => 'failed', 'error' => $message],
+                ['entity_type' => 'payment', 'local_uuid' => $localUuid, 'message' => $message],
+            ];
+        }
+
         $customerUuid = $item['customer_uuid'] ?? null;
         $customer = is_string($customerUuid) ? $lookups['customers']->get($customerUuid) : null;
 
@@ -749,6 +817,7 @@ class SyncService
         $plans = FreeMonthPlan::forCustomers($customers);
         $serviceNames = Service::query()->pluck('name', 'id');
         $currentPeriod = BusinessTimezone::currentPeriod();
+        $branchUuids = Branch::query()->pluck('uuid', 'id');
 
         return $customers
             ->map(fn (Customer $customer): array => [
@@ -760,6 +829,8 @@ class SyncService
                 'level' => $customer->level,
                 'status' => $customer->status,
                 'zone_uuid' => $customer->zone?->uuid,
+                // The phone sells an offer at the customer's branch price (offers carry branch_prices).
+                'branch_uuid' => $branchUuids[$customer->branch_id] ?? null,
                 'total_arrears' => $customer->latestManuscript?->total_arrears,
                 'credit' => $customer->latestManuscript?->credit,
                 'services' => $customer->subscriptions->map(fn (CustomerSubscription $row): array => [
@@ -975,6 +1046,31 @@ class SyncService
             'completed_at' => $status === 'synced' ? Carbon::now() : null,
             'error_message' => $error,
         ]);
+    }
+
+    /**
+     * The phone's collection time, or the server's now when it can't be
+     * right: unreadable, ahead of now (beyond a few minutes of clock drift),
+     * or older than OLDEST_COLLECTION_DAYS. push() keeps the phone's value as
+     * `phone_created_at` in the sync_queue payload, for the record.
+     */
+    private function boundedCollectedAt(mixed $collectedAt): ?string
+    {
+        if (! is_string($collectedAt) || $collectedAt === '') {
+            return null;
+        }
+
+        try {
+            $at = Carbon::parse($collectedAt);
+        } catch (Throwable) {
+            return Carbon::now()->toIso8601String();
+        }
+
+        $now = Carbon::now();
+
+        return $at->greaterThan($now->copy()->addMinutes(10)) || $at->lessThan($now->copy()->subDays(self::OLDEST_COLLECTION_DAYS))
+            ? $now->toIso8601String()
+            : $collectedAt;
     }
 
     private function errorMessage(Throwable $e): string
