@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\DataTransferObjects\ArrearsAdjustmentData;
 use App\DataTransferObjects\VerifyPaymentData;
+use App\Jobs\RecalculateCustomerManuscriptsForwardJob;
+use App\Models\CommandRun;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
 use App\Models\User;
@@ -36,7 +39,23 @@ class PaymentVerificationService
 
     public function verify(Payment $payment, VerifyPaymentData $data, User $actor): Payment
     {
-        $this->applyDecision($payment, $data, $actor);
+        DB::transaction(function () use ($payment, $data, $actor): void {
+            // Re-read under a lock: two decisions on the same payment at once
+            // must not both pass the checks below on a stale copy.
+            $current = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail(['id', 'verification_status', 'reversed_at']);
+
+            if ($current->isReversed()) {
+                throw ValidationException::withMessages(['action' => 'This payment was reversed — record the correct payment again instead.']);
+            }
+
+            // Undoing a verified payment goes through reverse(), which checks
+            // the remittance and the bill run — never a plain reject.
+            if ($data->action === 'reject' && $current->verification_status === 'verified') {
+                throw ValidationException::withMessages(['action' => 'This payment is already verified — use Reverse payment instead.']);
+            }
+
+            $this->applyDecision($payment, $data, $actor);
+        });
 
         // Extends the same forget-on-write to /reports: an approve/reject
         // flip changes the Daily tier's "verifications actioned today" and
@@ -48,6 +67,85 @@ class PaymentVerificationService
         ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());
 
         return $payment->fresh(['customer', 'verification.verifier']);
+    }
+
+    /**
+     * Undoes a verified payment that was wrong (owner's choice: reverse,
+     * then record it again correctly — a verified payment's money is never
+     * edited, so a receipt can't disagree with its payment):
+     *  - the payment becomes rejected and its receipt is voided (kept, marked
+     *    VOID) — the same path as rejecting it;
+     *  - the reversal is final (`reversed_at`): it is never approved or
+     *    edited again;
+     *  - if a bill run already counted it and that month is still open, the
+     *    customer's bills are recalculated now — a recalculation only counts
+     *    verified payments, so the money simply drops out;
+     *  - if that month has closed, its bill can't change, so an arrears
+     *    adjustment adding the amount to the current month goes for approval;
+     *  - it is refused while a bill run waits for review (its draft already
+     *    counted the money), and when the cash was already handed over in a
+     *    remittance — the money has moved, so the cashier records a refund.
+     *
+     * @return array{payment: Payment, adjustment_filed: bool}
+     */
+    public function reverse(Payment $payment, string $reason, User $actor): array
+    {
+        $result = DB::transaction(function () use ($payment, $reason, $actor): array {
+            $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->verification_status !== 'verified') {
+                throw ValidationException::withMessages(['reason' => 'Only a verified payment can be reversed — a pending one is simply rejected.']);
+            }
+
+            if ($locked->remittanceLine()->exists()) {
+                throw ValidationException::withMessages(['reason' => 'This payment\'s cash was already handed over in a daily remittance. The cashier records a refund instead.']);
+            }
+
+            $runLock = app(ManuscriptRunLockService::class);
+            $currentPeriod = $runLock->currentPeriod();
+            $draftRun = CommandRun::query()
+                ->where('command', 'manuscript:calculate')
+                ->whereIn('status', ['queued', 'pending_review'])
+                ->where('period', '>=', $currentPeriod)
+                ->value('period');
+
+            if ($draftRun !== null) {
+                throw ValidationException::withMessages(['reason' => "The {$draftRun} bill run is waiting for review and already counted this payment. Publish or discard it first, then reverse."]);
+            }
+
+            $locked->load(['customer.zone.branch', 'verification', 'receipt', 'customerCharge']);
+            $this->applyDecision($locked, new VerifyPaymentData(action: 'reject', notes: "Reversed: {$reason}"), $actor);
+            $locked->update(['reversed_at' => Carbon::now(), 'reversed_by' => $actor->id, 'reversal_reason' => $reason]);
+
+            $adjustmentFiled = false;
+            $countedPeriod = $locked->processed_period;
+
+            if ($countedPeriod !== null && $locked->isSubscription()) {
+                if ($runLock->isPeriodLocked($countedPeriod)) {
+                    app(ArrearsAdjustmentService::class)->create(new ArrearsAdjustmentData(
+                        customerUuid: $locked->customer->uuid,
+                        targetPeriod: $currentPeriod,
+                        direction: 'increase',
+                        amount: bcadd((string) $locked->amount, '0', 2),
+                        reasonCategory: 'billing_error',
+                        reasonNote: "Payment of {$locked->amount} FCFA counted in the closed {$countedPeriod} bill was reversed: {$reason}",
+                    ), $actor->id);
+                    $adjustmentFiled = true;
+                } else {
+                    $auditContext = ['reversed_payment_id' => $locked->id, 'triggered_by_user_id' => $actor->id];
+                    app(CustomerManuscriptRecalculationService::class)->recalculateOne($locked->customer, $currentPeriod, trigger: 'payment_reversed', auditContext: $auditContext);
+                    RecalculateCustomerManuscriptsForwardJob::dispatch($locked->customer_id, $countedPeriod, null, $actor->id)->afterCommit();
+                }
+            }
+
+            return ['payment' => $locked, 'adjustment_filed' => $adjustmentFiled];
+        });
+
+        // After the commit, so a page load can't re-cache the old figures in between.
+        ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());
+        $this->forgetShowCache($result['payment']->uuid);
+
+        return ['payment' => $result['payment']->fresh(['customer', 'verification.verifier', 'receipt']), 'adjustment_filed' => $result['adjustment_filed']];
     }
 
     /**

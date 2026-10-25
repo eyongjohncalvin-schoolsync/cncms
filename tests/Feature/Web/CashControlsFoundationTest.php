@@ -160,6 +160,8 @@ class CashControlsFoundationTest extends TestCase
         $customer = $this->customer();
         $this->post('/payments', ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly']);
         $payment = Payment::query()->where('customer_id', $customer->id)->latest('id')->firstOrFail();
+        // Still pending: a verified payment's money is reversed, not edited.
+        $payment->update(['verification_status' => 'pending']);
 
         $this->put("/payments/{$payment->uuid}", ['method' => 'mtn_momo'])->assertSessionHasErrors('method_reference');
 

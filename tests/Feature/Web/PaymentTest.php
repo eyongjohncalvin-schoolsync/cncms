@@ -1035,7 +1035,7 @@ class PaymentTest extends TestCase
     public function test_manager_can_edit_a_payments_amount(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 2500]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'amount' => 2500]);
 
         $this->actingAsRole('manager');
 
@@ -1056,7 +1056,7 @@ class PaymentTest extends TestCase
     {
         foreach (['admin', 'super'] as $role) {
             $customer = $this->customer();
-            $payment = PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 2500]);
+            $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'amount' => 2500]);
 
             $this->actingAsRole($role);
 
@@ -1120,7 +1120,7 @@ class PaymentTest extends TestCase
         // payments no longer carry an expiration_date — their value flows
         // through the draw-down branch as prepaid months.
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create([
+        $payment = PaymentFactory::new()->pending()->create([
             'customer_id' => $customer->id,
             'amount' => 2500,
             'frequency' => 'monthly',
@@ -1218,7 +1218,7 @@ class PaymentTest extends TestCase
     public function test_super_can_delete_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
 
         $this->actingAsRole('super');
 
@@ -1232,7 +1232,7 @@ class PaymentTest extends TestCase
     public function test_admin_can_delete_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
 
         $this->actingAsRole('admin');
 
@@ -1294,15 +1294,17 @@ class PaymentTest extends TestCase
      * raise an FK-constraint violation — the verification row is expected
      * to cascade-delete alongside it at the DB level.
      */
-    public function test_deleting_a_verified_payment_cascades_its_verification_record_without_error(): void
+    public function test_deleting_a_reviewed_payment_cascades_its_verification_record_without_error(): void
     {
+        // A verified payment is reversed, never deleted
+        // (PaymentService::delete()) — a rejected one still has its record.
         $customer = $this->customer();
         $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
 
         $this->actingAsRole('manager');
         $this->post("/payments/{$payment->uuid}/verify", [
-            'action' => 'approve',
-            'momo_ref' => 'MOMO-DELETE-001',
+            'action' => 'reject',
+            'notes' => 'Not received.',
         ])->assertRedirect();
 
         $this->assertDatabaseHas('payment_verifications', ['payment_id' => $payment->id]);

@@ -82,6 +82,19 @@ class PaymentPolicy
     }
 
     /**
+     * Undo a verified payment that was wrong (PaymentVerificationService::reverse()):
+     * the office, never whoever recorded it (the owner excepted) — a second
+     * person decides, as for a possible duplicate.
+     */
+    public function reverse(User $user, Payment $payment): bool
+    {
+        return $payment->verification_status === 'verified'
+            && ! $payment->isReversed()
+            && $this->context->can('payments.verify')
+            && ($payment->recorded_by !== $user->id || $this->context->isSuper());
+    }
+
+    /**
      * Takes the target $payment (unlike the class-level checks above) so an
      * agent's grant can be scoped to their own zone rather than being a
      * blanket role widening: an agent may verify a payment only for a
@@ -97,6 +110,10 @@ class PaymentPolicy
         // (agent is NOT seeded `payments.verify` — see Wave 2 rules).
         // A possible duplicate is for the office, and never for whoever
         // recorded it (the owner excepted) — a second person decides.
+        if ($payment->isReversed()) {
+            return false;
+        }
+
         if ($payment->isPossibleDuplicate()) {
             return $this->context->can('payments.verify')
                 && ($payment->recorded_by !== $user->id || $this->context->isSuper());

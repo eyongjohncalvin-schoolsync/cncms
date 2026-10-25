@@ -80,6 +80,12 @@ class PaymentReceiptTest extends TestCase
             ->assertRedirect();
     }
 
+    private function reverseViaHttp(Payment $payment): void
+    {
+        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Wrong amount entered.'])
+            ->assertSessionHasNoErrors();
+    }
+
     public function test_a_receipt_is_auto_issued_when_a_payment_is_verified(): void
     {
         $customer = $this->customer();
@@ -110,7 +116,7 @@ class PaymentReceiptTest extends TestCase
         $this->assertFalse(PaymentReceipt::query()->where('payment_id', $payment->id)->exists());
     }
 
-    public function test_an_existing_receipt_is_voided_when_its_payment_is_later_rejected(): void
+    public function test_an_existing_receipt_is_voided_when_its_payment_is_later_reversed(): void
     {
         $customer = $this->customer();
         $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
@@ -120,13 +126,17 @@ class PaymentReceiptTest extends TestCase
         $receipt = PaymentReceipt::query()->where('payment_id', $payment->id)->firstOrFail();
         $this->assertSame(PaymentReceipt::STATUS_ISSUED, $receipt->status);
 
+        // A verified payment is reversed, never plainly rejected.
         $this->rejectViaHttp($payment->fresh());
+        $this->assertSame(PaymentReceipt::STATUS_ISSUED, $receipt->fresh()->status);
+
+        $this->reverseViaHttp($payment->fresh());
 
         $this->assertSame(PaymentReceipt::STATUS_VOID, $receipt->fresh()->status);
         $this->assertTrue(PaymentReceipt::query()->where('id', $receipt->id)->exists());
     }
 
-    public function test_re_approving_a_rejected_payment_reactivates_the_same_receipt_row(): void
+    public function test_a_reversed_payment_keeps_its_one_void_receipt_and_is_never_re_approved(): void
     {
         $customer = $this->customer();
         $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
@@ -135,16 +145,14 @@ class PaymentReceiptTest extends TestCase
         $this->approveViaHttp($payment);
         $original = PaymentReceipt::query()->where('payment_id', $payment->id)->firstOrFail();
 
-        $this->rejectViaHttp($payment->fresh());
+        $this->reverseViaHttp($payment->fresh());
         $this->assertSame(PaymentReceipt::STATUS_VOID, $original->fresh()->status);
 
-        $this->approveViaHttp($payment->fresh());
+        $this->post("/payments/{$payment->uuid}/verify", ['action' => 'approve', 'momo_ref' => 'MOMO-RCP-001'])->assertForbidden();
 
-        $reactivated = PaymentReceipt::query()->where('payment_id', $payment->id)->firstOrFail();
-        $this->assertSame($original->id, $reactivated->id);
-        $this->assertSame($original->receipt_number, $reactivated->receipt_number);
-        $this->assertSame(PaymentReceipt::STATUS_ISSUED, $reactivated->status);
-        $this->assertSame(1, PaymentReceipt::query()->where('payment_id', $payment->id)->count());
+        $receipt = PaymentReceipt::query()->where('payment_id', $payment->id)->sole();
+        $this->assertSame($original->receipt_number, $receipt->receipt_number);
+        $this->assertSame(PaymentReceipt::STATUS_VOID, $receipt->status);
     }
 
     public function test_issue_for_is_idempotent(): void

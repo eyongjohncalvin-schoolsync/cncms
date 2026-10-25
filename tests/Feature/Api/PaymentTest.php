@@ -134,7 +134,7 @@ class PaymentTest extends TestCase
     public function test_super_can_update_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 2500]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'amount' => 2500]);
 
         $token = $this->tokenForRole('super');
 
@@ -147,7 +147,7 @@ class PaymentTest extends TestCase
     public function test_super_can_delete_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
 
         $token = $this->tokenForRole('super');
 

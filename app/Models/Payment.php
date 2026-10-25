@@ -20,6 +20,7 @@ use LogicException;
 #[Fillable([
     'customer_id', 'amount', 'credit', 'frequency', 'expiration_date', 'months', 'prepaid_rate', 'clear_arrears_first',
     'verification_status', 'processed_at', 'processed_period', 'recorded_offline', 'recorded_by_device', 'local_uuid', 'recorded_by',
+    'reversed_at', 'reversed_by', 'reversal_reason',
     // The field agent's actual offline-collection timestamp — see the
     // add_collected_at_to_payments_table migration and
     // App\Services\SyncService::pushPayment()'s doc comment. Deliberately
@@ -181,6 +182,7 @@ class Payment extends Model
             'service_months' => 'array',
             'expiration_date' => 'date',
             'processed_at' => 'datetime',
+            'reversed_at' => 'datetime',
             'collected_at' => 'datetime',
             'recorded_offline' => 'boolean',
         ];
@@ -201,6 +203,15 @@ class Payment extends Model
     public function isPossibleDuplicate(): bool
     {
         return $this->duplicate_of_id !== null;
+    }
+
+    /**
+     * Reversed after it was verified (PaymentVerificationService::reverse()):
+     * final — never approved or edited again.
+     */
+    public function isReversed(): bool
+    {
+        return $this->reversed_at !== null;
     }
 
     public function customer(): BelongsTo

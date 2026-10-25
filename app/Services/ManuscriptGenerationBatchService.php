@@ -391,6 +391,8 @@ class ManuscriptGenerationBatchService
                     // Belt and braces: only subscription money is ever
                     // consumed by a bill, so only it is ever stamped.
                     ->subscription()
+                    // A payment reversed since the run computed is never stamped as counted.
+                    ->where('verification_status', 'verified')
                     ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
                     ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
             }

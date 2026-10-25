@@ -625,6 +625,7 @@ class PaymentService
     {
         $this->assertValidMethod($data, $payment);
         $this->assertNotHandedOver($payment, $data);
+        $this->assertNoMoneyChangeAfterReceipt($payment, $data);
 
         if (! $payment->isSubscription() && $data->frequency !== null && $data->frequency !== 'monthly') {
             throw ValidationException::withMessages(['frequency' => 'Only a subscription payment can buy prepaid months.']);
@@ -693,8 +694,45 @@ class PaymentService
         }
     }
 
+    /**
+     * A verified payment has a receipt in the customer's hand: changing what
+     * was paid underneath it would make the receipt lie. The fix is to
+     * reverse it (PaymentVerificationService::reverse()) and record it again.
+     * Notes and references stay editable.
+     */
+    private function assertNoMoneyChangeAfterReceipt(Payment $payment, PaymentData $data): void
+    {
+        if ($payment->isReversed()) {
+            throw ValidationException::withMessages(['amount' => 'This payment was reversed and can no longer change. Record the correct payment again.']);
+        }
+
+        if ($payment->verification_status !== 'verified') {
+            return;
+        }
+
+        $changesMoney = ($data->amount !== null && bccomp($data->amount, (string) $payment->amount, 2) !== 0)
+            || ($data->credit !== null && bccomp($data->credit, (string) ($payment->credit ?? '0'), 2) !== 0)
+            || ($data->method !== null && $data->method !== $payment->method)
+            || ($data->frequency !== null && $data->frequency !== $payment->frequency)
+            || ($data->months !== null && $data->months !== (int) $payment->months);
+
+        if ($changesMoney) {
+            throw ValidationException::withMessages([
+                'amount' => 'This payment has a receipt. Reverse it and record it again.',
+            ]);
+        }
+    }
+
     public function delete(Payment $payment): void
     {
+        // A verified payment has a receipt and may already be on a bill:
+        // deleting it would make the receipt vanish and leave the bill wrong.
+        if ($payment->verification_status === 'verified') {
+            throw ValidationException::withMessages([
+                'payment' => 'This payment is verified and has a receipt — reverse it instead of deleting it.',
+            ]);
+        }
+
         if ($payment->remittanceLine()->exists()) {
             throw ValidationException::withMessages([
                 'payment' => 'This payment\'s money has already been handed over in a daily remittance and cannot be deleted.',

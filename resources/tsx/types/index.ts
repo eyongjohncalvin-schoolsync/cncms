@@ -435,6 +435,10 @@ export interface Payment {
     receipt?: PaymentReceiptSummary | null;
     /** A second payment for the customer that month — checked by someone other than its recorder. */
     possible_duplicate?: boolean;
+    /** Reversed after it was verified — final; the correct payment is recorded again. */
+    reversed_at?: string | null;
+    reversal_reason?: string | null;
+    can_reverse?: boolean;
     duplicate_reason?: string | null;
     duplicate_note?: string | null;
     /** The earlier payment to compare it with (Show only). */

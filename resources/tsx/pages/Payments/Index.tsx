@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
+import { ReversePaymentModal } from '@/components/shared/ReversePaymentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { hasPermission } from '@/lib/permissions';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -110,6 +111,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
 
     const [reviewing, setReviewing] = useState<Payment | null>(null);
     const [deleting, setDeleting] = useState<Payment | null>(null);
+    const [reversing, setReversing] = useState<Payment | null>(null);
     const [destroying, setDestroying] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
     const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -599,7 +601,10 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                             {payment.verification_status === 'pending' && canVerify && (
                                                 <DropdownItem onClick={() => setReviewing(payment)}>Review</DropdownItem>
                                             )}
-                                            {canDelete && (
+                                            {payment.can_reverse && (
+                                                <DropdownItem onClick={() => setReversing(payment)}>Reverse</DropdownItem>
+                                            )}
+                                            {canDelete && payment.verification_status !== 'verified' && (
                                                 <>
                                                     <DropdownDivider />
                                                     <DropdownItem onClick={() => setDeleting(payment)} variant="danger">
@@ -650,6 +655,8 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                     </div>
                 )}
             </Modal>
+
+            {reversing && <ReversePaymentModal open onClose={() => setReversing(null)} payment={reversing} />}
         </AppLayout>
     );
 }

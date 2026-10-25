@@ -281,7 +281,7 @@ class PaymentController extends Controller
         return back()->with($verifiedCount > 0 ? 'success' : 'error', $message);
     }
 
-    public function show(Payment $payment): Response
+    public function show(Request $request, Payment $payment): Response
     {
         $this->authorize('view', $payment);
 
@@ -313,6 +313,7 @@ class PaymentController extends Controller
             // delete()'s stricter super/admin-only role check instead of
             // update()'s super/admin/manager.
             'can_delete' => $this->context->can('payments.delete'),
+            'can_reverse' => $request->user()->can('reverse', $payment),
         ]);
     }
 
@@ -375,6 +376,23 @@ class PaymentController extends Controller
         return back()->with('success', $message);
     }
 
+    /**
+     * Undo a verified payment that was wrong: it becomes rejected and its
+     * receipt is voided (PaymentVerificationService::reverse()). Then record
+     * the right payment again.
+     */
+    public function reverse(Request $request, Payment $payment): RedirectResponse
+    {
+        $this->authorize('reverse', $payment);
+
+        $reason = $request->validate(['reason' => ['required', 'string', 'min:3', 'max:500']])['reason'];
+        $result = $this->verifications->reverse($payment, $reason, $request->user());
+
+        return back()->with('success', $result['adjustment_filed']
+            ? 'Payment reversed and its receipt voided. Its month\'s bill is closed, so an arrears adjustment adding it to this month is waiting for approval.'
+            : 'Payment reversed and its receipt voided. Record the correct payment now if needed.');
+    }
+
     public function uploadReceipt(Request $request, Payment $payment): RedirectResponse
     {
         $this->authorize('attachReceipt', $payment);
@@ -429,6 +447,10 @@ class PaymentController extends Controller
             'collected_at' => $payment->collected_at?->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),
             'verification' => $payment->verification ? $this->formatVerification($payment->verification) : null,
+            // PaymentVerificationService::reverse(): final, with the office's reason.
+            'reversed_at' => $payment->reversed_at?->toIso8601String(),
+            'reversal_reason' => $payment->reversal_reason,
+            'can_reverse' => (bool) request()->user()?->can('reverse', $payment),
             // A second payment for the customer that month (PaymentService::flagPossibleDuplicate()).
             'possible_duplicate' => $payment->isPossibleDuplicate(),
             'duplicate_reason' => $payment->duplicate_reason !== null ? (Payment::DUPLICATE_REASONS[$payment->duplicate_reason] ?? $payment->duplicate_reason) : null,

@@ -9,6 +9,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Modal } from '@/components/ui/Modal';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
+import { ReversePaymentModal } from '@/components/shared/ReversePaymentModal';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { paymentMethodLabel } from '@/components/shared/PaymentMethodFields';
 import type { PageProps, Payment, PaymentReceipt } from '@/types';
@@ -35,6 +36,7 @@ interface PaymentsShowProps {
     can_manage: boolean;
     can_delete: boolean;
     can_issue_receipt: boolean;
+    can_reverse: boolean;
 }
 
 const frequencyLabels: Record<Payment['frequency'], string> = {
@@ -43,8 +45,9 @@ const frequencyLabels: Record<Payment['frequency'], string> = {
     yearly: 'Yearly',
 };
 
-export default function PaymentsShow({ payment, receipt, can_manage, can_delete, can_issue_receipt }: PaymentsShowProps) {
+export default function PaymentsShow({ payment, receipt, can_manage, can_delete, can_issue_receipt, can_reverse }: PaymentsShowProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [reversing, setReversing] = useState(false);
     const [fileName, setFileName] = useState<string | null>(null);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [destroying, setDestroying] = useState(false);
@@ -200,7 +203,12 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                                 Edit Payment
                             </Link>
                         )}
-                        {can_delete && (
+                        {can_reverse && (
+                            <Button type="button" variant="secondary" onClick={() => setReversing(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
+                                Reverse Payment
+                            </Button>
+                        )}
+                        {can_delete && !isVerified && (
                             <Button type="button" variant="danger" onClick={() => setConfirmingDelete(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
                                 Delete Payment
                             </Button>
@@ -208,6 +216,13 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                     </div>
                 </div>
             </div>
+
+            {payment.reversed_at && (
+                <div role="status" className="mb-4 max-w-3xl rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                    <p className="font-semibold">Reversed on {new Date(payment.reversed_at).toLocaleString()} — its receipt is void.</p>
+                    {payment.reversal_reason && <p className="mt-1">Reason: {payment.reversal_reason}</p>}
+                </div>
+            )}
 
             {payment.possible_duplicate && (
                 // Compare with the first payment this month before approving or rejecting.
@@ -489,6 +504,8 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                     </Button>
                 </div>
             </Modal>
+
+            <ReversePaymentModal open={reversing} onClose={() => setReversing(false)} payment={payment} />
         </AppLayout>
     );
 }
