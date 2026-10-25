@@ -234,13 +234,16 @@ class PaymentService
         }
 
         $offline = (bool) $data->recordedOffline;
-        $offer = PrepaymentOffer::query()
-            ->where('uuid', $data->prepaymentOfferUuid)
-            // At the counter it must be on sale today; a phone may have sold it offline just before it ended.
-            ->when(! $offline, fn ($query) => $query->available())
-            ->first();
+        $offer = PrepaymentOffer::query()->where('uuid', $data->prepaymentOfferUuid)->first();
+        // On sale on the day the money was taken: today at the counter, the
+        // collection day for a phone (which may have sold it offline just
+        // before it ended — then it is kept, but the office decides).
+        $soldOn = $data->collectedAt !== null
+            ? Carbon::parse($data->collectedAt)->setTimezone(BusinessTimezone::WAT)->toDateString()
+            : BusinessTimezone::today();
+        $onSale = $offer !== null && PrepaymentOffer::query()->whereKey($offer->id)->available($soldOn)->exists();
 
-        if ($offer === null) {
+        if ($offer === null || (! $onSale && ! $offline)) {
             if (! $offline) {
                 throw ValidationException::withMessages(['prepayment_offer_uuid' => 'That offer is not available today.']);
             }
@@ -253,6 +256,7 @@ class PaymentService
         $debt = $this->unpaidDebt($customer);
         $total = bcadd($debt, $price, 2);
         $problem = match (true) {
+            ! $onSale => "{$offer->name} was not on sale on {$soldOn}.",
             ($data->purpose ?? Payment::PURPOSE_SUBSCRIPTION) !== Payment::PURPOSE_SUBSCRIPTION => 'An offer only pays for the monthly bill.',
             bccomp((string) $data->amount, $total, 2) !== 0 => bccomp($debt, '0', 2) > 0
                 ? "{$customer->name} owes ".$this->fcfa($debt).'. Collect '.$this->fcfa($total).": {$this->fcfa($debt)} clears the debt, {$this->fcfa($price)} buys {$offer->name}."
@@ -382,12 +386,12 @@ class PaymentService
 
         return match ($reason) {
             'advance' => in_array($attributes['frequency'] ?? null, ['months', 'yearly'], true),
+            // Only debt still unpaid counts — not debt the earlier payment already cleared.
             'arrears' => (function () use ($customer, $data): bool {
-                $customer->loadMissing('latestManuscript');
-                $owed = bcadd((string) ($customer->latestManuscript?->total_arrears ?? '0'), (string) $customer->bill, 2);
+                $debt = $this->unpaidDebt($customer);
 
-                return bccomp((string) ($customer->latestManuscript?->total_arrears ?? '0'), '0', 2) > 0
-                    && bccomp((string) $data->amount, $owed, 2) <= 0;
+                return bccomp($debt, '0', 2) > 0
+                    && bccomp((string) $data->amount, bcadd($debt, (string) $customer->bill, 2), 2) <= 0;
             })(),
             default => false,
         };
@@ -582,6 +586,12 @@ class PaymentService
      */
     public function createBulk(array $customerUuids, string $frequency, ?int $months): array
     {
+        // Each payment is the customer's one monthly bill: labelled as months
+        // or a year, it would claim months its money never bought.
+        if ($frequency !== 'monthly') {
+            throw ValidationException::withMessages(['frequency' => 'Bulk entry is for monthly payments only — record a prepayment on its own.']);
+        }
+
         $created = [];
         $failed = [];
 
@@ -626,6 +636,13 @@ class PaymentService
         $this->assertValidMethod($data, $payment);
         $this->assertNotHandedOver($payment, $data);
         $this->assertNoMoneyChangeAfterReceipt($payment, $data);
+
+        // An offer buys exactly its months: "4 months for 10,000" never becomes 12.
+        if ($payment->prepayment_offer_id !== null
+            && (($data->frequency !== null && $data->frequency !== $payment->frequency)
+                || ($data->months !== null && $data->months !== (int) $payment->months))) {
+            throw ValidationException::withMessages(['months' => 'This payment is under an offer — its months are the offer\'s. Reject it and record it again to change them.']);
+        }
 
         if (! $payment->isSubscription() && $data->frequency !== null && $data->frequency !== 'monthly') {
             throw ValidationException::withMessages(['frequency' => 'Only a subscription payment can buy prepaid months.']);

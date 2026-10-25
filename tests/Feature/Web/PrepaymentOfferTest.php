@@ -181,6 +181,38 @@ class PrepaymentOfferTest extends TestCase
         $this->assertSame('pending', $payment->verification_status, 'Sold to a customer with debt: the office decides.');
     }
 
+    public function test_a_phone_selling_an_offer_after_it_ended_is_kept_but_waits_for_the_office(): void
+    {
+        $this->offer->update(['valid_to' => Carbon::now()->subDays(5)->toDateString()]);
+
+        $results = $this->withToken($this->tokenForRole('manager'))->postJson('/api/v1/sync/push', [
+            'device_id' => 'phone-1',
+            'changes' => ['payments' => [
+                ['local_uuid' => $late = (string) Str::uuid(), 'customer_uuid' => $this->customer->uuid, 'amount' => 10000, 'frequency' => 'months', 'months' => 4,
+                    'prepayment_offer_uuid' => $this->offer->uuid, 'created_at' => Carbon::now()->subDay()->toIso8601String()],
+                ['local_uuid' => $inTime = (string) Str::uuid(), 'customer_uuid' => CustomerFactory::new()->create(['zone_id' => $this->customer->zone_id, 'bill' => 3000, 'status' => 'active'])->uuid,
+                    'amount' => 10000, 'frequency' => 'months', 'months' => 4,
+                    'prepayment_offer_uuid' => $this->offer->uuid, 'created_at' => Carbon::now()->subDays(6)->toIso8601String()],
+            ]],
+        ])->assertOk()->json('results.payments');
+
+        $this->assertSame(['synced', 'synced'], array_column($results, 'status'), 'Cash already collected is never refused.');
+        $late = Payment::query()->where('local_uuid', $late)->sole();
+        $this->assertSame($this->offer->id, $late->prepayment_offer_id);
+        $this->assertSame('pending', $late->verification_status, 'Sold after the offer ended: the office decides.');
+        $this->assertSame('verified', Payment::query()->where('local_uuid', $inTime)->value('verification_status'), 'Sold while it ran.');
+    }
+
+    public function test_an_offer_payment_keeps_the_offers_months(): void
+    {
+        $this->payOffer()->assertSessionHasNoErrors();
+        $payment = Payment::query()->where('customer_id', $this->customer->id)->sole();
+        $payment->update(['verification_status' => 'pending']);
+
+        $this->put("/payments/{$payment->uuid}", ['amount' => 10000, 'frequency' => 'months', 'months' => 12])->assertSessionHasErrors('months');
+        $this->assertSame(4, $payment->fresh()->months);
+    }
+
     public function test_the_bill_run_gives_exactly_the_offers_months_with_no_leftover(): void
     {
         // 5,000 for 3 months on a 2,000 bill: dividing by the bill would give 2 months + 1,000 credit.

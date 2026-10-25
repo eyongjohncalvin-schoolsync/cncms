@@ -694,10 +694,9 @@ function BulkPaymentForm({ customers }: { customers: Customer[] }) {
     const [zoneFilter, setZoneFilter] = useState('');
     const [selected, setSelected] = useState<Set<string>>(new Set());
 
-    const { data, setData, transform, post, processing, errors } = useForm({
+    const { setData, transform, post, processing, errors } = useForm({
         customer_uuids: [] as string[],
         frequency: 'monthly' as PaymentFrequency,
-        months: '',
     });
 
     const zones = useMemo(() => {
@@ -831,26 +830,10 @@ function BulkPaymentForm({ customers }: { customers: Customer[] }) {
                         )}
                     </div>
 
-                    <FrequencySelector
-                        label="Frequency (applies to all selected)"
-                        value={data.frequency}
-                        onChange={(freq) => setData('frequency', freq)}
-                        error={errors.frequency}
-                        required
-                    />
-
-                    {data.frequency === 'months' && (
-                        <TextInput
-                            id="bulk_months"
-                            label="Number of months"
-                            type="number"
-                            min="1"
-                            value={data.months}
-                            onChange={(e) => setData('months', e.target.value)}
-                            error={errors.months}
-                            required
-                        />
-                    )}
+                    <p className="text-xs text-slate-500">
+                        Each selected customer pays one month's bill. Record a prepayment for several months on its own (Single).
+                    </p>
+                    {errors.frequency && <p className="text-xs text-red-600">{errors.frequency}</p>}
 
                     <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-sm text-slate-600">

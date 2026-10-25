@@ -29,8 +29,20 @@ class StoreBulkPaymentRequest extends FormRequest
         return [
             'customer_uuids' => ['required', 'array', 'min:1', 'max:200'],
             'customer_uuids.*' => ['required', 'uuid', 'distinct'],
-            'frequency' => ['required', 'string', 'in:monthly,yearly,months'],
-            'months' => ['required_if:frequency,months', 'nullable', 'integer', 'min:1'],
+            // Each customer pays exactly one monthly bill; a prepayment's
+            // amount differs per customer, so it goes through the single form.
+            'frequency' => ['required', 'string', 'in:monthly'],
+            'months' => ['prohibited'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'frequency.in' => 'Bulk entry is for monthly payments only — record a prepayment on its own.',
         ];
     }
 }

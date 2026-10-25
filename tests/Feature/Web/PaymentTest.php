@@ -463,6 +463,17 @@ class PaymentTest extends TestCase
         ]);
     }
 
+    public function test_bulk_entry_is_for_monthly_payments_only(): void
+    {
+        // One month's bill each: labelled yearly it would claim months the money never bought.
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'bill' => 2500, 'status' => 'active']);
+        $this->actingAsRole('manager');
+
+        $this->post('/payments/bulk', ['customer_uuids' => [$customer->uuid], 'frequency' => 'yearly'])->assertSessionHasErrors('frequency');
+        $this->post('/payments/bulk', ['customer_uuids' => [$customer->uuid], 'frequency' => 'months', 'months' => 3])->assertSessionHasErrors('frequency');
+        $this->assertDatabaseMissing('payments', ['customer_id' => $customer->id]);
+    }
+
     /**
      * Audit scenario: PaymentService::createBulk() pays each customer at
      * exactly their own current `bill`, resolved via

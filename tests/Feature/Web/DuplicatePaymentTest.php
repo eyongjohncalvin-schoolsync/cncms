@@ -109,6 +109,16 @@ class DuplicatePaymentTest extends TestCase
         $this->assertSame('pending', $this->payments()->latest('id')->first()->verification_status);
     }
 
+    public function test_old_debt_already_paid_off_proves_nothing(): void
+    {
+        ManuscriptFactory::new()->withArrears(2500)->create(['customer_id' => $this->customer->id]);
+        $this->as('manager');
+        $this->pay(['amount' => 5000]); // clears the debt and this month
+
+        $this->pay(['duplicate_reason' => 'arrears', 'amount' => 2000])->assertSessionHasNoErrors();
+        $this->assertSame('pending', $this->payments()->latest('id')->first()->verification_status, 'No debt left to pay: the office checks it.');
+    }
+
     public function test_other_needs_a_note(): void
     {
         $this->as('manager');
