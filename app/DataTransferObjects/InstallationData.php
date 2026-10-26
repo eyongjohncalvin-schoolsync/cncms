@@ -31,6 +31,12 @@ final readonly class InstallationData
         public ?string $reason = null,
         public ?string $method = null,
         public ?string $methodReference = null,
+        // Auditing a late registration (owner, 2026-10-26): who really
+        // connected the customer, and what the customer says they paid and
+        // to whom (0 = nobody; asked only when registered late).
+        public ?string $connectedByUuid = null,
+        public ?string $customerSaysPaidAmount = null,
+        public ?string $customerSaysPaidTo = null,
     ) {}
 
     /**
@@ -66,6 +72,9 @@ final readonly class InstallationData
             reason: $reason !== '' ? $reason : null,
             method: $data['method'] ?? null,
             methodReference: $reference !== '' ? $reference : null,
+            connectedByUuid: isset($data['connected_by_uuid']) && $data['connected_by_uuid'] !== '' ? (string) $data['connected_by_uuid'] : null,
+            customerSaysPaidAmount: isset($data['customer_says_paid_amount']) && $data['customer_says_paid_amount'] !== '' ? (string) $data['customer_says_paid_amount'] : null,
+            customerSaysPaidTo: isset($data['customer_says_paid_to']) && trim((string) $data['customer_says_paid_to']) !== '' ? trim((string) $data['customer_says_paid_to']) : null,
         );
     }
 

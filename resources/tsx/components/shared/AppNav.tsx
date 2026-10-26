@@ -18,6 +18,7 @@ import {
     IconShieldLock,
     IconScale,
     IconGift,
+    IconClockExclamation,
     IconBook2,
     IconSend,
     IconReceipt,
@@ -146,6 +147,9 @@ const arrearsAdjustmentsNavItem = { href: '/arrears-adjustments', labelKey: 'com
 // CompensationBatchPolicy::viewAny → `installations.manage` or `installations.approve`.
 const compensationNavItem = { href: '/compensation', labelKey: 'common.compensation', icon: IconGift, accent: 'pink' as const };
 
+// Late registrations (auditing) — LateRegistrationController::index → `audit.view` or `arrears.approve`.
+const lateRegistrationsNavItem = { href: '/late-registrations', labelKey: 'common.late_registrations', icon: IconClockExclamation, accent: 'orange' as const };
+
 // Opening balances — OpeningBalanceBatchPolicy::viewAny → any of the three
 // `opening_balances.*` permissions.
 const openingBalancesNavItem = { href: '/opening-balances', labelKey: 'common.opening_balances', icon: IconBook2, accent: 'emerald' as const };
@@ -224,6 +228,7 @@ export function buildVisibleNavItems(permissions: string[] = [], branchFenced = 
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
         ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
         ...(canAny('installations.manage', 'installations.approve') ? [compensationNavItem] : []),
+        ...(canAny('audit.view', 'arrears.approve') ? [lateRegistrationsNavItem] : []),
         ...(canAny('opening_balances.view', 'opening_balances.enter', 'opening_balances.approve') ? [openingBalancesNavItem] : []),
         ...(can('receipts.manage_stock') ? [receiptStockNavItem] : []),
         ...(canAny('cash.view', 'cash.receive') ? [cashBookNavItem] : []),

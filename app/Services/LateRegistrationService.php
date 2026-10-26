@@ -40,7 +40,7 @@ class LateRegistrationService
      * customer's services: which were free, which passed unbilled, and any
      * charge already asked for. Null when the customer was not late.
      *
-     * @return array{connection_month: string, billing_starts: string, months: list<array{period: string, free: bool, amount: string}>, missed_months: int, missed_amount: string, all_months: int, all_amount: string, free_months_running: bool, reason: ?string, charge: ?array{uuid: string, amount: string, status: string, cancels_free_months: bool}}|null
+     * @return array{connection_month: string, billing_starts: string, months: list<array{period: string, free: bool, amount: string}>, missed_months: int, missed_amount: string, all_months: int, all_amount: string, free_months_running: bool, reason: ?string, connected_by: ?string, says_paid_amount: ?string, says_paid_to: ?string, charge: ?array{uuid: string, amount: string, status: string, cancels_free_months: bool}}|null
      */
     public function summary(Customer $customer): ?array
     {
@@ -90,6 +90,10 @@ class LateRegistrationService
             'all_amount' => array_reduce($months, fn (string $carry, array $m): string => bcadd($carry, $m['full'], 2), '0.00'),
             'free_months_running' => $this->runningInstallationGrants($customer) !== [],
             'reason' => $customer->late_registration_reason,
+            // Auditing: who connected them, and what they say they paid and to whom.
+            'connected_by' => $customer->connected_by_user_id !== null ? User::query()->whereKey($customer->connected_by_user_id)->value('name') : null,
+            'says_paid_amount' => $customer->customer_says_paid_amount !== null ? (string) $customer->customer_says_paid_amount : null,
+            'says_paid_to' => $customer->customer_says_paid_to,
             'charge' => $charge === null ? null : [
                 'uuid' => $charge->uuid,
                 'amount' => (string) $charge->amount,

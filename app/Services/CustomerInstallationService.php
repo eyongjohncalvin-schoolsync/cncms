@@ -15,6 +15,7 @@ use App\Models\InstallationOffer;
 use App\Models\Payment;
 use App\Models\Scopes\BranchScope;
 use App\Models\Service;
+use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Support\Billing\ConnectionMonth;
@@ -75,6 +76,37 @@ class CustomerInstallationService
         return [
             ...$this->planFor($services, $installation, preview: true)['summary'],
             'duplicates' => $this->possibleDuplicates($name, $phone),
+        ];
+    }
+
+    /**
+     * Auditing (owner, 2026-10-26): who connected the customer (a member of
+     * this company's staff), and — for a late registration — why it was late
+     * and what the customer says they paid and to whom.
+     *
+     * @param  array{late: bool}  $plan
+     * @return array<string, mixed>
+     */
+    private function auditFields(InstallationData $installation, array $plan, ?int $defaultConnectorId = null): array
+    {
+        $connectorId = $defaultConnectorId;
+
+        if ($installation->connectedByUuid !== null) {
+            // Users are central, staff membership is per company (two connections, so two lookups).
+            $userId = User::query()->where('uuid', $installation->connectedByUuid)->value('id');
+
+            if ($userId === null || ! TenantUser::query()->where('user_id', $userId)->exists()) {
+                throw ValidationException::withMessages(['connected_by_uuid' => 'Pick who connected the customer from the staff list.']);
+            }
+
+            $connectorId = (int) $userId;
+        }
+
+        return [
+            'connected_by_user_id' => $connectorId,
+            'late_registration_reason' => $plan['late'] ? $installation->reason : null,
+            'customer_says_paid_amount' => $plan['late'] ? $installation->customerSaysPaidAmount : null,
+            'customer_says_paid_to' => $plan['late'] ? $installation->customerSaysPaidTo : null,
         ];
     }
 
@@ -142,7 +174,7 @@ class CustomerInstallationService
                 $customer->forceFill([
                     'connected_on' => $plan['connected_on'],
                     'billing_starts_period' => $plan['installation_month'],
-                    'late_registration_reason' => $plan['late'] ? $installation->reason : null,
+                    ...$this->auditFields($installation, $plan),
                 ])->save();
 
                 $offer = $plan['offer'];
@@ -255,6 +287,8 @@ class CustomerInstallationService
                 'connected_on' => $plan['connected_on'],
                 'billing_starts_period' => null,
                 'activation_status' => Customer::ACTIVATION_PENDING,
+                // Registered in the field: the agent connected it (the office may correct it at activation).
+                'connected_by_user_id' => $actor->id,
             ])->save();
 
             $offer = $plan['offer'];
@@ -411,7 +445,8 @@ class CustomerInstallationService
                     'connected_on' => $plan['connected_on'],
                     'billing_starts_period' => $plan['installation_month'],
                     'activation_status' => null,
-                    'late_registration_reason' => $plan['late'] ? $installation->reason : null,
+                    // The agent who registered it in the field connected it, unless the office says otherwise.
+                    ...$this->auditFields($installation, $plan, $customer->connected_by_user_id),
                 ])->save();
 
                 if ($charge !== null && $plan['offer'] !== null && $charge->installation_offer_id !== $plan['offer']->id) {
@@ -513,11 +548,25 @@ class CustomerInstallationService
         $installationMonth = ConnectionMonth::billingStarts($connectedOn, $this->lock->currentPeriod());
         $late = ConnectionMonth::isLate($connectedOn, $this->lock->currentPeriod());
 
-        // A late registration says why (the office's to give for a field one, at activation).
-        if ($late && ! $preview && $installation->reason === null && ($activation || ! $field)) {
-            throw ValidationException::withMessages([
-                'installation_reason' => 'The customer was connected in '.CustomerCoverageService::monthLabel($connectionMonth).' — say why they are registered only now.',
+        // A late registration says why, and what the customer says they paid
+        // and to whom — for auditing (the office's to give for a field one,
+        // at activation).
+        if ($late && ! $preview && ($activation || ! $field)) {
+            $missing = array_filter([
+                'installation_reason' => $installation->reason === null
+                    ? 'The customer was connected in '.CustomerCoverageService::monthLabel($connectionMonth).' — say why they are registered only now.'
+                    : null,
+                'customer_says_paid_amount' => $installation->customerSaysPaidAmount === null
+                    ? 'Ask the customer whether they paid anyone for the connection (0 if nobody).'
+                    : null,
+                'customer_says_paid_to' => $installation->customerSaysPaidAmount !== null && bccomp($installation->customerSaysPaidAmount, '0', 2) > 0 && $installation->customerSaysPaidTo === null
+                    ? 'Who did the customer pay?'
+                    : null,
             ]);
+
+            if ($missing !== []) {
+                throw ValidationException::withMessages($missing);
+            }
         }
 
         if ($activation) {

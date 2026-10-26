@@ -34,6 +34,10 @@ class ActivateFieldInstallationRequest extends FormRequest
             'service_plans.*.free_from' => ['nullable', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
             'service_plans.*.free_months' => ['nullable', 'integer', 'min:0', 'max:36'],
             'installation_reason' => ['nullable', 'string', 'max:500'],
+            // Auditing a late registration (StoreCustomerRequest::installationRules()).
+            'connected_by_uuid' => ['nullable', 'uuid'],
+            'customer_says_paid_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999.99', 'decimal:0,2'],
+            'customer_says_paid_to' => ['nullable', 'string', 'max:150'],
             'note' => ['nullable', 'string', 'max:500'],
         ];
     }

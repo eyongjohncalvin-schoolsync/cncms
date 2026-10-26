@@ -693,6 +693,9 @@ export interface LateRegistration {
     all_amount: string;
     free_months_running: boolean;
     reason: string | null;
+    connected_by: string | null;
+    says_paid_amount: string | null;
+    says_paid_to: string | null;
     charge: { uuid: string; amount: string; status: string; cancels_free_months: boolean } | null;
     can_charge: boolean;
 }
@@ -813,6 +816,9 @@ export interface FieldInstallationDetail {
         /** The first month that can still be billed. */
         current_month?: string;
         today: string;
+        /** Who may have connected the customer, and who did by default (the field agent). */
+        staff?: { uuid: string; name: string }[];
+        connected_by_uuid?: string | null;
     };
 }
 

@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Models\User;
 use App\Services\LateRegistrationService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
 
 /**
  * "Charge as old debt" for a customer registered late (owner, 2026-10-26):
@@ -23,6 +26,74 @@ class LateRegistrationController extends Controller
         private readonly LateRegistrationService $lateRegistrations,
         private readonly TenantContext $context,
     ) {}
+
+    /**
+     * The late-registration report, for auditing (owner, 2026-10-26): every
+     * customer registered after their connection month closed, in the last
+     * 12 months — how late, who connected them, what the customer says they
+     * paid, the months not billed and what was charged — totalled per
+     * person who connected them, per branch and per zone.
+     */
+    public function index(Request $request): Response
+    {
+        abort_unless($this->context->canAny('audit.view', 'arrears.approve'), 403);
+
+        $months = (int) $request->integer('months', 12);
+        $months = in_array($months, [3, 6, 12, 24], true) ? $months : 12;
+
+        $customers = Customer::query()
+            ->withTrashed()
+            ->with(['zone.branch'])
+            ->whereNotNull('connected_on')
+            ->whereNotNull('billing_starts_period')
+            ->whereRaw("to_char(connected_on, 'YYYY-MM') < billing_starts_period")
+            ->where('created_at', '>=', now()->subMonths($months))
+            ->latest('created_at')
+            ->get();
+
+        $connectors = User::query()->whereIn('id', $customers->pluck('connected_by_user_id')->filter()->unique())->pluck('name', 'id');
+
+        $rows = $customers->map(function (Customer $customer) use ($connectors): array {
+            $summary = $this->lateRegistrations->summary($customer);
+            $charged = $summary['charge'] !== null && $summary['charge']['status'] !== 'rejected' ? $summary['charge']['amount'] : '0.00';
+
+            return [
+                'uuid' => $customer->uuid,
+                'name' => $customer->name,
+                'archived' => $customer->trashed(),
+                'branch' => $customer->zone?->branch?->name ?? '—',
+                'zone' => $customer->zone?->name ?? '—',
+                'connected_on' => $customer->connected_on?->toDateString(),
+                'registered_on' => $customer->created_at?->toDateString(),
+                'days_late' => (int) $customer->connected_on?->diffInDays($customer->created_at, true),
+                'connected_by' => $connectors[$customer->connected_by_user_id] ?? 'Not recorded',
+                'reason' => $customer->late_registration_reason,
+                'says_paid_amount' => $customer->customer_says_paid_amount !== null ? (string) $customer->customer_says_paid_amount : null,
+                'says_paid_to' => $customer->customer_says_paid_to,
+                'not_billed_months' => $summary['missed_months'] ?? 0,
+                'not_billed_amount' => $summary['missed_amount'] ?? '0.00',
+                'charged_amount' => $charged,
+                'charge_status' => $summary['charge']['status'] ?? null,
+            ];
+        });
+
+        $groupBy = fn (string $key) => $rows->groupBy($key)->map(fn ($group, $name): array => [
+            'name' => (string) $name,
+            'customers' => $group->count(),
+            'average_days_late' => (int) round($group->avg('days_late')),
+            'not_billed_amount' => $group->reduce(fn (string $carry, array $row): string => bcadd($carry, $row['not_billed_amount'], 2), '0.00'),
+            'charged_amount' => $group->reduce(fn (string $carry, array $row): string => bcadd($carry, $row['charged_amount'], 2), '0.00'),
+            'says_paid_someone' => $group->filter(fn (array $row): bool => (float) ($row['says_paid_amount'] ?? 0) > 0)->count(),
+        ])->sortByDesc('not_billed_amount')->values();
+
+        return Inertia::render('LateRegistrations/Index', [
+            'months' => $months,
+            'rows' => $rows->values(),
+            'by_connector' => $groupBy('connected_by'),
+            'by_branch' => $groupBy('branch'),
+            'by_zone' => $groupBy('zone'),
+        ]);
+    }
 
     public function charge(Request $request, Customer $customer): RedirectResponse
     {

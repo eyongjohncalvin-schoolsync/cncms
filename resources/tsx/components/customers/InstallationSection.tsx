@@ -26,6 +26,10 @@ export interface InstallationFormValues {
     service_plans: ServicePlanForm[];
     method: PaymentMethod;
     method_reference: string;
+    /** Auditing: who connected the customer, and — when registered late — what they say they paid and to whom. */
+    connected_by_uuid: string;
+    customer_says_paid_amount: string;
+    customer_says_paid_to: string;
 }
 
 export interface InstallationOptions {
@@ -34,6 +38,8 @@ export interface InstallationOptions {
     can_manage: boolean;
     can_take_payment: boolean;
     today: string;
+    /** Who may have connected the customer. */
+    staff?: { uuid: string; name: string }[];
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -128,6 +134,9 @@ export function initialInstallationValues(options: InstallationOptions): Install
         service_plans: [],
         method: 'cash',
         method_reference: '',
+        connected_by_uuid: '',
+        customer_says_paid_amount: '',
+        customer_says_paid_to: '',
     };
 }
 
@@ -267,6 +276,50 @@ export function InstallationSection({
                         onChange={(e) => onChange('connected_on', e.target.value)}
                         error={errors.connected_on}
                     />
+
+                    {(options.staff?.length ?? 0) > 0 && (
+                        <SelectInput
+                            id="connected_by_uuid"
+                            label="Connected by"
+                            value={values.connected_by_uuid}
+                            onChange={(e) => onChange('connected_by_uuid', e.target.value)}
+                            error={errors.connected_by_uuid}
+                        >
+                            <option value="">— Who did the connection? —</option>
+                            {options.staff?.map((member) => (
+                                <option key={member.uuid} value={member.uuid}>
+                                    {member.name}
+                                </option>
+                            ))}
+                        </SelectInput>
+                    )}
+
+                    {preview?.late && (
+                        <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <p className="text-sm font-medium text-amber-900">Did the customer pay anyone for the connection? Ask them.</p>
+                            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                                <TextInput
+                                    id="customer_says_paid_amount"
+                                    type="number"
+                                    min="0"
+                                    label="Amount they say they paid (0 if nobody)"
+                                    value={values.customer_says_paid_amount}
+                                    onChange={(e) => onChange('customer_says_paid_amount', e.target.value)}
+                                    error={errors.customer_says_paid_amount}
+                                />
+                                {Number(values.customer_says_paid_amount) > 0 && (
+                                    <TextInput
+                                        id="customer_says_paid_to"
+                                        label="Paid to whom?"
+                                        placeholder="e.g. the agent, by name"
+                                        value={values.customer_says_paid_to}
+                                        onChange={(e) => onChange('customer_says_paid_to', e.target.value)}
+                                        error={errors.customer_says_paid_to}
+                                    />
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {options.can_manage && (
                         <SelectInput

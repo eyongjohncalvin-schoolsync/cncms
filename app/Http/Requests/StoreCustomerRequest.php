@@ -102,6 +102,11 @@ class StoreCustomerRequest extends FormRequest
             'service_plans.*.free_months' => ['nullable', 'integer', 'min:0', 'max:36'],
             'service_plans.*.paid_months' => ['nullable', 'integer', 'min:0', 'max:24'],
             ...Payment::methodRules(),
+            // Auditing (owner, 2026-10-26): who connected the customer, and —
+            // for a late registration — what the customer says they paid.
+            'connected_by_uuid' => ['nullable', 'uuid'],
+            'customer_says_paid_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999.99', 'decimal:0,2'],
+            'customer_says_paid_to' => ['nullable', 'string', 'max:150'],
         ];
     }
 

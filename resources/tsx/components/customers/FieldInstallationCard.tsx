@@ -24,6 +24,10 @@ interface ActivationForm {
     service_plans: { service_uuid: string; free_from: string | null; free_months: number }[];
     installation_reason: string;
     note: string;
+    // Auditing a late registration.
+    connected_by_uuid: string;
+    customer_says_paid_amount: string;
+    customer_says_paid_to: string;
 }
 
 /**
@@ -183,6 +187,9 @@ function initialForm(field: FieldInstallationDetail, zoneUuid: string): Activati
         })),
         installation_reason: '',
         note: '',
+        connected_by_uuid: field.form.connected_by_uuid ?? '',
+        customer_says_paid_amount: '',
+        customer_says_paid_to: '',
     };
 }
 
@@ -303,6 +310,45 @@ function ActivateModal({ open, onClose, field, zoneUuid }: { open: boolean; onCl
                     error={fieldErrors.installation_reason}
                 />
                 {beyondCap && <p className="text-xs text-amber-700">More than {field.form.max_free_months} free months needs an admin/owner&apos;s approval.</p>}
+                {(field.form.staff?.length ?? 0) > 0 && (
+                    <SelectInput
+                        id="fi-connected-by"
+                        label="Connected by"
+                        value={data.connected_by_uuid}
+                        onChange={(e) => setData('connected_by_uuid', e.target.value)}
+                        error={fieldErrors.connected_by_uuid}
+                    >
+                        <option value="">—</option>
+                        {field.form.staff?.map((member) => (
+                            <option key={member.uuid} value={member.uuid}>
+                                {member.name}
+                            </option>
+                        ))}
+                    </SelectInput>
+                )}
+                {field.form.current_month && data.connected_on.slice(0, 7) < field.form.current_month && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-sm font-medium text-amber-900">Registered late — did the customer pay anyone for the connection? Ask them.</p>
+                        <TextInput
+                            id="fi-says-paid"
+                            type="number"
+                            min="0"
+                            label="Amount they say they paid (0 if nobody)"
+                            value={data.customer_says_paid_amount}
+                            onChange={(e) => setData('customer_says_paid_amount', e.target.value)}
+                            error={fieldErrors.customer_says_paid_amount}
+                        />
+                        {Number(data.customer_says_paid_amount) > 0 && (
+                            <TextInput
+                                id="fi-says-paid-to"
+                                label="Paid to whom?"
+                                value={data.customer_says_paid_to}
+                                onChange={(e) => setData('customer_says_paid_to', e.target.value)}
+                                error={fieldErrors.customer_says_paid_to}
+                            />
+                        )}
+                    </div>
+                )}
                 <TextInput id="fi-note" label="Note (optional)" value={data.note} onChange={(e) => setData('note', e.target.value)} error={fieldErrors.note} />
                 {fieldErrors.status && <p className="text-xs text-red-600">{fieldErrors.status}</p>}
                 <div className="flex justify-end gap-2">

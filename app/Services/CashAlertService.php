@@ -10,6 +10,7 @@ use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\ReceiptLeaf;
 use App\Models\Remittance;
@@ -58,6 +59,7 @@ class CashAlertService
         return array_values(array_filter([
             $this->cashNotHandedOver($deadlineHours),
             $this->possibleDuplicatePayments(),
+            $this->lateRegistrationsPaidSomeone(),
             $this->handoversNotReceived($deadlineHours),
             $this->openShortages(),
             $this->walletLinesNotFound(),
@@ -196,6 +198,30 @@ class CashAlertService
                     .($payment->verification_status === 'verified' ? ' · verified on the spot' : ' · waiting for the office'),
                 'amount' => (string) $payment->amount,
                 'link' => "/payments/{$payment->uuid}",
+            ])->all());
+    }
+
+    /**
+     * A customer registered late who says they paid someone for the
+     * connection — the "connected, cash pocketed, registered late" signal
+     * (owner, 2026-10-26). Registered in the last 60 days.
+     */
+    private function lateRegistrationsPaidSomeone(): array
+    {
+        $customers = Customer::query()
+            ->where('customer_says_paid_amount', '>', 0)
+            ->where('created_at', '>=', now()->subDays(60))
+            ->latest('id')->limit(100)
+            ->get(['id', 'uuid', 'name', 'customer_says_paid_amount', 'customer_says_paid_to', 'connected_by_user_id']);
+
+        $names = User::query()->whereIn('id', $customers->pluck('connected_by_user_id')->filter())->pluck('name', 'id');
+
+        return $this->alert('late_registration_paid_someone', 'danger', 'Customers who say they paid someone', 'Registered late, and the customer says they paid for the connection. Find where that money went — it never came through a receipt.',
+            $customers->map(fn (Customer $customer): array => [
+                'label' => $customer->name,
+                'detail' => 'Says paid '.($customer->customer_says_paid_to ?? 'someone').' · connected by '.($names[$customer->connected_by_user_id] ?? 'unknown'),
+                'amount' => (string) $customer->customer_says_paid_amount,
+                'link' => "/customers/{$customer->uuid}",
             ])->all());
     }
 

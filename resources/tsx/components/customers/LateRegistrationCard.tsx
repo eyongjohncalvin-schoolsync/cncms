@@ -32,6 +32,15 @@ export function LateRegistrationCard({ customerUuid, late }: { customerUuid: str
                             Registered late — connected {formatMonthYear(late.connection_month)}, first bill {formatMonthYear(late.billing_starts)}
                         </p>
                         {late.reason && <p className="text-slate-600">Why: {late.reason}</p>}
+                        {late.connected_by && <p className="text-slate-600">Connected by: {late.connected_by}</p>}
+                        {late.says_paid_amount !== null &&
+                            (Number(late.says_paid_amount) > 0 ? (
+                                <p className="font-medium text-red-700">
+                                    The customer says they paid {formatCurrency(late.says_paid_amount)} to {late.says_paid_to ?? 'someone'} — check where that money went.
+                                </p>
+                            ) : (
+                                <p className="text-slate-600">The customer says they paid nobody.</p>
+                            ))}
                         <p className="text-slate-600">
                             {free.length > 0 && <>Free: {range(free)}. </>}
                             {missed.length > 0 ? (

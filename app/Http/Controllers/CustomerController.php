@@ -27,6 +27,8 @@ use App\Models\InstallationOffer;
 use App\Models\Payment;
 use App\Models\Service;
 use App\Models\ServiceVariant;
+use App\Models\TenantUser;
+use App\Models\User;
 use App\Models\Zone;
 use App\Services\ArrearsAdjustmentService;
 use App\Services\CustomerChargeService;
@@ -137,8 +139,32 @@ class CustomerController extends Controller
                 'can_manage' => $this->context->can('installations.manage'),
                 'can_take_payment' => $this->context->can('payments.create'),
                 'today' => BusinessTimezone::today(),
+                // "Connected by" (auditing a late registration).
+                'staff' => $this->staffForSelect(),
             ],
         ]);
+    }
+
+    /**
+     * Staff who may have connected a customer — active members of this
+     * company, of the viewer's branch (or headquarters' unbranched staff)
+     * when they are fenced to one.
+     *
+     * @return list<array{uuid: string, name: string}>
+     */
+    private function staffForSelect(): array
+    {
+        $members = TenantUser::query()
+            ->when($this->context->isFenced(), fn ($query) => $query->where(fn ($inner) => $inner->where('branch_id', $this->context->branchId)->orWhereNull('branch_id')))
+            ->pluck('user_id');
+
+        return User::query()
+            ->whereIn('id', $members)
+            ->where('status', 'active')
+            ->orderBy('name')
+            ->get(['uuid', 'name'])
+            ->map(fn (User $user): array => ['uuid' => (string) $user->uuid, 'name' => (string) $user->name])
+            ->all();
     }
 
     /**
@@ -805,6 +831,9 @@ class CustomerController extends Controller
                 'installation_month' => $installationMonth,
                 'current_month' => $currentPeriod,
                 'today' => BusinessTimezone::today(),
+                'staff' => $this->staffForSelect(),
+                // Defaults to the agent who registered it in the field.
+                'connected_by_uuid' => $customer->connected_by_user_id !== null ? User::query()->whereKey($customer->connected_by_user_id)->value('uuid') : null,
             ],
         ];
     }

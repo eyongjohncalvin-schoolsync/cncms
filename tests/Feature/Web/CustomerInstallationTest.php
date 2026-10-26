@@ -19,6 +19,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\Zone;
+use App\Services\CashAlertService;
 use App\Services\CustomerManuscriptRecalculationService;
 use Database\Factories\BranchFactory;
 use Database\Factories\CustomerFactory;
@@ -152,6 +153,7 @@ class CustomerInstallationTest extends TestCase
         $this->post('/customers', $this->form([
             'connected_on' => '2026-08-12',
             'installation_reason' => 'The agent connected him in August and forgot to register him',
+            'customer_says_paid_amount' => 0,
             'service_plans' => [$this->plan($this->tv, free: 3, from: '2026-08')],
         ]))->assertSessionHasNoErrors();
 
@@ -277,6 +279,46 @@ class CustomerInstallationTest extends TestCase
         $this->assertArrayHasKey($elsewhere->uuid, $byPhone('+237 677 333 444'));
     }
 
+    public function test_a_late_registration_records_who_connected_and_what_the_customer_says_they_paid(): void
+    {
+        // For auditing "connected, cash pocketed, registered late".
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $agent = User::query()->where('email', 'terence@shalomtech.dev')->firstOrFail();
+        $this->manager();
+        $late = fn (array $extra): array => $this->form([
+            'connected_on' => '2026-08-12',
+            'installation_reason' => 'Agent forgot',
+            'connected_by_uuid' => $agent->uuid,
+            'service_plans' => [$this->plan($this->tv, free: 1, from: '2026-08')],
+            ...$extra,
+        ]);
+
+        $this->post('/customers', $late([]))->assertSessionHasErrors('customer_says_paid_amount');
+        $this->post('/customers', $late(['customer_says_paid_amount' => 10000]))->assertSessionHasErrors('customer_says_paid_to');
+        $this->post('/customers', $late(['customer_says_paid_amount' => 10000, 'customer_says_paid_to' => 'Terence, the agent']))->assertSessionHasNoErrors();
+
+        $customer = $this->created();
+        $this->assertSame($agent->id, $customer->connected_by_user_id);
+        $this->assertSame('10000.00', (string) $customer->customer_says_paid_amount);
+        $this->assertSame('Agent forgot', $customer->late_registration_reason);
+
+        // The office is warned, and the report shows it against the agent.
+        $this->admin();
+        $this->assertSame(1, app(CashAlertService::class)->counts()['late_registration_paid_someone'] ?? 0);
+        $this->get('/late-registrations')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('LateRegistrations/Index')
+            ->where('rows.0.connected_by', $agent->name)
+            ->where('rows.0.days_late', 59)
+            ->where('rows.0.not_billed_amount', '2500.00')
+            ->where('by_connector.0.says_paid_someone', 1));
+    }
+
+    public function test_the_late_registration_report_is_for_auditors(): void
+    {
+        $this->actAs('kelvin@shalomtech.dev', 'agent');
+        $this->get('/late-registrations')->assertForbidden();
+    }
+
     /** Registered by the manager on 10 Oct; connected 12 Aug, free months from August. */
     private function lateCustomer(int $freeMonths): Customer
     {
@@ -284,6 +326,7 @@ class CustomerInstallationTest extends TestCase
         $this->post('/customers', $this->form([
             'connected_on' => '2026-08-12',
             'installation_reason' => 'Connected in August, registered only now',
+            'customer_says_paid_amount' => 0,
             'service_plans' => [$this->plan($this->tv, free: $freeMonths, from: '2026-08')],
         ]))->assertSessionHasNoErrors();
 

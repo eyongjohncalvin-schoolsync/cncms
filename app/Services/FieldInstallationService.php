@@ -195,6 +195,9 @@ class FieldInstallationService
                 'connected_on' => $input['connected_on'] ?? $proposal['connected_on'] ?? $customer->connected_on?->toDateString(),
                 'service_plans' => $input['service_plans'] ?? $proposal['service_plans'] ?? [],
                 'installation_reason' => $input['installation_reason'] ?? null,
+                'connected_by_uuid' => $input['connected_by_uuid'] ?? null,
+                'customer_says_paid_amount' => $input['customer_says_paid_amount'] ?? null,
+                'customer_says_paid_to' => $input['customer_says_paid_to'] ?? null,
             ];
             $installation = InstallationData::fromArray($confirmed);
 
