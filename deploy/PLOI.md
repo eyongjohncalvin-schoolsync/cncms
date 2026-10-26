@@ -112,7 +112,17 @@ php artisan queue:work --queue=default,manuscripts,bills --sleep=3 --tries=3 --b
 ```
 
 Without it, manuscript runs, bill generation, receipt-book PDFs and every
-email sit `queued` forever. The queue order is the priority order.
+email sit `queued` forever. The queue order is the priority order — all
+three queues must be listed: manuscript runs wait on `manuscripts`, bills
+and receipt books on `bills`.
+
+`DB_QUEUE_RETRY_AFTER` (default 1900) must stay above `--timeout=1800`, or a
+long manuscript chunk is taken for dead and run twice. Don't set it lower in
+`.env`.
+
+With **site isolation** on, run the daemon (and the scheduler below) as the
+site's own user (e.g. `cncms-eyyyd`), not `ploi` — the same reason as the
+backup: the site's files and `.env` belong to that user.
 
 ## 5. Scheduler and backups
 
