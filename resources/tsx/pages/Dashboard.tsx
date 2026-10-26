@@ -40,6 +40,8 @@ interface DashboardProps {
         monthly_income: string;
         /** Verified installation fees this month — income, but kept apart from subscriptions. */
         installation_income?: string;
+        /** Verified income this month by what it was for — bill money vs one-off fees, never added together. */
+        income_by_purpose?: { subscription: string; installation: string; relocation: string; reinstallation: string };
         total_arrears: string;
         collection_rate: number;
         pending_arrears_adjustments: number;
@@ -57,6 +59,8 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
         return `${percent}% of total`;
     }, [stats.active_customers, stats.total_customers]);
 
+    // Relocation and re-installation fees: one-off money like installation, never bill money.
+    const oneOffOther = Number(stats.income_by_purpose?.relocation ?? 0) + Number(stats.income_by_purpose?.reinstallation ?? 0);
     const hasPending = stats.pending_verifications > 0;
     const hasPendingArrearsAdjustments = stats.pending_arrears_adjustments > 0;
 
@@ -150,17 +154,27 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                         tone={hasPending ? 'red' : 'yellow'}
                     />
                 </div>
+                {/* Bill money and one-off fees are kept apart — never one total (consistency and auditing). */}
                 <div className="animate-fade-up" style={{ animationDelay: '210ms' }}>
                     <StatCard
-                        label="Monthly Income"
-                        value={formatCurrency(stats.monthly_income)}
-                        hint={
-                            Number(stats.installation_income ?? 0) > 0
-                                ? `Subscriptions · + ${formatCurrency(stats.installation_income ?? '0')} installations`
-                                : 'Subscriptions'
-                        }
+                        label="Bill money (monthly)"
+                        value={formatCurrency(stats.income_by_purpose?.subscription ?? stats.monthly_income)}
+                        hint={`Verified bill payments · ${formatCurrency(stats.monthly_income)} from active customers (collection rate)`}
                         icon={<IconCash size={20} stroke={1.75} />}
                         tone="green"
+                    />
+                </div>
+                <div className="animate-fade-up" style={{ animationDelay: '235ms' }}>
+                    <StatCard
+                        label="Installation money"
+                        value={formatCurrency(stats.income_by_purpose?.installation ?? stats.installation_income ?? '0')}
+                        hint={
+                            oneOffOther > 0
+                                ? `Verified installation fees · + ${formatCurrency(String(oneOffOther))} relocation / re-installation`
+                                : 'Verified installation fees — never counted as bill money'
+                        }
+                        icon={<IconCash size={20} stroke={1.75} />}
+                        tone="blue"
                     />
                 </div>
                 <div className="animate-fade-up" style={{ animationDelay: '260ms' }}>

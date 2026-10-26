@@ -416,6 +416,8 @@ export interface Payment {
     credit: string;
     frequency: PaymentFrequency;
     purpose?: PaymentPurpose;
+    /** "Monthly bill", "Installation", "Relocation", "Re-installation" — what the money was for. */
+    purpose_label?: string;
     method: PaymentMethod;
     method_reference: string | null;
     months: number | null;

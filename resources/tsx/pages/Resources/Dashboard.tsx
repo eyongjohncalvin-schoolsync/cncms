@@ -132,15 +132,34 @@ export default function ResourcesDashboardPage({ period, income, expenses, pnl, 
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="animate-fade-up" style={{ animationDelay: '100ms' }}>
                     <StatCard
-                        label="Verified Income"
+                        label="Total income (bill + installation)"
                         value={formatCurrency(income.verified)}
-                        hint={
-                            income.by_purpose && Number(income.by_purpose.installation) > 0
-                                ? `${income.payment_count} payments · subscriptions ${formatCurrency(income.by_purpose.subscription)} · installations ${formatCurrency(income.by_purpose.installation)}`
-                                : `${income.payment_count} payments recorded`
-                        }
+                        hint={`${income.payment_count} payments — the profit figure counts both; they are shown apart next to it`}
                         icon={<IconCash size={20} stroke={1.75} />}
                         tone="green"
+                    />
+                </div>
+                {/* Bill money and one-off fees, apart (consistency and auditing). */}
+                <div className="animate-fade-up" style={{ animationDelay: '120ms' }}>
+                    <StatCard
+                        label="Bill money (monthly)"
+                        value={formatCurrency(income.by_purpose?.subscription ?? '0')}
+                        hint="Verified monthly-bill payments"
+                        icon={<IconCash size={20} stroke={1.75} />}
+                        tone="green"
+                    />
+                </div>
+                <div className="animate-fade-up" style={{ animationDelay: '140ms' }}>
+                    <StatCard
+                        label="Installation money"
+                        value={formatCurrency(income.by_purpose?.installation ?? '0')}
+                        hint={
+                            Number(income.by_purpose?.relocation ?? 0) + Number(income.by_purpose?.reinstallation ?? 0) > 0
+                                ? `Verified installation fees · + ${formatCurrency(String(Number(income.by_purpose?.relocation ?? 0) + Number(income.by_purpose?.reinstallation ?? 0)))} relocation / re-installation`
+                                : 'Verified installation fees'
+                        }
+                        icon={<IconCash size={20} stroke={1.75} />}
+                        tone="blue"
                     />
                 </div>
                 <div className="animate-fade-up" style={{ animationDelay: '150ms' }}>

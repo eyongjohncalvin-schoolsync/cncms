@@ -26,6 +26,7 @@ use App\Services\ReceiptEmailService;
 use App\Support\BranchPrices;
 use App\Support\PaymentReceiptLink;
 use App\Support\TenantContext;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -66,6 +67,10 @@ class PaymentController extends Controller
         ]);
         // The "Possible duplicates" tab: second payments in a month.
         $filters['duplicates'] = $request->boolean('duplicates');
+        // Bill money vs one-off fees (installation, relocation, re-installation),
+        // never mixed by accident: the page shows monthly bills unless asked
+        // for installation fees, or everything (owner, 2026-10-26).
+        $filters['purpose'] = in_array($request->query('purpose'), ['bill', 'fees', 'all'], true) ? $request->query('purpose') : 'bill';
 
         // Default view = current calendar month only. Payments accumulate
         // forever and this table has no archival/retention step, so with no
@@ -109,6 +114,7 @@ class PaymentController extends Controller
             'filters' => [
                 'verification_status' => $filters['verification_status'] ?? null,
                 'duplicates' => $filters['duplicates'],
+                'purpose' => $filters['purpose'],
                 'frequency' => $filters['frequency'] ?? null,
                 'search' => $filters['search'] ?? null,
                 // Echoed back so the page can render an accurate "Showing:
@@ -138,16 +144,31 @@ class PaymentController extends Controller
             // large enough that these four COUNT queries become the
             // bottleneck, the fix is a maintained cache/aggregate, not
             // silently narrowing the signal to "this month".
+            // Counted within the view picked (monthly bills / installation fees / all).
             'statusCounts' => [
-                'all' => Payment::query()->forBranch(TenantContext::currentBranchId())->count(),
-                'pending' => $this->payments->pendingVerificationCount(),
-                'verified' => Payment::query()->forBranch(TenantContext::currentBranchId())->where('verification_status', 'verified')->count(),
-                'rejected' => Payment::query()->forBranch(TenantContext::currentBranchId())->where('verification_status', 'rejected')->count(),
+                'all' => $this->countedPayments($filters['purpose'])->count(),
+                'pending' => $this->countedPayments($filters['purpose'])->where('verification_status', 'pending')->count(),
+                'verified' => $this->countedPayments($filters['purpose'])->where('verification_status', 'verified')->count(),
+                'rejected' => $this->countedPayments($filters['purpose'])->where('verification_status', 'rejected')->count(),
                 // Possible duplicates still waiting for the office — the tab
                 // itself lists every flagged one in the period.
-                'duplicates' => Payment::query()->forBranch(TenantContext::currentBranchId())->whereNotNull('duplicate_of_id')->where('verification_status', 'pending')->count(),
+                'duplicates' => $this->countedPayments($filters['purpose'])->whereNotNull('duplicate_of_id')->where('verification_status', 'pending')->count(),
             ],
         ]);
+    }
+
+    /**
+     * The branch's payments within one view of the Payments page: monthly
+     * bills, installation (and relocation / re-installation) fees, or all.
+     *
+     * @return Builder<Payment>
+     */
+    private function countedPayments(string $purpose): Builder
+    {
+        return Payment::query()
+            ->forBranch(TenantContext::currentBranchId())
+            ->when($purpose === 'bill', fn ($query) => $query->subscription())
+            ->when($purpose === 'fees', fn ($query) => $query->where('purpose', Payment::PURPOSE_INSTALLATION));
     }
 
     public function create(Request $request): Response
@@ -485,6 +506,12 @@ class PaymentController extends Controller
             'credit' => (string) $payment->credit,
             'frequency' => $payment->frequency,
             'purpose' => $payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
+            // What the money was for, in words — bill money or a one-off fee.
+            'purpose_label' => match ($payment->purpose ?? Payment::PURPOSE_SUBSCRIPTION) {
+                Payment::PURPOSE_SUBSCRIPTION => 'Monthly bill',
+                Payment::PURPOSE_INSTALLATION => $payment->customerCharge?->kindLabel() ?? 'Installation',
+                default => Payment::PURPOSE_LABELS[$payment->purpose] ?? (string) $payment->purpose,
+            },
             'method' => $payment->method,
             'method_reference' => $payment->method_reference,
             'months' => $payment->months,

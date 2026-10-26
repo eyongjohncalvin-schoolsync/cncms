@@ -248,7 +248,7 @@ function AgentView({ tier, report }: { tier: ReportTier; report: ReportData }) {
         const r = report as DailyReport;
         return (
             <div className="mx-auto flex max-w-md flex-col gap-4 animate-fade-up">
-                <StatCard label="My Collections Today" value={formatCurrency(r.payments.verified)} icon={<IconCash size={20} stroke={1.75} />} tone="green" />
+                <MoneySplit when="I collected today" block={r.payments} />
                 <StatCard label="Customers Paid" value={r.payments.count.toLocaleString()} icon={<IconUserCheck size={20} stroke={1.75} />} tone="blue" />
                 <StatCard
                     label="Customers Outstanding"
@@ -287,7 +287,7 @@ function AgentView({ tier, report }: { tier: ReportTier; report: ReportData }) {
         const r = report as WeeklyReport;
         return (
             <div className="mx-auto flex max-w-md flex-col gap-4 animate-fade-up">
-                <StatCard label="My Collections This Week" value={formatCurrency(r.collections.verified)} icon={<IconCash size={20} stroke={1.75} />} tone="green" />
+                <MoneySplit when="I collected this week" block={r.collections} />
                 <StatCard label="Payments" value={r.collections.count.toLocaleString()} icon={<IconUserCheck size={20} stroke={1.75} />} tone="blue" />
                 <StatCard label="New Customers" value={r.new_customers.toLocaleString()} icon={<IconUserPlus size={20} stroke={1.75} />} tone="purple" />
             </div>
@@ -297,12 +297,7 @@ function AgentView({ tier, report }: { tier: ReportTier; report: ReportData }) {
     const r = report as MonthlyReport;
     return (
         <div className="mx-auto flex max-w-md flex-col gap-4 animate-fade-up">
-            <StatCard
-                label="My Collections This Month"
-                value={formatCurrency(r.collections_cash_received.verified)}
-                icon={<IconCash size={20} stroke={1.75} />}
-                tone="green"
-            />
+            <MoneySplit when="I collected this month" block={r.collections_cash_received} />
             <StatCard label="Payments" value={r.collections_cash_received.count.toLocaleString()} icon={<IconUserCheck size={20} stroke={1.75} />} tone="blue" />
             <StatCard label="Collection Rate" value={`${r.collection_health.collection_rate}%`} icon={<IconReceipt2 size={20} stroke={1.75} />} tone="purple" />
         </div>
@@ -317,18 +312,40 @@ function AgentView({ tier, report }: { tier: ReportTier; report: ReportData }) {
  * the split by purpose (docs/plans/installation-and-promotions.md). Technician
  * fees are never part of report figures.
  */
-function purposeHint(byPurpose?: ReportIncomeByPurpose): string {
-    const relocation = Number(byPurpose?.relocation ?? 0);
-    const reinstallation = Number(byPurpose?.reinstallation ?? 0);
-
-    if (!byPurpose || (Number(byPurpose.installation) <= 0 && relocation <= 0 && reinstallation <= 0)) {
-        return '';
-    }
+/**
+ * Bill money and installation money as two separate cards — never one total
+ * (owner, 2026-10-26: consistency and auditing). Relocation and
+ * re-installation fees are one-off money too, shown with installations.
+ */
+function MoneySplit({
+    when,
+    block,
+    extraHint = '',
+}: {
+    when: string;
+    block: { verified: string; count: number; by_purpose?: ReportIncomeByPurpose };
+    extraHint?: string;
+}) {
+    const byPurpose = block.by_purpose;
+    const other = Number(byPurpose?.relocation ?? 0) + Number(byPurpose?.reinstallation ?? 0);
 
     return (
-        ` · subscriptions ${formatCurrency(byPurpose.subscription)} · installations ${formatCurrency(byPurpose.installation)}` +
-        (relocation > 0 ? ` · relocations ${formatCurrency(byPurpose.relocation ?? '0')}` : '') +
-        (reinstallation > 0 ? ` · re-installations ${formatCurrency(byPurpose.reinstallation ?? '0')}` : '')
+        <>
+            <StatCard
+                label={`Bill money ${when}`}
+                value={formatCurrency(byPurpose?.subscription ?? block.verified)}
+                hint={`Verified monthly-bill payments · ${block.count} payments in all${extraHint}`}
+                icon={<IconCash size={20} stroke={1.75} />}
+                tone="green"
+            />
+            <StatCard
+                label={`Installation money ${when}`}
+                value={formatCurrency(byPurpose?.installation ?? '0')}
+                hint={other > 0 ? `Verified installation fees · + ${formatCurrency(String(other))} relocation / re-installation` : 'Verified installation fees'}
+                icon={<IconCash size={20} stroke={1.75} />}
+                tone="blue"
+            />
+        </>
     );
 }
 
@@ -336,13 +353,7 @@ function DailyView({ report }: { report: DailyReport }) {
     return (
         <div className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 animate-fade-up" style={{ animationDelay: '80ms' }}>
-                <StatCard
-                    label="Collected Today"
-                    value={formatCurrency(report.payments.verified)}
-                    hint={`${report.payments.count} payments · ${formatCurrency(report.payments.pending)} pending${purposeHint(report.payments.by_purpose)}`}
-                    icon={<IconCash size={20} stroke={1.75} />}
-                    tone="green"
-                />
+                <MoneySplit when="today" block={report.payments} extraHint={` · ${formatCurrency(report.payments.pending)} pending`} />
                 <StatCard
                     label="Pending Verification"
                     value={report.pending_queue.count.toLocaleString()}
@@ -441,14 +452,7 @@ function WeeklyView({ report, role }: { report: WeeklyReport; role: string | nul
     return (
         <div className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 animate-fade-up" style={{ animationDelay: '80ms' }}>
-                <StatCard
-                    label="Collections This Week"
-                    value={formatCurrency(report.collections.verified)}
-                    delta={deltaWithGood(report.deltas.collections_total, 'up', 'vs last week')}
-                    hint={report.deltas.collections_total ? undefined : '—'}
-                    icon={<IconCash size={20} stroke={1.75} />}
-                    tone="green"
-                />
+                <MoneySplit when="this week" block={report.collections} />
                 <StatCard
                     label="Payments"
                     value={report.collections.count.toLocaleString()}
@@ -588,13 +592,7 @@ function MonthlyView({ report }: { report: MonthlyReport }) {
     return (
         <div className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5 animate-fade-up" style={{ animationDelay: '80ms' }}>
-                <StatCard
-                    label="Collections (cash received)"
-                    value={formatCurrency(report.collections_cash_received.verified)}
-                    hint={`${report.collections_cash_received.count} payments, all statuses shown separately${purposeHint(report.collections_cash_received.by_purpose)}`}
-                    icon={<IconCash size={20} stroke={1.75} />}
-                    tone="green"
-                />
+                <MoneySplit when="this month" block={report.collections_cash_received} />
                 <StatCard
                     label="Arrears Adjustments (written off)"
                     value={formatCurrency(report.arrears_adjustments_written_off.total)}

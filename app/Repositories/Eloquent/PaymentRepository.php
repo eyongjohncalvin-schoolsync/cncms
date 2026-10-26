@@ -18,7 +18,7 @@ class PaymentRepository implements PaymentRepositoryInterface
     {
         return $this->scopeToBranchDirect(Payment::query(), $this->currentBranchId())
             // remittanceLine: whether the cash was handed in (the Reverse dialog's choices).
-            ->with(['customer', 'verification.verifier', 'remittanceLine'])
+            ->with(['customer', 'verification.verifier', 'remittanceLine', 'customerCharge'])
             ->when($filters['customer_id'] ?? null, fn ($query, $customerId) => $query->where('customer_id', $customerId))
             ->when(
                 $filters['zone_id'] ?? null,
@@ -29,6 +29,9 @@ class PaymentRepository implements PaymentRepositoryInterface
                 fn ($query, $status) => $query->where('verification_status', $status)
             )
             ->when($filters['duplicates'] ?? false, fn ($query) => $query->whereNotNull('duplicate_of_id'))
+            // Bill money vs one-off fees (installation, relocation, re-installation).
+            ->when(($filters['purpose'] ?? null) === 'bill', fn ($query) => $query->subscription())
+            ->when(($filters['purpose'] ?? null) === 'fees', fn ($query) => $query->where('purpose', Payment::PURPOSE_INSTALLATION))
             ->when($filters['frequency'] ?? null, fn ($query, $frequency) => $query->where('frequency', $frequency))
             ->when($filters['recorded_offline'] ?? null, fn ($query, bool $recordedOffline) => $query->where('recorded_offline', $recordedOffline))
             ->when($filters['from'] ?? null, fn ($query, $from) => $query->whereDate('created_at', '>=', $from))

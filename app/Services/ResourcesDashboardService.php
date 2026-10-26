@@ -164,6 +164,24 @@ class ResourcesDashboardService
     }
 
     /**
+     * Verified income for a period by what it was for, branch-fenced — the
+     * dashboard keeps bill money and one-off fees (installation, relocation,
+     * re-installation) apart, for consistency and auditing.
+     *
+     * @return array{subscription: string, installation: string, relocation: string, reinstallation: string}
+     */
+    public function incomeByPurpose(string $period): array
+    {
+        if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period)) {
+            return ['subscription' => '0.00', 'installation' => '0.00', 'relocation' => '0.00', 'reinstallation' => '0.00'];
+        }
+
+        [$start, $end] = $this->periodBounds($period);
+
+        return $this->incomeFor($start, $end, TenantContext::currentBranchId())['by_purpose'];
+    }
+
+    /**
      * Verified installation-fee income for a period, branch-fenced — the
      * dashboard's "+ installations" figure next to subscription income.
      * '0.00' for a malformed period rather than an error.

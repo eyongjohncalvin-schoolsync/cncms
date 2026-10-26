@@ -67,6 +67,9 @@ class DashboardController extends Controller
                 // fees are never income.
                 'monthly_income' => $summary['total_collected'],
                 'installation_income' => app(ResourcesDashboardService::class)->installationIncome($period),
+                // Kept apart for consistency and auditing (owner, 2026-10-26):
+                // every verified bill payment this month, and the one-off fees.
+                'income_by_purpose' => app(ResourcesDashboardService::class)->incomeByPurpose($period),
                 'total_arrears' => $summary['total_arrears'],
                 'collection_rate' => $summary['collection_rate'],
                 // Same "maker-checker pending count" idea as

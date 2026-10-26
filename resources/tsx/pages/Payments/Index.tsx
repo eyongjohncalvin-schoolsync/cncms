@@ -27,6 +27,8 @@ interface PaymentsIndexProps {
         // The "Possible duplicates" tab (second payments in a month).
         duplicates?: boolean;
         frequency: PaymentFrequency | null;
+        /** Bill money only, or one-off fees only (installation, relocation, re-installation). */
+        purpose?: 'bill' | 'fees' | 'all' | null;
         // Matches the payment's customer's name (partial, case-insensitive)
         // or phone (partial) — same 'search' filter/idiom as
         // Customers/Index.tsx, applied server-side (not just to the
@@ -50,6 +52,13 @@ interface PaymentsIndexProps {
 }
 
 type TabKey = 'all' | VerificationStatus | 'duplicates';
+
+// Which money: monthly bills (the default), installation fees, or everything.
+const purposeViews: { key: 'bill' | 'fees' | 'all'; label: string }[] = [
+    { key: 'bill', label: 'Monthly bills' },
+    { key: 'fees', label: 'Installation fees' },
+    { key: 'all', label: 'All payments' },
+];
 
 const tabs: { key: TabKey; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -216,7 +225,30 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 verification_status: key === 'all' || key === 'duplicates' ? undefined : key,
                 duplicates: key === 'duplicates' ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
+                purpose: filters.purpose ?? undefined,
                 search: filters.search ?? undefined,
+            },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                replace: true,
+                onStart: () => setIsFiltering(true),
+                onFinish: () => setIsFiltering(false),
+            },
+        );
+    }
+
+    // Bill money vs one-off fees — kept apart (owner, 2026-10-26).
+    function changePurpose(value: string) {
+        router.get(
+            '/payments',
+            {
+                verification_status: filters.verification_status ?? undefined,
+                duplicates: filters.duplicates ? 1 : undefined,
+                frequency: filters.frequency ?? undefined,
+                purpose: value || undefined,
+                search: filters.search ?? undefined,
+                ...(isAllTime ? { scope: 'all' } : { from: filters.from ?? undefined, to: filters.to ?? undefined }),
             },
             {
                 preserveState: true,
@@ -235,6 +267,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 verification_status: filters.verification_status ?? undefined,
                 duplicates: filters.duplicates ? 1 : undefined,
                 frequency: value || undefined,
+                purpose: filters.purpose ?? undefined,
                 search: filters.search ?? undefined,
             },
             {
@@ -261,6 +294,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                     verification_status: filters.verification_status ?? undefined,
                 duplicates: filters.duplicates ? 1 : undefined,
                     frequency: filters.frequency ?? undefined,
+                    purpose: filters.purpose ?? undefined,
                     search: debouncedSearch || undefined,
                     ...(isAllTime
                         ? { scope: 'all' }
@@ -299,6 +333,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 verification_status: filters.verification_status ?? undefined,
                 duplicates: filters.duplicates ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
+                purpose: filters.purpose ?? undefined,
                 search: filters.search ?? undefined,
                 from: `${value}-01`,
                 to: `${value}-${String(lastDay).padStart(2, '0')}`,
@@ -323,6 +358,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 verification_status: filters.verification_status ?? undefined,
                 duplicates: filters.duplicates ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
+                purpose: filters.purpose ?? undefined,
                 search: filters.search ?? undefined,
                 scope: 'all',
             },
@@ -346,6 +382,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 verification_status: filters.verification_status ?? undefined,
                 duplicates: filters.duplicates ? 1 : undefined,
                 frequency: filters.frequency ?? undefined,
+                purpose: filters.purpose ?? undefined,
                 search: filters.search ?? undefined,
             },
             {
@@ -386,6 +423,23 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                     <IconPlus size={18} stroke={2} />
                     Record Payment
                 </Link>
+            </div>
+
+            {/* Monthly bills and installation fees are separate money — one view at a time (owner, 2026-10-26). */}
+            <div className="mb-3 inline-flex rounded-lg bg-slate-100 p-1 animate-fade-up" role="group" aria-label="Which payments">
+                {purposeViews.map((view) => (
+                    <button
+                        key={view.key}
+                        type="button"
+                        aria-pressed={(filters.purpose ?? 'bill') === view.key}
+                        onClick={() => changePurpose(view.key)}
+                        className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                            (filters.purpose ?? 'bill') === view.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                    >
+                        {view.label}
+                    </button>
+                ))}
             </div>
 
             <div
@@ -519,7 +573,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                             <Th>Customer</Th>
                             <Th>Zone</Th>
                             <Th>Amount</Th>
-                            <Th>Freq.</Th>
+                            <Th>For / freq.</Th>
                             <Th>Verification</Th>
                             <Th>Receipt</Th>
                             <Th>Recorded</Th>
@@ -552,7 +606,13 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                             </span>
                                         )}
                                     </Td>
-                                    <Td>{frequencyLabels[payment.frequency]}</Td>
+                                    <Td>
+                                        {payment.purpose && payment.purpose !== 'subscription' ? (
+                                            <Badge tone="blue">{payment.purpose_label ?? 'Installation'}</Badge>
+                                        ) : (
+                                            frequencyLabels[payment.frequency]
+                                        )}
+                                    </Td>
                                     <Td>
                                         {payment.verification_status === 'pending' && canVerify ? (
                                             <button type="button" onClick={() => setReviewing(payment)}>
