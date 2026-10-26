@@ -177,7 +177,7 @@ function initialForm(field: FieldInstallationDetail, zoneUuid: string): Activati
         connected_on: field.proposal.connected_on ?? field.form.today,
         service_plans: field.proposal.service_plans.map((plan) => ({
             service_uuid: plan.service_uuid,
-            // A month that closed before activation cannot be given back.
+            // Free months count from the connection month, even one that closed before activation.
             free_from: plan.free_months > 0 ? (plan.free_from && plan.free_from > first ? plan.free_from : first) : null,
             free_months: plan.free_months,
         })),
@@ -218,8 +218,9 @@ function ActivateModal({ open, onClose, field, zoneUuid }: { open: boolean; onCl
         <Modal open={open} onClose={onClose} title="Activate this customer">
             <form onSubmit={submit} className="flex flex-col gap-4">
                 <p className="text-sm text-slate-600">
-                    Confirm or correct what the agent entered. Billing starts in the installation month ({periodLabel(field.form.installation_month)} at the
-                    earliest). The money taken in the field stays as recorded.
+                    Confirm or correct what the agent entered. Free months count from the connection month ({periodLabel(field.form.installation_month)}
+                    ); the first bill is never before {periodLabel(field.form.current_month ?? field.form.installation_month)}. The money taken in the field
+                    stays as recorded.
                 </p>
                 <SelectInput id="fi-zone" label="Zone" value={data.zone_uuid} onChange={(e) => setData('zone_uuid', e.target.value)} error={fieldErrors.zone_uuid}>
                     {field.form.zones.map((zone) => (
@@ -292,7 +293,11 @@ function ActivateModal({ open, onClose, field, zoneUuid }: { open: boolean; onCl
                 {fieldErrors.service_plans && <p className="text-xs text-red-600">{fieldErrors.service_plans}</p>}
                 <TextInput
                     id="fi-reason"
-                    label="Reason for anything needing approval (free months without the fee fully paid, beyond the offer or the cap)"
+                    label={
+                        field.form.current_month && data.connected_on.slice(0, 7) < field.form.current_month
+                            ? 'Why was this customer registered only now? (connected in an earlier month)'
+                            : 'Reason for anything needing approval (free months without the fee fully paid, beyond the promotion or the cap)'
+                    }
                     value={data.installation_reason}
                     onChange={(e) => setData('installation_reason', e.target.value)}
                     error={fieldErrors.installation_reason}

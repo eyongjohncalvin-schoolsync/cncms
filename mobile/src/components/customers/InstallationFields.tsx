@@ -13,6 +13,8 @@ import {
     formatPeriod,
     installationMonth,
     isFreeMonth,
+    isLateRegistration,
+    monthsBetween,
     syncPlans,
     takesMoney,
     toggleFreeMonth,
@@ -115,6 +117,8 @@ export function InstallationFields({
     }, [body, offline]);
 
     const needsReason = (preview?.needs_approval.length ?? 0) > 0;
+    // Connected in a month that has passed: say why it is registered only now.
+    const late = isLateRegistration(state.connectedOn, options.today);
 
     return (
         <Card>
@@ -192,7 +196,7 @@ export function InstallationFields({
                                 {plan.free_months > 0 && (
                                     <>
                                         <View style={styles.chips}>
-                                            {Array.from({ length: CHIP_COUNT }, (_, i) => addMonths(firstMonth, i)).map((month) => {
+                                            {Array.from({ length: Math.max(0, monthsBetween(firstMonth, options.today.slice(0, 7))) + CHIP_COUNT }, (_, i) => addMonths(firstMonth, i)).map((month) => {
                                                 const selected = isFreeMonth(plan, month);
 
                                                 return (
@@ -250,9 +254,9 @@ export function InstallationFields({
                 </>
             )}
 
-            {(needsReason || state.reason !== '' || offline) && (
+            {(needsReason || late || state.reason !== '' || offline) && (
                 <TextInput
-                    label={offline ? 'Note for the office (optional)' : 'Reason (needs admin/owner approval)'}
+                    label={late ? 'Why is the customer registered only now?' : offline ? 'Note for the office (optional)' : 'Reason (needs admin/owner approval)'}
                     value={state.reason}
                     onChangeText={(text) => set({ reason: text })}
                     error={errors.installation_reason}

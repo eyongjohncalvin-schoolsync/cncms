@@ -35,10 +35,13 @@ use Illuminate\Validation\ValidationException;
  *  - approveGroup() / rejectGroup() — decide a whole request at once.
  *  - forfeitForCharge() — a refunded installation's unused free months.
  *
- * Start months are never in a past (locked) month. Every change recomputes
- * the customer's manuscripts from the grant's start month (rows already
- * generated for that month or later), so no month is double-given or
- * skipped.
+ * Installation months may start in a past (locked) month — a late
+ * registration's free months count from the real connection (owner,
+ * 2026-10-26); they run by calendar, so a closed month is simply used.
+ * Compensation and carried-in months never start in the past. Every change
+ * recomputes the customer's manuscripts from the grant's start month (rows
+ * already generated for that month or later, never a locked one), so no
+ * month is double-given or skipped.
  */
 class FreeMonthGrantService
 {
@@ -128,9 +131,12 @@ class FreeMonthGrantService
                 'months' => $row['months'],
                 'standard_months' => $offer !== null ? ($standard[$serviceId] ?? 0) : null,
                 'status' => $needsApproval ? FreeMonthGrant::STATUS_PENDING_APPROVAL : FreeMonthGrant::STATUS_APPROVED,
-                // The month chosen on the form — kept while awaiting
-                // approval, so approving starts exactly there.
-                'start_period' => max($row['from'], $this->lock->currentPeriod()),
+                // The month chosen on the form, kept while awaiting approval
+                // so approving starts exactly there — a closed month too for
+                // a late registration: free months count from the real
+                // connection (owner, 2026-10-26). By calendar, so a run that
+                // started in a closed month simply has fewer months left.
+                'start_period' => $row['from'],
                 'requested_by' => $actor->id,
                 'decided_by' => $needsApproval ? null : $actor->id,
                 'decided_at' => $needsApproval ? null : now(),
@@ -252,9 +258,11 @@ class FreeMonthGrantService
             $current = $this->lock->currentPeriod();
 
             foreach ($grants->sortBy('id') as $grant) {
+                // Installation months keep the month chosen — approving late
+                // must not move them forward and give the used ones back.
                 $start = $grant->reason === FreeMonthGrant::REASON_COMPENSATION
                     ? $this->compensationStart($customer, $grant->service_id !== null ? (int) $grant->service_id : null)
-                    : max((string) ($grant->start_period ?? $current), $current);
+                    : (string) ($grant->start_period ?? $current);
 
                 $grant->update([
                     'status' => FreeMonthGrant::STATUS_APPROVED,

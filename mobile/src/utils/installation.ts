@@ -80,12 +80,22 @@ function monthIndex(from: string, period: string): number {
     return (y - fy) * 12 + (m - fm);
 }
 
-/** The installation month: when the customer was connected, never a month already past. */
+/**
+ * The connection month: free months count from here, even when it has
+ * closed (a late registration) — App\Support\Billing\ConnectionMonth.
+ */
 export function installationMonth(connectedOn: string, today: string): string {
-    const connected = (connectedOn || today).slice(0, 7);
-    const current = today.slice(0, 7);
+    return (connectedOn || today).slice(0, 7);
+}
 
-    return connected > current ? connected : current;
+/** Whole months from `from` to `period` (`YYYY-MM`), negative when earlier. */
+export function monthsBetween(from: string, period: string): number {
+    return monthIndex(from, period);
+}
+
+/** Registered after the month they were connected in had passed. */
+export function isLateRegistration(connectedOn: string, today: string): boolean {
+    return installationMonth(connectedOn, today) < today.slice(0, 7);
 }
 
 /** A newly ticked service starts with the offer's months, else the installation month free (D16). */

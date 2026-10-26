@@ -64,12 +64,17 @@ export function periodLabel(period: string | null): string {
     return `${MONTHS[m - 1]} ${y}`;
 }
 
-/** The installation month: when the customer was connected, never a month already past. */
+/**
+ * The connection month: free months count from here, even when it has
+ * closed (a late registration) — App\Support\Billing\ConnectionMonth.
+ */
 export function installationMonth(connectedOn: string, today: string): string {
-    const connected = (connectedOn || today).slice(0, 7);
-    const current = today.slice(0, 7);
+    return (connectedOn || today).slice(0, 7);
+}
 
-    return connected > current ? connected : current;
+/** Month chips from the connection month to six months past the current one. */
+function chipCount(firstMonth: string, today: string): number {
+    return Math.max(0, monthIndex(firstMonth, today.slice(0, 7))) + CHIP_COUNT;
 }
 
 /**
@@ -338,9 +343,11 @@ export function InstallationSection({
                                 {plan.free_months > 0 && (
                                     <div className="mt-2">
                                         <div className="flex flex-wrap gap-1.5" role="group" aria-label={`Free months for ${service.name}`}>
-                                            {Array.from({ length: CHIP_COUNT }, (_, i) => addMonths(firstMonth, i)).map((month) => {
+                                            {Array.from({ length: chipCount(firstMonth, options.today) }, (_, i) => addMonths(firstMonth, i)).map((month) => {
                                                 const offset = monthIndex(start, month);
                                                 const selected = offset >= 0 && offset < plan.free_months;
+                                                // A closed month: free if chosen (already used), never billed.
+                                                const closed = month < options.today.slice(0, 7);
 
                                                 return (
                                                     <button
@@ -348,9 +355,10 @@ export function InstallationSection({
                                                         type="button"
                                                         aria-pressed={selected}
                                                         onClick={() => setPlan(service.uuid, toggleFreeMonth(plan, month, firstMonth))}
+                                                        title={closed ? 'Already passed' : undefined}
                                                         className={`rounded-full border px-3 py-1 text-xs font-medium ${
                                                             selected ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400'
-                                                        }`}
+                                                        } ${closed ? 'opacity-60' : ''}`}
                                                     >
                                                         {periodLabel(month)}
                                                     </button>
@@ -358,10 +366,24 @@ export function InstallationSection({
                                             })}
                                         </div>
                                         <p className="mt-1 text-xs text-slate-500">
-                                            The installation month is free by default — tap more months to add them (up to {options.max_free_months}; more needs an
-                                            admin/owner). Untick it to bill the installation month.
+                                            The connection month is free by default — tap the last free month to set them (up to {options.max_free_months}; more
+                                            needs an admin/owner). Faded months have already passed.
                                         </p>
                                     </div>
+                                )}
+                                {/* The free months decide the first bill — they always agree. */}
+                                {timeline && (
+                                    <p className="mt-2 text-xs text-slate-600">
+                                        First bill: <strong>{periodLabel(timeline.first_billed)}</strong>
+                                        {timeline.not_billed_from && (
+                                            <span className="text-amber-700">
+                                                {' '}
+                                                · not billed: {periodLabel(timeline.not_billed_from)}
+                                                {timeline.not_billed_until !== timeline.not_billed_from ? `–${periodLabel(timeline.not_billed_until ?? null)}` : ''} (passed before
+                                                registration — an admin may charge them later)
+                                            </span>
+                                        )}
+                                    </p>
                                 )}
 
                                 {options.can_take_payment && (
@@ -402,15 +424,19 @@ export function InstallationSection({
                     })}
                 {errors.service_plans && <p className="text-xs text-red-600">{errors.service_plans}</p>}
 
-                {(needsReason || values.installation_reason !== '') && (
+                {(needsReason || preview?.late || values.installation_reason !== '') && (
                     <div>
                         <TextInput
                             id="installation_reason"
-                            label="Reason (needs admin/owner approval)"
+                            label={needsReason ? 'Reason (needs admin/owner approval)' : 'Why is the customer registered only now?'}
                             value={values.installation_reason}
                             onChange={(e) => onChange('installation_reason', e.target.value)}
                             error={errors.installation_reason}
-                            placeholder="Why this customer gets a different deal"
+                            placeholder={
+                                preview?.late
+                                    ? `Connected in ${preview.connection_month_label} — e.g. the agent connected him and forgot to register him`
+                                    : 'Why this customer gets a different deal'
+                            }
                         />
                         {preview && preview.needs_approval.length > 0 && (
                             <p className="mt-1 text-xs text-amber-700">Needs approval: {preview.needs_approval.join(', ')}.</p>
@@ -442,8 +468,15 @@ export function InstallationSection({
                                 <p className="text-slate-600">Installation still owed after today: {formatCurrency(preview.installation_balance)}.</p>
                             )}
                             <p className="text-slate-600">
-                                Installation month {preview.installation_month_label} · first billed month <strong>{preview.first_bill_label ?? '—'}</strong>
+                                Connected {preview.connection_month_label ?? preview.installation_month_label} · first billed month{' '}
+                                <strong>{preview.first_bill_label ?? '—'}</strong>
                             </p>
+                            {preview.late && (
+                                <p className="text-amber-700">
+                                    Registered late: free months count from the connection month; months that passed after them are not billed unless an admin
+                                    charges them as old debt.
+                                </p>
+                            )}
                         </div>
                     )}
                     {!previewError && !preview && <p className="text-slate-500">Working out the first bill…</p>}

@@ -736,6 +736,9 @@ export interface ServiceTimeline {
     paid_from: string | null;
     paid_until: string | null;
     first_billed: string | null;
+    /** A late registration's closed months after the free ones — not billed unless an admin charges them. */
+    not_billed_from?: string | null;
+    not_billed_until?: string | null;
 }
 
 /** The coverage line — "TV Service: free Oct–Nov 2026, paid Dec 2026–Feb 2027, billed from Mar 2027" (CustomerCoverageService). */
@@ -787,7 +790,10 @@ export interface FieldInstallationDetail {
         zones: Zone[];
         offers: InstallationOfferOption[];
         max_free_months: number;
+        /** The connection month: free months count from here, even when it has closed. */
         installation_month: string;
+        /** The first month that can still be billed. */
+        current_month?: string;
         today: string;
     };
 }
@@ -802,6 +808,11 @@ export interface InstallationPreview {
     settled_now: boolean;
     installation_month: string;
     installation_month_label: string;
+    /** When they were connected — free months count from here. */
+    connection_month?: string;
+    connection_month_label?: string;
+    /** Registered after their connection month closed. */
+    late?: boolean;
     services: ServiceTimeline[];
     upfront_amount: string;
     first_bill: string | null;

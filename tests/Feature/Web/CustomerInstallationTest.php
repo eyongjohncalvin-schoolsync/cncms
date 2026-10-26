@@ -135,6 +135,78 @@ class CustomerInstallationTest extends TestCase
         return ['service_uuid' => $service->uuid, 'free_from' => $free > 0 ? $from : null, 'free_months' => $free, 'paid_months' => $paid];
     }
 
+    public function test_a_late_registration_counts_free_months_from_the_real_connection(): void
+    {
+        // Connected 12 Aug, registered 10 Oct with 3 free months: Aug–Oct
+        // are free (Aug and Sep already passed), so the first bill is Nov.
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+
+        $this->post('/customers', $this->form([
+            'connected_on' => '2026-08-12',
+            'service_plans' => [$this->plan($this->tv, free: 3, from: '2026-08')],
+        ]))->assertSessionHasErrors('installation_reason');
+
+        $this->post('/customers', $this->form([
+            'connected_on' => '2026-08-12',
+            'installation_reason' => 'The agent connected him in August and forgot to register him',
+            'service_plans' => [$this->plan($this->tv, free: 3, from: '2026-08')],
+        ]))->assertSessionHasNoErrors();
+
+        $customer = $this->created();
+        $this->assertSame('2026-08-12', $customer->connected_on->toDateString());
+        $this->assertSame('2026-10', $customer->billing_starts_period, 'closed months are never written');
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame('2026-08', $grant->start_period, 'counted from the connection, not moved to now');
+        $this->assertSame(3, $grant->months);
+
+        $this->assertSame('0.00', (string) $this->bill($customer, '2026-10')->total_bill, 'October is the last free month');
+        $this->assertSame('2500.00', (string) $this->bill($customer, '2026-11')->bill, 'the first bill');
+    }
+
+    public function test_a_late_registration_shows_the_months_not_billed(): void
+    {
+        // Connected in August with one free month: September passed unbilled.
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+
+        $preview = $this->postJson('/customers/installation-preview', $this->form([
+            'connected_on' => '2026-08-12',
+            'service_plans' => [$this->plan($this->tv, free: 1, from: '2026-08')],
+        ]))->assertOk()->json();
+
+        $this->assertTrue($preview['late'], 'The preview works before the reason is typed.');
+        $this->assertSame('2026-08', $preview['connection_month']);
+        $this->assertSame('2026-10', $preview['first_bill']);
+        $tv = collect($preview['services'])->firstWhere('service_uuid', $this->tv->uuid);
+        $this->assertSame(['2026-08', '2026-08'], [$tv['free_from'], $tv['free_until']]);
+        $this->assertSame(['2026-09', '2026-09'], [$tv['not_billed_from'], $tv['not_billed_until']]);
+        $this->assertStringContainsString('not billed Sep', $preview['line']);
+    }
+
+    public function test_approving_late_free_months_keeps_their_start(): void
+    {
+        // The fee isn't paid, so the free months wait for approval; approving
+        // them a month later must not move them forward and give the used ones back.
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+        $this->post('/customers', $this->form([
+            'installation_fee' => '10000',
+            'installation_paid' => '0',
+            'installation_reason' => 'Promised by the agent',
+            'service_plans' => [$this->plan($this->tv, free: 2, from: '2026-10')],
+        ]))->assertSessionHasNoErrors();
+        $grant = FreeMonthGrant::query()->where('customer_id', $this->created()->id)->sole();
+        $this->assertSame(FreeMonthGrant::STATUS_PENDING_APPROVAL, $grant->status);
+
+        $this->travelTo(Carbon::parse('2026-11-20 09:00', 'Africa/Lagos'));
+        $this->admin();
+        $this->post("/free-months/{$grant->uuid}/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame('2026-10', $grant->fresh()->start_period);
+    }
+
     public function test_example_a_free_months_then_months_paid_upfront_then_billed(): void
     {
         // TV 2,500, installed 10 Oct, fee paid in full: Oct–Nov free (the

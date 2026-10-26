@@ -144,6 +144,11 @@ class CustomerCoverageService
                 $bits[] = 'free '.self::range($timeline['free_from'], (string) $timeline['free_until']);
             }
 
+            // A late registration's closed months after the free ones (CustomerInstallationService::planFor()).
+            if (($timeline['not_billed_from'] ?? null) !== null) {
+                $bits[] = 'not billed '.self::range($timeline['not_billed_from'], (string) $timeline['not_billed_until']);
+            }
+
             if ($timeline['paid_from'] !== null) {
                 $bits[] = 'paid '.self::range($timeline['paid_from'], (string) $timeline['paid_until']);
             }

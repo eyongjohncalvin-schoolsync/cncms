@@ -7,6 +7,8 @@ import {
     initialInstallationState,
     installationMonth,
     isFreeMonth,
+    isLateRegistration,
+    monthsBetween,
     promoLabel,
     syncPlans,
     takesMoney,
@@ -21,10 +23,16 @@ test('addMonths crosses the year', () => {
     assert.equal(addMonths('2026-10', 0), '2026-10');
 });
 
-test('installationMonth: the connection month, never a past month', () => {
+test('installationMonth: the real connection month, even one that has passed (late registration)', () => {
     assert.equal(installationMonth('2026-10-10', '2026-10-23'), '2026-10');
-    assert.equal(installationMonth('2026-08-30', '2026-10-23'), '2026-10');
+    assert.equal(installationMonth('2026-08-30', '2026-10-23'), '2026-08');
     assert.equal(installationMonth('', '2026-10-23'), '2026-10');
+});
+
+test('isLateRegistration: connected in a month that has passed', () => {
+    assert.equal(isLateRegistration('2026-08-30', '2026-10-23'), true);
+    assert.equal(isLateRegistration('2026-10-01', '2026-10-23'), false);
+    assert.equal(monthsBetween('2026-08', '2026-10'), 2);
 });
 
 test('defaultPlan: the installation month free by default, the offer preset when picked', () => {

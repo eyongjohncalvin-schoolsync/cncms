@@ -43,6 +43,7 @@ use App\Services\InvoiceService;
 use App\Services\ManuscriptRunLockService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
+use App\Support\Billing\ConnectionMonth;
 use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
@@ -756,7 +757,8 @@ class CustomerController extends Controller
             : null;
         $currentPeriod = app(ManuscriptRunLockService::class)->currentPeriod();
         $connectedOn = (string) ($proposal['connected_on'] ?? $customer->connected_on?->toDateString() ?? BusinessTimezone::today());
-        $installationMonth = max(substr(min($connectedOn, BusinessTimezone::today()), 0, 7), $currentPeriod);
+        // Free months count from the connection month, even a closed one (ConnectionMonth).
+        $installationMonth = ConnectionMonth::of(min($connectedOn, BusinessTimezone::today()));
 
         return [
             'uuid' => $field->uuid,
@@ -800,6 +802,7 @@ class CustomerController extends Controller
                 'offers' => $offers,
                 'max_free_months' => FreeMonthGrantService::maxMonths(),
                 'installation_month' => $installationMonth,
+                'current_month' => $currentPeriod,
                 'today' => BusinessTimezone::today(),
             ],
         ];

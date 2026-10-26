@@ -16,11 +16,11 @@ use App\Models\Payment;
 use App\Models\Service;
 use App\Models\User;
 use App\Models\Zone;
+use App\Support\Billing\ConnectionMonth;
 use App\Support\Billing\FreeMonthPlan;
 use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
 use App\Support\UpperCaseLabel;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -71,7 +71,7 @@ class CustomerInstallationService
     public function preview(array $services, InstallationData $installation, ?string $name = null, ?string $phone = null): array
     {
         return [
-            ...$this->planFor($services, $installation)['summary'],
+            ...$this->planFor($services, $installation, preview: true)['summary'],
             'duplicates' => $this->possibleDuplicates($name, $phone),
         ];
     }
@@ -352,11 +352,10 @@ class CustomerInstallationService
             }
         }
 
-        // A registration that synced or was activated after its month closed
-        // cannot be backdated: its free run starts at the installation month
-        // at the earliest.
+        // Free months count from the real connection month, even when the
+        // registration synced or is activated after that month closed.
         $connectedOn = min($installation->connectedOn ?? $customer->connected_on?->toDateString() ?? BusinessTimezone::today(), BusinessTimezone::today());
-        $installationMonth = max(BusinessTimezone::periodOf(Carbon::parse($connectedOn, BusinessTimezone::WAT)), $this->lock->currentPeriod());
+        $connectionMonth = ConnectionMonth::of($connectedOn);
         $plans = [];
 
         foreach ($services as $selection) {
@@ -366,7 +365,7 @@ class CustomerInstallationService
 
             $chosen = $installation->servicePlans[$selection->serviceUuid] ?? null;
             $plans[$selection->serviceUuid] = [
-                'free_from' => isset($chosen['free_from']) ? max((string) $chosen['free_from'], $installationMonth) : null,
+                'free_from' => isset($chosen['free_from']) ? max((string) $chosen['free_from'], $connectionMonth) : null,
                 'free_months' => (int) ($chosen['free_months'] ?? 0),
                 // Settled by the money, not by the form: the upfront months
                 // are already a payment, so planFor() must not count them
@@ -444,7 +443,7 @@ class CustomerInstallationService
      * @param  list<CustomerServiceSelection>  $services
      * @return array{offer: ?InstallationOffer, standard_fee: ?string, charge_amount: ?string, fee_needs_approval: bool, waiver_needed: bool, free_by_service_id: array<int, array{from: string, months: int}>, free_needs_approval: bool, service_months: list<array{service_id: int, months: int, rate: string}>, upfront_amount: string, connected_on: string, installation_month: string, summary: array<string, mixed>}
      */
-    private function planFor(array $services, InstallationData $installation, bool $field = false, bool $activation = false, ?CustomerCharge $charge = null, ?int $branchId = null): array
+    private function planFor(array $services, InstallationData $installation, bool $field = false, bool $activation = false, ?CustomerCharge $charge = null, ?int $branchId = null, bool $preview = false): array
     {
         $today = BusinessTimezone::today();
         // The customer's branch's prices and offer fees (branches v2 D4).
@@ -494,7 +493,18 @@ class CustomerInstallationService
             $connectedOn = $today;
         }
 
-        $installationMonth = max(BusinessTimezone::periodOf(Carbon::parse($connectedOn, BusinessTimezone::WAT)), $this->lock->currentPeriod());
+        // Free months count from the real connection month; the ledger starts
+        // there, or now when that month has closed (ConnectionMonth).
+        $connectionMonth = ConnectionMonth::of($connectedOn);
+        $installationMonth = ConnectionMonth::billingStarts($connectedOn, $this->lock->currentPeriod());
+        $late = ConnectionMonth::isLate($connectedOn, $this->lock->currentPeriod());
+
+        // A late registration says why (the office's to give for a field one, at activation).
+        if ($late && ! $preview && $installation->reason === null && ($activation || ! $field)) {
+            throw ValidationException::withMessages([
+                'installation_reason' => 'The customer was connected in '.CustomerCoverageService::monthLabel($connectionMonth).' — say why they are registered only now.',
+            ]);
+        }
 
         if ($activation) {
             // Activating a field registration: the fee was settled in the
@@ -537,7 +547,7 @@ class CustomerInstallationService
         if ($installation->servicePlans === null) {
             foreach ($presets as $serviceId => $months) {
                 if (isset($prices[$serviceId])) {
-                    $plans[$serviceId] = ['free_from' => $installationMonth, 'free_months' => $months, 'paid_months' => 0];
+                    $plans[$serviceId] = ['free_from' => $connectionMonth, 'free_months' => $months, 'paid_months' => 0];
                 }
             }
         } else {
@@ -552,7 +562,7 @@ class CustomerInstallationService
                     continue;
                 }
 
-                $plans[(int) $serviceId] = [...$row, 'free_from' => $row['free_from'] ?? $installationMonth];
+                $plans[(int) $serviceId] = [...$row, 'free_from' => $row['free_from'] ?? $connectionMonth];
             }
         }
 
@@ -568,8 +578,8 @@ class CustomerInstallationService
             }
 
             if ($row['free_months'] > 0) {
-                if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) $row['free_from']) || $row['free_from'] < $installationMonth) {
-                    throw ValidationException::withMessages(['service_plans' => 'Free months start at the installation month or later.']);
+                if (! preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) $row['free_from']) || $row['free_from'] < $connectionMonth) {
+                    throw ValidationException::withMessages(['service_plans' => 'Free months start at the connection month or later.']);
                 }
 
                 $freeById[$serviceId] = ['from' => (string) $row['free_from'], 'months' => $row['free_months']];
@@ -594,7 +604,7 @@ class CustomerInstallationService
         ]));
 
         // A field registration's reason is the office's to give, at activation.
-        if ($needsApproval !== [] && $installation->reason === null && ($activation || ! $field)) {
+        if ($needsApproval !== [] && ! $preview && $installation->reason === null && ($activation || ! $field)) {
             throw ValidationException::withMessages(['installation_reason' => 'Give the reason for '.mb_strtolower(implode(', ', $needsApproval)).' — it needs approval.']);
         }
 
@@ -612,20 +622,34 @@ class CustomerInstallationService
             $windows[] = ['service_id' => $serviceId, 'start' => $row['from'], 'end' => FreeMonthGrant::addMonths($row['from'], $row['months'] - 1)];
         }
 
+        // Paid and billed months from the first open month (never a closed one)…
         $walk = (new FreeMonthPlan($installationMonth, $prices, $windows))->timelines(
             $installationMonth,
             array_combine(array_column($serviceMonths, 'service_id'), array_column($serviceMonths, 'months')) ?: [],
         );
+        // …free months from the real connection month, closed ones included.
+        $freeWalk = $late ? (new FreeMonthPlan($connectionMonth, $prices, $windows))->timelines($connectionMonth)['services'] : [];
 
         $timelines = [];
 
         foreach ($walk['services'] as $serviceId => $timeline) {
+            if ($late) {
+                $timeline['free_from'] = $freeWalk[$serviceId]['free_from'];
+                $timeline['free_until'] = $freeWalk[$serviceId]['free_until'];
+            }
+
+            // Months after the free ones that closed before registration: not billed (an admin may charge them).
+            $notBilledFrom = $timeline['free_until'] !== null ? FreeMonthGrant::addMonths($timeline['free_until'], 1) : $connectionMonth;
+            $notBilledUntil = FreeMonthGrant::addMonths($installationMonth, -1);
+
             $timelines[] = [
                 'service_uuid' => (string) array_search($serviceId, $uuidToId->all(), true),
                 'service' => (string) ($serviceNames[$serviceId] ?? 'Service'),
                 'price' => $prices[$serviceId],
                 ...$timeline,
                 'paid_amount' => bcmul((string) ($plans[$serviceId]['paid_months'] ?? 0), $prices[$serviceId], 2),
+                'not_billed_from' => $late && $notBilledFrom <= $notBilledUntil ? $notBilledFrom : null,
+                'not_billed_until' => $late && $notBilledFrom <= $notBilledUntil ? $notBilledUntil : null,
             ];
         }
 
@@ -643,7 +667,12 @@ class CustomerInstallationService
             'upfront_amount' => $upfront,
             'connected_on' => $connectedOn,
             'installation_month' => $installationMonth,
+            'connection_month' => $connectionMonth,
+            'late' => $late,
             'summary' => [
+                'connection_month' => $connectionMonth,
+                'connection_month_label' => CustomerCoverageService::monthLabel($connectionMonth),
+                'late' => $late,
                 'bill' => $bill,
                 'fee' => $chargeAmount !== null && ! $waiverNeeded ? $chargeAmount : '0.00',
                 'standard_fee' => $standardFee,
