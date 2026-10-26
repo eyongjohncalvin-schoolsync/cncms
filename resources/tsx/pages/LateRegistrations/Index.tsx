@@ -181,9 +181,9 @@ export default function LateRegistrationsIndex({ months, rows, by_connector, by_
                                         <Td>{row.connected_by}</Td>
                                         <Td className={Number(row.says_paid_amount ?? 0) > 0 ? 'font-semibold text-red-700' : ''}>
                                             {row.says_paid_amount === null
-                                                ? '—'
+                                                ? 'Not asked'
                                                 : Number(row.says_paid_amount) > 0
-                                                  ? `${formatCurrency(row.says_paid_amount)} to ${row.says_paid_to ?? '?'}`
+                                                  ? `${formatCurrency(row.says_paid_amount)}${row.says_paid_to ? ` to ${row.says_paid_to}` : ''}`
                                                   : 'Nobody'}
                                         </Td>
                                         <Td>

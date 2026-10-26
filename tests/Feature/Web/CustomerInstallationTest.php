@@ -293,8 +293,10 @@ class CustomerInstallationTest extends TestCase
             ...$extra,
         ]);
 
-        $this->post('/customers', $late([]))->assertSessionHasErrors('customer_says_paid_amount');
-        $this->post('/customers', $late(['customer_says_paid_amount' => 10000]))->assertSessionHasErrors('customer_says_paid_to');
+        // The reason is required; what the customer says they paid, and to whom, is optional.
+        $this->post('/customers', $late(['installation_reason' => '']))->assertSessionHasErrors('installation_reason');
+        $this->post('/customers', $late(['name' => 'Not Asked Customer']))->assertSessionHasNoErrors();
+        $this->assertNull($this->created('Not Asked Customer')->customer_says_paid_amount, 'blank = not asked');
         $this->post('/customers', $late(['customer_says_paid_amount' => 10000, 'customer_says_paid_to' => 'Terence, the agent']))->assertSessionHasNoErrors();
 
         $customer = $this->created();

@@ -328,12 +328,12 @@ function ActivateModal({ open, onClose, field, zoneUuid }: { open: boolean; onCl
                 )}
                 {field.form.current_month && data.connected_on.slice(0, 7) < field.form.current_month && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                        <p className="text-sm font-medium text-amber-900">Registered late — did the customer pay anyone for the connection? Ask them.</p>
+                        <p className="text-sm font-medium text-amber-900">Registered late — did the customer pay anyone for the connection? (optional)</p>
                         <TextInput
                             id="fi-says-paid"
                             type="number"
                             min="0"
-                            label="Amount they say they paid (0 if nobody)"
+                            label="Amount they say they paid (0 if nobody, blank if not asked)"
                             value={data.customer_says_paid_amount}
                             onChange={(e) => setData('customer_says_paid_amount', e.target.value)}
                             error={fieldErrors.customer_says_paid_amount}
@@ -341,7 +341,7 @@ function ActivateModal({ open, onClose, field, zoneUuid }: { open: boolean; onCl
                         {Number(data.customer_says_paid_amount) > 0 && (
                             <TextInput
                                 id="fi-says-paid-to"
-                                label="Paid to whom?"
+                                label="Paid to whom? (optional)"
                                 value={data.customer_says_paid_to}
                                 onChange={(e) => setData('customer_says_paid_to', e.target.value)}
                                 error={fieldErrors.customer_says_paid_to}

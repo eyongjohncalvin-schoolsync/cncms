@@ -296,13 +296,13 @@ export function InstallationSection({
 
                     {preview?.late && (
                         <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                            <p className="text-sm font-medium text-amber-900">Did the customer pay anyone for the connection? Ask them.</p>
+                            <p className="text-sm font-medium text-amber-900">Did the customer pay anyone for the connection? (optional — ask them if you can)</p>
                             <div className="mt-2 grid gap-3 sm:grid-cols-2">
                                 <TextInput
                                     id="customer_says_paid_amount"
                                     type="number"
                                     min="0"
-                                    label="Amount they say they paid (0 if nobody)"
+                                    label="Amount they say they paid (0 if nobody, blank if not asked)"
                                     value={values.customer_says_paid_amount}
                                     onChange={(e) => onChange('customer_says_paid_amount', e.target.value)}
                                     error={errors.customer_says_paid_amount}
@@ -310,7 +310,7 @@ export function InstallationSection({
                                 {Number(values.customer_says_paid_amount) > 0 && (
                                     <TextInput
                                         id="customer_says_paid_to"
-                                        label="Paid to whom?"
+                                        label="Paid to whom? (optional)"
                                         placeholder="e.g. the agent, by name"
                                         value={values.customer_says_paid_to}
                                         onChange={(e) => onChange('customer_says_paid_to', e.target.value)}

@@ -548,25 +548,13 @@ class CustomerInstallationService
         $installationMonth = ConnectionMonth::billingStarts($connectedOn, $this->lock->currentPeriod());
         $late = ConnectionMonth::isLate($connectedOn, $this->lock->currentPeriod());
 
-        // A late registration says why, and what the customer says they paid
-        // and to whom — for auditing (the office's to give for a field one,
-        // at activation).
-        if ($late && ! $preview && ($activation || ! $field)) {
-            $missing = array_filter([
-                'installation_reason' => $installation->reason === null
-                    ? 'The customer was connected in '.CustomerCoverageService::monthLabel($connectionMonth).' — say why they are registered only now.'
-                    : null,
-                'customer_says_paid_amount' => $installation->customerSaysPaidAmount === null
-                    ? 'Ask the customer whether they paid anyone for the connection (0 if nobody).'
-                    : null,
-                'customer_says_paid_to' => $installation->customerSaysPaidAmount !== null && bccomp($installation->customerSaysPaidAmount, '0', 2) > 0 && $installation->customerSaysPaidTo === null
-                    ? 'Who did the customer pay?'
-                    : null,
+        // A late registration says why (the office's to give for a field one,
+        // at activation). What the customer says they paid, and to whom, is
+        // optional (owner, 2026-10-26) — left blank means "not asked".
+        if ($late && ! $preview && ($activation || ! $field) && $installation->reason === null) {
+            throw ValidationException::withMessages([
+                'installation_reason' => 'The customer was connected in '.CustomerCoverageService::monthLabel($connectionMonth).' — say why they are registered only now.',
             ]);
-
-            if ($missing !== []) {
-                throw ValidationException::withMessages($missing);
-            }
         }
 
         if ($activation) {
