@@ -813,6 +813,15 @@ class PaymentService
             ]);
         }
 
+        // A receipt number once issued is audited (printed books, unaccounted
+        // numbers): a reversed payment keeps its VOID receipt as proof and
+        // simply stays under Rejected.
+        if ($payment->receipt()->exists()) {
+            throw ValidationException::withMessages([
+                'payment' => 'This payment had a receipt — it stays, voided, as proof. It only shows under Rejected.',
+            ]);
+        }
+
         $charge = $payment->customerCharge;
 
         $this->payments->delete($payment);

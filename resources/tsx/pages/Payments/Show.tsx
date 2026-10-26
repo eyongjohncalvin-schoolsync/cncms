@@ -208,7 +208,7 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                                 Reverse Payment
                             </Button>
                         )}
-                        {can_delete && !isVerified && (
+                        {can_delete && !isVerified && !receipt && !payment.handed_in && (
                             <Button type="button" variant="danger" onClick={() => setConfirmingDelete(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
                                 Delete Payment
                             </Button>

@@ -146,7 +146,8 @@ class PaymentController extends Controller
             // silently narrowing the signal to "this month".
             // Counted within the view picked (monthly bills / installation fees / all).
             'statusCounts' => [
-                'all' => $this->countedPayments($filters['purpose'])->count(),
+                // The default list: money that counts (pending + verified) — rejected ones have their own tab.
+                'all' => $this->countedPayments($filters['purpose'])->where('verification_status', '!=', 'rejected')->count(),
                 'pending' => $this->countedPayments($filters['purpose'])->where('verification_status', 'pending')->count(),
                 'verified' => $this->countedPayments($filters['purpose'])->where('verification_status', 'verified')->count(),
                 'rejected' => $this->countedPayments($filters['purpose'])->where('verification_status', 'rejected')->count(),

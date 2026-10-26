@@ -11,8 +11,10 @@ use App\Models\TenantUser;
 use App\Models\User;
 use App\Support\TenantContext;
 use Database\Factories\CustomerFactory;
+use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -68,6 +70,26 @@ class BillAndInstallationMoneyTest extends TestCase
         $this->get('/payments?purpose=fees')->assertInertia(fn (Assert $page) => $page
             ->where('filters.purpose', 'fees')
             ->where('payments.data', fn ($rows) => collect($rows)->firstWhere('uuid', $this->installation->uuid)['purpose_label'] === 'Installation'));
+    }
+
+    public function test_rejected_payments_only_show_under_rejected_and_can_be_deleted_unless_receipted(): void
+    {
+        $rejected = PaymentFactory::new()->pending()->create(['customer_id' => $this->customer->id, 'amount' => 3000]);
+        $this->post("/payments/{$rejected->uuid}/verify", ['action' => 'reject', 'notes' => 'Wrong customer'])->assertSessionHasNoErrors();
+
+        $uuids = fn (string $url): array => collect($this->get($url)->assertOk()->viewData('page')['props']['payments']['data'])->pluck('uuid')->all();
+        $this->assertNotContains($rejected->uuid, $uuids('/payments'), 'Not money: not in the default list.');
+        $this->assertContains($rejected->uuid, $uuids('/payments?verification_status=rejected'));
+
+        $this->delete("/payments/{$rejected->uuid}")->assertSessionHasNoErrors();
+        $this->assertNull(Payment::query()->find($rejected->id));
+
+        // A reversed payment keeps its VOID receipt as proof.
+        $this->bill->update(['recorded_by' => null]);
+        $this->post("/payments/{$this->bill->uuid}/reverse", ['reason' => 'Paid twice'])->assertSessionHasNoErrors();
+        $this->delete("/payments/{$this->bill->uuid}")->assertSessionHasErrors('payment');
+        Cache::flush(); // the list is cached for 25 seconds (PaymentService::list())
+        $this->assertNotContains($this->bill->uuid, $uuids('/payments'));
     }
 
     public function test_the_dashboard_shows_bill_money_and_installation_money_apart(): void

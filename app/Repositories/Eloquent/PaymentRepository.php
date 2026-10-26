@@ -26,7 +26,9 @@ class PaymentRepository implements PaymentRepositoryInterface
             )
             ->when(
                 $filters['verification_status'] ?? null,
-                fn ($query, $status) => $query->where('verification_status', $status)
+                fn ($query, $status) => $query->where('verification_status', $status),
+                // The default list is money: rejected payments only show under Rejected.
+                fn ($query) => ($filters['duplicates'] ?? false) ? $query : $query->where('verification_status', '!=', 'rejected'),
             )
             ->when($filters['duplicates'] ?? false, fn ($query) => $query->whereNotNull('duplicate_of_id'))
             // Bill money vs one-off fees (installation, relocation, re-installation).

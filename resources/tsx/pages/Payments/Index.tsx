@@ -61,7 +61,8 @@ const purposeViews: { key: 'bill' | 'fees' | 'all'; label: string }[] = [
 ];
 
 const tabs: { key: TabKey; label: string }[] = [
-    { key: 'all', label: 'All' },
+    // Rejected payments are not money: they only show under Rejected.
+    { key: 'all', label: 'Pending & verified' },
     { key: 'pending', label: 'Pending' },
     { key: 'verified', label: 'Verified' },
     { key: 'rejected', label: 'Rejected' },
@@ -117,6 +118,9 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
     // `payments.delete` mirrors PaymentPolicy::delete's stricter gate.
     const canVerify = hasPermission(auth.user?.permissions, 'payments.verify');
     const canDelete = hasPermission(auth.user?.permissions, 'payments.delete');
+    // PaymentService::delete(): not verified, never handed in, and never receipted
+    // (a reversed payment keeps its VOID receipt as proof, under Rejected).
+    const isDeletable = (payment: Payment) => canDelete && payment.verification_status !== 'verified' && !payment.receipt && !payment.handed_in;
 
     const [reviewing, setReviewing] = useState<Payment | null>(null);
     const [deleting, setDeleting] = useState<Payment | null>(null);
@@ -664,7 +668,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                             {payment.can_reverse && (
                                                 <DropdownItem onClick={() => setReversing(payment)}>Reverse</DropdownItem>
                                             )}
-                                            {canDelete && payment.verification_status !== 'verified' && (
+                                            {isDeletable(payment) && (
                                                 <>
                                                     <DropdownDivider />
                                                     <DropdownItem onClick={() => setDeleting(payment)} variant="danger">
@@ -673,6 +677,16 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                                 </>
                                             )}
                                         </Dropdown>
+                                        {/* A rejected payment is not money: delete it in one click. */}
+                                        {payment.verification_status === 'rejected' && isDeletable(payment) && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setDeleting(payment)}
+                                                className="ml-2 text-xs font-medium text-red-600 hover:underline"
+                                            >
+                                                Delete
+                                            </button>
+                                        )}
                                     </Td>
                                 </tr>
                             ))}
