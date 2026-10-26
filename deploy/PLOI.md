@@ -62,19 +62,12 @@ directory `/public`.
   - `QUEUE_CONNECTION=database`, `CACHE_STORE=database`, `SESSION_DRIVER=database`
   - `MAIL_*`: real SMTP. Receipts, voucher approvals, cash digests and
     maintenance notices all email.
-- **Keep the test suite off the server (one time, after the first deploy).**
-  `tests/` stays in Git — it guards every change — but production never needs
-  it (it is outside `/public`, holds no secrets, and `--no-dev` skips PHPUnit).
-  Sparse checkout makes every later `git pull` leave it out:
-
-  ```bash
-  cd {SITE_DIRECTORY}
-  git sparse-checkout init --no-cone
-  git sparse-checkout set '/*' '!/tests/' '!/phpunit.xml'
-  ls tests 2>/dev/null || echo "tests/ not on the server"
-  ```
-
-  Undo with `git sparse-checkout disable`.
+- **The test suite stays off the server.** `tests/` stays in Git — it guards
+  every change — but production never needs it (it is outside `/public`,
+  holds no secrets, and `--no-dev` skips PHPUnit). The deploy script below
+  sets a sparse checkout on every deploy, so `git pull` leaves it out. Check:
+  `ls {SITE_DIRECTORY}/tests 2>/dev/null || echo "tests/ not on the server"`.
+  Undo with `git sparse-checkout disable` (and remove that deploy line).
 - **Deploy script** (site → Deploy script). Use Ploi's own variables as its
   editor names them:
 
@@ -82,7 +75,8 @@ directory `/public`.
   set -e   # any failed step (e.g. a migration) stops the deploy and Ploi marks it failed
   cd {SITE_DIRECTORY}
   PHP_BIN={SITE_PHP} bash deploy/scripts/backup-db.sh   # a fresh backup before every deploy — no backup, no deploy
-  git pull origin {BRANCH}
+  git sparse-checkout set --no-cone '/*' '!/tests/' '!/phpunit.xml'   # tests stay off the server (safe to repeat)
+  git pull --no-stat origin {BRANCH}   # --no-stat: no list of changed files (it named tests even when they are not checked out)
   {SITE_COMPOSER} install --no-interaction --prefer-dist --optimize-autoloader --no-dev
   npm ci && npm run build
   {SITE_PHP} artisan migrate --force
@@ -143,7 +137,8 @@ user** (with site isolation that is the site's own user, e.g.
 bash {SITE_DIRECTORY}/deploy/scripts/backup-db.sh
 ```
 
-It writes to `~/backups/cncms` and keeps 14 days. Check the folder the
+It writes to `~/backups/cncms` and deletes backups older than 14 days
+(nightly and deploy ones alike), always keeping the newest 3. Check the folder the
 morning after setting it up: before 2026-10-25 the script misread `.env`
 and failed every run without saying so. The deploy script above also takes
 one before every deploy. **Copy those off the
