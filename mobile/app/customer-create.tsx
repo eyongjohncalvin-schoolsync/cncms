@@ -148,7 +148,8 @@ export default function CustomerCreateScreen() {
             setInstallation(
                 initialInstallationState(
                     fieldMode ? localToday() : options.today,
-                    options.can_manage || fieldMode ? (options.offers.find((o) => o.is_default)?.uuid ?? null) : null,
+                    // No promotion is preselected: free months are the default (owner, 2026-10-26).
+                    null,
                 ),
             );
         }
@@ -239,7 +240,7 @@ export default function CustomerCreateScreen() {
                     const options = installationResponse.data;
                     setInstallationOptions(options);
                     setInstallation(
-                        initialInstallationState(options.today, options.can_manage ? (options.offers.find((o) => o.is_default)?.uuid ?? null) : null),
+                        initialInstallationState(options.today, null),
                     );
                 }
 

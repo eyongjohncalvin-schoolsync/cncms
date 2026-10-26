@@ -16,9 +16,11 @@ use Illuminate\Validation\ValidationException;
  * Settings → Installation offers (docs/plans/installation-and-promotions.md,
  * phase 2, item 1) — the only writer of App\Models\InstallationOffer. An
  * offer is a fee and free months per service (D7), each capped by
- * companies.max_free_months (D8), with an optional validity window and one
- * default (pre-selected on the add-customer form). Offers are copied onto a
- * customer when picked, so editing one never changes past customers.
+ * companies.max_free_months (D8), with an optional validity window. Since
+ * 2026-10-26 offers are promotions: an admin switches one on for a campaign,
+ * staff pick it on purpose — never preselected (free months are the default
+ * without one). Offers are copied onto a customer when picked, so editing
+ * one never changes past customers.
  */
 class InstallationOfferService
 {
@@ -30,10 +32,6 @@ class InstallationOfferService
         $months = $this->resolveMonths($data['months'] ?? []);
 
         return DB::transaction(function () use ($offer, $data, $months): InstallationOffer {
-            if ($data['is_default'] ?? false) {
-                InstallationOffer::query()->where('is_default', true)->when($offer !== null, fn ($q) => $q->whereKeyNot($offer->id))->update(['is_default' => false]);
-            }
-
             $attributes = [
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
@@ -41,7 +39,8 @@ class InstallationOfferService
                 'valid_from' => $data['valid_from'] ?? null,
                 'valid_to' => $data['valid_to'] ?? null,
                 'active' => (bool) ($data['active'] ?? true),
-                'is_default' => (bool) ($data['is_default'] ?? false),
+                // Promotions are never preselected (owner, 2026-10-26).
+                'is_default' => false,
             ];
 
             if ($offer === null) {
@@ -80,7 +79,7 @@ class InstallationOfferService
 
     /**
      * The offers a manager may pick today, shaped for the add-customer form
-     * (web and mobile), default first.
+     * (web and mobile), by name.
      *
      * @return list<array{uuid: string, name: string, description: ?string, fee: string, is_default: bool, months: list<array{service_uuid: string, service_name: string, months: int}>}>
      */
@@ -92,7 +91,6 @@ class InstallationOfferService
         return InstallationOffer::query()
             ->available(BusinessTimezone::today())
             ->with('serviceMonths.service')
-            ->orderByDesc('is_default')
             ->orderBy('name')
             ->get()
             ->map(fn (InstallationOffer $offer): array => [...$this->shape($offer), 'fee' => $prices->offerFee($offer)])
@@ -112,7 +110,8 @@ class InstallationOfferService
             'name' => $offer->name,
             'description' => $offer->description,
             'fee' => bcadd((string) $offer->fee, '0', 2),
-            'is_default' => (bool) $offer->is_default,
+            // Always false: no promotion is preselected — older phone builds read this to preselect one.
+            'is_default' => false,
             'months' => $offer->serviceMonths
                 ->map(fn (OfferServiceMonths $row): array => [
                     'service_uuid' => (string) $row->service?->uuid,

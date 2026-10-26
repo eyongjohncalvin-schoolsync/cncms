@@ -39,7 +39,7 @@ class SaveInstallationOfferRequest extends FormRequest
             'valid_from' => ['nullable', 'date_format:Y-m-d'],
             'valid_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:valid_from'],
             'active' => ['boolean'],
-            'is_default' => ['boolean'],
+            'is_default' => ['boolean'], // ignored since 2026-10-26: promotions are never preselected
             'months' => ['nullable', 'array'],
             'months.*.service_uuid' => ['required', 'uuid', 'exists:services,uuid'],
             'months.*.months' => ['required', 'integer', 'min:0', 'max:'.FreeMonthGrantService::maxMonths()],

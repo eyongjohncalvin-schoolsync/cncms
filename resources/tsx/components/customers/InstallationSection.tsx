@@ -108,13 +108,15 @@ export function defaultPlan(serviceUuid: string, firstMonth: string, offer: Inst
     return { service_uuid: serviceUuid, free_from: months > 0 ? firstMonth : null, free_months: months, paid_months: 0 };
 }
 
-/** The section's starting values: the default offer pre-picked, nothing paid until typed. */
+/**
+ * The section's starting values: no promotion (free months are the default;
+ * a running promotion is picked on purpose — owner, 2026-10-26), nothing
+ * paid until typed.
+ */
 export function initialInstallationValues(options: InstallationOptions): InstallationFormValues {
-    const offer = options.can_manage ? options.offers.find((o) => o.is_default) : undefined;
-
     return {
         connected_on: options.today,
-        installation_offer_uuid: offer?.uuid ?? '',
+        installation_offer_uuid: '',
         installation_fee: '',
         installation_paid: '',
         installation_reason: '',
@@ -264,7 +266,7 @@ export function InstallationSection({
                     {options.can_manage && (
                         <SelectInput
                             id="installation_offer_uuid"
-                            label="Installation offer (preset)"
+                            label="Promotion (if one is running)"
                             value={values.installation_offer_uuid}
                             onChange={(e) => {
                                 const next = options.offers.find((o) => o.uuid === e.target.value) ?? null;
@@ -277,7 +279,7 @@ export function InstallationSection({
                             }}
                             error={errors.installation_offer_uuid}
                         >
-                            <option value="">No offer</option>
+                            <option value="">No promotion — free months below</option>
                             {options.offers.map((o) => (
                                 <option key={o.uuid} value={o.uuid}>
                                     {o.name} — {formatCurrency(o.fee)}
@@ -292,7 +294,7 @@ export function InstallationSection({
                             type="number"
                             min="0"
                             label="Installation fee (FCFA)"
-                            placeholder={offer ? `${offer.fee} (offer)` : '0'}
+                            placeholder={offer ? `${offer.fee} (promotion)` : '0'}
                             value={values.installation_fee}
                             onChange={(e) => onChange('installation_fee', e.target.value)}
                             error={errors.installation_fee}
@@ -462,7 +464,7 @@ export function InstallationSection({
                                     </li>
                                 ))}
                             </ul>
-                            <p className="mt-1 text-xs">Installation offers are for new installations only.</p>
+                            <p className="mt-1 text-xs">Promotions are for new installations only.</p>
                         </div>
                     </div>
                 )}

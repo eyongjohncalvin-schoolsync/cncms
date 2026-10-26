@@ -128,9 +128,9 @@ export function InstallationFields({
 
             {(options.can_manage || offline) && (
                 <>
-                    <Text style={styles.label}>Installation offer (preset)</Text>
+                    <Text style={styles.label}>Promotion (if one is running)</Text>
                     <View style={styles.chips}>
-                        {[{ uuid: null as string | null, name: 'No offer', fee: '' }, ...options.offers].map((o) => {
+                        {[{ uuid: null as string | null, name: 'No promotion', fee: '' }, ...options.offers].map((o) => {
                             const selected = o.uuid === state.offerUuid;
                             const next = options.offers.find((x) => x.uuid === o.uuid) ?? null;
 

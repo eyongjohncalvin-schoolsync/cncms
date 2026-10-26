@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Head, router, useForm } from '@inertiajs/react';
-import { IconEdit, IconGift, IconPlus, IconStar, IconTrash } from '@tabler/icons-react';
+import { IconEdit, IconGift, IconPlus, IconTrash } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { SettingsTabs } from '@/components/settings/SettingsTabs';
 import { Button } from '@/components/ui/Button';
@@ -21,7 +21,6 @@ interface OfferRow {
     name: string;
     description: string | null;
     fee: string;
-    is_default: boolean;
     months: OfferMonths[];
     valid_from: string | null;
     valid_to: string | null;
@@ -57,8 +56,8 @@ export default function InstallationOffers({ offers, services, max_free_months, 
     const fees = useForm({ relocation_fee: one_off_fees.relocation_fee ?? '', reinstallation_fee: one_off_fees.reinstallation_fee ?? '' });
 
     return (
-        <AppLayout title="Installation offers" breadcrumbs={[{ label: 'Settings', href: '/settings/company' }, { label: 'Installation offers' }]}>
-            <Head title="Settings — Installation offers" />
+        <AppLayout title="Installation promotions" breadcrumbs={[{ label: 'Settings', href: '/settings/company' }, { label: 'Installation promotions' }]}>
+            <Head title="Settings — Installation promotions" />
 
             <SettingsTabs active="installation-offers" />
 
@@ -68,16 +67,17 @@ export default function InstallationOffers({ offers, services, max_free_months, 
                         <IconGift size={24} stroke={1.75} />
                     </span>
                     <div>
-                        <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-900">Installation offers</h1>
+                        <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-900">Installation promotions</h1>
                         <p className="mt-1 text-sm text-slate-500">
-                            The installation fee and the free months each service comes with. Free months start the month after the fee is fully
-                            paid. Changing an offer never changes customers who already took it.
+                            Campaigns such as &quot;10,000 FCFA installation, 3 months free&quot;. Switch one on (with optional dates) and staff can pick
+                            it when adding a customer; otherwise they type the fee and give the usual free months. Changing a promotion never
+                            changes customers who already took it.
                         </p>
                     </div>
                 </div>
                 <Button onClick={() => setModal({ offer: null })} className="shrink-0">
                     <IconPlus size={16} stroke={1.9} />
-                    Add offer
+                    Add promotion
                 </Button>
             </div>
 
@@ -173,7 +173,7 @@ export default function InstallationOffers({ offers, services, max_free_months, 
                 </CardBody>
             </Card>
 
-            {offers.length === 0 && <p className="text-sm text-slate-500">No offers yet — add one so managers can pick it on the add-customer form.</p>}
+            {offers.length === 0 && <p className="text-sm text-slate-500">No promotions yet — add one when the company runs a campaign.</p>}
 
             <div className="space-y-4">
                 {offers.map((offer) => (
@@ -181,11 +181,8 @@ export default function InstallationOffers({ offers, services, max_free_months, 
                         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex min-w-0 flex-wrap items-center gap-2.5">
                                 <span className="font-medium text-slate-900">{offer.name}</span>
-                                {offer.is_default && (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                                        <IconStar size={11} stroke={2} />
-                                        Default
-                                    </span>
+                                {offer.available && (
+                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">Running</span>
                                 )}
                                 {!offer.available && (
                                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
@@ -266,7 +263,6 @@ function OfferFormModal({
         valid_from: offer?.valid_from ?? '',
         valid_to: offer?.valid_to ?? '',
         active: offer?.active ?? true,
-        is_default: offer?.is_default ?? false,
         months: services.map((service) => ({
             service_uuid: service.uuid,
             months: offer?.months.find((m) => m.service_uuid === service.uuid)?.months ?? 0,
@@ -287,7 +283,7 @@ function OfferFormModal({
     const monthErrors = Object.entries(errors).filter(([key]) => key.startsWith('months'));
 
     return (
-        <Modal open onClose={onClose} title={offer ? `Edit ${offer.name}` : 'Add installation offer'}>
+        <Modal open onClose={onClose} title={offer ? `Edit ${offer.name}` : 'Add promotion'}>
             <form onSubmit={submit} className="space-y-4">
                 <TextInput id="offer-name" label="Name" value={data.name} onChange={(e) => setData('name', e.target.value)} error={errors.name} required />
                 <TextInput
@@ -359,12 +355,8 @@ function OfferFormModal({
                 </div>
 
                 <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={data.is_default} onChange={(e) => setData('is_default', e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
-                    Pre-select this offer on new customers
-                </label>
-                <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input type="checkbox" checked={data.active} onChange={(e) => setData('active', e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
-                    Active (offered on the add-customer form)
+                    Switched on (staff can pick it on the add-customer form between its dates)
                 </label>
 
                 <div className="flex justify-end gap-2 pt-2">

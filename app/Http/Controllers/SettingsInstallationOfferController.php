@@ -44,7 +44,6 @@ class SettingsInstallationOfferController extends Controller
         return Inertia::render('Settings/InstallationOffers', [
             'offers' => InstallationOffer::query()
                 ->with('serviceMonths.service')
-                ->orderByDesc('is_default')
                 ->orderBy('name')
                 ->get()
                 ->map(fn (InstallationOffer $offer): array => [

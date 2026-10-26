@@ -111,7 +111,7 @@ class BranchSettingsController extends Controller
                         'branch_price' => $prices->overridesVariant($variant->id) ? $prices->variant($variant) : null,
                     ])->values()->all(),
                 ])->values()->all(),
-            'offers' => InstallationOffer::query()->available(BusinessTimezone::today())->orderByDesc('is_default')->orderBy('name')->get()
+            'offers' => InstallationOffer::query()->available(BusinessTimezone::today())->orderBy('name')->get()
                 ->map(fn (InstallationOffer $offer): array => [
                     'uuid' => $offer->uuid,
                     'name' => $offer->name,

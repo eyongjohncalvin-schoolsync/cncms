@@ -17,7 +17,7 @@ const tabs = [
     { href: '/settings/services', label: 'Services', icon: IconBroadcast },
     // installations.offers-gated (InstallationOfferPolicy) — same "tab may
     // render, controller enforces" tradeoff as Services above.
-    { href: '/settings/installation-offers', label: 'Installation offers', icon: IconGift },
+    { href: '/settings/installation-offers', label: 'Promotions', icon: IconGift },
     // payments.offers-gated (PrepaymentOfferPolicy) — same tradeoff.
     { href: '/settings/prepayment-offers', label: 'Prepayment offers', icon: IconCalendarDollar },
     // salaries.manage + headquarters (SalaryPolicy::manageScale) — same tradeoff.
