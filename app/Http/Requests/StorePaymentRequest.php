@@ -75,6 +75,10 @@ class StorePaymentRequest extends FormRequest
             'duplicate_note' => ['nullable', 'required_if:duplicate_reason,other', 'string', 'max:255'],
             // A prepayment offer (PaymentService::applyPrepaymentOffer() fixes its months and checks its price).
             'prepayment_offer_uuid' => ['nullable', 'uuid'],
+            // Correcting a verified payment: this one is recorded in its
+            // place and the old one reversed (PaymentController::store()).
+            'replaces_payment_uuid' => ['nullable', 'uuid'],
+            'replace_reason' => ['required_with:replaces_payment_uuid', 'nullable', 'string', 'min:3', 'max:500'],
         ];
     }
 }

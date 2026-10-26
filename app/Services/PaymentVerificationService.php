@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DataTransferObjects\ArrearsAdjustmentData;
+use App\DataTransferObjects\PaymentData;
 use App\DataTransferObjects\VerifyPaymentData;
 use App\Jobs\RecalculateCustomerManuscriptsForwardJob;
 use App\Models\CommandRun;
+use App\Models\ExpenseCategory;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
+use App\Models\RemittanceLine;
 use App\Models\User;
+use App\Models\Voucher;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\PaymentVerificationRepositoryInterface;
 use App\Support\BranchLookup;
@@ -83,23 +87,33 @@ class PaymentVerificationService
      *  - if that month has closed, its bill can't change, so an arrears
      *    adjustment adding the amount to the current month goes for approval;
      *  - it is refused while a bill run waits for review (its draft already
-     *    counted the money), and when the cash was already handed over in a
-     *    remittance — the money has moved, so the cashier records a refund.
+     *    counted the money).
      *
-     * @return array{payment: Payment, adjustment_filed: bool}
+     * What happens to the money ($money, owner 2026-10-26):
+     *  - `none` — nothing (the cash is still with the collector, or was never taken);
+     *  - `correct` — $correction is recorded in its place, in the same
+     *    transaction. When the cash was already handed in, the correction
+     *    takes the old payment's place in that handover (same method, not
+     *    more than was counted; any difference goes back through a refund
+     *    bon), so the collector never hands the same money in twice;
+     *  - `refund` — handed-in cash only: a refund bon for the whole amount,
+     *    approved and paid on Vouchers like any bon.
+     * Handed-in cash must say `correct` or `refund`, so the counted handover
+     * and the cash book still add up.
+     *
+     * @return array{payment: Payment, adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher}
      */
-    public function reverse(Payment $payment, string $reason, User $actor): array
+    public function reverse(Payment $payment, string $reason, User $actor, string $money = 'none', ?PaymentData $correction = null): array
     {
-        $result = DB::transaction(function () use ($payment, $reason, $actor): array {
+        $result = DB::transaction(function () use ($payment, $reason, $actor, $money, $correction): array {
             $locked = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->verification_status !== 'verified') {
                 throw ValidationException::withMessages(['reason' => 'Only a verified payment can be reversed — a pending one is simply rejected.']);
             }
 
-            if ($locked->remittanceLine()->exists()) {
-                throw ValidationException::withMessages(['reason' => 'This payment\'s cash was already handed over in a daily remittance. The cashier records a refund instead.']);
-            }
+            $line = $locked->remittanceLine()->first();
+            $this->assertMoneyChoice($locked, $line, $money, $correction);
 
             $runLock = app(ManuscriptRunLockService::class);
             $currentPeriod = $runLock->currentPeriod();
@@ -138,14 +152,94 @@ class PaymentVerificationService
                 }
             }
 
-            return ['payment' => $locked, 'adjustment_filed' => $adjustmentFiled];
+            $replacement = null;
+            $refundAmount = $money === 'refund' ? (string) $line->amount : '0.00';
+
+            if ($money === 'correct') {
+                $replacement = app(PaymentService::class)->create($correction);
+                $locked->update(['replaced_by_payment_id' => $replacement->id]);
+
+                if ($line !== null) {
+                    // The handed-in cash now stands for the correct payment,
+                    // in the collector's name; what it didn't need goes back.
+                    $replacement->update(['recorded_by' => $locked->recorded_by]);
+                    $line->update(['payment_id' => $replacement->id]);
+                    $refundAmount = bcsub((string) $line->amount, (string) $replacement->amount, 2);
+                }
+            }
+
+            $voucher = bccomp($refundAmount, '0', 2) > 0 ? $this->refundBon($locked, $refundAmount, $reason, $actor) : null;
+
+            if ($voucher !== null) {
+                $locked->update(['refund_voucher_id' => $voucher->id]);
+            }
+
+            return ['payment' => $locked, 'adjustment_filed' => $adjustmentFiled, 'replacement' => $replacement, 'refund_voucher' => $voucher];
         });
 
         // After the commit, so a page load can't re-cache the old figures in between.
         ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());
         $this->forgetShowCache($result['payment']->uuid);
 
-        return ['payment' => $result['payment']->fresh(['customer', 'verification.verifier', 'receipt']), 'adjustment_filed' => $result['adjustment_filed']];
+        return [...$result, 'payment' => $result['payment']->fresh(['customer', 'verification.verifier', 'receipt'])];
+    }
+
+    /**
+     * Handed-in cash must be corrected or refunded; a correction of it uses
+     * the money's own method and no more than was counted, and is a monthly
+     * bill payment (an installation or field-registration payment is undone
+     * through its own charge / registration).
+     */
+    private function assertMoneyChoice(Payment $payment, ?RemittanceLine $line, string $money, ?PaymentData $correction): void
+    {
+        if (! in_array($money, ['none', 'correct', 'refund'], true)) {
+            throw ValidationException::withMessages(['money' => 'Say what happens to the money.']);
+        }
+
+        if ($line !== null && $money === 'none') {
+            throw ValidationException::withMessages(['money' => 'This payment\'s cash was already handed in. Record the correct payment in its place, or give the money back with a refund bon.']);
+        }
+
+        if ($line === null && $money === 'refund') {
+            throw ValidationException::withMessages(['money' => 'The cash was never handed in — the collector still holds it. Reverse it, and record the correct payment if there is one.']);
+        }
+
+        if ($money !== 'correct') {
+            return;
+        }
+
+        if ($correction === null) {
+            throw ValidationException::withMessages(['money' => 'Enter the correct payment.']);
+        }
+
+        if (! $payment->isSubscription() || $payment->field_installation_id !== null) {
+            throw ValidationException::withMessages(['money' => 'Only a monthly bill payment is corrected this way.']);
+        }
+
+        if ($line !== null) {
+            if (($correction->method ?? 'cash') !== $line->method) {
+                throw ValidationException::withMessages(['method' => 'The money was handed in as '.(Payment::METHOD_LABELS[$line->method] ?? $line->method).' — the correct payment must be too.']);
+            }
+
+            if (bccomp((string) $correction->amount, (string) $line->amount, 2) > 0) {
+                throw ValidationException::withMessages(['amount' => 'Only '.number_format((float) $line->amount, 0, '.', ',').' FCFA was handed in for this payment. Record any extra as a payment of its own.']);
+            }
+        }
+    }
+
+    /** A pending refund bon for money going back to the customer, paid from the till once approved. */
+    private function refundBon(Payment $payment, string $amount, string $reason, User $actor): Voucher
+    {
+        $customer = $payment->customer;
+        $category = ExpenseCategory::query()->firstOrCreate(['name' => CustomerChargeService::REFUND_CATEGORY], ['icon' => 'ti-receipt-refund', 'is_active' => true]);
+
+        return app(VoucherService::class)->request([
+            'kind' => Voucher::KIND_EXPENSE,
+            'payee_name' => mb_substr((string) $customer->name, 0, 150),
+            'purpose' => mb_substr("Refund — payment reversed: {$customer->name} ({$customer->accountCode()}): {$reason}", 0, 500),
+            'category_uuid' => $category->uuid,
+            'amount' => $amount,
+        ], $actor, branchId: $customer->branch_id);
     }
 
     /**

@@ -22,6 +22,22 @@ interface PaymentsCreateProps {
     has_receipt_book?: boolean;
     /** Prepayment offers on sale today (Settings → Prepayment offers). */
     prepayment_offers?: PrepaymentOfferOption[];
+    /** Correcting a verified payment (?replaces=uuid): saving reverses it and records this one in its place. */
+    replacing?: ReplacingPayment | null;
+}
+
+interface ReplacingPayment {
+    uuid: string;
+    customer_uuid: string;
+    customer_name: string;
+    amount: string;
+    frequency: PaymentFrequency;
+    months: number | null;
+    method: PaymentMethod;
+    method_reference: string | null;
+    collected_at: string | null;
+    /** Set when its cash was already handed in: keep the method, and no more than this. */
+    handed_in_amount: string | null;
 }
 
 interface PrepaymentOfferOption {
@@ -130,7 +146,7 @@ function MissingCustomerNote() {
     );
 }
 
-export default function PaymentsCreate({ customers, has_receipt_book = false, prepayment_offers = [] }: PaymentsCreateProps) {
+export default function PaymentsCreate({ customers, has_receipt_book = false, prepayment_offers = [], replacing = null }: PaymentsCreateProps) {
     const [mode, setMode] = useState<'single' | 'bulk'>('single');
     const payableCustomers = useMemo(() => customers.filter(isPayable), [customers]);
 
@@ -143,14 +159,14 @@ export default function PaymentsCreate({ customers, has_receipt_book = false, pr
 
             <div className="mb-6 flex flex-wrap items-start justify-between gap-4 animate-fade-up" style={{ animationDelay: '0ms' }}>
                 <div>
-                    <h2 className="font-display text-2xl text-slate-900">Record Payment</h2>
+                    <h2 className="font-display text-2xl text-slate-900">{replacing ? 'Correct a payment' : 'Record Payment'}</h2>
                     <p className="mt-1 text-sm text-slate-500">
                         {mode === 'single'
                             ? 'Log a customer payment and update their billing status.'
                             : 'Record standard monthly-bill payments for several customers at once.'}
                     </p>
                 </div>
-                <div className="inline-flex rounded-lg bg-slate-100 p-1">
+                <div className={`inline-flex rounded-lg bg-slate-100 p-1 ${replacing ? 'hidden' : ''}`}>
                     {(['single', 'bulk'] as const).map((option) => (
                         <button
                             key={option}
@@ -167,7 +183,7 @@ export default function PaymentsCreate({ customers, has_receipt_book = false, pr
             </div>
 
             {mode === 'single' ? (
-                <SinglePaymentForm customers={payableCustomers} hasReceiptBook={has_receipt_book} offers={prepayment_offers} />
+                <SinglePaymentForm customers={payableCustomers} hasReceiptBook={has_receipt_book} offers={prepayment_offers} replacing={replacing} />
             ) : (
                 <BulkPaymentForm customers={payableCustomers} />
             )}
@@ -175,20 +191,32 @@ export default function PaymentsCreate({ customers, has_receipt_book = false, pr
     );
 }
 
-function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: Customer[]; hasReceiptBook: boolean; offers: PrepaymentOfferOption[] }) {
+function SinglePaymentForm({
+    customers,
+    hasReceiptBook,
+    offers,
+    replacing = null,
+}: {
+    customers: Customer[];
+    hasReceiptBook: boolean;
+    offers: PrepaymentOfferOption[];
+    replacing?: ReplacingPayment | null;
+}) {
     const [search, setSearch] = useState('');
 
     const { data, setData, post, processing, errors } = useForm({
-        customer_uuid: '',
-        amount: '',
+        customer_uuid: replacing?.customer_uuid ?? '',
+        amount: replacing ? String(Math.round(Number(replacing.amount))) : '',
         credit: '',
-        frequency: 'monthly' as PaymentFrequency,
-        months: '',
-        // Owner's rule: a prepayment clears arrears first unless an
-        // arrears approver deliberately unticks it (enforced server-side too).
+        frequency: (replacing?.frequency ?? 'monthly') as PaymentFrequency,
+        months: replacing?.months ? String(replacing.months) : '',
+        // Owner's rule: a prepayment always clears arrears first (server-side too).
         clear_arrears_first: true,
-        method: 'cash' as PaymentMethod,
-        method_reference: '',
+        method: (replacing?.method ?? 'cash') as PaymentMethod,
+        method_reference: replacing?.method_reference ?? '',
+        // Correcting a verified payment: it is reversed and this one recorded in its place.
+        replaces_payment_uuid: replacing?.uuid ?? '',
+        replace_reason: '',
         receipt_number: '',
         // Only sent after the server says the customer already paid this
         // month (errors.duplicate) and the collector says why it's fine.
@@ -366,9 +394,38 @@ function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: C
             <form onSubmit={submit} className="w-full animate-fade-up lg:max-w-2xl" style={{ animationDelay: '100ms' }}>
                 <Card>
                     <CardHeader>
-                        <h3 className="text-sm font-semibold text-slate-900">Payment details</h3>
+                        <h3 className="text-sm font-semibold text-slate-900">{replacing ? 'The correct payment' : 'Payment details'}</h3>
                     </CardHeader>
                     <CardBody className="flex flex-col gap-4">
+                        {replacing && (
+                            <div role="note" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                                <p className="font-semibold">
+                                    Correcting {replacing.customer_name}&apos;s payment of {formatCurrency(replacing.amount)}
+                                    {replacing.collected_at ? ` (${new Date(replacing.collected_at).toLocaleDateString()})` : ''}.
+                                </p>
+                                <p className="mt-1">Saving reverses it — its receipt is voided — and records the payment below in its place.</p>
+                                {replacing.handed_in_amount && (
+                                    <p className="mt-1">
+                                        Its {formatCurrency(replacing.handed_in_amount)} was already handed in: keep the same method, and the correct amount
+                                        can&apos;t be more. If it is less, the difference goes back to the customer through a refund bon.
+                                    </p>
+                                )}
+                                <div className="mt-3">
+                                    <TextInput
+                                        id="replace_reason"
+                                        label="What was wrong?"
+                                        required
+                                        placeholder="e.g. Recorded on the wrong customer"
+                                        value={data.replace_reason}
+                                        onChange={(e) => setData('replace_reason', e.target.value)}
+                                        error={errors.replace_reason}
+                                    />
+                                </div>
+                                {(errors as Record<string, string | undefined>).money && (
+                                    <p className="mt-2 text-sm text-red-600">{(errors as Record<string, string | undefined>).money}</p>
+                                )}
+                            </div>
+                        )}
                         <div className="flex flex-col gap-1">
                             <label className="text-sm font-medium text-slate-700">
                                 Customer
@@ -579,7 +636,7 @@ function SinglePaymentForm({ customers, hasReceiptBook, offers }: { customers: C
                                 className="w-full rounded-lg px-5 py-2.5 text-sm font-semibold sm:w-auto"
                             >
                                 {processing && <LoadingSpinner className="h-4 w-4" />}
-                                {processing ? 'Saving…' : duplicateError ? 'Record anyway' : 'Record Payment'}
+                                {processing ? 'Saving…' : duplicateError ? 'Record anyway' : replacing ? 'Reverse and record the correct payment' : 'Record Payment'}
                             </Button>
                         </div>
                     </CardBody>

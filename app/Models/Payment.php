@@ -20,7 +20,7 @@ use LogicException;
 #[Fillable([
     'customer_id', 'amount', 'credit', 'frequency', 'expiration_date', 'months', 'prepaid_rate', 'clear_arrears_first',
     'verification_status', 'processed_at', 'processed_period', 'recorded_offline', 'recorded_by_device', 'local_uuid', 'recorded_by',
-    'reversed_at', 'reversed_by', 'reversal_reason',
+    'reversed_at', 'reversed_by', 'reversal_reason', 'replaced_by_payment_id', 'refund_voucher_id',
     // The field agent's actual offline-collection timestamp — see the
     // add_collected_at_to_payments_table migration and
     // App\Services\SyncService::pushPayment()'s doc comment. Deliberately

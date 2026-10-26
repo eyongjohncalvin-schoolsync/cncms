@@ -18,6 +18,7 @@ use App\Models\PaymentReceipt;
 use App\Models\PaymentVerification;
 use App\Models\PrepaymentOffer;
 use App\Models\ReceiptBlock;
+use App\Models\Voucher;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
@@ -149,9 +150,33 @@ class PaymentController extends Controller
         ]);
     }
 
-    public function create(): Response
+    public function create(Request $request): Response
     {
         $this->authorize('create', Payment::class);
+
+        // "Record the correct payment" for a verified one (?replaces=uuid):
+        // saving reverses it and records this one in its place.
+        $replacing = null;
+
+        if (is_string($request->query('replaces'))) {
+            $old = (new Payment)->resolveRouteBinding($request->query('replaces')) ?? abort(404);
+            $this->authorize('reverse', $old);
+            $line = $old->remittanceLine()->first();
+
+            $replacing = [
+                'uuid' => $old->uuid,
+                'customer_uuid' => $old->customer->uuid,
+                'customer_name' => $old->customer->name,
+                'amount' => (string) $old->amount,
+                'frequency' => $old->frequency,
+                'months' => $old->months,
+                'method' => $old->method,
+                'method_reference' => $old->method_reference,
+                'collected_at' => ($old->collected_at ?? $old->created_at)?->toIso8601String(),
+                // Handed in: the correction keeps this method and can't be more than this.
+                'handed_in_amount' => $line !== null ? (string) $line->amount : null,
+            ];
+        }
 
         // ~549 customers total — small enough to hand the whole list to the
         // page for a client-side searchable dropdown rather than building a
@@ -214,12 +239,27 @@ class PaymentController extends Controller
                 ->where('kind', ReceiptBlock::KIND_BOOK)
                 ->where('status', 'open')
                 ->exists(),
+            'replacing' => $replacing,
         ]);
     }
 
     public function store(StorePaymentRequest $request): RedirectResponse
     {
-        $this->payments->create(PaymentData::fromArray($request->validated()));
+        $validated = $request->validated();
+
+        // Correcting a verified payment: it is reversed and this one recorded
+        // in its place, together (PaymentVerificationService::reverse()).
+        if (! empty($validated['replaces_payment_uuid'])) {
+            // Resolved like a link to it, so the branch fence applies (ScopesRouteBindingToBranch).
+            $old = (new Payment)->resolveRouteBinding($validated['replaces_payment_uuid']) ?? abort(404);
+            $this->authorize('reverse', $old);
+
+            $result = $this->verifications->reverse($old, $validated['replace_reason'], $request->user(), 'correct', PaymentData::fromArray($validated));
+
+            return redirect()->route('payments.show', $result['replacement'])->with('success', $this->reversedMessage($result));
+        }
+
+        $this->payments->create(PaymentData::fromArray($validated));
 
         return redirect()->route('payments.index')->with('success', 'Payment recorded successfully.');
     }
@@ -377,12 +417,29 @@ class PaymentController extends Controller
     {
         $this->authorize('reverse', $payment);
 
-        $reason = $request->validate(['reason' => ['required', 'string', 'min:3', 'max:500']])['reason'];
-        $result = $this->verifications->reverse($payment, $reason, $request->user());
+        // "Record the correct payment" goes through store() (the full payment form); here: nothing, or a refund.
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+            'money' => ['nullable', 'string', 'in:none,refund'],
+        ]);
+        $result = $this->verifications->reverse($payment, $validated['reason'], $request->user(), $validated['money'] ?? 'none');
 
-        return back()->with('success', $result['adjustment_filed']
-            ? 'Payment reversed and its receipt voided. Its month\'s bill is closed, so an arrears adjustment adding it to this month is waiting for approval.'
-            : 'Payment reversed and its receipt voided. Record the correct payment now if needed.');
+        return back()->with('success', $this->reversedMessage($result));
+    }
+
+    /**
+     * @param  array{adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher}  $result
+     */
+    private function reversedMessage(array $result): string
+    {
+        return implode(' ', array_filter([
+            'Payment reversed and its receipt voided.',
+            $result['replacement'] !== null ? 'The correct payment is recorded in its place.' : null,
+            $result['refund_voucher'] !== null
+                ? 'Refund bon '.$result['refund_voucher']->number.' for '.number_format((float) $result['refund_voucher']->amount, 0, '.', ',').' FCFA waits for approval on Vouchers; the cashier pays the customer from the till.'
+                : null,
+            $result['adjustment_filed'] ? 'Its month\'s bill is closed, so an arrears adjustment adding it to this month waits for approval.' : null,
+        ]));
     }
 
     public function uploadReceipt(Request $request, Payment $payment): RedirectResponse
@@ -443,6 +500,8 @@ class PaymentController extends Controller
             'reversed_at' => $payment->reversed_at?->toIso8601String(),
             'reversal_reason' => $payment->reversal_reason,
             'can_reverse' => (bool) request()->user()?->can('reverse', $payment),
+            // Its cash went into a daily handover: reversing it must correct or refund.
+            'handed_in' => $payment->relationLoaded('remittanceLine') ? $payment->remittanceLine !== null : $payment->remittanceLine()->exists(),
             // A second payment for the customer that month (PaymentService::flagPossibleDuplicate()).
             'possible_duplicate' => $payment->isPossibleDuplicate(),
             'duplicate_reason' => $payment->duplicate_reason !== null ? (Payment::DUPLICATE_REASONS[$payment->duplicate_reason] ?? $payment->duplicate_reason) : null,

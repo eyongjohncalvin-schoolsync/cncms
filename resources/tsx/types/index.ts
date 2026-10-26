@@ -439,6 +439,8 @@ export interface Payment {
     reversed_at?: string | null;
     reversal_reason?: string | null;
     can_reverse?: boolean;
+    /** Its cash was already handed in at a daily handover. */
+    handed_in?: boolean;
     duplicate_reason?: string | null;
     duplicate_note?: string | null;
     /** The earlier payment to compare it with (Show only). */
