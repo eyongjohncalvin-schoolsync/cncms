@@ -473,50 +473,29 @@ class ManuscriptCalculateTest extends TestCase
         $this->assertSame(3, $r5->prepaidMonthsRemaining, 'reconnected — window resumes with all 4 still there');
     }
 
-    public function test_a_prepaid_customers_freeze_lifts_exactly_on_the_expiration_day(): void
+    public function test_a_prepaid_customers_freeze_lifts_the_month_after_its_expiry_month(): void
     {
-        // business-rules.md #7 / step 3 of the calculation formula: the freeze
-        // condition is `payment_expiration > TODAY` (strict greater-than), so
-        // on the exact calendar day the expiration date arrives, billing must
-        // already have resumed — not one day early, not one day late. Calls
-        // the calculator directly (bypassing runAndPersist) so a fixed $asOf
-        // can be pinned to the day before and the day of expiration.
-        $customer = CustomerFactory::new()->create([
-            'zone_id' => $this->zone()->id,
-            'bill' => 2500,
-            'others' => 0,
-            'status' => 'active',
-        ]);
+        // Owner, 2026-10-26: only the month counts — a window expiring on
+        // 15 Feb covers February, and the customer is billed from March.
+        // (It used to lift on the exact expiry day.)
+        Carbon::setTestNow('2026-01-15 10:00:00');
 
-        $payment = PaymentFactory::new()->months(1, 2500)->create([
-            'customer_id' => $customer->id,
-            'verification_status' => 'verified',
-        ]);
+        try {
+            $customer = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+            $payment = PaymentFactory::new()->months(1, 2500)->create(['customer_id' => $customer->id, 'verification_status' => 'verified']);
+            $this->assertSame('2026-02-15', Carbon::parse($payment->expiration_date)->toDateString());
 
-        $expiration = Carbon::parse($payment->expiration_date);
+            $february = $this->calculator->calculate($customer, '2026-02', null, collect([$payment]), collect());
+            $this->assertTrue($february->isFrozen, 'the expiry month is covered');
+            $this->assertSame('prepaid', $february->frozenReason);
+            $this->assertEqualsWithDelta(0.0, (float) $february->totalBill, 0.001);
 
-        $dayBefore = $this->calculator->calculate(
-            $customer,
-            '2026-01',
-            null,
-            collect([$payment]),
-            collect(),
-            $expiration->copy()->subDay(),
-        );
-        $this->assertTrue($dayBefore->isFrozen, 'still inside the prepaid window one day before expiration');
-        $this->assertSame('prepaid', $dayBefore->frozenReason);
-        $this->assertEqualsWithDelta(0.0, (float) $dayBefore->totalBill, 0.001);
-
-        $onExpirationDay = $this->calculator->calculate(
-            $customer,
-            '2026-01',
-            null,
-            collect([$payment]),
-            collect(),
-            $expiration->copy(),
-        );
-        $this->assertFalse($onExpirationDay->isFrozen, 'freeze must have lifted by the exact expiration day, not one day later');
-        $this->assertEqualsWithDelta(2500.0, (float) $onExpirationDay->totalBill, 0.001);
+            $march = $this->calculator->calculate($customer, '2026-03', null, collect([$payment]), collect());
+            $this->assertFalse($march->isFrozen, 'billed from the month after');
+            $this->assertEqualsWithDelta(2500.0, (float) $march->totalBill, 0.001);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     /**
@@ -584,6 +563,19 @@ class ManuscriptCalculateTest extends TestCase
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_only_the_expiry_month_counts_even_the_first(): void
+    {
+        // Owner, 2026-10-26: days never matter — an expiry on 1 Nov covers November too.
+        $customer = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+        $october = ManuscriptFactory::new()->forPeriod('2026-10')->create([
+            'customer_id' => $customer->id, 'bill' => 2500, 'total_arrears' => 0, 'credit' => 0, 'total_bill' => 0,
+            'payment_expiration' => '2026-11-01',
+        ]);
+
+        $this->assertTrue($this->calculator->calculate($customer, '2026-11', $october, collect(), collect())->isFrozen, '1 Nov covers November');
+        $this->assertFalse($this->calculator->calculate($customer, '2026-12', $october, collect(), collect())->isFrozen, 'billed from December');
     }
 
     public function test_a_prepayment_expiring_after_the_billed_month_starts_still_covers_it(): void
@@ -737,6 +729,20 @@ class ManuscriptCalculateTest extends TestCase
      * the ones that fell inside the original prepaid window.
      */
     public function test_an_active_prepayment_survives_disconnection_and_reconnection_with_no_retroactive_arrears(): void
+    {
+        // Coverage goes by the expiry MONTH against the billed period (owner,
+        // 2026-10-26), so "today" is pinned to line the 12-month window
+        // (Jan 2026 → Jan 2027) up with the periods billed below.
+        Carbon::setTestNow('2026-01-10 10:00:00');
+
+        try {
+            $this->runPrepaymentThroughDisconnection();
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    private function runPrepaymentThroughDisconnection(): void
     {
         $customer = CustomerFactory::new()->create([
             'zone_id' => $this->zone()->id,

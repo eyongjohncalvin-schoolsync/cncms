@@ -162,14 +162,13 @@ final class ManuscriptCalculator
         ?Carbon $asOf = null,
         ?FreeMonthPlan $freeMonths = null,
     ): ManuscriptCalculationResult {
-        // Prepaid coverage is judged against the START of the billed period,
-        // not the day the run executes: runs happen late in month N-1, so a
-        // "now" cutoff treated an expiry that lapses before month N even
-        // begins (e.g. 28 Sep, run on 22 Sep for October) as still covering
-        // month N — leaving that month unbilled for good (2026-10 run, owner
-        // confirmed 2026-09-22 that such a month must be billed). '!' zeroes
-        // the time fields; see the !Y-m parse gotcha.
-        $asOf ??= Carbon::createFromFormat('!Y-m', $period)->startOfMonth();
+        // Prepaid coverage is judged by MONTH against the billed period, never
+        // the day the run executes: runs happen late in month N-1, so a "now"
+        // cutoff once treated an expiry that lapses before month N (28 Sep,
+        // run on 22 Sep for October) as covering month N (owner, 2026-09-22).
+        // Since 2026-10-26 only the expiry's month counts (see below); $asOf
+        // is kept for callers' signatures but no longer decides coverage.
+        unset($asOf);
         $freeMonths ??= FreeMonthPlan::forCustomer($customer);
 
         $fullBill = $this->normalize((string) $customer->bill);
@@ -245,7 +244,10 @@ final class ManuscriptCalculator
             ->when($previousExpiration, fn (Collection $dates) => $dates->push(Carbon::parse($previousExpiration)))
             ->max();
 
-        if ($candidateExpiration !== null && $candidateExpiration->greaterThan($asOf)) {
+        // Only the month counts (owner, 2026-10-26): an old-system expiry
+        // anywhere in a month — the 1st or the 29th — covers that month, and
+        // the customer is billed from the next one. Days never matter.
+        if ($candidateExpiration !== null && $candidateExpiration->format('Y-m') >= $period) {
             [$totalArrears, $credit] = $this->splitNet($this->add($this->sub($previousArrears, $previousCredit), $adjustmentNet));
 
             // D6 (free first, then paid months): a month that is entirely
