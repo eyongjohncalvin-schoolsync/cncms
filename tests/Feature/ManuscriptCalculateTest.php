@@ -564,6 +564,28 @@ class ManuscriptCalculateTest extends TestCase
         }
     }
 
+    public function test_a_legacy_prepayment_ending_late_october_is_billed_in_the_november_run(): void
+    {
+        // Owner's question (2026-10-26): covered until 29 Oct, the November
+        // run done in late October bills November — no waiting a month.
+        Carbon::setTestNow('2026-10-26 10:00:00');
+
+        try {
+            $customer = CustomerFactory::new()->create(['zone_id' => $this->zone()->id, 'bill' => 2500, 'others' => 0, 'status' => 'active']);
+            $october = ManuscriptFactory::new()->forPeriod('2026-10')->create([
+                'customer_id' => $customer->id, 'bill' => 2500, 'total_arrears' => 0, 'credit' => 0, 'total_bill' => 0,
+                'payment_expiration' => '2026-10-29',
+            ]);
+
+            $november = $this->calculator->calculate($customer, '2026-11', $october, collect(), collect());
+
+            $this->assertFalse($november->isFrozen, 'an expiry of 29 Oct cannot cover November');
+            $this->assertGreaterThan(0, (float) $november->totalBill, 'November is billed in the November run');
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_a_prepayment_expiring_after_the_billed_month_starts_still_covers_it(): void
     {
         Carbon::setTestNow('2026-09-22 10:00:00');
