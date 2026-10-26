@@ -8,7 +8,9 @@ import { formatCurrency } from '@/lib/formatCurrency';
 interface ReversePaymentModalProps {
     open: boolean;
     onClose: () => void;
-    payment: { uuid: string; customer_name: string; amount: string | number; handed_in?: boolean };
+    payment: { uuid: string; customer_name: string; amount: string | number; handed_in?: boolean; purpose?: string };
+    /** When given and allowed: "Give free months instead" (the usual allowance and approval apply). */
+    freeMonths?: { can_request: boolean; max_months: number } | null;
 }
 
 type MoneyChoice = 'correct' | 'refund' | 'none';
@@ -23,10 +25,12 @@ type MoneyChoice = 'correct' | 'refund' | 'none';
  *    cashier once approved;
  *  - nothing — the cash is still with the collector (not handed in).
  */
-export function ReversePaymentModal({ open, onClose, payment }: ReversePaymentModalProps) {
+export function ReversePaymentModal({ open, onClose, payment, freeMonths = null }: ReversePaymentModalProps) {
     const handedIn = payment.handed_in === true;
     const [choice, setChoice] = useState<MoneyChoice>('correct');
-    const { data, setData, post, processing, errors, reset, clearErrors } = useForm({ reason: '', money: 'none' as 'none' | 'refund' });
+    const [giveFree, setGiveFree] = useState(false);
+    const canGiveFree = freeMonths?.can_request === true && (payment.purpose ?? 'subscription') === 'subscription';
+    const { data, setData, transform, post, processing, errors, reset, clearErrors } = useForm({ reason: '', money: 'none' as 'none' | 'refund', free_months: '1' });
 
     function close() {
         if (processing) {
@@ -47,6 +51,7 @@ export function ReversePaymentModal({ open, onClose, payment }: ReversePaymentMo
             return;
         }
 
+        transform((values) => ({ ...values, free_months: canGiveFree && giveFree ? values.free_months : null }));
         post(`/payments/${payment.uuid}/reverse`, {
             preserveScroll: true,
             onSuccess: () => {
@@ -118,6 +123,32 @@ export function ReversePaymentModal({ open, onClose, payment }: ReversePaymentMo
                             placeholder="e.g. The customer paid twice by mistake"
                         />
                         {errors.reason && <p className="mt-1 text-sm text-red-600">{errors.reason}</p>}
+
+                        {canGiveFree && (
+                            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                                <label className="flex items-center gap-2 text-sm font-medium text-emerald-900">
+                                    <input type="checkbox" checked={giveFree} onChange={(e) => setGiveFree(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+                                    Give free months instead
+                                </label>
+                                {giveFree && (
+                                    <div className="mt-2 flex items-center gap-2 text-sm text-emerald-900">
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={freeMonths?.max_months ?? 3}
+                                            value={data.free_months}
+                                            onChange={(e) => setData('free_months', e.target.value)}
+                                            className="w-20 rounded-lg border-slate-300 text-sm"
+                                            aria-label="Free months"
+                                        />
+                                        month(s), after the customer&apos;s existing free and paid months. Beyond the yearly allowance an admin approves.
+                                    </div>
+                                )}
+                                {(errors as Record<string, string | undefined>).free_months && (
+                                    <p className="mt-1 text-sm text-red-600">{(errors as Record<string, string | undefined>).free_months}</p>
+                                )}
+                            </div>
+                        )}
                     </>
                 )}
                 {(errors as Record<string, string | undefined>).money && (

@@ -196,6 +196,31 @@ class FreeMonthGrantService
         return $grants;
     }
 
+    /**
+     * What the "Give free months" dialog needs — on the customer page and
+     * the payment page alike.
+     *
+     * @return array{can_request: bool, max_months: int, months_without_approval_left: int, bill: string, services: list<array{uuid: string, name: string}>}
+     */
+    public function formOptions(Customer $customer, User $viewer): array
+    {
+        $customer->loadMissing('subscriptions.service');
+
+        return [
+            'can_request' => $viewer->can('create', FreeMonthGrant::class) && ! $customer->trashed(),
+            'max_months' => self::maxMonths(),
+            // Months the asker may still give this customer this year on their own (the rest wait for approval).
+            'months_without_approval_left' => max(0, self::monthsWithoutApproval() - $this->monthsGivenWithoutApproval($customer)),
+            // For "% off the monthly bill" → write-off amount.
+            'bill' => (string) $customer->bill,
+            'services' => $customer->subscriptions
+                ->filter(fn ($row): bool => $row->service_variant_id === null)
+                ->map(fn ($row): array => ['uuid' => (string) $row->service?->uuid, 'name' => (string) $row->service?->name])
+                ->values()
+                ->all(),
+        ];
+    }
+
     /** Free months one customer may be given a year without approval (0 = always ask). */
     public static function monthsWithoutApproval(): int
     {

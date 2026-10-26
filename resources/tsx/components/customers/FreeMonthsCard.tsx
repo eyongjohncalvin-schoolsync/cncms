@@ -112,7 +112,7 @@ function GrantRow({ grant }: { grant: FreeMonthGrantRow }) {
     );
 }
 
-function CompensationModal({
+export function CompensationModal({
     open,
     onClose,
     customerUuid,

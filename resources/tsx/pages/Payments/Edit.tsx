@@ -7,10 +7,13 @@ import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PaymentMethodFields } from '@/components/shared/PaymentMethodFields';
-import type { Payment, PaymentFrequency } from '@/types';
+import type { CustomerCoverage, Payment, PaymentFrequency } from '@/types';
+import { CoverageNote } from '@/components/shared/CoverageNote';
 
 interface PaymentsEditProps {
     payment: Payment;
+    /** Free months first, then paid, then billed (CustomerCoverageService). */
+    coverage?: CustomerCoverage | null;
 }
 
 const frequencyOptions: { value: PaymentFrequency; label: string }[] = [
@@ -80,7 +83,7 @@ function FrequencySelector({
  * a payment was recorded against the wrong customer, record a new one
  * instead.
  */
-export default function PaymentsEdit({ payment }: PaymentsEditProps) {
+export default function PaymentsEdit({ payment, coverage }: PaymentsEditProps) {
     const { data, setData, put, processing, errors } = useForm({
         amount: payment.amount,
         credit: payment.credit,
@@ -128,6 +131,7 @@ export default function PaymentsEdit({ payment }: PaymentsEditProps) {
                             Correcting a recorded payment. The customer this payment belongs to can&apos;t be changed here — record a new
                             payment instead if it was recorded against the wrong customer.
                         </p>
+                        <CoverageNote coverage={coverage} />
 
                         <TextInput
                             id="amount"

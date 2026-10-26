@@ -13,6 +13,7 @@ use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
 use App\Models\Branch;
 use App\Models\Customer;
+use App\Models\FreeMonthGrant;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
 use App\Models\PaymentVerification;
@@ -20,6 +21,8 @@ use App\Models\PrepaymentOffer;
 use App\Models\ReceiptBlock;
 use App\Models\Voucher;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
+use App\Services\CustomerCoverageService;
+use App\Services\FreeMonthGrantService;
 use App\Services\PaymentService;
 use App\Services\PaymentVerificationService;
 use App\Services\ReceiptEmailService;
@@ -29,6 +32,7 @@ use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -349,6 +353,10 @@ class PaymentController extends Controller
 
         return Inertia::render('Payments/Show', [
             'payment' => $this->formatPayment($payment),
+            // What the customer's months look like — free first, then paid, then billed —
+            // and the "Give free months" dialog (the same rules as on the customer page).
+            'coverage' => app(CustomerCoverageService::class)->summarize($payment->customer),
+            'free_months' => [...app(FreeMonthGrantService::class)->formOptions($payment->customer, $request->user()), 'grants' => []],
             // The business-issued receipt (Wave 2 of
             // payment-receipts-and-whatsapp.md) — null until a receipt is
             // issued (auto on verify, or the manual action below).
@@ -387,6 +395,8 @@ class PaymentController extends Controller
 
         return Inertia::render('Payments/Edit', [
             'payment' => $this->formatPayment($payment),
+            // Free months come first, then paid months: shown so a prepayment's months are read right.
+            'coverage' => app(CustomerCoverageService::class)->summarize($payment->customer),
         ]);
     }
 
@@ -443,10 +453,32 @@ class PaymentController extends Controller
         $validated = $request->validate([
             'reason' => ['required', 'string', 'min:3', 'max:500'],
             'money' => ['nullable', 'string', 'in:none,refund'],
+            // "Give free months instead": the customer gets free months in place of this payment.
+            'free_months' => ['nullable', 'integer', 'min:1', 'max:'.FreeMonthGrantService::maxMonths()],
         ]);
-        $result = $this->verifications->reverse($payment, $validated['reason'], $request->user(), $validated['money'] ?? 'none');
+        $freeMonths = (int) ($validated['free_months'] ?? 0);
 
-        return back()->with('success', $this->reversedMessage($result));
+        if ($freeMonths > 0 && (! $payment->isSubscription() || ! $request->user()->can('create', FreeMonthGrant::class))) {
+            abort(403, 'You may not give free months here.');
+        }
+
+        $grants = DB::transaction(function () use ($payment, $validated, $freeMonths, $request, &$result) {
+            $result = $this->verifications->reverse($payment, $validated['reason'], $request->user(), $validated['money'] ?? 'none');
+
+            return $freeMonths > 0
+                ? app(FreeMonthGrantService::class)->requestCompensation($payment->customer, null, $freeMonths, 'Instead of a reversed payment: '.$validated['reason'], $request->user())
+                : null;
+        });
+
+        $message = $this->reversedMessage($result);
+
+        if ($grants !== null) {
+            $message .= $grants->first()?->status === FreeMonthGrant::STATUS_APPROVED
+                ? " {$freeMonths} free month(s) given instead."
+                : " {$freeMonths} free month(s) asked for instead — they wait for approval.";
+        }
+
+        return back()->with('success', $message);
     }
 
     /**

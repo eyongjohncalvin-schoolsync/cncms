@@ -10,9 +10,11 @@ import { Modal } from '@/components/ui/Modal';
 import { VerificationBadge } from '@/components/shared/StatusBadge';
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { ReversePaymentModal } from '@/components/shared/ReversePaymentModal';
+import { CoverageNote } from '@/components/shared/CoverageNote';
+import { CompensationModal } from '@/components/customers/FreeMonthsCard';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { paymentMethodLabel } from '@/components/shared/PaymentMethodFields';
-import type { PageProps, Payment, PaymentReceipt } from '@/types';
+import type { CustomerCoverage, CustomerFreeMonths, PageProps, Payment, PaymentReceipt } from '@/types';
 
 function formatRelative(iso: string): string {
     const then = new Date(iso).getTime();
@@ -37,6 +39,9 @@ interface PaymentsShowProps {
     can_delete: boolean;
     can_issue_receipt: boolean;
     can_reverse: boolean;
+    /** The customer's months (free → paid → billed) and the "Give free months" dialog's options. */
+    coverage?: CustomerCoverage | null;
+    free_months?: CustomerFreeMonths | null;
 }
 
 const frequencyLabels: Record<Payment['frequency'], string> = {
@@ -45,7 +50,8 @@ const frequencyLabels: Record<Payment['frequency'], string> = {
     yearly: 'Yearly',
 };
 
-export default function PaymentsShow({ payment, receipt, can_manage, can_delete, can_issue_receipt, can_reverse }: PaymentsShowProps) {
+export default function PaymentsShow({ payment, receipt, can_manage, can_delete, can_issue_receipt, can_reverse, coverage, free_months }: PaymentsShowProps) {
+    const [givingFreeMonths, setGivingFreeMonths] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [reversing, setReversing] = useState(false);
     const [fileName, setFileName] = useState<string | null>(null);
@@ -195,6 +201,11 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                         Edit/Delete Payment which stay behind can_manage/can_delete. */}
                     <div className="flex flex-wrap items-center gap-2">
                         <ArrearsAdjustmentModal customer={arrearsCustomer} />
+                        {free_months?.can_request && (
+                            <Button type="button" variant="secondary" onClick={() => setGivingFreeMonths(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
+                                Give free months
+                            </Button>
+                        )}
                         {can_manage && (
                             <Link
                                 href={`/payments/${payment.uuid}/edit`}
@@ -245,6 +256,16 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                     </p>
                     <p className="mt-2 text-xs text-amber-800">It can only be approved by someone in the office other than the person who recorded it.</p>
                 </div>
+            )}
+
+            {(payment.purpose ?? 'subscription') === 'subscription' && (
+                <div className="mb-4 max-w-3xl">
+                    <CoverageNote coverage={coverage} />
+                </div>
+            )}
+
+            {free_months && givingFreeMonths && (
+                <CompensationModal open onClose={() => setGivingFreeMonths(false)} customerUuid={payment.customer_uuid} freeMonths={free_months} />
             )}
 
             <div className="mb-4 grid max-w-3xl grid-cols-1 gap-4 animate-fade-up sm:grid-cols-2" style={{ animationDelay: '100ms' }}>
@@ -505,7 +526,7 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                 </div>
             </Modal>
 
-            <ReversePaymentModal open={reversing} onClose={() => setReversing(false)} payment={payment} />
+            <ReversePaymentModal open={reversing} onClose={() => setReversing(false)} payment={payment} freeMonths={free_months} />
         </AppLayout>
     );
 }

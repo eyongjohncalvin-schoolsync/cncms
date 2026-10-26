@@ -7,8 +7,11 @@ namespace Tests\Feature\Web;
 use App\Models\ArrearsAdjustment;
 use App\Models\CommandRun;
 use App\Models\Customer;
+use App\Models\CustomerSubscription;
+use App\Models\FreeMonthGrant;
 use App\Models\Manuscript;
 use App\Models\Payment;
+use App\Models\Service;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
@@ -56,6 +59,26 @@ class ReversePaymentTest extends TestCase
         $this->assertSame('void', $payment->receipt->status);
         $this->assertStringContainsString('Wrong amount entered', (string) $payment->verification->notes);
         $this->assertSame(0, ArrearsAdjustment::query()->where('customer_id', $this->customer->id)->count(), 'No bill counted it yet.');
+    }
+
+    public function test_free_months_can_be_given_instead_of_a_reversed_payment(): void
+    {
+        CustomerSubscription::query()->create(['customer_id' => $this->customer->id, 'service_id' => Service::query()->where('slug', 'tv')->value('id'), 'price' => 2500]);
+        $payment = $this->verifiedPaymentRecordedBy('kelvin@shalomtech.dev');
+
+        $this->as('terence@shalomtech.dev', 'admin');
+        $this->get("/payments/{$payment->uuid}")->assertInertia(fn (Assert $page) => $page
+            ->where('free_months.can_request', true)
+            ->has('coverage'));
+
+        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'The agent promised a free month', 'free_months' => 1])
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', fn (string $message) => str_contains($message, 'free month'));
+
+        $this->assertSame('rejected', $payment->fresh()->verification_status);
+        $grant = FreeMonthGrant::query()->where('customer_id', $this->customer->id)->where('reason', FreeMonthGrant::REASON_COMPENSATION)->sole();
+        $this->assertSame(1, $grant->months);
+        $this->assertStringContainsString('Instead of a reversed payment', (string) $grant->note);
     }
 
     public function test_a_reason_is_required(): void
