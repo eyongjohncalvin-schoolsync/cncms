@@ -63,6 +63,9 @@ final readonly class ManuscriptCalculationResult
         // Months paid upfront per service still to come (D15):
         // service id => ['months' => n, 'rate' => locked price].
         public array $servicePrepaid = [],
+        // Services paid ahead THIS month on their own (D15) — the next run
+        // bills each of them once when its months end (owner, 2026-10-26).
+        public array $coveredServiceIds = [],
     ) {}
 
     /**
@@ -80,7 +83,17 @@ final readonly class ManuscriptCalculationResult
             'prepaid_rate' => $this->prepaidRate,
             'free_value' => $this->freeValue,
             'service_prepaid' => $this->servicePrepaidForStorage(),
+            // A free or paid-ahead month: the next run bills the customer
+            // normally (that month's bill, nothing owed) — owner, 2026-10-26.
+            'covered' => $this->isCovered(),
+            'covered_services' => $this->coveredServiceIds === [] ? null : array_values(array_map('intval', $this->coveredServiceIds)),
         ];
+    }
+
+    /** The month was free or paid ahead (not merely frozen by a disconnection). */
+    public function isCovered(): bool
+    {
+        return $this->isFrozen && in_array($this->frozenReason, ['prepaid', 'free'], true);
     }
 
     /**

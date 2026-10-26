@@ -199,8 +199,8 @@ class FreeMonthsBillingTest extends TestCase
         $march = $this->runMonth($customer, '2027-03');
         $this->assertSame('2500.00', $march->bill, 'first billed month');
         $this->assertSame('0.00', $march->credit, 'free months never become credit');
-        // Same pay-ahead rule as every existing customer (step 5).
-        $this->assertSame('5000.00', $march->totalBill);
+        // Owner, 2026-10-26: the first month after free and paid months is billed once — nothing owed.
+        $this->assertSame('2500.00', $march->totalBill);
     }
 
     public function test_example_b_free_and_paid_months_per_service(): void
@@ -225,6 +225,41 @@ class FreeMonthsBillingTest extends TestCase
         $january = $this->runMonth($customer, '2027-01');
         $this->assertSame('5000.00', $january->bill);
         $this->assertSame([], array_filter($january->servicePrepaid, fn (array $s): bool => $s['months'] > 0));
+    }
+
+    public function test_example_b_first_bill_after_the_covered_months_is_the_bill_once(): void
+    {
+        // Owner, 2026-10-26: both services come out of covered months in
+        // January — 5,000 for January, nothing owed; February like everyone.
+        $customer = $this->customer(['tv', 'internet'], billingStarts: '2026-10');
+        $this->grant($customer, 'tv', 2, '2026-10');
+        $this->grant($customer, 'internet', 1, '2026-10');
+        $this->upfront($customer, ['tv' => 1, 'internet' => 2]);
+
+        foreach (['2026-10', '2026-11', '2026-12'] as $period) {
+            $this->runMonth($customer, $period);
+        }
+
+        $january = $this->runMonth($customer, '2027-01');
+        $this->assertSame('5000.00', $january->totalBill, 'the bill once');
+        $this->assertSame('0.00', $january->totalArrears, 'nothing owed');
+    }
+
+    public function test_one_service_coming_out_of_free_months_is_billed_once(): void
+    {
+        // TV free Oct–Nov, Internet billed all along. When TV's free months
+        // end in December, TV is billed once — not owed and billed again.
+        $customer = $this->customer(['tv', 'internet'], billingStarts: '2026-10');
+        $this->grant($customer, 'tv', 2, '2026-10');
+
+        $this->runMonth($customer, '2026-10');
+        $november = $this->runMonth($customer, '2026-11');
+        $this->assertSame('2500.00', $november->bill, 'Internet only');
+
+        $december = $this->runMonth($customer, '2026-12');
+        $this->assertSame('5000.00', $december->bill, 'TV and Internet');
+        // Owed: Internet keeps the pay-ahead rule (unpaid Oct–Dec here); TV is not owed on top of its first bill.
+        $this->assertSame(bcadd((string) $november->totalArrears, '2500.00', 2), $december->totalArrears, 'only Internet added to what is owed');
     }
 
     public function test_a_service_paid_upfront_is_charged_while_another_is_free(): void

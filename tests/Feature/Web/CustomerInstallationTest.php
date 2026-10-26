@@ -408,7 +408,7 @@ class CustomerInstallationTest extends TestCase
 
         $march = $this->bill($customer, '2027-03');
         $this->assertSame('2500.00', (string) $march->bill, 'first billed month March');
-        $this->assertSame('5000.00', (string) $march->total_bill, 'same pay-ahead rule as every customer (D18)');
+        $this->assertSame('2500.00', (string) $march->total_bill, 'first month after free and paid months: the bill once, nothing owed (owner, 2026-10-26)');
     }
 
     public function test_the_preview_shows_each_service_timeline_and_what_to_collect(): void

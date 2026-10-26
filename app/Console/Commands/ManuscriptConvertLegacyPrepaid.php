@@ -113,6 +113,9 @@ class ManuscriptConvertLegacyPrepaid extends Command
                     $manuscript->fill([
                         'prepaid_months_remaining' => (int) $manuscript->prepaid_months_remaining + $months,
                         'prepaid_rate' => $months > 0 ? ($manuscript->prepaid_rate ?? $customer?->bill) : $manuscript->prepaid_rate,
+                        // The date covered this bill's month: keep that, so the
+                        // next month is billed once, nothing owed (owner, 2026-10-26).
+                        'covered' => $manuscript->covered || $manuscript->payment_expiration->format('Y-m') >= (string) $manuscript->period,
                         'payment_expiration' => null,
                     ])->save();
                 }

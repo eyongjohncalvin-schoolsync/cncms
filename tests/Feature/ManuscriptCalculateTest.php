@@ -350,7 +350,7 @@ class ManuscriptCalculateTest extends TestCase
         $r7 = $this->runAndPersist($customer, '2026-07');
         $this->assertFalse($r7->isFrozen);
         $this->assertSame(0, $r7->prepaidMonthsRemaining);
-        $this->assertEqualsWithDelta(5000.0, (float) $r7->totalBill, 0.001);
+        $this->assertEqualsWithDelta(2500.0, (float) $r7->totalBill, 0.001, 'first month after the window: the bill once, nothing owed (owner, 2026-10-26)');
     }
 
     public function test_a_drawdown_prepaid_customer_is_unaffected_by_a_bill_rate_change(): void
@@ -374,7 +374,7 @@ class ManuscriptCalculateTest extends TestCase
 
         // Only now does the new rate apply.
         $r7 = $this->runAndPersist($customer, '2026-07');
-        $this->assertEqualsWithDelta(6000.0, (float) $r7->totalBill, 0.001); // 3000 bill + 3000 arrears
+        $this->assertEqualsWithDelta(3000.0, (float) $r7->totalBill, 0.001, 'first month after the window: the new 3000 bill once, nothing owed');
     }
 
     public function test_stacking_a_second_drawdown_prepayment_adds_months_at_the_new_rate(): void
@@ -400,7 +400,7 @@ class ManuscriptCalculateTest extends TestCase
         foreach (['2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09'] as $period) {
             $this->assertEqualsWithDelta(0.0, (float) $this->runAndPersist($customer, $period)->totalBill, 0.001);
         }
-        $this->assertEqualsWithDelta(6000.0, (float) $this->runAndPersist($customer, '2026-10')->totalBill, 0.001);
+        $this->assertEqualsWithDelta(3000.0, (float) $this->runAndPersist($customer, '2026-10')->totalBill, 0.001, 'first month after the window: the bill once, nothing owed');
     }
 
     public function test_drawdown_overpayment_becomes_credit_drawn_at_the_current_rate(): void
@@ -418,9 +418,19 @@ class ManuscriptCalculateTest extends TestCase
             $this->assertEqualsWithDelta(5000.0, (float) $r->credit, 0.001, 'overpay held as loose credit through the window');
         }
 
+        // Owner, 2026-10-26: the first month after the window is billed once,
+        // as the bill — so the 5,000 over pays exactly two more months.
         $r7 = $this->runAndPersist($customer, '2026-07');
-        $this->assertEqualsWithDelta(0.0, (float) $r7->totalBill, 0.001, 'credit covers month 7');
-        $this->assertEqualsWithDelta(2500.0, (float) $r7->credit, 0.001);
+        $this->assertEqualsWithDelta(0.0, (float) $r7->totalBill, 0.001, 'credit pays month 7');
+        $this->assertEqualsWithDelta(5000.0, (float) $r7->credit, 0.001, 'month 7 billed once, paid from this credit');
+
+        $r8 = $this->runAndPersist($customer, '2026-08');
+        $this->assertEqualsWithDelta(0.0, (float) $r8->totalBill, 0.001, 'credit pays month 8');
+        $this->assertEqualsWithDelta(2500.0, (float) $r8->credit, 0.001);
+
+        $r9 = $this->runAndPersist($customer, '2026-09');
+        $this->assertEqualsWithDelta(2500.0, (float) $r9->totalBill, 0.001, 'the credit is used up: billed from month 9');
+        $this->assertEqualsWithDelta(0.0, (float) $r9->credit, 0.001);
     }
 
     public function test_drawdown_always_clears_debt_first(): void

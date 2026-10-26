@@ -202,6 +202,15 @@ final class ManuscriptCalculator
         $adjustmentNet = $this->adjustmentNet($eligibleAdjustments);
         $processedAdjustments = $eligibleAdjustments->values();
 
+        // Owner, 2026-10-26: covered months — free, paid ahead, or an
+        // old-system date — are paid. The first month after them is billed
+        // normally: that month's bill once, nothing owed (never "owed + the
+        // bill on top"). From the next month the customer is like everyone.
+        $justUncovered = ! $isFirstRun && (
+            (bool) $previousManuscript->covered
+            || ($hasPlan && $freeMonths->isFullyFree((string) $previousManuscript->period, $fullBill))
+        );
+
         // Before the installation month nothing is billed at all — like a
         // frozen month, payments wait for the first real run.
         $notStarted = $freeMonths->beforeBillingStarts($period);
@@ -323,6 +332,32 @@ final class ManuscriptCalculator
         $nothingCharged = $this->compare($billDue, '0.00') === 0 && ($fullyFree || $coveredServiceIds !== []);
         $chargedReason = $nothingCharged ? ($fullyFree && $coveredServiceIds === [] ? 'free' : 'prepaid') : null;
 
+        // What this month adds to what is owed. Normally the whole charge
+        // (pay-ahead rule: owed now, and the bill shows it again on top). But
+        // a month — or a service — coming straight out of covered months
+        // (free, or paid ahead) is billed once, as the bill, not owed too
+        // (owner, 2026-10-26). Whole bill: $justUncovered. One service: free
+        // last month by calendar, or paid ahead on its own last month.
+        $chargeEntering = $justUncovered ? '0.00' : $billDue;
+
+        if (! $justUncovered && ! $isFirstRun && $freeMonths->servicePrices !== []) {
+            $previousPeriod = (string) $previousManuscript->period;
+            $previousCoveredServices = array_map('intval', (array) ($previousManuscript->covered_services ?? []));
+
+            foreach ($freeMonths->servicePrices as $serviceId => $price) {
+                $chargedNow = ! $freeMonths->isServiceFree((int) $serviceId, $period) && ! in_array((int) $serviceId, $coveredServiceIds, true);
+                $coveredBefore = $freeMonths->isServiceFree((int) $serviceId, $previousPeriod) || in_array((int) $serviceId, $previousCoveredServices, true);
+
+                if ($chargedNow && $coveredBefore) {
+                    $chargeEntering = $this->sub($chargeEntering, $this->normalize((string) $price));
+                }
+            }
+
+            if ($this->compare($chargeEntering, '0.00') < 0) {
+                $chargeEntering = '0.00';
+            }
+        }
+
         // --- Draw-down prepayment branch (references/prepayment-drawdown.md) ---
         // A months/yearly payment with NO expiration_date (and no per-service
         // months) is a whole-bill draw-down prepayment: it buys N whole billing
@@ -413,7 +448,8 @@ final class ManuscriptCalculator
             //    month with nothing charged (free, or covered per service)
             //    uses no whole-bill month: free first, then paid (D6).
             $coveredThisPeriod = $prepaidMonths > 0 && (! ($hasPlan || $coveredServiceIds !== []) || $this->compare($billDue, '0.00') > 0);
-            $chargeThisPeriod = $coveredThisPeriod ? '0.00' : $billDue;
+            // Just out of covered months (whole bill or a service): billed once, as the bill (not owed too).
+            $chargeThisPeriod = $coveredThisPeriod ? '0.00' : $chargeEntering;
 
             $net = $this->add(
                 $this->add($this->sub($arrears, $credit), $chargeThisPeriod),
@@ -460,6 +496,7 @@ final class ManuscriptCalculator
                 prepaidRate: $prepaidRate,
                 freeValue: $freeValue,
                 servicePrepaid: $servicePrepaid,
+                coveredServiceIds: $coveredServiceIds,
             );
         }
 
@@ -474,7 +511,8 @@ final class ManuscriptCalculator
         // free services and services paid upfront) enters net, and the bill
         // shows it once more on top — the pay-ahead rule (step 5).
         $net = $this->add(
-            $this->add($this->sub($previousArrears, $previousCredit), $this->sub($billDue, $income)),
+            // Just out of covered months (whole bill or a service): billed once, as the bill — not owed too.
+            $this->add($this->sub($previousArrears, $previousCredit), $this->sub($chargeEntering, $income)),
             $adjustmentNet,
         );
 
@@ -501,6 +539,7 @@ final class ManuscriptCalculator
             processedAdjustments: $processedAdjustments,
             freeValue: $freeValue,
             servicePrepaid: $servicePrepaid,
+            coveredServiceIds: $coveredServiceIds,
         );
     }
 

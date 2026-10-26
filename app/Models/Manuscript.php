@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
-#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'free_value', 'service_prepaid', 'period', 'command_run_id', 'opening_balance_batch_id', 'sent_log'])]
+#[Fillable(['customer_id', 'bill', 'total_arrears', 'credit', 'total_bill', 'payment_expiration', 'prepaid_months_remaining', 'prepaid_rate', 'free_value', 'service_prepaid', 'covered', 'covered_services', 'period', 'command_run_id', 'opening_balance_batch_id', 'sent_log'])]
 #[RouteKey('uuid')]
 class Manuscript extends Model
 {
@@ -59,6 +59,8 @@ class Manuscript extends Model
             // CustomerStatusService, the PDF register's ->format('M y') are
             // unaffected) — only the JSON shape changes, to a plain date.
             'payment_expiration' => 'date:Y-m-d',
+            'covered' => 'boolean',
+            'covered_services' => 'array',
         ];
     }
 

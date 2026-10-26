@@ -54,8 +54,11 @@ class ConvertLegacyPrepaidTest extends TestCase
         foreach (['2026-11' => 0.0, '2026-12' => 0.0, '2027-01' => 0.0] as $period => $due) {
             $this->assertSame($due, (float) $this->bill($covered, $period)->total_bill, "{$period} is covered");
         }
-        $this->assertGreaterThan(0, (float) $this->bill($covered, '2027-02')->total_bill, 'billed from February');
-        $this->assertGreaterThan(0, (float) $this->bill($ending, '2026-11')->total_bill, 'billed from November');
+        // The first month after the covered months: the bill once, nothing owed (owner, 2026-10-26).
+        $february = $this->bill($covered, '2027-02');
+        $this->assertSame(['2500.00', '0.00'], [(string) $february->total_bill, (string) $february->total_arrears], 'billed from February');
+        $november = $this->bill($ending, '2026-11');
+        $this->assertSame(['2500.00', '0.00'], [(string) $november->total_bill, (string) $november->total_arrears], 'covered to 29 Oct: November 2,500, nothing owed');
     }
 
     private function customerCoveredUntil(string $date): Customer

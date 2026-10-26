@@ -795,7 +795,7 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
 
         $july = Manuscript::query()->where('customer_id', $prepaid->id)->where('period', '2026-07')->sole();
         $this->assertSame(0, (int) $july->prepaid_months_remaining);
-        $this->assertEqualsWithDelta(6000.0, (float) $july->total_bill, 0.001, 'first billed month after the window, at the new 3000 rate');
+        $this->assertEqualsWithDelta(3000.0, (float) $july->total_bill, 0.001, 'first billed month after the window: the new 3000 bill once, nothing owed (owner, 2026-10-26)');
 
         // The control customer was billed every month and owes all seven.
         $controlJuly = Manuscript::query()->where('customer_id', $control->id)->where('period', '2026-07')->sole();
