@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Models\Voucher;
 use App\Models\Zone;
 use App\Services\CustomerManuscriptRecalculationService;
+use Database\Factories\BranchFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\InstallationOfferFactory;
 use Database\Factories\ZoneFactory;
@@ -249,6 +250,31 @@ class CustomerInstallationTest extends TestCase
 
         $this->actAs('kelvin@shalomtech.dev', 'agent');
         $this->post("/customers/{$customer->uuid}/late-registration/charge", ['scope' => 'missed', 'amount' => 2500, 'note' => 'x y z'])->assertForbidden();
+    }
+
+    public function test_a_new_customer_cannot_start_with_old_debt_typed_in(): void
+    {
+        // It would land on the first bill with no approval.
+        $this->manager();
+
+        $this->post('/customers', $this->form(['others' => 5000]))->assertSessionHasErrors('others');
+        $this->post('/customers', $this->form(['others' => 0]))->assertSessionHasNoErrors();
+    }
+
+    public function test_an_archived_or_other_branch_customer_is_flagged_as_a_possible_duplicate(): void
+    {
+        // An old customer — maybe an old debtor — coming back as "new" for a promotion.
+        $this->manager();
+        $archived = CustomerFactory::new()->create(['zone_id' => $this->zone->id, 'name' => 'OLD DEBTOR', 'phone' => '677111222']);
+        $archived->delete();
+        $elsewhere = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create(['branch_id' => BranchFactory::new()->create()->id])->id, 'phone' => '677333444']);
+
+        $byPhone = fn (string $phone): array => collect($this->postJson('/customers/installation-preview', [...$this->form(), 'name' => 'Someone', 'phone' => $phone])
+            ->assertOk()->json('duplicates'))->keyBy('uuid')->all();
+
+        $this->assertSame('archived', $byPhone('677111222')[$archived->uuid]['status']);
+        $this->assertFalse($byPhone('677111222')[$archived->uuid]['openable']);
+        $this->assertArrayHasKey($elsewhere->uuid, $byPhone('+237 677 333 444'));
     }
 
     /** Registered by the manager on 10 Oct; connected 12 Aug, free months from August. */

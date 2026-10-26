@@ -839,7 +839,7 @@ export interface InstallationPreview {
     needs_approval: string[];
     max_free_months: number;
     line: string;
-    duplicates: { uuid: string; name: string; phone: string | null; zone: string | null; status: string }[];
+    duplicates: { uuid: string; name: string; phone: string | null; zone: string | null; status: string; openable?: boolean; other_branch?: boolean }[];
 }
 
 export interface CustomerDetail extends Customer {

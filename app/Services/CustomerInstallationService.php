@@ -13,6 +13,7 @@ use App\Models\CustomerCharge;
 use App\Models\FreeMonthGrant;
 use App\Models\InstallationOffer;
 use App\Models\Payment;
+use App\Models\Scopes\BranchScope;
 use App\Models\Service;
 use App\Models\User;
 use App\Models\Zone;
@@ -20,6 +21,7 @@ use App\Support\Billing\ConnectionMonth;
 use App\Support\Billing\FreeMonthPlan;
 use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
+use App\Support\TenantContext;
 use App\Support\UpperCaseLabel;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -92,8 +94,15 @@ class CustomerInstallationService
             return [];
         }
 
+        // Archived customers and other branches too: a late registration or a
+        // promotion is exactly where an old customer (or debtor) comes back
+        // as "new". Only a warning — the viewer may not open those records.
+        $branchId = TenantContext::currentBranchId();
+
         return Customer::query()
-            ->with('zone:id,name')
+            ->withTrashed()
+            ->withoutGlobalScope(BranchScope::class)
+            ->with(['zone' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)->select('id', 'name')])
             ->where(function ($query) use ($lastNine, $name): void {
                 if ($lastNine !== null) {
                     $query->orWhereRaw("regexp_replace(coalesce(phone, ''), '\\D', '', 'g') like ?", ['%'.$lastNine]);
@@ -112,7 +121,10 @@ class CustomerInstallationService
                 'name' => $customer->name,
                 'phone' => $customer->phone,
                 'zone' => $customer->zone?->name,
-                'status' => $customer->status,
+                'status' => $customer->trashed() ? 'archived' : $customer->status,
+                // Openable by the viewer: not archived, and in their branch (or they see all).
+                'openable' => ! $customer->trashed() && ($branchId === null || $customer->branch_id === $branchId),
+                'other_branch' => $branchId !== null && $customer->branch_id !== $branchId,
             ])
             ->all();
     }

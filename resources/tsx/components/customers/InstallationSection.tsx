@@ -490,10 +490,15 @@ export function InstallationSection({
                             <ul className="mt-1 space-y-0.5">
                                 {preview.duplicates.map((d) => (
                                     <li key={d.uuid}>
-                                        <Link href={`/customers/${d.uuid}`} className="underline">
-                                            {d.name}
-                                        </Link>{' '}
+                                        {d.openable === false ? (
+                                            <span className="font-medium">{d.name}</span>
+                                        ) : (
+                                            <Link href={`/customers/${d.uuid}`} className="underline">
+                                                {d.name}
+                                            </Link>
+                                        )}{' '}
                                         — {d.phone ?? 'no phone'} · {d.zone ?? 'no zone'} · {d.status}
+                                        {d.other_branch ? ' · another branch' : ''}
                                     </li>
                                 ))}
                             </ul>

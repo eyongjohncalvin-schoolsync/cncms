@@ -48,7 +48,12 @@ class StoreCustomerRequest extends FormRequest
             'name' => ['required', 'string', 'max:50'],
             'location' => ['nullable', 'string', 'max:30'],
             'bill' => ['required_without:services', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
-            'others' => ['nullable', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'],
+            // A new customer starts owing nothing: old debt typed here would
+            // land on their first bill with no approval. A late registration's
+            // missed months go through "Charge as old debt" (approved by
+            // someone else); an existing customer's balance through import
+            // or opening balances.
+            'others' => ['nullable', 'numeric', 'min:0', 'max:0'],
             'phone' => ['required', 'string', 'max:20'],
             'description' => ['nullable', 'string'],
             'email' => ['nullable', 'email:rfc', 'max:150'],
@@ -60,6 +65,16 @@ class StoreCustomerRequest extends FormRequest
             'services.*.service_variant_uuid' => ['nullable', 'uuid', 'exists:service_variants,uuid'],
             'services.*.price' => ['required_with:services', 'numeric', 'gte:0', 'max:999999999.99', 'decimal:0,2'],
             ...self::installationRules(),
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'others.max' => 'A new customer starts owing nothing. Charge old debt from their page once registered — it needs approval.',
         ];
     }
 
