@@ -277,6 +277,11 @@ class ArrearsAdjustmentService
                     'status' => 'approved',
                 ]);
 
+            // "Charge every month since connection" (late registration): the free months end too.
+            if ($adjustment->cancels_free_months) {
+                app(LateRegistrationService::class)->endFreeMonths($customer);
+            }
+
             $this->applyLedgerEffect($adjustment, $customer, $actor->id);
             $this->notifyApproved($adjustment);
 

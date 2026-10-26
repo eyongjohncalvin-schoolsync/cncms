@@ -130,6 +130,7 @@ class CustomerInstallationService
                 $customer->forceFill([
                     'connected_on' => $plan['connected_on'],
                     'billing_starts_period' => $plan['installation_month'],
+                    'late_registration_reason' => $plan['late'] ? $installation->reason : null,
                 ])->save();
 
                 $offer = $plan['offer'];
@@ -398,6 +399,7 @@ class CustomerInstallationService
                     'connected_on' => $plan['connected_on'],
                     'billing_starts_period' => $plan['installation_month'],
                     'activation_status' => null,
+                    'late_registration_reason' => $plan['late'] ? $installation->reason : null,
                 ])->save();
 
                 if ($charge !== null && $plan['offer'] !== null && $charge->installation_offer_id !== $plan['offer']->id) {

@@ -38,6 +38,7 @@ import { CustomerStatusActions } from '@/components/customers/CustomerStatusActi
 import { ArrearsAdjustmentModal } from '@/components/customers/ArrearsAdjustmentModal';
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { InstallationCard } from '@/components/customers/InstallationCard';
+import { LateRegistrationCard } from '@/components/customers/LateRegistrationCard';
 import { OneOffChargesCard } from '@/components/customers/OneOffChargesCard';
 import { FreeMonthsCard } from '@/components/customers/FreeMonthsCard';
 import { FieldInstallationCard } from '@/components/customers/FieldInstallationCard';
@@ -518,6 +519,12 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
 
             {/* Installation fees — a separate balance, never in the monthly total
                 or arrears (docs/plans/installation-and-promotions.md, D1). */}
+            {customer.installation?.late && (
+                <div className="animate-fade-up mt-6" style={{ animationDelay: '0.13s' }}>
+                    <LateRegistrationCard customerUuid={customer.uuid} late={customer.installation.late} />
+                </div>
+            )}
+
             {customer.installation && (
                 <div className="animate-fade-up mt-6" style={{ animationDelay: '0.14s' }}>
                     <InstallationCard customerUuid={customer.uuid} installation={customer.installation} />

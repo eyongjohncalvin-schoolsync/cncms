@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CustomerRecordExportController;
 use App\Http\Controllers\CustomerStatementController;
+use App\Http\Controllers\LateRegistrationController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('customers', [CustomerController::class, 'index'])->name('customers.index');
@@ -33,6 +34,8 @@ Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->n
 // restore() must resolve an already-archived customer, so its binding
 // (and show()'s, further down) opts into trashed rows via ->withTrashed().
 Route::patch('customers/{customer}/archive', [CustomerController::class, 'archive'])->name('customers.archive');
+// A late registration's months that passed unbilled, charged as old debt (LateRegistrationService).
+Route::post('customers/{customer}/late-registration/charge', [LateRegistrationController::class, 'charge'])->name('customers.late-registration.charge');
 Route::patch('customers/{customer}/restore', [CustomerController::class, 'restore'])->name('customers.restore')->withTrashed();
 // Dedicated status actions (App\Services\CustomerStatusService) — a fast
 // alternative to the generic update() route above, distinct the same way

@@ -26,6 +26,7 @@ use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -183,6 +184,84 @@ class CustomerInstallationTest extends TestCase
         $this->assertSame(['2026-08', '2026-08'], [$tv['free_from'], $tv['free_until']]);
         $this->assertSame(['2026-09', '2026-09'], [$tv['not_billed_from'], $tv['not_billed_until']]);
         $this->assertStringContainsString('not billed Sep', $preview['line']);
+    }
+
+    public function test_the_months_not_billed_can_be_charged_as_old_debt(): void
+    {
+        // Connected in August with one free month: September passed unbilled.
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $customer = $this->lateCustomer(freeMonths: 1);
+
+        $this->admin();
+        $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page
+            ->where('customer.installation.late.missed_months', 1)
+            ->where('customer.installation.late.missed_amount', '2500.00')
+            ->where('customer.installation.late.can_charge', true));
+
+        $this->post("/customers/{$customer->uuid}/late-registration/charge", ['scope' => 'missed', 'amount' => 2500, 'note' => 'He knew he was not registered'])
+            ->assertSessionHasNoErrors();
+        $adjustment = ArrearsAdjustment::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame('late_registration', $adjustment->reason_category);
+        $this->assertSame('2026-10', $adjustment->target_period, 'on the current bill');
+        $this->assertSame('pending', $adjustment->status, 'another approver confirms it');
+
+        // Asked once only.
+        $this->post("/customers/{$customer->uuid}/late-registration/charge", ['scope' => 'missed', 'amount' => 2500, 'note' => 'Again'])->assertSessionHasErrors('amount');
+
+        $this->manager();
+        $this->post("/arrears-adjustments/{$adjustment->uuid}/approve")->assertSessionHasNoErrors();
+        $october = Manuscript::query()->where('customer_id', $customer->id)->where('period', '2026-10')->firstOrFail();
+        $this->assertSame('2500.00', (string) $october->bill, 'October is billed as usual…');
+        $this->assertSame('5000.00', (string) $october->total_arrears, '…plus the 2,500 for September.');
+    }
+
+    public function test_charging_every_month_since_connection_ends_the_free_months(): void
+    {
+        // Connected in August with 3 free months (Aug–Oct): nothing was
+        // missed, but the admin decides there are no free months at all.
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $customer = $this->lateCustomer(freeMonths: 3);
+
+        $this->admin();
+        $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page
+            ->where('customer.installation.late.missed_months', 0)
+            ->where('customer.installation.late.all_amount', '5000.00')
+            ->where('customer.installation.late.free_months_running', true));
+        $this->post("/customers/{$customer->uuid}/late-registration/charge", ['scope' => 'all', 'amount' => 5000, 'note' => 'No free months were authorised'])
+            ->assertSessionHasNoErrors();
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame(3, $grant->months, 'Nothing changes before approval.');
+
+        $this->manager();
+        $this->post('/arrears-adjustments/'.ArrearsAdjustment::query()->where('customer_id', $customer->id)->value('uuid').'/approve')->assertSessionHasNoErrors();
+
+        $this->assertSame(2, $grant->fresh()->months, 'Aug–Sep used; October is no longer free.');
+        $october = Manuscript::query()->where('customer_id', $customer->id)->where('period', '2026-10')->firstOrFail();
+        $this->assertSame('2500.00', (string) $october->bill, 'October is billed now…');
+        $this->assertSame('7500.00', (string) $october->total_arrears, '…plus Aug–Sep (5,000) as old debt.');
+    }
+
+    public function test_only_an_arrears_approver_charges_late_months(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $customer = $this->lateCustomer(freeMonths: 1);
+
+        $this->actAs('kelvin@shalomtech.dev', 'agent');
+        $this->post("/customers/{$customer->uuid}/late-registration/charge", ['scope' => 'missed', 'amount' => 2500, 'note' => 'x y z'])->assertForbidden();
+    }
+
+    /** Registered by the manager on 10 Oct; connected 12 Aug, free months from August. */
+    private function lateCustomer(int $freeMonths): Customer
+    {
+        $this->manager();
+        $this->post('/customers', $this->form([
+            'connected_on' => '2026-08-12',
+            'installation_reason' => 'Connected in August, registered only now',
+            'service_plans' => [$this->plan($this->tv, free: $freeMonths, from: '2026-08')],
+        ]))->assertSessionHasNoErrors();
+
+        return $this->created();
     }
 
     public function test_approving_late_free_months_keeps_their_start(): void

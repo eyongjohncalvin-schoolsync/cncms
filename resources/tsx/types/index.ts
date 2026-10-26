@@ -561,7 +561,9 @@ export type ArrearsAdjustmentReasonCategory =
     | 'other'
     | 'credit_correction'
     | 'duplicate_credit'
-    | 'migration_credit_error';
+    | 'migration_credit_error'
+    // Months a late-registered customer used before registration (LateRegistrationService).
+    | 'late_registration';
 export type ArrearsAdjustmentStatus = 'pending' | 'pending_second_approval' | 'approved' | 'rejected';
 
 /**
@@ -677,6 +679,22 @@ export interface CustomerInstallation {
     applicable?: boolean;
     connected_on?: string | null;
     billing_starts_period?: string | null;
+    /** Registered after the connection month closed (LateRegistrationService::summary()). */
+    late?: LateRegistration | null;
+}
+
+export interface LateRegistration {
+    connection_month: string;
+    billing_starts: string;
+    months: { period: string; free: boolean; amount: string }[];
+    missed_months: number;
+    missed_amount: string;
+    all_months: number;
+    all_amount: string;
+    free_months_running: boolean;
+    reason: string | null;
+    charge: { uuid: string; amount: string; status: string; cancels_free_months: boolean } | null;
+    can_charge: boolean;
 }
 
 /** Relocation and re-installation fees on the customer page (CustomerController::shapeOneOffCharges). */

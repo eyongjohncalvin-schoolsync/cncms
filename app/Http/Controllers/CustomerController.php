@@ -40,6 +40,7 @@ use App\Services\FieldInstallationService;
 use App\Services\FreeMonthGrantService;
 use App\Services\InstallationOfferService;
 use App\Services\InvoiceService;
+use App\Services\LateRegistrationService;
 use App\Services\ManuscriptRunLockService;
 use App\Services\ManuscriptService;
 use App\Services\ZoneService;
@@ -828,6 +829,11 @@ class CustomerController extends Controller
             'applicable' => $charges->isNotEmpty() || $customer->connected_on !== null,
             'connected_on' => $customer->connected_on?->toDateString(),
             'billing_starts_period' => $customer->billing_starts_period,
+            // Registered after their connection month closed: the months that passed unbilled, and the charge decision.
+            'late' => ($late = app(LateRegistrationService::class)->summary($customer)) === null ? null : [
+                ...$late,
+                'can_charge' => $late['charge'] === null && $this->context->can('arrears.approve') && ! $customer->trashed(),
+            ],
         ];
     }
 

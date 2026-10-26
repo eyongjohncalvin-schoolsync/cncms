@@ -24,6 +24,7 @@ const reasonCategoryLabels: Record<ArrearsAdjustmentReasonCategory, string> = {
     credit_correction: 'Credit correction',
     duplicate_credit: 'Duplicate credit',
     migration_credit_error: 'Migration credit error',
+    late_registration: 'Late registration — months not billed',
 };
 
 // Arrears corrections and credit corrections offer different reason menus —

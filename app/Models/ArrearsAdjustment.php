@@ -90,6 +90,7 @@ class ArrearsAdjustment extends Model
             'approved_at' => 'datetime',
             'second_approved_at' => 'datetime',
             'processed_at' => 'datetime',
+            'cancels_free_months' => 'boolean',
         ];
     }
 
