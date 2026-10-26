@@ -31,6 +31,8 @@ Route::get('users', [UserController::class, 'index'])->name('users.index');
 Route::post('users', [UserController::class, 'store'])->name('users.store');
 Route::patch('users/{tenantUser}', [UserController::class, 'update'])->name('users.update');
 Route::post('users/{tenantUser}/deactivate', [UserController::class, 'deactivate'])->name('users.deactivate');
+Route::post('users/{tenantUser}/activate', [UserController::class, 'activate'])->name('users.activate');
+Route::delete('users/{tenantUser}', [UserController::class, 'destroy'])->name('users.destroy');
 
 // Roles & permissions tab
 Route::get('users/roles', [RoleController::class, 'index'])->name('users.roles.index');

@@ -19,6 +19,7 @@ use App\Services\AccountSecurityService;
 use App\Services\CashBookService;
 use App\Services\SalaryService;
 use App\Services\StaffAssignmentService;
+use App\Services\StaffRemovalService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
@@ -74,6 +75,9 @@ class UserController extends Controller
         $canSetSalaries = $this->context->can('salaries.manage');
         $salaries = $canSetSalaries ? $this->salaries->summaryFor($tenantUsers->pluck('user_id')->map(fn ($id): int => (int) $id)->all()) : [];
 
+        // Delete is offered only for accounts with no history — one query for the list.
+        $withHistory = app(StaffRemovalService::class)->usersWithHistory($tenantUsers->pluck('user_id')->map(fn ($id): int => (int) $id)->all());
+
         return Inertia::render('UsersControlCenter/Users', [
             'can_set_salaries' => $canSetSalaries,
             'salary_grades' => $canSetSalaries
@@ -95,6 +99,9 @@ class UserController extends Controller
                 'username' => $tenantUser->user->username,
                 'email' => $tenantUser->user->email,
                 'status' => $tenantUser->user->status,
+                'can_delete' => ! isset($withHistory[(int) $tenantUser->user_id])
+                    && $tenantUser->user_id !== request()->user()->id
+                    && ! $tenantUser->user->is_landlord,
                 'branch_uuid' => $tenantUser->branch?->uuid,
                 'branch_name' => $tenantUser->branch?->name,
                 // Only meaningful for role === 'worker' — see
@@ -260,5 +267,31 @@ class UserController extends Controller
         $account->deactivate($tenantUser->user);
 
         return redirect()->route('users.index')->with('success', 'User deactivated.');
+    }
+
+    /**
+     * Lets a deactivated user sign in again (their old sessions stay ended).
+     */
+    public function activate(TenantUser $tenantUser): RedirectResponse
+    {
+        $this->authorize('activate', $tenantUser);
+
+        $tenantUser->user->update(['status' => 'active']);
+
+        return redirect()->route('users.index')->with('success', 'User reactivated.');
+    }
+
+    /**
+     * Deletes an account that has no history; anyone else can only be
+     * deactivated (StaffRemovalService).
+     */
+    public function destroy(TenantUser $tenantUser, StaffRemovalService $removal): RedirectResponse
+    {
+        $this->authorize('delete', $tenantUser);
+
+        $name = $tenantUser->user->name;
+        $removal->delete($tenantUser, request()->user());
+
+        return redirect()->route('users.index')->with('success', "{$name} deleted.");
     }
 }

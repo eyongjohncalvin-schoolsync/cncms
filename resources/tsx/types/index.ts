@@ -970,6 +970,8 @@ export interface TenantUserRow {
     username: string;
     email: string;
     status: 'active' | 'passive';
+    /** No history anywhere (and not the viewer or a platform owner) — the account may be deleted. */
+    can_delete: boolean;
     /**
      * Multi-branch RBAC fence (branches-and-locations.md section 4). null
      * means unrestricted (sees every branch) — the default for everyone.

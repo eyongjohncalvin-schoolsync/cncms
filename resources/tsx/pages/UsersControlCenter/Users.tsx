@@ -1,4 +1,4 @@
-import { Form, Head, Link, router } from '@inertiajs/react';
+import { Form, Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import { IconEdit, IconInfoCircle, IconUsersGroup } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -67,6 +67,8 @@ export default function UsersControlCenterUsers({
     const [editingUser, setEditingUser] = useState<TenantUserRow | null>(null);
     const [salaryUser, setSalaryUser] = useState<TenantUserRow | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [showDeactivated, setShowDeactivated] = useState(false);
+    const { errors } = usePage<{ errors: Record<string, string> }>().props;
 
     useEffect(() => {
         const removeStart = router.on('start', () => setIsLoading(true));
@@ -121,6 +123,22 @@ export default function UsersControlCenterUsers({
         }
     }
 
+    function activate(tenantUser: TenantUserRow) {
+        if (confirm(`Reactivate ${tenantUser.name}? They will be able to sign in again.`)) {
+            router.post(`/users/${tenantUser.id}/activate`, {}, { preserveScroll: true });
+        }
+    }
+
+    // Only offered for an account with no history (can_delete); the server checks again.
+    function remove(tenantUser: TenantUserRow) {
+        if (confirm(`Delete ${tenantUser.name}'s account for good? This cannot be undone.`)) {
+            router.delete(`/users/${tenantUser.id}`, { preserveScroll: true });
+        }
+    }
+
+    const deactivatedCount = users.filter((tenantUser) => tenantUser.status === 'passive').length;
+    const visibleUsers = showDeactivated ? users : users.filter((tenantUser) => tenantUser.status === 'active');
+
     return (
         <AppLayout title="Users Control Center" breadcrumbs={[{ label: 'Users Control Center' }]}>
             <Head title="Users Control Center — Users" />
@@ -161,7 +179,25 @@ export default function UsersControlCenterUsers({
                 </p>
             </div>
 
-            {users.length === 0 ? (
+            {errors.user && (
+                <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    {errors.user}
+                </div>
+            )}
+
+            {deactivatedCount > 0 && (
+                <label className="mb-3 inline-flex items-center gap-2 text-sm text-slate-600">
+                    <input
+                        type="checkbox"
+                        checked={showDeactivated}
+                        onChange={(e) => setShowDeactivated(e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Show deactivated users ({deactivatedCount})
+                </label>
+            )}
+
+            {visibleUsers.length === 0 ? (
                 <EmptyState title="No users found" description="Add a user to get started." />
             ) : (
                 <Card className="p-0 animate-fade-up [animation-delay:100ms]">
@@ -179,7 +215,7 @@ export default function UsersControlCenterUsers({
                             <Th>Actions</Th>
                         </TableHead>
                         <TableBody>
-                            {users.map((tenantUser) => (
+                            {visibleUsers.map((tenantUser) => (
                                 <tr key={tenantUser.id} className="transition-colors hover:bg-slate-50/70">
                                     <Td>
                                         <div className="flex items-start gap-2.5">
@@ -328,14 +364,39 @@ export default function UsersControlCenterUsers({
                                                 <IconEdit size={16} stroke={1.75} />
                                                 Job Title
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => deactivate(tenantUser)}
-                                                disabled={tenantUser.status === 'passive'}
-                                                className="rounded-md px-2 py-1 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
-                                            >
-                                                Deactivate
-                                            </button>
+                                            {tenantUser.status === 'passive' ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => activate(tenantUser)}
+                                                    className="rounded-md px-2 py-1 text-sm font-medium text-green-700 transition-colors hover:bg-green-50 hover:text-green-800"
+                                                >
+                                                    Reactivate
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => deactivate(tenantUser)}
+                                                    className="rounded-md px-2 py-1 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700"
+                                                >
+                                                    Deactivate
+                                                </button>
+                                            )}
+                                            {tenantUser.can_delete ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => remove(tenantUser)}
+                                                    className="rounded-md px-2 py-1 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 hover:text-red-800"
+                                                >
+                                                    Delete
+                                                </button>
+                                            ) : (
+                                                <span
+                                                    className="cursor-help text-xs text-slate-400"
+                                                    title="This account has history (payments, verifications, bons, the audit log…), so it can only be deactivated."
+                                                >
+                                                    Has history
+                                                </span>
+                                            )}
                                         </div>
                                     </Td>
                                 </tr>

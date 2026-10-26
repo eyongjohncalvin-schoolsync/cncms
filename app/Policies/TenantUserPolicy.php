@@ -51,6 +51,19 @@ class TenantUserPolicy
         return $this->context->can('users.manage') && ($tenantUser === null || $this->worksInMyBranch($tenantUser));
     }
 
+    public function activate(User $user, ?TenantUser $tenantUser = null): bool
+    {
+        return $this->deactivate($user, $tenantUser);
+    }
+
+    /**
+     * Only an account with no history — StaffRemovalService::delete() checks that.
+     */
+    public function delete(User $user, ?TenantUser $tenantUser = null): bool
+    {
+        return $this->deactivate($user, $tenantUser);
+    }
+
     /**
      * Unfenced: everyone. Fenced: staff fenced to my branch, and agents whose
      * zone is in my branch (the Agent query is branch-scoped already).
