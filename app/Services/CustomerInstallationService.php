@@ -167,6 +167,7 @@ class CustomerInstallationService
     public function create(CustomerData $customerData, InstallationData $installation, User $actor): array
     {
         $plan = $this->planFor($customerData->services ?? [], $installation, branchId: $this->branchOfZone($customerData->zoneUuid));
+        $this->assertPricesAllowed($customerData);
 
         return DB::transaction(function () use ($customerData, $installation, $actor, $plan): array {
             return $this->grants->deferRecalculation(function () use ($customerData, $installation, $actor, $plan): array {
@@ -279,6 +280,7 @@ class CustomerInstallationService
         );
 
         $plan = $this->planFor($customerData->services ?? [], $moneyOnly, field: true, branchId: $this->branchOfZone($customerData->zoneUuid));
+        $this->assertPricesAllowed($customerData);
 
         return DB::transaction(function () use ($customerData, $installation, $customerUuid, $field, $installationReceipt, $upfrontReceipt, $actor, $plan): array {
             $customer = $this->customers->create($customerData);
@@ -471,6 +473,24 @@ class CustomerInstallationService
                 return ['customer' => $customer, 'grants' => $grants, 'installation_month' => $plan['installation_month']];
             });
         });
+    }
+
+    /**
+     * A new customer's service prices must be a default, a price option or
+     * — for someone allowed — an amount at or above the minimum
+     * (CustomerSubscriptionService::assertPricesAllowed()). A bill typed
+     * without a service list is the default service at that price.
+     */
+    private function assertPricesAllowed(CustomerData $customerData): void
+    {
+        $subscriptions = app(CustomerSubscriptionService::class);
+        $branchId = $this->branchOfZone($customerData->zoneUuid);
+
+        $subscriptions->assertPricesAllowed(
+            $customerData->services ?? [$subscriptions->defaultSelection($customerData->bill, $branchId)],
+            null,
+            $branchId,
+        );
     }
 
     /** The branch a new customer joins through their zone (null: the branch being worked in). */

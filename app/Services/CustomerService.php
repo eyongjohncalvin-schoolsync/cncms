@@ -188,6 +188,8 @@ class CustomerService
             // null = leave subscriptions alone (bulk bill update, a status
             // change, any partial edit that didn't touch the services block).
             if ($data->services !== null) {
+                // A changed price: a default, a price option, or (if allowed) at or above the minimum.
+                $this->subscriptions->assertPricesAllowed($data->services, $customer, $customer->branch_id);
                 $this->subscriptions->sync($customer, $data->services);
             }
 

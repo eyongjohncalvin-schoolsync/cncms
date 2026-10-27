@@ -322,11 +322,21 @@ export interface ServiceVariantOption {
  * Every ACTIVE service, plus — when editing an existing customer — any
  * service/option they already hold even if it has since gone inactive.
  */
+/** A price option of a service (Settings → Services) — a quick pick besides its default price. */
+export interface ServicePriceOption {
+    amount: string;
+    label: string | null;
+}
+
 export interface ServiceCatalogueEntry {
     uuid: string;
     name: string;
     description: string | null;
     price: string;
+    /** Quick picks besides `price` (the default); another amount only with `customers.custom_price`. */
+    price_options?: ServicePriceOption[];
+    /** No customer may be set below this (null: no minimum). */
+    min_price?: string | null;
     is_default: boolean;
     active: boolean;
     variants: ServiceVariantOption[];

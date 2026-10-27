@@ -26,7 +26,7 @@ use Illuminate\Support\Str;
  * existing subscriptions (SettingsServiceController offers an explicit
  * "apply to all subscribers" action for that).
  */
-#[Fillable(['name', 'slug', 'price', 'is_default', 'active', 'description', 'sort_order'])]
+#[Fillable(['name', 'slug', 'price', 'is_default', 'active', 'description', 'sort_order', 'price_options', 'min_price'])]
 #[RouteKey('uuid')]
 class Service extends Model
 {
@@ -66,10 +66,25 @@ class Service extends Model
     {
         return [
             'price' => 'decimal:2',
+            'price_options' => 'array',
+            'min_price' => 'decimal:2',
             'is_default' => 'boolean',
             'active' => 'boolean',
             'sort_order' => 'integer',
         ];
+    }
+
+    /**
+     * The price options' amounts, "2000.00"-style (owner, 2026-10-27).
+     *
+     * @return list<string>
+     */
+    public function priceOptionAmounts(): array
+    {
+        return array_values(array_map(
+            fn (array $option): string => number_format((float) ($option['amount'] ?? 0), 2, '.', ''),
+            $this->price_options ?? [],
+        ));
     }
 
     public function customers(): BelongsToMany

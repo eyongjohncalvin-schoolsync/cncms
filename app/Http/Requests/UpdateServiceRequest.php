@@ -7,6 +7,7 @@ namespace App\Http\Requests;
 use App\Models\Service;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Validator;
 
 class UpdateServiceRequest extends FormRequest
 {
@@ -48,6 +49,28 @@ class UpdateServiceRequest extends FormRequest
             'price' => ['sometimes', 'required', 'numeric', 'gte:0', 'max:999999999.99', 'decimal:0,2'],
             'is_default' => ['sometimes', 'boolean'],
             'active' => ['sometimes', 'boolean'],
+            ...StoreServiceRequest::priceOptionRules(),
+        ];
+    }
+
+    /**
+     * The same minimum check as StoreServiceRequest, against this
+     * service's values for any field the request leaves out.
+     *
+     * @return array<int, \Closure(Validator): void>
+     */
+    public function after(): array
+    {
+        /** @var Service $service */
+        $service = $this->route('service');
+
+        return [
+            fn (Validator $validator) => StoreServiceRequest::checkMinimum(
+                $validator,
+                $this->has('price') ? $this->input('price') : $service->price,
+                $this->has('min_price') ? $this->input('min_price') : $service->min_price,
+                $this->has('price_options') ? $this->input('price_options') : $service->price_options,
+            ),
         ];
     }
 }

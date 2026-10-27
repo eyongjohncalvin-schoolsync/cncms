@@ -23,6 +23,8 @@ interface ServiceRow {
     name: string;
     description: string | null;
     price: string;
+    price_options: { amount: string; label: string | null }[];
+    min_price: string | null;
     is_default: boolean;
     active: boolean;
     subscriber_count: number;
@@ -91,6 +93,14 @@ export default function SettingsServices({ services }: SettingsServicesProps) {
                                 <span className="text-xs text-slate-400">
                                     {service.subscriber_count} subscriber{service.subscriber_count === 1 ? '' : 's'}
                                 </span>
+                                {(service.price_options.length > 0 || service.min_price) && (
+                                    <span className="text-xs text-slate-500">
+                                        {service.price_options.length > 0 &&
+                                            `Options: ${service.price_options.map((option) => formatCurrency(option.amount)).join(' · ')}`}
+                                        {service.price_options.length > 0 && service.min_price && ' — '}
+                                        {service.min_price && `minimum ${formatCurrency(service.min_price)}`}
+                                    </span>
+                                )}
                             </div>
                             <div className="flex shrink-0 items-center gap-1.5">
                                 <span className="mr-2 text-sm font-semibold text-slate-700 tabular-nums">{formatCurrency(service.price)}</span>
@@ -266,6 +276,9 @@ function ServiceFormModal({ initial, onClose }: { initial: ServiceRow | null; on
         price: initial?.price ?? '0',
         is_default: initial?.is_default ?? false,
         active: initial?.active ?? true,
+        // Owner, 2026-10-27: quick picks on the customer form, and a floor no one may go under.
+        price_options: (initial?.price_options ?? []).map((option) => ({ amount: option.amount, label: option.label ?? '' })),
+        min_price: initial?.min_price ?? '',
     });
 
     function submit(e: FormEvent) {
@@ -279,6 +292,15 @@ function ServiceFormModal({ initial, onClose }: { initial: ServiceRow | null; on
             post('/settings/services', options);
         }
     }
+
+    function setOption(index: number, field: 'amount' | 'label', value: string) {
+        setData(
+            'price_options',
+            data.price_options.map((option, i) => (i === index ? { ...option, [field]: value } : option)),
+        );
+    }
+
+    const optionErrors = Object.entries(errors).filter(([key]) => key.startsWith('price_options')).map(([, message]) => message);
 
     return (
         <Modal open onClose={onClose} title={initial ? `Edit ${initial.name}` : 'Add Service'}>
@@ -303,6 +325,70 @@ function ServiceFormModal({ initial, onClose }: { initial: ServiceRow | null; on
                     error={errors.price}
                     required
                 />
+
+                <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+                    <div>
+                        <p className="text-sm font-medium text-slate-800">Other price options (optional)</p>
+                        <p className="text-xs text-slate-500">
+                            Shown as quick picks next to the default price when registering a customer. Only people allowed to
+                            type a custom price (Roles &amp; permissions) can enter another amount.
+                        </p>
+                    </div>
+                    {data.price_options.map((option, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                aria-label={`Price option ${index + 1} amount`}
+                                placeholder="Amount"
+                                value={option.amount}
+                                onChange={(e) => setOption(index, 'amount', e.target.value)}
+                                className="w-32 rounded-lg border border-slate-300 px-2.5 py-1.5 text-right text-sm"
+                            />
+                            <input
+                                type="text"
+                                maxLength={40}
+                                aria-label={`Price option ${index + 1} label`}
+                                placeholder="Label, e.g. Business"
+                                value={option.label}
+                                onChange={(e) => setOption(index, 'label', e.target.value)}
+                                className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                            />
+                            <IconButton
+                                label="Remove price option"
+                                variant="danger"
+                                onClick={() => setData('price_options', data.price_options.filter((_, i) => i !== index))}
+                            >
+                                <IconTrash size={15} stroke={1.75} />
+                            </IconButton>
+                        </div>
+                    ))}
+                    {data.price_options.length < 10 && (
+                        <button
+                            type="button"
+                            onClick={() => setData('price_options', [...data.price_options, { amount: '', label: '' }])}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                        >
+                            <IconPlus size={14} stroke={2} /> Add a price option
+                        </button>
+                    )}
+                    {optionErrors.length > 0 && <p className="text-xs text-red-600">{optionErrors[0]}</p>}
+                </div>
+
+                <TextInput
+                    id="min_price"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    label="Minimum price (optional)"
+                    value={data.min_price}
+                    onChange={(e) => setData('min_price', e.target.value)}
+                    error={errors.min_price}
+                    placeholder="No minimum"
+                />
+                <p className="-mt-2 text-xs text-slate-500">No customer can be set below this amount, whoever types it.</p>
+
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input
                         type="checkbox"

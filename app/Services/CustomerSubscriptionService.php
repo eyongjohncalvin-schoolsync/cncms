@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Auth\Permission;
 use App\DataTransferObjects\CustomerServiceSelection;
 use App\Models\Branch;
 use App\Models\Customer;
@@ -13,6 +14,7 @@ use App\Models\Service;
 use App\Models\ServiceVariant;
 use App\Support\BranchLookup;
 use App\Support\BranchPrices;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -44,6 +46,72 @@ class CustomerSubscriptionService
      *
      * @param  list<CustomerServiceSelection>  $selections
      */
+    /**
+     * Price options (owner, 2026-10-27), for a customer staff create or
+     * edit (web, phone, field registration — never a spreadsheet import or
+     * old-system data, which carry real existing prices). A base service's
+     * price may be:
+     *  - unchanged (the customer's current price stays, whatever it is);
+     *  - the default — the branch's price where it sets one;
+     *  - one of the service's price options;
+     *  - any other amount only for someone allowed `customers.custom_price`,
+     *    and never below the service's minimum price.
+     * A service's options (channels) keep their own catalogue prices.
+     *
+     * @param  list<CustomerServiceSelection>  $selections
+     *
+     * @throws ValidationException
+     */
+    public function assertPricesAllowed(array $selections, ?Customer $customer, ?int $branchId): void
+    {
+        $bases = array_values(array_filter($selections, fn (CustomerServiceSelection $s): bool => $s->serviceVariantUuid === null));
+
+        if ($bases === []) {
+            return;
+        }
+
+        $services = Service::query()->whereIn('uuid', array_map(fn (CustomerServiceSelection $s): string => $s->serviceUuid, $bases))->get()->keyBy('uuid');
+        $current = $customer === null ? collect() : $customer->subscriptions()->whereNull('service_variant_id')->pluck('price', 'service_id');
+        $prices = BranchPrices::for($branchId);
+        $context = app()->bound(TenantContext::class) ? app(TenantContext::class) : null;
+        $mayType = $context === null || $context->can(Permission::CustomersCustomPrice->value);
+
+        foreach ($bases as $selection) {
+            $service = $services->get($selection->serviceUuid);
+
+            if ($service === null) {
+                continue; // sync() reports an unknown service
+            }
+
+            $price = $this->normalizePrice($selection->price);
+
+            if ($current->has($service->id) && $this->normalizePrice((string) $current[$service->id]) === $price) {
+                continue;
+            }
+
+            $choices = [$this->normalizePrice($prices->service($service)), ...$service->priceOptionAmounts()];
+
+            if (in_array($price, $choices, true)) {
+                continue;
+            }
+
+            if (! $mayType) {
+                $listed = array_unique($choices);
+                sort($listed, SORT_NUMERIC);
+
+                throw ValidationException::withMessages(['services' => [
+                    "Choose {$service->name}'s price from its options (".implode(' / ', array_map(fn (string $amount): string => number_format((float) $amount, 0, '.', ','), $listed)).' FCFA) — only a manager can set another amount.',
+                ]]);
+            }
+
+            if ($service->min_price !== null && bccomp($price, (string) $service->min_price, 2) < 0) {
+                throw ValidationException::withMessages(['services' => [
+                    "{$service->name} can't be below its minimum of ".number_format((float) $service->min_price, 0, '.', ',').' FCFA.',
+                ]]);
+            }
+        }
+    }
+
     public function sync(Customer $customer, array $selections): void
     {
         if ($selections === []) {

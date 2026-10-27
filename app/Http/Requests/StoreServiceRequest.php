@@ -7,6 +7,7 @@ namespace App\Http\Requests;
 use App\Models\Service;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Validator;
 
 class StoreServiceRequest extends FormRequest
 {
@@ -43,6 +44,58 @@ class StoreServiceRequest extends FormRequest
             'price' => ['required', 'numeric', 'gte:0', 'max:999999999.99', 'decimal:0,2'],
             'is_default' => ['sometimes', 'boolean'],
             'active' => ['sometimes', 'boolean'],
+            ...self::priceOptionRules(),
+        ];
+    }
+
+    /**
+     * Price options and the minimum price (owner, 2026-10-27) — shared with
+     * UpdateServiceRequest.
+     *
+     * @return array<string, mixed>
+     */
+    public static function priceOptionRules(): array
+    {
+        return [
+            'price_options' => ['sometimes', 'nullable', 'array', 'max:10'],
+            'price_options.*.amount' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
+            'price_options.*.label' => ['nullable', 'string', 'max:40'],
+            'min_price' => ['sometimes', 'nullable', 'numeric', 'gte:0', 'max:999999999.99', 'decimal:0,2'],
+        ];
+    }
+
+    /**
+     * No default price or price option below the minimum — staff could
+     * otherwise pick a price the minimum is meant to forbid.
+     *
+     * @param  array<int, array{amount?: mixed}>|null  $options
+     */
+    public static function checkMinimum(Validator $validator, mixed $price, mixed $minimum, ?array $options): void
+    {
+        if ($minimum === null || $minimum === '') {
+            return;
+        }
+
+        if ($price !== null && $price !== '' && (float) $price > 0 && (float) $price < (float) $minimum) {
+            $validator->errors()->add('min_price', 'The minimum cannot be above the default price.');
+        }
+
+        foreach ($options ?? [] as $option) {
+            if (isset($option['amount']) && (float) $option['amount'] < (float) $minimum) {
+                $validator->errors()->add('price_options', 'Every price option must be at least the minimum price.');
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * @return array<int, \Closure(Validator): void>
+     */
+    public function after(): array
+    {
+        return [
+            fn (Validator $validator) => self::checkMinimum($validator, $this->input('price'), $this->input('min_price'), $this->input('price_options')),
         ];
     }
 }

@@ -1,6 +1,75 @@
+import { usePage } from '@inertiajs/react';
+import { useState } from 'react';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { CustomerServiceSelectionForm, ServiceCatalogueEntry } from '@/types';
+import { hasPermission } from '@/lib/permissions';
+import type { CustomerServiceSelectionForm, PageProps, ServiceCatalogueEntry } from '@/types';
+
+/** Same "2000.00" shape the server compares with. */
+function samePrice(a: string | undefined, b: string | undefined): boolean {
+    return a !== undefined && b !== undefined && (parseFloat(a) || 0).toFixed(2) === (parseFloat(b) || 0).toFixed(2);
+}
+
+/**
+ * A ticked service's price quick picks (owner, 2026-10-27): its default,
+ * its price options, and — when editing — the customer's current price.
+ * With `customers.custom_price` the amount box above takes any amount at
+ * or above the minimum; without it these are the only choices.
+ */
+function PriceChoices({
+    service,
+    price,
+    currentPrice,
+    mayTypePrice,
+    onPick,
+}: {
+    service: ServiceCatalogueEntry;
+    price: string;
+    currentPrice: string | undefined;
+    mayTypePrice: boolean;
+    onPick: (price: string) => void;
+}) {
+    const choices: { amount: string; label: string }[] = [{ amount: service.price, label: 'Default' }];
+
+    for (const option of service.price_options ?? []) {
+        if (!choices.some((choice) => samePrice(choice.amount, option.amount))) {
+            choices.push({ amount: option.amount, label: option.label ?? '' });
+        }
+    }
+
+    if (currentPrice !== undefined && !choices.some((choice) => samePrice(choice.amount, currentPrice))) {
+        choices.push({ amount: currentPrice, label: 'Current' });
+    }
+
+    if (choices.length < 2 && !service.min_price) {
+        return null;
+    }
+
+    return (
+        <div className="mt-2 ml-7 flex flex-wrap items-center gap-1.5">
+            {choices.map((choice) => {
+                const active = samePrice(choice.amount, price);
+
+                return (
+                    <button
+                        key={choice.amount}
+                        type="button"
+                        onClick={() => onPick(choice.amount)}
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                            active ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-indigo-400'
+                        }`}
+                    >
+                        {formatCurrency(parseFloat(choice.amount) || 0)}
+                        {choice.label && <span className={active ? 'text-indigo-100' : 'text-slate-400'}> · {choice.label}</span>}
+                    </button>
+                );
+            })}
+            {mayTypePrice && service.min_price && (
+                <span className="text-xs text-slate-400">Other amounts: at least {formatCurrency(parseFloat(service.min_price) || 0)}</span>
+            )}
+        </div>
+    );
+}
 
 interface ServicesPickerProps {
     catalogue: ServiceCatalogueEntry[];
@@ -28,6 +97,15 @@ interface ServicesPickerProps {
  * this too; this UI just never lets you build an invalid selection).
  */
 export function ServicesPicker({ catalogue, value, onChange, error }: ServicesPickerProps) {
+    // Typing a price of one's own is `customers.custom_price`; everyone else
+    // picks the default or a price option (the server checks the same).
+    const { auth } = usePage<PageProps>().props;
+    const mayTypePrice = hasPermission(auth.user?.permissions, 'customers.custom_price');
+    // An existing customer's current prices — kept as a choice when editing.
+    const [initialPrices] = useState<Record<string, string>>(() =>
+        Object.fromEntries(value.filter((v) => v.service_variant_uuid === null).map((v) => [v.service_uuid, v.price])),
+    );
+
     const baseSelection = (serviceUuid: string) => value.find((v) => v.service_uuid === serviceUuid && v.service_variant_uuid === null);
     const variantSelection = (variantUuid: string) => value.find((v) => v.service_variant_uuid === variantUuid);
 
@@ -88,13 +166,14 @@ export function ServicesPicker({ catalogue, value, onChange, error }: ServicesPi
                                     </span>
                                     {service.description && <span className="mt-0.5 block text-xs text-slate-500">{service.description}</span>}
                                 </span>
-                                {checked && (
+                                {checked && mayTypePrice && (
                                     <span className="flex shrink-0 items-center gap-1">
                                         <input
                                             type="number"
                                             step="0.01"
-                                            min="0"
+                                            min={service.min_price ?? '0'}
                                             value={selection.price}
+                                            aria-label={`${service.name} price`}
                                             onClick={(e) => e.preventDefault()}
                                             onChange={(e) => setPrice((v) => v.service_uuid === service.uuid && v.service_variant_uuid === null, e.target.value)}
                                             className="w-28 rounded-lg border border-slate-300 px-2.5 py-1.5 text-right text-sm text-slate-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
@@ -102,7 +181,20 @@ export function ServicesPicker({ catalogue, value, onChange, error }: ServicesPi
                                         <span className="text-xs text-slate-400">FCFA</span>
                                     </span>
                                 )}
+                                {checked && !mayTypePrice && (
+                                    <span className="shrink-0 text-sm font-semibold text-slate-900">{formatCurrency(parseFloat(selection.price) || 0)}</span>
+                                )}
                             </label>
+
+                            {checked && (
+                                <PriceChoices
+                                    service={service}
+                                    price={selection.price}
+                                    currentPrice={initialPrices[service.uuid]}
+                                    mayTypePrice={mayTypePrice}
+                                    onPick={(price) => setPrice((v) => v.service_uuid === service.uuid && v.service_variant_uuid === null, price)}
+                                />
+                            )}
 
                             {checked && parseFloat(selection.price) === 0 && (
                                 <p className="mt-2 ml-7 flex items-center gap-1 text-xs text-amber-600">

@@ -41,7 +41,7 @@ class SettingsServiceController extends Controller
 
     public function store(StoreServiceRequest $request): RedirectResponse
     {
-        $data = $request->validated();
+        $data = $this->withTidyPriceOptions($request->validated());
 
         if ($data['is_default'] ?? false) {
             $this->clearExistingDefault();
@@ -54,7 +54,7 @@ class SettingsServiceController extends Controller
 
     public function update(UpdateServiceRequest $request, Service $service): RedirectResponse
     {
-        $data = $request->validated();
+        $data = $this->withTidyPriceOptions($request->validated());
 
         if ($data['is_default'] ?? false) {
             $this->clearExistingDefault($service->id);
@@ -168,6 +168,32 @@ class SettingsServiceController extends Controller
     }
 
     /**
+     * Price options stored cheapest first, one per amount, "2000.00"-style,
+     * a blank label as none; an empty list as none.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function withTidyPriceOptions(array $data): array
+    {
+        if (! array_key_exists('price_options', $data)) {
+            return $data;
+        }
+
+        $options = collect($data['price_options'] ?? [])
+            ->map(fn (array $option): array => [
+                'amount' => number_format((float) $option['amount'], 2, '.', ''),
+                'label' => filled($option['label'] ?? null) ? trim((string) $option['label']) : null,
+            ])
+            ->unique('amount')
+            ->sortBy(fn (array $option): float => (float) $option['amount'])
+            ->values()
+            ->all();
+
+        return [...$data, 'price_options' => $options === [] ? null : $options];
+    }
+
+    /**
      * `uq_services_single_default` allows at most one `is_default = true`
      * row — clear whichever row currently holds it before setting a new
      * one, so a client's `is_default: true` never trips the constraint.
@@ -205,6 +231,8 @@ class SettingsServiceController extends Controller
                 'name' => $service->name,
                 'description' => $service->description,
                 'price' => $service->price,
+                'price_options' => $service->price_options ?? [],
+                'min_price' => $service->min_price,
                 'is_default' => $service->is_default,
                 'active' => $service->active,
                 'subscriber_count' => $service->customers_count,

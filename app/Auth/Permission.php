@@ -58,6 +58,14 @@ enum Permission: string
      * is deliberately NOT in the manager / agent / worker sets.
      */
     case CustomersExportRecord = 'customers.export_record';
+    /**
+     * Typing a service price of one's own on a customer, instead of the
+     * service's default or one of its price options (owner, 2026-10-27).
+     * Never below the service's minimum price, whoever types it
+     * (CustomerSubscriptionService::assertPricesAllowed()). Seeded to
+     * admin + manager.
+     */
+    case CustomersCustomPrice = 'customers.custom_price';
 
     // ---- Payments -----------------------------------------------------
     case PaymentsView = 'payments.view';

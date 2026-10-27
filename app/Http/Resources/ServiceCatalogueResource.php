@@ -31,6 +31,11 @@ class ServiceCatalogueResource extends JsonResource
             'description' => $this->description,
             // The agent's branch's prices (branches v2 D4).
             'price' => BranchPrices::current()->service($this->resource),
+            // Price options (owner, 2026-10-27): quick picks besides the
+            // default; another amount only with `customers.custom_price`
+            // (in the user's permissions), never below min_price.
+            'price_options' => $this->price_options ?? [],
+            'min_price' => $this->min_price,
             'is_default' => $this->is_default,
             'variants' => $this->variants->map(fn (ServiceVariant $variant): array => [
                 'uuid' => $variant->uuid,

@@ -720,6 +720,10 @@ class CustomerController extends Controller
                 'name' => $service->name,
                 'description' => $service->description,
                 'price' => $prices->service($service),
+                // Quick picks besides the default; any other amount only for
+                // whoever may type one, and never below the minimum.
+                'price_options' => $service->price_options ?? [],
+                'min_price' => $service->min_price,
                 'is_default' => $service->is_default,
                 'active' => $service->active,
                 'variants' => $service->variants->map(fn (ServiceVariant $variant): array => [

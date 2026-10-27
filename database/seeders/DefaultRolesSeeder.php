@@ -123,6 +123,7 @@ class DefaultRolesSeeder extends Seeder
             Permission::CustomersChangeStatus->value,
             Permission::CustomersStatusBoard->value,
             Permission::CustomersEligibilityBoard->value,
+            Permission::CustomersCustomPrice->value,
 
             Permission::PaymentsView->value,
             Permission::PaymentsCreate->value,
