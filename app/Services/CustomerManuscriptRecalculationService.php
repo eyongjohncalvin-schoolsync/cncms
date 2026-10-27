@@ -7,6 +7,8 @@ namespace App\Services;
 use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
+use App\Support\Billing\FreeMonthPlan;
+use App\Support\BranchLookup;
 use App\Support\ScheduledTasks\ManuscriptChunkDataResolver;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -163,5 +165,71 @@ class CustomerManuscriptRecalculationService
         CustomerService::forgetShowCache($customer->uuid, $customer->branch_id);
 
         return $manuscript;
+    }
+
+    /**
+     * recalculateOne() for many customers and one period, in the bill run's
+     * batched shape (ManuscriptCalculate::runForEveryCustomer()): each
+     * lookup is one query for the whole set — latest bills, eligible
+     * payments and adjustments, free-month plans, this period's rows — then
+     * one write per customer, and ONE `command_runs` audit row for the set
+     * instead of one per customer. Same calculator, same eligibility, so
+     * the result is identical to calling recalculateOne() for each.
+     *
+     * @param  Collection<int, Customer>  $customers
+     * @param  array<string, mixed>  $auditContext
+     */
+    public function recalculateMany(Collection $customers, string $period, string $trigger, array $auditContext = []): void
+    {
+        $customers = $customers->reject(fn (Customer $customer): bool => $customer->isPendingActivation())->values();
+
+        if ($customers->isEmpty()) {
+            return;
+        }
+
+        $customerIds = $customers->pluck('id')->all();
+        BranchLookup::remember($customers);
+
+        [$previousByCustomer, $paymentsByCustomer, $adjustmentsByCustomer] = $this->resolver->resolve($customerIds, $period);
+        $freeMonthPlans = FreeMonthPlan::forCustomers($customers);
+        $currentByCustomer = Manuscript::query()->whereIn('customer_id', $customerIds)->where('period', $period)->get()->keyBy('customer_id');
+
+        foreach ($customers as $customer) {
+            $result = $this->calculator->calculate(
+                $customer,
+                $period,
+                $previousByCustomer->get($customer->id),
+                $paymentsByCustomer->get($customer->id, new Collection),
+                $adjustmentsByCustomer->get($customer->id, new Collection),
+                freeMonths: $freeMonthPlans[$customer->id] ?? null,
+            );
+
+            // command_run_id cleared for the same reason as recalculateOne().
+            ($currentByCustomer->get($customer->id) ?? new Manuscript(['customer_id' => $customer->id, 'period' => $period]))
+                ->fill([...$result->toManuscriptAttributes(), 'command_run_id' => null])
+                ->save();
+
+            foreach ($result->processedPayments as $payment) {
+                $payment->forceFill(['processed_at' => Carbon::now(), 'processed_period' => $period])->save();
+            }
+
+            foreach ($result->processedAdjustments as $adjustment) {
+                $adjustment->forceFill(['processed_at' => Carbon::now(), 'processed_period' => $period])->save();
+            }
+        }
+
+        CommandRun::create([
+            'command' => 'manuscript:recalculate-many',
+            'period' => $period,
+            'ran_at' => Carbon::now(),
+            'status' => 'published',
+            'published_at' => Carbon::now(),
+            'metadata' => [
+                'customer_ids' => $customerIds,
+                'customers_processed' => count($customerIds),
+                'trigger' => $trigger,
+                ...$auditContext,
+            ],
+        ]);
     }
 }

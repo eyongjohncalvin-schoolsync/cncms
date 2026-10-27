@@ -40,6 +40,9 @@ class ApplyCompensationBatchJob implements ShouldQueue
             return;
         }
 
-        $compensation->apply($batch, $approver);
+        // Well inside $timeout: what's left is picked up by a fresh job.
+        if (! $compensation->apply($batch, $approver, secondsBudget: 1200)) {
+            self::dispatch($this->batchId, $this->approvedByUserId);
+        }
     }
 }

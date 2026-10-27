@@ -5,15 +5,19 @@ declare(strict_types=1);
 namespace Tests\Feature\Web;
 
 use App\Models\Branch;
+use App\Models\CommandRun;
 use App\Models\Company;
 use App\Models\CompensationBatch;
 use App\Models\Customer;
 use App\Models\CustomerSubscription;
 use App\Models\FreeMonthGrant;
+use App\Models\Manuscript;
 use App\Models\Service;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
+use App\Services\FreeMonthGrantService;
+use App\Services\ManuscriptRunLockService;
 use App\Support\TenantContext;
 use Database\Factories\BranchFactory;
 use Database\Factories\CustomerFactory;
@@ -119,6 +123,42 @@ class CompensationTest extends TestCase
             $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->status);
             $this->assertNotNull($grant->start_period);
         }
+    }
+
+    /**
+     * Applying a batch (2026-10-27): customers are given their months in
+     * chunks with one batched recalculation per month and one audit run per
+     * chunk — and the bills come out exactly as approving each one alone.
+     */
+    public function test_a_batch_bills_exactly_like_approving_each_customer_alone(): void
+    {
+        $next = FreeMonthGrant::addMonths(app(ManuscriptRunLockService::class)->currentPeriod(), 1);
+        [$inBatch, $alone] = [$this->subscriber(), $this->subscriber([], ZoneFactory::new()->create(['branch_id' => Branch::headquartersId()]))];
+
+        // Months already billed come first (D20), so the free month lands in
+        // next month — whose bill run is already waiting for review: that
+        // month must be recalculated with the free month in it.
+        CommandRun::query()->create(['command' => 'manuscript:calculate', 'period' => $next, 'ran_at' => now(), 'status' => 'pending_review', 'metadata' => []]);
+
+        $this->as('kelvin@shalomtech.dev', 'manager');
+        $this->post('/compensation', $this->batchForm(['zone_uuid' => $this->zone->uuid]))->assertSessionHasNoErrors();
+        $this->allowance(0);
+        $this->post("/customers/{$alone->uuid}/free-months", ['months' => 1, 'reason' => 'Signal outage 3–10 October'])->assertSessionHasNoErrors();
+
+        $this->as('patience@shalomtech.dev', 'admin');
+        $runsBefore = CommandRun::query()->where('command', 'manuscript:recalculate-many')->count();
+        $this->post('/compensation/'.CompensationBatch::query()->latest('id')->value('uuid').'/approve')->assertSessionHasNoErrors();
+        app(FreeMonthGrantService::class)->approveGroup((string) $this->grantsOf($alone)->value('group_uuid'), User::query()->where('email', 'patience@shalomtech.dev')->firstOrFail());
+
+        $bill = fn (Customer $customer): array => Manuscript::query()->where('customer_id', $customer->id)->where('period', '>=', $next)->orderBy('period')->get()
+            ->map->only(['period', 'bill', 'total_bill', 'total_arrears', 'credit', 'covered'])->all();
+
+        $this->assertNotSame([], $bill($inBatch), 'Next month was written.');
+        $this->assertSame($bill($alone), $bill($inBatch), 'The batch bills exactly like a single approval.');
+        $this->assertTrue((bool) $bill($inBatch)[0]['covered'], 'Next month is the free month.');
+        $this->assertSame([FreeMonthGrant::STATUS_APPROVED, $this->grantsOf($alone)->value('start_period')], [$this->grantsOf($inBatch)->value('status'), $this->grantsOf($inBatch)->value('start_period')]);
+        $this->assertSame(1, CommandRun::query()->where('command', 'manuscript:recalculate-many')->count() - $runsBefore, 'One audit run for the chunk.');
+        $this->assertFalse(CommandRun::query()->where('command', 'manuscript:recalculate-one')->where('metadata->customer_id', $inBatch->id)->exists());
     }
 
     public function test_rejecting_a_branch_wide_compensation_rejects_every_customer_in_it(): void

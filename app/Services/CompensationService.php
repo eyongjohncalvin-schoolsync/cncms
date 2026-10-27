@@ -12,6 +12,7 @@ use App\Models\FreeMonthGrant;
 use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Models\Zone;
+use App\Support\BranchLookup;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -72,16 +73,22 @@ class CompensationService
 
             $count = 0;
 
-            $this->customersQuery($batch)->with('zone')->orderBy('id')->each(function (Customer $customer) use ($batch, $held, $serviceIds, $months, $note, $actor, &$count): void {
-                $theirs = $held[$customer->id] ?? [];
-                $services = $serviceIds === null ? $theirs : array_values(array_intersect($serviceIds, $theirs));
+            $this->customersQuery($batch)->with('zone')->chunkById(500, function ($customers) use ($batch, $held, $serviceIds, $months, $note, $actor, &$count): void {
+                // The new requests take their customer's branch from memory, not a query each.
+                BranchLookup::remember($customers);
 
-                if ($services === []) {
-                    return;
+                foreach ($customers as $customer) {
+                    $theirs = $held[$customer->id] ?? [];
+                    $services = $serviceIds === null ? $theirs : array_values(array_intersect($serviceIds, $theirs));
+
+                    if ($services === []) {
+                        continue;
+                    }
+
+                    // $theirs: the services already looked up for the whole batch above.
+                    $this->grants->requestCompensation($customer, $services, $months, $note, $actor, batchId: $batch->id, heldServiceIds: $theirs);
+                    $count++;
                 }
-
-                $this->grants->requestCompensation($customer, $services, $months, $note, $actor, batchId: $batch->id);
-                $count++;
             });
 
             if ($count === 0) {
@@ -124,19 +131,42 @@ class CompensationService
         });
     }
 
+    /** Customers given their months per transaction while applying a batch. */
+    public const int APPLY_CHUNK = 100;
+
     /**
-     * Gives each customer of an approved batch their months (one request at
-     * a time, each recalculating that customer's bills). A request already
-     * applied is skipped, so running it again finishes an interrupted batch.
+     * Gives the customers of an approved batch their months, APPLY_CHUNK
+     * customers at a time — each chunk one transaction with one batched
+     * recalculation per month (FreeMonthGrantService::approveCompensationGroups()).
+     * A request already applied is skipped, so running it again finishes an
+     * interrupted batch. Stops after $secondsBudget and returns false when
+     * customers remain (the job queues itself again), true when done.
      */
-    public function apply(CompensationBatch $batch, User $actor): void
+    public function apply(CompensationBatch $batch, User $actor, int $secondsBudget = PHP_INT_MAX): bool
     {
-        FreeMonthGrant::query()
-            ->where('compensation_batch_id', $batch->id)
-            ->where('status', FreeMonthGrant::STATUS_PENDING_APPROVAL)
-            ->distinct()
-            ->pluck('group_uuid')
-            ->each(fn (string $groupUuid) => $this->grants->approveGroup($groupUuid, $actor));
+        $startedAt = microtime(true);
+
+        while (true) {
+            $groupUuids = FreeMonthGrant::query()
+                ->where('compensation_batch_id', $batch->id)
+                ->where('status', FreeMonthGrant::STATUS_PENDING_APPROVAL)
+                ->select('group_uuid')
+                ->groupBy('group_uuid')
+                ->orderByRaw('min(id)')
+                ->limit(self::APPLY_CHUNK)
+                ->pluck('group_uuid')
+                ->all();
+
+            if ($groupUuids === []) {
+                return true;
+            }
+
+            $this->grants->approveCompensationGroups($groupUuids, $actor, $batch->id);
+
+            if (microtime(true) - $startedAt > $secondsBudget) {
+                return false;
+            }
+        }
     }
 
     /**

@@ -12,6 +12,7 @@ use App\Models\FreeMonthGrant;
 use App\Models\InstallationOffer;
 use App\Models\Manuscript;
 use App\Models\User;
+use App\Support\CacheVersion;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -163,15 +164,20 @@ class FreeMonthGrantService
      * @param  list<int>|null  $serviceIds  null = every service the customer holds
      * @return Collection<int, FreeMonthGrant>
      */
-    public function requestCompensation(Customer $customer, ?array $serviceIds, int $months, string $note, User $actor, ?int $arrearsAdjustmentId = null, ?int $batchId = null): Collection
+    public function requestCompensation(Customer $customer, ?array $serviceIds, int $months, string $note, User $actor, ?int $arrearsAdjustmentId = null, ?int $batchId = null, ?array $heldServiceIds = null): Collection
     {
         $this->assertWithinCap([$months]);
 
+        // A batch passes the services it already looked up for every customer at once.
+        $held = $heldServiceIds ?? $this->heldServiceIds($customer);
+
         $serviceIds = $serviceIds === null || $serviceIds === []
-            ? $this->heldServiceIds($customer)
+            ? $held
             : array_values(array_unique(array_map('intval', $serviceIds)));
 
-        $this->assertServicesHeld($customer, $serviceIds);
+        if (array_diff($serviceIds, $held) !== []) {
+            throw ValidationException::withMessages(['services' => 'Free months can only be given on services the customer holds.']);
+        }
 
         $groupUuid = (string) Str::uuid();
 
@@ -296,7 +302,8 @@ class FreeMonthGrantService
                 ]);
             }
 
-            $this->recalculateFrom($customer, (string) $grants->map->fresh()->min('start_period'));
+            // update() above already set start_period on these models.
+            $this->recalculateFrom($customer, (string) $grants->min('start_period'));
             $customer->touch();
             $this->forgetCustomerCache($customer);
 
@@ -425,7 +432,25 @@ class FreeMonthGrantService
             return;
         }
 
-        $periods = Manuscript::query()->where('period', '>=', $from)->distinct()->pluck('period')
+        foreach ($this->generatedPeriodsFrom($from) as $period) {
+            $this->recalculation->recalculateOne($customer, (string) $period, trigger: 'free_months', auditContext: [
+                'triggered_by_user_id' => auth()->id(),
+            ]);
+        }
+    }
+
+    /**
+     * Every month from $from on (never a locked one) that already has
+     * manuscripts or a bill run on its way — the months a change must be
+     * written into.
+     *
+     * @return Collection<int, string>
+     */
+    public function generatedPeriodsFrom(string $from): Collection
+    {
+        $from = max($from, $this->lock->currentPeriod());
+
+        return Manuscript::query()->where('period', '>=', $from)->distinct()->pluck('period')
             ->merge(CommandRun::query()
                 ->where('command', 'manuscript:calculate')
                 ->whereIn('status', ['queued', 'pending_review', 'published'])
@@ -434,12 +459,62 @@ class FreeMonthGrantService
             ->unique()
             ->sort()
             ->values();
+    }
 
-        foreach ($periods as $period) {
-            $this->recalculation->recalculateOne($customer, (string) $period, trigger: 'free_months', auditContext: [
-                'triggered_by_user_id' => auth()->id(),
-            ]);
-        }
+    /**
+     * Approves many compensation requests at once — a zone/branch batch
+     * (CompensationService::apply()). Same placement as approveGroup() (each
+     * service's months after its existing free and paid months, D20), but
+     * one locking query for all the requests and one batched recalculation
+     * per month for all their customers, instead of a lookup, a
+     * recalculation and an audit run per customer. One transaction: a
+     * failure leaves every request in the set pending, so running the
+     * batch again finishes it.
+     *
+     * @param  list<string>  $groupUuids
+     * @return int customers given their months
+     */
+    public function approveCompensationGroups(array $groupUuids, User $actor, ?int $batchId = null): int
+    {
+        return DB::transaction(function () use ($groupUuids, $actor, $batchId): int {
+            $grants = FreeMonthGrant::query()
+                ->whereIn('group_uuid', $groupUuids)
+                ->where('status', FreeMonthGrant::STATUS_PENDING_APPROVAL)
+                ->where('reason', FreeMonthGrant::REASON_COMPENSATION)
+                ->with('customer')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            if ($grants->isEmpty()) {
+                return 0;
+            }
+
+            $starts = [];
+
+            foreach ($grants as $grant) {
+                $start = $this->compensationStart($grant->customer, $grant->service_id !== null ? (int) $grant->service_id : null);
+                $grant->update(['status' => FreeMonthGrant::STATUS_APPROVED, 'start_period' => $start, 'decided_by' => $actor->id, 'decided_at' => now()]);
+                $starts[] = $start;
+            }
+
+            $customers = $grants->pluck('customer')->unique('id')->values();
+
+            // A customer whose months start later is simply recalculated to
+            // the same figures for the earlier months.
+            foreach ($this->generatedPeriodsFrom(min($starts)) as $period) {
+                $this->recalculation->recalculateMany($customers, (string) $period, 'compensation_batch', [
+                    'compensation_batch_id' => $batchId,
+                    'triggered_by_user_id' => $actor->id,
+                ]);
+            }
+
+            // What touch() did per customer: the phones download them again.
+            Customer::query()->withoutGlobalScopes()->whereKey($customers->pluck('id'))->update(['updated_at' => now()]);
+            CacheVersion::bump(CacheVersion::CUSTOMERS);
+
+            return $customers->count();
+        });
     }
 
     /** Whole months from $from to $to (`Y-m`), negative when $to is earlier. */
@@ -456,7 +531,7 @@ class FreeMonthGrantService
      */
     private function lockedPendingGroup(string $groupUuid): Collection
     {
-        $grants = FreeMonthGrant::query()->where('group_uuid', $groupUuid)->lockForUpdate()->get();
+        $grants = FreeMonthGrant::query()->where('group_uuid', $groupUuid)->with('customer')->lockForUpdate()->get();
 
         if ($grants->isEmpty() || $grants->contains(fn (FreeMonthGrant $grant): bool => $grant->status !== FreeMonthGrant::STATUS_PENDING_APPROVAL)) {
             throw ValidationException::withMessages(['grant' => 'These free months are not waiting for approval.']);
