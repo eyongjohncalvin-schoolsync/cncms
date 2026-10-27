@@ -639,11 +639,21 @@ export interface ServiceVariantOptionApi {
     price: string;
 }
 
+/** A price option of a service (Settings → Services) — a quick pick besides its default price. */
+export interface ServicePriceOptionApi {
+    amount: string;
+    label: string | null;
+}
+
 export interface ServiceCatalogueApi {
     uuid: string;
     name: string;
     description: string | null;
     price: string;
+    /** Quick picks besides `price` (the default); another amount only with `customers.custom_price`. Absent on older servers. */
+    price_options?: ServicePriceOptionApi[];
+    /** No customer may be set below this (null: no minimum). */
+    min_price?: string | null;
     is_default: boolean;
     variants: ServiceVariantOptionApi[];
 }

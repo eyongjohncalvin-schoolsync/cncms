@@ -1,9 +1,36 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { TextInput } from '../ui/TextInput';
+import { useAuth } from '../../auth/AuthContext';
 import { colors } from '../../theme/colors';
 import { fontSize, radius, spacing, touchTarget } from '../../theme/tokens';
 import { formatFcfa } from '../../utils/format';
 import type { CustomerServiceSelection, ServiceCatalogueApi } from '../../types/api';
+
+/** Same "2000.00" shape the server compares with. */
+function samePrice(a: string | undefined, b: string | undefined): boolean {
+    return a !== undefined && b !== undefined && (parseFloat(a) || 0).toFixed(2) === (parseFloat(b) || 0).toFixed(2);
+}
+
+/**
+ * A ticked service's price quick picks (owner, 2026-10-27): its default,
+ * its price options, and — when editing — the customer's current price.
+ */
+function priceChoices(service: ServiceCatalogueApi, currentPrice: string | undefined): { amount: string; label: string }[] {
+    const choices = [{ amount: service.price, label: 'Default' }];
+
+    for (const option of service.price_options ?? []) {
+        if (!choices.some((choice) => samePrice(choice.amount, option.amount))) {
+            choices.push({ amount: option.amount, label: option.label ?? '' });
+        }
+    }
+
+    if (currentPrice !== undefined && !choices.some((choice) => samePrice(choice.amount, currentPrice))) {
+        choices.push({ amount: currentPrice, label: 'Current' });
+    }
+
+    return choices;
+}
 
 interface ServicesPickerProps {
     catalogue: ServiceCatalogueApi[];
@@ -33,6 +60,15 @@ interface ServicesPickerProps {
  * doesn't need to know about active/inactive at all.
  */
 export function ServicesPicker({ catalogue, value, onChange, error }: ServicesPickerProps) {
+    // Typing a price of one's own is `customers.custom_price`; everyone else
+    // picks the default or a price option (the server checks the same).
+    const { can } = useAuth();
+    const mayTypePrice = can('customers.custom_price');
+    // An existing customer's current prices — kept as a choice when editing.
+    const [initialPrices] = useState<Record<string, string>>(() =>
+        Object.fromEntries(value.filter((v) => v.service_variant_uuid === null).map((v) => [v.service_uuid, v.price])),
+    );
+
     const baseSelection = (serviceUuid: string) =>
         value.find((v) => v.service_uuid === serviceUuid && v.service_variant_uuid === null);
     const variantSelection = (variantUuid: string) => value.find((v) => v.service_variant_uuid === variantUuid);
@@ -87,8 +123,33 @@ export function ServicesPicker({ catalogue, value, onChange, error }: ServicesPi
                         </Pressable>
 
                         {checked ? (
+                            <View style={styles.choices}>
+                                {priceChoices(service, initialPrices[service.uuid]).map((choice) => {
+                                    const active = samePrice(choice.amount, selection.price);
+
+                                    return (
+                                        <Pressable
+                                            key={choice.amount}
+                                            accessibilityRole="radio"
+                                            accessibilityState={{ selected: active }}
+                                            onPress={() =>
+                                                setPrice((v) => v.service_uuid === service.uuid && v.service_variant_uuid === null, choice.amount)
+                                            }
+                                            style={[styles.choice, active && styles.choiceActive]}
+                                        >
+                                            <Text style={[styles.choiceText, active && styles.choiceTextActive]}>
+                                                {formatFcfa(parseFloat(choice.amount) || 0)}
+                                                {choice.label ? ` · ${choice.label}` : ''}
+                                            </Text>
+                                        </Pressable>
+                                    );
+                                })}
+                            </View>
+                        ) : null}
+
+                        {checked && mayTypePrice ? (
                             <View style={styles.priceRow}>
-                                <Text style={styles.priceLabel}>Price</Text>
+                                <Text style={styles.priceLabel}>Other</Text>
                                 <TextInput
                                     keyboardType="numeric"
                                     value={selection.price}
@@ -99,6 +160,10 @@ export function ServicesPicker({ catalogue, value, onChange, error }: ServicesPi
                                 />
                                 <Text style={styles.priceCurrency}>FCFA</Text>
                             </View>
+                        ) : null}
+
+                        {checked && mayTypePrice && service.min_price ? (
+                            <Text style={styles.minimumHint}>At least {formatFcfa(parseFloat(service.min_price) || 0)}</Text>
                         ) : null}
 
                         {checked && parseFloat(selection.price) === 0 ? (
@@ -202,6 +267,21 @@ const styles = StyleSheet.create({
     serviceLabel: { flex: 1, gap: 2 },
     serviceName: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     serviceDescription: { fontSize: fontSize.xs, color: colors.textSecondary },
+    choices: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm, marginLeft: 30 },
+    // A price pick is tapped on every registration: the 48dp floor, not hitSlop.
+    choice: {
+        minHeight: touchTarget.floor,
+        justifyContent: 'center',
+        paddingHorizontal: spacing.md,
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.surface,
+    },
+    choiceActive: { backgroundColor: colors.accent.customers, borderColor: colors.accent.customers },
+    choiceText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+    choiceTextActive: { color: colors.textInverse },
+    minimumHint: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: spacing.xs, marginLeft: 30 },
     priceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, marginLeft: 30 },
     priceLabel: { fontSize: fontSize.xs, color: colors.textSecondary, width: 40 },
     priceInput: { flex: 1, marginBottom: 0 },
