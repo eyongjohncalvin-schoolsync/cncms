@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\BumpsCacheVersion;
 use App\Models\Concerns\HasUuid;
+use App\Support\CacheVersion;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -19,7 +21,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[RouteKey('uuid')]
 class PaymentVerification extends Model
 {
-    use Auditable, BelongsToBranch, HasUuid;
+    use Auditable, BelongsToBranch, BumpsCacheVersion, HasUuid;
+
+    /** @return list<string> */
+    public function cacheVersions(): array
+    {
+        return [CacheVersion::PAYMENTS];
+    }
 
     protected function casts(): array
     {

@@ -470,13 +470,13 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
             {
                 public function __construct(private readonly int $poisonCustomerId) {}
 
-                public function resolve(array $customerIds, string $period): array
+                public function resolve(array $customerIds, string $period, bool $withPreviousManuscripts = true): array
                 {
                     if (in_array($this->poisonCustomerId, $customerIds, true)) {
                         throw new RuntimeException('Simulated chunk-level failure.');
                     }
 
-                    return parent::resolve($customerIds, $period);
+                    return parent::resolve($customerIds, $period, $withPreviousManuscripts);
                 }
             };
         });

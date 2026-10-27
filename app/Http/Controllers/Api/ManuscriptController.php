@@ -41,7 +41,8 @@ class ManuscriptController extends Controller
     {
         $this->authorize('viewAny', Manuscript::class);
 
-        $perPage = (int) $request->integer('per_page', 25);
+        // Capped: the app asks for 300 a page; no request loads a whole period.
+        $perPage = min(max(1, $request->integer('per_page', 25)), 500);
         $filters = $request->only(['period', 'zone_uuid', 'status']);
 
         if ($this->context->is('agent')) {

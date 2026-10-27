@@ -20,6 +20,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -187,7 +188,7 @@ class ReportService
         $weekId = $weekStart->format('Y').'-W'.str_pad((string) $weekStart->isoWeek(), 2, '0', STR_PAD_LEFT);
 
         foreach (array_unique([$branchId, null], SORT_REGULAR) as $scopeBranchId) {
-            $suffix = (string) ($scopeBranchId ?? 'all');
+            $suffix = self::versions().':'.($scopeBranchId ?? 'all');
             Cache::forget(self::CACHE_PREFIX.":daily:{$day->toDateString()}:{$suffix}");
             Cache::forget(self::CACHE_PREFIX.":weekly:{$weekId}:{$suffix}");
             Cache::forget(self::CACHE_PREFIX.":monthly:{$period}:{$suffix}");
@@ -640,7 +641,9 @@ class ReportService
      */
     private function billingRunFor(string $period): ?array
     {
+        // Not computed_result: the per-customer map is never read here.
         $run = CommandRun::query()
+            ->select(['id', 'ran_at', 'metadata'])
             ->where('command', 'manuscript:calculate')
             ->where('period', $period)
             ->orderByDesc('ran_at')
@@ -1110,13 +1113,24 @@ class ReportService
 
     private function scopeSuffix(?int $branchId, ?array $zoneIds): string
     {
-        $suffix = (string) ($branchId ?? 'all');
+        $suffix = self::versions().':'.($branchId ?? 'all');
 
         if ($zoneIds !== null) {
-            $suffix .= ':zones-'.($zoneIds === [] ? 'none' : implode('-', $zoneIds));
+            // Hashed: an agent with many zones would overflow the cache key column.
+            $suffix .= ':zones-'.($zoneIds === [] ? 'none' : md5(implode('-', $zoneIds)));
         }
 
         return $suffix;
+    }
+
+    /**
+     * Any payment, bill, customer or spending change retires every cached
+     * report (CacheVersion) — including sealed months, whose 24h cache
+     * otherwise kept a late verification out of last month's figures.
+     */
+    private static function versions(): string
+    {
+        return CacheVersion::of(CacheVersion::PAYMENTS, CacheVersion::MANUSCRIPTS, CacheVersion::CUSTOMERS, CacheVersion::SPENDING);
     }
 
     /**

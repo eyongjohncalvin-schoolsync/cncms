@@ -10,6 +10,7 @@ use App\Models\Scopes\BranchScope;
 use App\Models\StaffSalary;
 use App\Models\User;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -153,5 +154,7 @@ class SalaryService
     private function mirrorOnAgent(int $userId, string $amount): void
     {
         Agent::query()->withoutGlobalScope(BranchScope::class)->where('user_id', $userId)->update(['salary' => $amount]);
+        // A bulk update fires no model events.
+        CacheVersion::bump(CacheVersion::AGENTS);
     }
 }

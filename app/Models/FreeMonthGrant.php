@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\BumpsCacheVersion;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Models\Scopes\BranchScope;
+use App\Support\CacheVersion;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -52,7 +54,13 @@ use Illuminate\Support\Carbon;
 #[RouteKey('uuid')]
 class FreeMonthGrant extends Model
 {
-    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, BumpsCacheVersion, HasUuid, ScopesRouteBindingToBranch;
+
+    /** @return list<string> */
+    public function cacheVersions(): array
+    {
+        return [CacheVersion::CUSTOMERS];
+    }
 
     public const string REASON_INSTALLATION_OFFER = 'installation_offer';
 

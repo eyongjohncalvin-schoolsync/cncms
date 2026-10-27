@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\Zone;
 use App\Models\ZoneAgent;
 use App\Support\BranchLookup;
+use App\Support\CacheVersion;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -33,6 +34,8 @@ class ZoneCoverageService
         DB::transaction(function () use ($agent, $zone, $actor): void {
             ZoneAgent::query()->withoutGlobalScope(BranchScope::class)
                 ->where('agent_id', $agent->id)->where('zone_id', '!=', $zone->id)->delete();
+            // A bulk delete fires no model events.
+            CacheVersion::bump(CacheVersion::AGENTS);
 
             $this->addZone($agent, $zone, $actor);
         });

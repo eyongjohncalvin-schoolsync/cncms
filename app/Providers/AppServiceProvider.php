@@ -18,6 +18,8 @@ use App\Policies\SalaryPolicy;
 use App\Services\FreeMonthGrantService;
 use App\Support\BranchLookup;
 use App\Support\BranchPrices;
+use App\Support\CacheVersion;
+use App\Support\MaintenanceMode;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -90,7 +92,7 @@ class AppServiceProvider extends ServiceProvider
         // still start each tenant with a clean slate rather than risk a
         // key colliding after a reactivation/re-provision. Flushing on both
         // tenancy transitions bounds any staleness to a single job/test.
-        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => [Company::flushMemo(), NotificationSetting::flushMemo()]);
+        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => [Company::flushMemo(), NotificationSetting::flushMemo(), CacheVersion::flush(), MaintenanceMode::flushMemo()]);
 
         // Branches v2: parent → branch memo used to stamp branch_id on new rows.
         // A zone can change branch (its customers and agents follow it by

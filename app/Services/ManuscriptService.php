@@ -11,6 +11,7 @@ use App\Models\Manuscript;
 use App\Models\Zone;
 use App\Repositories\Contracts\ManuscriptRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -465,14 +466,24 @@ class ManuscriptService
      */
     private function summaryCacheKey(array $scopedFilters): string
     {
-        return 'manuscripts:summary:'.$scopedFilters['period'].':'.(TenantContext::currentBranchId() ?? 'all').':'
+        return 'manuscripts:summary:'.$scopedFilters['period'].':'.self::versions().':'.(TenantContext::currentBranchId() ?? 'all').':'
             .md5(json_encode($scopedFilters));
     }
 
     private function listCacheKey(array $scopedFilters, int $perPage, int $page): string
     {
-        return 'manuscripts:list:'.$scopedFilters['period'].':'.(TenantContext::currentBranchId() ?? 'all').':'
+        return 'manuscripts:list:'.$scopedFilters['period'].':'.self::versions().':'.(TenantContext::currentBranchId() ?? 'all').':'
             .md5(json_encode([$scopedFilters, $perPage, $page]));
+    }
+
+    /**
+     * Bills, the payments counted as collected, and the customers listed:
+     * a change to any retires every cached summary and page (CacheVersion),
+     * whatever its filters or branch.
+     */
+    private static function versions(): string
+    {
+        return CacheVersion::of(CacheVersion::MANUSCRIPTS, CacheVersion::PAYMENTS, CacheVersion::CUSTOMERS);
     }
 
     /**

@@ -89,6 +89,9 @@ final class CustomerImportService
         // mostly have none (most paper records carry no number) — a missing
         // phone must not reject the whole row on import.
         $rules['phone'] = ['nullable', 'string', 'max:20'];
+        // The form refuses old debt for a brand-new customer; an import brings
+        // in existing customers with the balance they already owe.
+        $rules['others'] = ['nullable', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'];
 
         // zone uuid => id, resolved through CustomerService's branch-scoped
         // lookup once per distinct zone rather than once per row.

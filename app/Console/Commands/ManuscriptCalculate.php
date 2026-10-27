@@ -16,6 +16,7 @@ use App\Services\ManuscriptService;
 use App\Support\Billing\FreeMonthPlan;
 use App\Support\BranchLookup;
 use App\Support\DetectsUniqueViolation;
+use App\Support\ScheduledTasks\ManuscriptChunkDataResolver;
 use Illuminate\Console\Command;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -220,15 +221,8 @@ class ManuscriptCalculate extends Command
             // Batch-resolve, once per chunk of 200, what ManuscriptCalculator
             // used to query per customer: each customer's most recent
             // prior-period manuscript and their period-eligible verified
-            // payments. `period` is a 'YYYY-MM' string, so sortByDesc('period')
-            // in PHP is equivalent to the previous per-customer
-            // ->orderByDesc('period')->first() SQL ordering.
-            $previousManuscriptsByCustomer = Manuscript::query()
-                ->whereIn('customer_id', $customerIds)
-                ->where('period', '<', $period)
-                ->get()
-                ->groupBy('customer_id')
-                ->map(fn (Collection $manuscripts): Manuscript => $manuscripts->sortByDesc('period')->first());
+            // payments — the same latest-row query as the queued path.
+            $previousManuscriptsByCustomer = ManuscriptChunkDataResolver::latestBefore($customerIds->all(), $period);
 
             // Eligibility goes through the single shared
             // Payment::scopeEligibleForPeriod() predicate — see that

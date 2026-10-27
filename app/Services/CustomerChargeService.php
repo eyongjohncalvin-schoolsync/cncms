@@ -13,7 +13,6 @@ use App\Models\User;
 use App\Models\Voucher;
 use App\Support\TenantContext;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -449,7 +448,6 @@ class CustomerChargeService
      */
     private function forgetCustomerCache(Customer $customer): void
     {
-        Cache::forget("customers:show:{$customer->uuid}:".(TenantContext::currentBranchId() ?? 'all'));
-        Cache::forget("customers:show:{$customer->uuid}:all");
+        CustomerService::forgetShowCache($customer->uuid, $customer->branch_id);
     }
 }

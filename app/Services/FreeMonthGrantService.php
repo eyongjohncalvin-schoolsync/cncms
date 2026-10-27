@@ -13,7 +13,6 @@ use App\Models\InstallationOffer;
 use App\Models\Manuscript;
 use App\Models\User;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -500,6 +499,6 @@ class FreeMonthGrantService
 
     private function forgetCustomerCache(Customer $customer): void
     {
-        Cache::forget("customers:show:{$customer->uuid}:all");
+        CustomerService::forgetShowCache($customer->uuid, $customer->branch_id);
     }
 }

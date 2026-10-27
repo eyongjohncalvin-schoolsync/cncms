@@ -411,7 +411,7 @@ class CustomerStatusService
         // page could sit stale for up to that cache's 60s TTL. Reliably
         // covers only the unscoped 'all' variant; a branch-scoped entry
         // still expires on its own short TTL.
-        Cache::forget('customers:show:'.$customer->uuid.':all');
+        CustomerService::forgetShowCache($customer->uuid, $customer->branch_id);
     }
 
     /**

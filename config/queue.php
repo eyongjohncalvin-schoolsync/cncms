@@ -37,7 +37,8 @@ return [
 
         'database' => [
             'driver' => 'database',
-            'connection' => env('DB_QUEUE_CONNECTION'),
+            // Central connection by default, never whichever tenant schema is active.
+            'connection' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'pgsql')),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             // Must outlast the worker's --timeout (1800s, deploy/PLOI.md): a

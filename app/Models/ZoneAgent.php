@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\BumpsCacheVersion;
+use App\Support\CacheVersion;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,7 +20,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['zone_id', 'agent_id', 'role', 'assigned_by'])]
 class ZoneAgent extends Model
 {
-    use BelongsToBranch;
+    use BelongsToBranch, BumpsCacheVersion;
+
+    /** @return list<string> */
+    public function cacheVersions(): array
+    {
+        return [CacheVersion::AGENTS];
+    }
 
     public const string ROLE_RESPONSIBLE = 'responsible';
 

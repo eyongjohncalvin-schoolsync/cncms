@@ -40,8 +40,8 @@ class ManuscriptRerunGuard
 {
     /**
      * @throws ValidationException when a published manuscript:calculate run
-     *                              already exists for $period and $override
-     *                              is false.
+     *                             already exists for $period and $override
+     *                             is false.
      */
     public function assertRerunAllowed(string $period, bool $override): void
     {
@@ -49,7 +49,9 @@ class ManuscriptRerunGuard
             return;
         }
 
+        // Not computed_result: the per-customer map is never read here.
         $priorRun = CommandRun::query()
+            ->select(['id', 'ran_at', 'metadata', 'scheduled_task_id'])
             ->where('command', 'manuscript:calculate')
             ->where('period', $period)
             ->where('status', 'published')

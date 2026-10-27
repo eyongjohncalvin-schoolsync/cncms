@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\BumpsCacheVersion;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Models\Scopes\BranchScope;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -49,7 +51,13 @@ use LogicException;
 #[RouteKey('uuid')]
 class Payment extends Model
 {
-    use Auditable, BelongsToBranch, HasUuid, ScopesRouteBindingToBranch;
+    use Auditable, BelongsToBranch, BumpsCacheVersion, HasUuid, ScopesRouteBindingToBranch;
+
+    /** @return list<string> */
+    public function cacheVersions(): array
+    {
+        return [CacheVersion::PAYMENTS];
+    }
 
     /** The monthly bill — the only money billing ever sees. */
     public const string PURPOSE_SUBSCRIPTION = 'subscription';

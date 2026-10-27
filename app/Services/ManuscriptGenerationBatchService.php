@@ -13,6 +13,7 @@ use App\Models\Payment;
 use App\Models\ScheduledTask;
 use App\Models\Scopes\BranchScope;
 use App\Support\BranchLookup;
+use App\Support\CacheVersion;
 use App\Support\DetectsUniqueViolation;
 use Illuminate\Bus\Batch;
 use Illuminate\Database\QueryException;
@@ -395,6 +396,8 @@ class ManuscriptGenerationBatchService
                     ->where('verification_status', 'verified')
                     ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
                     ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
+                // A bulk update fires no model events.
+                CacheVersion::bump(CacheVersion::PAYMENTS);
             }
 
             // Same re-stampable-on-republish guard, applied to arrears
@@ -406,6 +409,8 @@ class ManuscriptGenerationBatchService
                     ->whereIn('id', $adjustmentIds)
                     ->where(fn ($query) => $query->whereNull('processed_period')->orWhere('processed_period', $commandRun->period))
                     ->update(['processed_at' => Carbon::now(), 'processed_period' => $commandRun->period]);
+                // A bulk update fires no model events.
+                CacheVersion::bump(CacheVersion::PAYMENTS);
             }
 
             $commandRun->update([

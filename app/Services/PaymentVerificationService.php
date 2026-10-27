@@ -469,7 +469,7 @@ class PaymentVerificationService
      */
     private function forgetShowCache(string $uuid): void
     {
-        Cache::forget("payments:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all'));
-        Cache::forget("payments:show:{$uuid}:all");
+        Cache::forget(PaymentService::showCacheKey($uuid, TenantContext::currentBranchId()));
+        Cache::forget(PaymentService::showCacheKey($uuid, null));
     }
 }

@@ -44,9 +44,12 @@ class CashBookController extends Controller
             return redirect()->route('cash.hand-over');
         }
 
-        $accounts = $canViewAll ? $this->cashBook->activeAccounts() : collect();
+        // One load of the active accounts (the list and the transfer targets),
+        // and balances only for the accounts shown — not the whole ledger.
+        $activeAccounts = $this->cashBook->activeAccounts();
+        $accounts = $canViewAll ? $activeAccounts : collect();
         $myTill = $canReceive ? $this->cashBook->tillFor($user) : null;
-        $balances = $this->cashBook->balances(null);
+        $balances = $this->cashBook->balances($accounts->pluck('id')->push($myTill?->id)->filter()->unique()->values()->all());
 
         $closesToday = CashDayClose::query()->whereDate('business_date', $this->cashBook->today())->get()->keyBy('cash_account_id');
 
@@ -63,15 +66,15 @@ class CashBookController extends Controller
             ],
             'accounts' => $accounts->map(fn (CashAccount $account): array => $this->shapeAccount($account, $balances, $closesToday))->values()->all(),
             'my_till' => $myTill ? $this->shapeAccount($myTill, $balances, $closesToday) : null,
-            'transfer_targets' => $this->cashBook->activeAccounts()->map(fn (CashAccount $account): array => [
+            'transfer_targets' => $activeAccounts->map(fn (CashAccount $account): array => [
                 'uuid' => $account->uuid,
                 'name' => $account->name,
                 'kind' => $account->kind,
             ])->values()->all(),
-            'awaiting' => Remittance::query()->with('collector')->where('status', 'submitted')->latest('submitted_at')->get()
+            'awaiting' => Remittance::query()->with(['collector', 'receivedBy'])->where('status', 'submitted')->latest('submitted_at')->get()
                 ->map(fn (Remittance $remittance): array => $this->shapeRemittance($remittance))->values()->all(),
             'open_shortages' => $canViewAll
-                ? Remittance::query()->with('collector')->where('shortage_status', 'open')->latest('received_at')->get()
+                ? Remittance::query()->with(['collector', 'receivedBy'])->where('shortage_status', 'open')->latest('received_at')->get()
                     ->map(fn (Remittance $remittance): array => $this->shapeRemittance($remittance))->values()->all()
                 : [],
             'recent' => $canViewAll

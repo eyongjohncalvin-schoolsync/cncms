@@ -58,7 +58,9 @@ return [
 
         'database' => [
             'driver' => 'database',
-            'connection' => env('DB_CACHE_CONNECTION'),
+            // Pinned to the central connection by default: a tenant artisan run would
+            // otherwise bind the store to the tenant schema, which has no cache table.
+            'connection' => env('DB_CACHE_CONNECTION', env('DB_CONNECTION', 'pgsql')),
             'table' => env('DB_CACHE_TABLE', 'cache'),
             'lock_connection' => env('DB_CACHE_LOCK_CONNECTION'),
             'lock_table' => env('DB_CACHE_LOCK_TABLE'),

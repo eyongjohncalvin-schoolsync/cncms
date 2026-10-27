@@ -14,6 +14,7 @@ use App\Models\ScheduledTask;
 use App\Services\ManuscriptGenerationBatchService;
 use App\Services\ManuscriptRunLockService;
 use App\Services\ManuscriptService;
+use App\Support\CacheVersion;
 use App\Support\ResolvesCommandRunBatchProgress;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
@@ -47,7 +48,13 @@ class SettingsCommandRunController extends Controller
     {
         $this->authorize('viewAny', CommandRun::class);
 
-        $paginator = CommandRun::query()->latest('ran_at')->paginate(25);
+        // Only the summary out of computed_result: the per-customer map is
+        // ~500 bytes a customer, and 25 of them were decoded for one page.
+        $paginator = CommandRun::query()
+            ->select(['id', 'uuid', 'command', 'period', 'ran_at', 'metadata', 'status', 'batch_id', 'published_at'])
+            ->selectRaw("computed_result->'summary' as computed_result_summary")
+            ->latest('ran_at')
+            ->paginate(25);
 
         $batchProgressById = $this->batchProgress($paginator->pluck('batch_id')->filter()->all());
 
@@ -63,7 +70,7 @@ class SettingsCommandRunController extends Controller
             // entries) — the Preview UI is a summary, not a raw data dump,
             // matching how `metadata` was already summarized rather than
             // shown as raw JSON.
-            'computed_result_summary' => $run->computed_result['summary'] ?? null,
+            'computed_result_summary' => $run->computed_result_summary !== null ? json_decode((string) $run->computed_result_summary, true) : null,
             'batch_progress' => $batchProgressById[$run->batch_id] ?? null,
             'published_at' => $run->published_at,
             // Manuscript-run-management feature (task-scheduler.md's
@@ -284,6 +291,8 @@ class SettingsCommandRunController extends Controller
             // why period-alone scoping is unsafe (would also delete a
             // sibling run's rows against the same period).
             Manuscript::query()->where('command_run_id', $run->id)->delete();
+            // A bulk delete fires no model events.
+            CacheVersion::bump(CacheVersion::MANUSCRIPTS);
 
             $run->update([
                 'status' => 'rolled_back',
@@ -389,6 +398,9 @@ class SettingsCommandRunController extends Controller
                 ->whereIn('id', $adjustmentIds)
                 ->where('processed_period', $run->period)
                 ->update(['processed_period' => null, 'processed_at' => null]);
+
+            // Bulk writes fire no model events.
+            CacheVersion::bump(CacheVersion::MANUSCRIPTS, CacheVersion::PAYMENTS);
 
             $run->update([
                 'status' => 'rolled_back',

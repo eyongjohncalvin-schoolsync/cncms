@@ -8,6 +8,7 @@ use App\DataTransferObjects\CustomerData;
 use App\Models\Customer;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
@@ -58,7 +59,8 @@ class CustomerService
         // it (a cross-branch super's result served back to a branch-fenced
         // manager, or vice versa) — a real cross-branch data leak, not just
         // staleness.
-        $cacheKey = 'customers:list:'.(TenantContext::currentBranchId() ?? 'all').':'
+        // CacheVersion: any customer change retires the cached pages (and the disconnections board).
+        $cacheKey = 'customers:list:'.CacheVersion::of(CacheVersion::CUSTOMERS).':'.(TenantContext::currentBranchId() ?? 'all').':'
             .md5(json_encode([$filters, $perPage, request()->query('page', 1)]));
 
         return Cache::remember(
@@ -71,7 +73,7 @@ class CustomerService
     public function findOrFail(string $uuid, bool $withTrashed = false): Customer
     {
         $customer = Cache::remember(
-            "customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all').($withTrashed ? ':trashed' : ''),
+            self::showCacheKey($uuid, TenantContext::currentBranchId(), $withTrashed),
             now()->addSeconds(60),
             function () use ($uuid, $withTrashed): Customer {
                 $customer = $this->customers->findByUuid(
@@ -320,12 +322,26 @@ class CustomerService
      * branch-fenced caller's cached copy is bounded by findOrFail()'s 60s
      * TTL instead, the same staleness tradeoff already accepted for list().
      */
-    public function forgetShowCache(string $uuid): void
+    public static function forgetShowCache(string $uuid, ?int $ownBranchId = null): void
     {
-        foreach (['', ':trashed'] as $suffix) {
-            Cache::forget("customers:show:{$uuid}:".(TenantContext::currentBranchId() ?? 'all').$suffix);
-            Cache::forget("customers:show:{$uuid}:all".$suffix);
+        // The actor's key, the unrestricted key, and the customer's own
+        // branch — the only fenced key that can hold it.
+        foreach (array_unique([TenantContext::currentBranchId(), null, $ownBranchId]) as $branchId) {
+            foreach ([false, true] as $withTrashed) {
+                Cache::forget(self::showCacheKey($uuid, $branchId, $withTrashed));
+            }
         }
+    }
+
+    /**
+     * The customer page's cache key. It shows the customer, their latest
+     * bill and latest payments, so all three versions are in it.
+     */
+    public static function showCacheKey(string $uuid, ?int $branchId, bool $withTrashed): string
+    {
+        return "customers:show:{$uuid}:"
+            .CacheVersion::of(CacheVersion::CUSTOMERS, CacheVersion::PAYMENTS, CacheVersion::MANUSCRIPTS).':'
+            .($branchId ?? 'all').($withTrashed ? ':trashed' : '');
     }
 
     /**

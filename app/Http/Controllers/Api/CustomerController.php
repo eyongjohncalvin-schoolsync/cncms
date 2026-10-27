@@ -42,7 +42,8 @@ class CustomerController extends Controller
     {
         $this->authorize('viewAny', Customer::class);
 
-        $perPage = (int) $request->integer('per_page', 25);
+        // Capped: the app asks for at most 300; no request loads every customer.
+        $perPage = min(max(1, $request->integer('per_page', 25)), 500);
 
         $filters = $request->only(['zone_uuid', 'status', 'level', 'search', 'has_phone']);
 

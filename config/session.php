@@ -73,7 +73,8 @@ return [
     |
     */
 
-    'connection' => env('SESSION_CONNECTION'),
+    // Central connection by default, never whichever tenant schema is active.
+    'connection' => env('SESSION_CONNECTION', env('DB_CONNECTION', 'pgsql')),
 
     /*
     |--------------------------------------------------------------------------

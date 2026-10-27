@@ -9,6 +9,8 @@ use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\ZoneAgent;
+use App\Support\CacheVersion;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -46,6 +48,9 @@ class StaffRemovalService
         'user_activitylogs.user_id',
     ];
 
+    /** Ids of staff already known to have history (plain ints: safe for the database cache store). */
+    private const string KNOWN_WITH_HISTORY_KEY = 'staff:with_history';
+
     public function __construct(private readonly AccountSecurityService $account) {}
 
     /**
@@ -56,10 +61,30 @@ class StaffRemovalService
      */
     public function usersWithHistory(array $userIds): array
     {
-        if ($userIds === []) {
-            return [];
+        // History is never lost, so whoever has it is remembered for a day
+        // and only the rest are checked — usually just new accounts, instead
+        // of scanning every table for all staff on each Users page load.
+        $known = Cache::get(self::KNOWN_WITH_HISTORY_KEY, []);
+        $unknown = array_values(array_diff($userIds, $known));
+
+        if ($unknown !== []) {
+            $found = array_keys($this->scanForHistory($unknown));
+
+            if ($found !== []) {
+                $known = array_values(array_unique([...$known, ...$found]));
+                Cache::put(self::KNOWN_WITH_HISTORY_KEY, $known, now()->addDay());
+            }
         }
 
+        return array_fill_keys(array_values(array_intersect($userIds, $known)), true);
+    }
+
+    /**
+     * @param  list<int>  $userIds
+     * @return array<int, true>
+     */
+    private function scanForHistory(array $userIds): array
+    {
         $placeholders = implode(',', array_fill(0, count($userIds), '?'));
         $selects = [];
         $bindings = [];
@@ -120,6 +145,7 @@ class StaffRemovalService
             $agentIds = Agent::query()->withoutGlobalScope(BranchScope::class)->where('user_id', $user->id)->pluck('id');
             ZoneAgent::query()->withoutGlobalScopes()->whereIn('agent_id', $agentIds)->delete();
             Agent::query()->withoutGlobalScope(BranchScope::class)->whereKey($agentIds)->delete();
+            CacheVersion::bump(CacheVersion::AGENTS);
 
             foreach (self::SETUP_COLUMNS as $setupColumn) {
                 [$table, $column] = explode('.', $setupColumn);

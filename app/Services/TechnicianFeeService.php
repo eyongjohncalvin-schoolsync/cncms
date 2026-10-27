@@ -9,6 +9,7 @@ use App\Models\CashMovement;
 use App\Models\Payment;
 use App\Models\TechnicianFeePayout;
 use App\Models\User;
+use App\Support\CacheVersion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -102,6 +103,8 @@ class TechnicianFeeService
             $payout->update(['cash_movement_id' => $movement->id]);
 
             Payment::query()->whereIn('id', $fees->pluck('id'))->update(['technician_fee_payout_id' => $payout->id]);
+            // A bulk update fires no model events.
+            CacheVersion::bump(CacheVersion::PAYMENTS);
 
             return $payout;
         });

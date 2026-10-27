@@ -9,6 +9,7 @@ use App\Models\CustomerCharge;
 use App\Models\Expenditure;
 use App\Models\Payment;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -24,6 +25,12 @@ use Illuminate\Validation\ValidationException;
  */
 class ResourcesDashboardService
 {
+    /** The P&L's cache key: income and spending changes both retire it (CacheVersion). */
+    public static function cacheKey(string $period, ?int $branchId): string
+    {
+        return 'resources:dashboard:'.$period.':'.CacheVersion::of(CacheVersion::PAYMENTS, CacheVersion::SPENDING).':'.($branchId ?? 'all');
+    }
+
     /**
      * @return array{
      *     period: string,
@@ -50,7 +57,7 @@ class ResourcesDashboardService
         // branch-scoped, so the cache must not be shared across callers with
         // different effective branches.
         return Cache::remember(
-            'resources:dashboard:'.$period.':'.($branchId ?? 'all'),
+            self::cacheKey($period, $branchId),
             now()->addMinutes(5),
             function () use ($period, $branchId): array {
                 [$start, $end] = $this->periodBounds($period);

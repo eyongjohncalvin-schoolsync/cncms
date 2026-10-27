@@ -19,13 +19,32 @@ use App\Models\User;
  */
 class MaintenanceMode
 {
+    /** @var array{0: float, 1: ?MaintenanceWindow}|null when current() last read, and what */
+    private static ?array $memo = null;
+
     /**
      * The window users should be told about: the running one, else the next
      * scheduled one.
      */
     public static function current(): ?MaintenanceWindow
     {
-        return MaintenanceWindow::query()->live()->orderBy('starts_at')->first();
+        // A page load asks twice (the tenant middleware, then the shared
+        // banner prop): one query serves both. Kept for a few seconds only,
+        // so a long-lived worker or scheduler never sees an old window.
+        if (self::$memo !== null && microtime(true) - self::$memo[0] < 5) {
+            return self::$memo[1];
+        }
+
+        $window = MaintenanceWindow::query()->live()->orderBy('starts_at')->first();
+        self::$memo = [microtime(true), $window];
+
+        return $window;
+    }
+
+    /** Forgets the memo — when a window is saved, and between tests. */
+    public static function flushMemo(): void
+    {
+        self::$memo = null;
     }
 
     public static function active(): ?MaintenanceWindow

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Support\MaintenanceMode;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Connection;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -24,6 +25,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['starts_at', 'ends_at', 'message', 'created_by', 'cancelled_at', 'ended_at'])]
 class MaintenanceWindow extends Model
 {
+    protected static function booted(): void
+    {
+        static::saved(static fn () => MaintenanceMode::flushMemo());
+        static::deleted(static fn () => MaintenanceMode::flushMemo());
+    }
+
     protected function casts(): array
     {
         return [

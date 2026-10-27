@@ -2,6 +2,8 @@
 
 namespace Tests;
 
+use App\Support\CacheVersion;
+use App\Support\MaintenanceMode;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use RuntimeException;
 
@@ -38,5 +40,10 @@ abstract class TestCase extends BaseTestCase
         // process that would otherwise kill whichever later test is running
         // when those 120 seconds run out.
         set_time_limit(0);
+
+        // Process-wide memos outlive a test's rolled-back rows (one PHP
+        // process runs every test); a real request starts with none.
+        MaintenanceMode::flushMemo();
+        CacheVersion::flush();
     }
 }

@@ -44,14 +44,11 @@ class ManuscriptChunkDataResolver
      * @param  array<int, int>  $customerIds
      * @return array{0: Collection<int, Manuscript>, 1: Collection<int, Collection<int, Payment>>, 2: Collection<int, Collection<int, ArrearsAdjustment>>}
      */
-    public function resolve(array $customerIds, string $period): array
+    public function resolve(array $customerIds, string $period, bool $withPreviousManuscripts = true): array
     {
-        $previousManuscriptsByCustomer = Manuscript::query()
-            ->whereIn('customer_id', $customerIds)
-            ->where('period', '<', $period)
-            ->get()
-            ->groupBy('customer_id')
-            ->map(fn (Collection $manuscripts): Manuscript => $manuscripts->sortByDesc('period')->first());
+        $previousManuscriptsByCustomer = $withPreviousManuscripts
+            ? self::latestBefore($customerIds, $period)
+            : new Collection;
 
         // Eligibility for period $period — see Payment::scopeEligibleForPeriod()'s
         // doc comment for the full rationale; this is one of that scope's
@@ -73,5 +70,26 @@ class ManuscriptChunkDataResolver
             ->groupBy('customer_id');
 
         return [$previousManuscriptsByCustomer, $eligibleVerifiedPaymentsByCustomer, $eligibleAdjustmentsByCustomer];
+    }
+
+    /**
+     * Each customer's latest manuscript before $period — one row per
+     * customer (DISTINCT ON, served by the customer/period unique index),
+     * not their whole history.
+     *
+     * @param  array<int, int>  $customerIds
+     * @return Collection<int, Manuscript>
+     */
+    public static function latestBefore(array $customerIds, string $period): Collection
+    {
+        return Manuscript::query()
+            ->selectRaw('distinct on (manuscripts.customer_id) manuscripts.*')
+            ->whereIn('customer_id', $customerIds)
+            ->where('period', '<', $period)
+            ->orderBy('customer_id')
+            ->orderByDesc('period')
+            ->get()
+            ->keyBy('customer_id')
+            ->toBase();
     }
 }

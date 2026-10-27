@@ -10,6 +10,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use Database\Factories\AgentFactory;
 use Database\Factories\BranchFactory;
 use Database\Factories\CustomerFactory;
@@ -250,7 +251,7 @@ class ReportTest extends TestCase
 
         $response = $this->get('/reports?tier=weekly');
 
-        $response->assertOk()->assertInertia(function (Assert $page) use ($zoneA, $zoneB) {
+        $response->assertOk()->assertInertia(function (Assert $page) use ($zoneA) {
             $page->has('report.league_table', 1);
             $page->where('report.league_table.0.zone_uuid', $zoneA->uuid);
         });
@@ -350,14 +351,20 @@ class ReportTest extends TestCase
 
         $this->actingAsRole('super');
 
-        $this->assertFalse(Cache::has("reports:daily:{$today}:all"));
+        $versions = CacheVersion::of(CacheVersion::PAYMENTS, CacheVersion::MANUSCRIPTS, CacheVersion::CUSTOMERS, CacheVersion::SPENDING);
+        $this->assertFalse(Cache::has("reports:daily:{$today}:{$versions}:all"));
 
         $this->get('/reports?tier=daily')->assertOk();
 
-        $this->assertTrue(Cache::has("reports:daily:{$today}:all"), 'The daily report must be cached under reports:daily:{date}:{branch|all}.');
+        $this->assertTrue(Cache::has("reports:daily:{$today}:{$versions}:all"), 'The daily report must be cached under reports:daily:{date}:{data versions}:{branch|all}.');
     }
 
-    public function test_a_cached_daily_report_does_not_reflect_a_new_payment_until_forgotten(): void
+    /**
+     * Cache audit (2026-10-27): the report used to keep showing the old
+     * figures until its cache expired or was forgotten by hand. The data
+     * versions in its key (CacheVersion) now retire it on any payment.
+     */
+    public function test_a_cached_daily_report_shows_a_new_payment_straight_away(): void
     {
         // A fresh branch/zone — not the unrestricted 'all' scope — so the
         // "zero payments" baseline is actually trustworthy against the real
@@ -366,7 +373,6 @@ class ReportTest extends TestCase
         $branch = BranchFactory::new()->create();
         $zone = ZoneFactory::new()->create(['branch_id' => $branch->id]);
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id]);
-        $today = $this->todayWat();
 
         $this->actingAsRole('manager', $branch->id);
 
@@ -376,13 +382,7 @@ class ReportTest extends TestCase
 
         PaymentFactory::new()->create(['customer_id' => $customer->id, 'amount' => 5000, 'verification_status' => 'verified']);
 
-        // Still cached — the new payment must not appear yet.
-        $this->get('/reports?tier=daily')->assertInertia(fn (Assert $page) => $page
-            ->where('report.payments.count', 0));
-
-        Cache::forget("reports:daily:{$today}:{$branch->id}");
-
-        // Cache cleared — now it appears.
+        // The payment moved the payments version: no stale report.
         $this->get('/reports?tier=daily')->assertInertia(fn (Assert $page) => $page
             ->where('report.payments.count', 1));
     }

@@ -11,6 +11,7 @@ use App\Models\StaffSalary;
 use App\Models\User;
 use App\Repositories\Contracts\AgentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -57,7 +58,8 @@ class AgentService
 
         // Branch fence baked into the key — see the identical note on
         // App\Services\CustomerService::list().
-        $cacheKey = 'agents:list:'.(TenantContext::currentBranchId() ?? 'all').':'.md5(json_encode([$filters, $perPage, $page]));
+        // CacheVersion: agent and coverage changes retire it ('agents:all' was never the written key).
+        $cacheKey = 'agents:list:'.CacheVersion::of(CacheVersion::AGENTS).':'.(TenantContext::currentBranchId() ?? 'all').':'.md5(json_encode([$filters, $perPage, $page]));
 
         return Cache::remember(
             $cacheKey,

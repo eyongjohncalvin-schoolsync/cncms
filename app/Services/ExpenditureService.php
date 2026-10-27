@@ -134,8 +134,8 @@ class ExpenditureService
         $date = $spentAt instanceof Carbon ? $spentAt : Carbon::parse($spentAt);
         $period = $date->format('Y-m');
 
-        Cache::forget('resources:dashboard:'.$period.':'.(TenantContext::currentBranchId() ?? 'all'));
-        Cache::forget('resources:dashboard:'.$period.':all');
+        Cache::forget(ResourcesDashboardService::cacheKey($period, TenantContext::currentBranchId()));
+        Cache::forget(ResourcesDashboardService::cacheKey($period, null));
 
         ReportService::forgetCache($date);
     }

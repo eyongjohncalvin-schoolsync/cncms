@@ -24,7 +24,8 @@ class ZoneController extends Controller
     {
         $this->authorize('viewAny', Zone::class);
 
-        $perPage = (int) $request->integer('per_page', 25);
+        // Capped: the app asks for 100 (every zone); no request loads unbounded rows.
+        $perPage = min(max(1, $request->integer('per_page', 25)), 500);
 
         $zones = $this->zones->list($request->only(['search']), $perPage);
 

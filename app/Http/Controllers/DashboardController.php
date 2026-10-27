@@ -14,6 +14,7 @@ use App\Services\ResourcesDashboardService;
 use App\Services\SpendingControlService;
 use App\Services\ZoneCoverageService;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -39,7 +40,7 @@ class DashboardController extends Controller
         $branchId = TenantContext::currentBranchId();
 
         $counts = Cache::remember(
-            'dashboard:counts:'.($branchId ?? 'all'),
+            'dashboard:counts:'.CacheVersion::of(CacheVersion::CUSTOMERS, CacheVersion::PAYMENTS).':'.($branchId ?? 'all'),
             now()->addSeconds(60),
             fn (): array => [
                 'total_customers' => Customer::query()

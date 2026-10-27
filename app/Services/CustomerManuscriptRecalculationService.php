@@ -76,9 +76,9 @@ class CustomerManuscriptRecalculationService
      *                           should always pass one explicitly rather than relying on this
      *                           default.
      * @param  array<string, mixed>  $auditContext  Extra identifying fields merged into the
-     *                                               command_runs row's metadata alongside
-     *                                               customer_id/trigger — e.g.
-     *                                               ['arrears_adjustment_id' => ..., 'triggered_by_user_id' => ...].
+     *                                              command_runs row's metadata alongside
+     *                                              customer_id/trigger — e.g.
+     *                                              ['arrears_adjustment_id' => ..., 'triggered_by_user_id' => ...].
      */
     public function recalculateOne(
         Customer $customer,
@@ -93,7 +93,7 @@ class CustomerManuscriptRecalculationService
             ->orderByDesc('period')
             ->first();
 
-        [, $eligibleVerifiedPaymentsByCustomer, $eligibleAdjustmentsByCustomer] = $this->resolver->resolve([$customer->id], $period);
+        [, $eligibleVerifiedPaymentsByCustomer, $eligibleAdjustmentsByCustomer] = $this->resolver->resolve([$customer->id], $period, withPreviousManuscripts: false);
 
         $result = $this->calculator->calculate(
             $customer,
@@ -160,7 +160,7 @@ class CustomerManuscriptRecalculationService
         // in a different branch context than the one that last cached the
         // page), so this only reliably covers the unscoped 'all' variant —
         // a real branch-scoped cache entry still expires on its own 60s TTL.
-        Cache::forget('customers:show:'.$customer->uuid.':all');
+        CustomerService::forgetShowCache($customer->uuid, $customer->branch_id);
 
         return $manuscript;
     }

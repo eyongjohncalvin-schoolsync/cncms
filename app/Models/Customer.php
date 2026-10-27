@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToBranch;
+use App\Models\Concerns\BumpsCacheVersion;
 use App\Models\Concerns\HasUpperCaseLabels;
 use App\Models\Concerns\HasUuid;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -39,7 +41,13 @@ use Illuminate\Support\Carbon;
 #[RouteKey('uuid')]
 class Customer extends Model
 {
-    use Auditable, BelongsToBranch, HasUpperCaseLabels, HasUuid, SoftDeletes;
+    use Auditable, BelongsToBranch, BumpsCacheVersion, HasUpperCaseLabels, HasUuid, SoftDeletes;
+
+    /** @return list<string> */
+    public function cacheVersions(): array
+    {
+        return [CacheVersion::CUSTOMERS];
+    }
 
     /** customers.activation_status of a field registration awaiting the office (phase 3). */
     public const string ACTIVATION_PENDING = 'pending';

@@ -16,7 +16,9 @@ use App\Support\Billing\FreeMonthPlan;
 use App\Support\BranchLookup;
 use App\Support\BranchPrices;
 use App\Support\BusinessTimezone;
+use App\Support\CacheVersion;
 use App\Support\TenantContext;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -76,7 +78,8 @@ class PaymentService
         // App\Services\CustomerService::list(): PaymentRepository's queries
         // are now branch-scoped, so the cache must not be shared across
         // callers with different effective branches.
-        $cacheKey = 'payments:list:'.($this->context->branchId ?? 'all').':'
+        // CacheVersion: any payment change (web, API, sync, jobs) retires the cached pages.
+        $cacheKey = 'payments:list:'.CacheVersion::of(CacheVersion::PAYMENTS).':'.($this->context->branchId ?? 'all').':'
             .md5(json_encode([$filters, $perPage, request()->query('page', 1)]));
 
         return Cache::remember(
@@ -89,7 +92,7 @@ class PaymentService
     public function findOrFail(string $uuid): Payment
     {
         return Cache::remember(
-            "payments:show:{$uuid}:".($this->context->branchId ?? 'all'),
+            self::showCacheKey($uuid, $this->context->branchId),
             now()->addSeconds(30),
             function () use ($uuid): Payment {
                 $payment = $this->payments->findByUuid($uuid, ['customer', 'verification.verifier']);
@@ -114,7 +117,7 @@ class PaymentService
         $branchId = TenantContext::currentBranchId();
 
         return Cache::remember(
-            'payments:pending_count:'.($branchId ?? 'all'),
+            'payments:pending_count:'.CacheVersion::of(CacheVersion::PAYMENTS).':'.($branchId ?? 'all'),
             now()->addSeconds(15),
             fn (): int => Payment::query()
                 ->where('verification_status', 'pending')
@@ -335,7 +338,8 @@ class PaymentService
      */
     public static function unpaidDebts(Collection $customers): array
     {
-        $customers->each(fn (Customer $customer) => $customer->loadMissing('latestManuscript'));
+        // One query for any not yet loaded (a per-model loadMissing would be one each).
+        (new EloquentCollection($customers->all()))->loadMissing('latestManuscript');
 
         $paidSince = Payment::query()
             ->whereIn('customer_id', $customers->pluck('id'))
@@ -921,8 +925,14 @@ class PaymentService
      */
     private function forgetShowCache(string $uuid): void
     {
-        Cache::forget("payments:show:{$uuid}:".($this->context->branchId ?? 'all'));
-        Cache::forget("payments:show:{$uuid}:all");
+        Cache::forget(self::showCacheKey($uuid, $this->context->branchId));
+        Cache::forget(self::showCacheKey($uuid, null));
+    }
+
+    /** The payment page's cache key — its version moves with every payment change. */
+    public static function showCacheKey(string $uuid, ?int $branchId): string
+    {
+        return "payments:show:{$uuid}:".CacheVersion::of(CacheVersion::PAYMENTS).':'.($branchId ?? 'all');
     }
 
     /**
