@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\Branch;
 use App\Models\Company;
+use App\Models\NotificationSetting;
 use App\Models\PaymentReceipt;
 use App\Models\PersonalAccessToken;
 use App\Models\Report;
@@ -89,7 +90,7 @@ class AppServiceProvider extends ServiceProvider
         // still start each tenant with a clean slate rather than risk a
         // key colliding after a reactivation/re-provision. Flushing on both
         // tenancy transitions bounds any staleness to a single job/test.
-        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => Company::flushMemo());
+        Event::listen([TenancyInitialized::class, TenancyEnded::class], static fn () => [Company::flushMemo(), NotificationSetting::flushMemo()]);
 
         // Branches v2: parent → branch memo used to stamp branch_id on new rows.
         // A zone can change branch (its customers and agents follow it by

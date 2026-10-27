@@ -51,7 +51,11 @@ class ZoneRepository implements ZoneRepositoryInterface
     public function forBulkAction(array $filters, ?array $uuids, int $limit): Collection
     {
         return $this->scopeToBranchDirect(Zone::query(), $this->currentBranchId())
-            ->withCount(['customers', 'agents'])
+            // Archived customers too: they still hold the zone (ZoneService::delete()).
+            ->withCount([
+                'customers' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)->withTrashed(),
+                'agents' => fn ($query) => $query->withoutGlobalScope(BranchScope::class),
+            ])
             ->when(
                 $uuids !== null,
                 fn ($query) => $query->whereIn('uuid', $uuids),

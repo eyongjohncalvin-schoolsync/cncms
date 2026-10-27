@@ -370,7 +370,7 @@ class PaymentVerificationService
 
         // One query for the whole selection (with everything verify() and
         // receipt issuing read) rather than a lookup per payment.
-        $paymentsByUuid = $this->payments->findManyByUuids($paymentUuids, ['customer.zone.branch', 'verification', 'receipt', 'customerCharge']);
+        $paymentsByUuid = $this->payments->findManyByUuids($paymentUuids, ['customer.zone.branch', 'customer.latestManuscript', 'verification', 'receipt', 'customerCharge', 'recordedBy']);
         BranchLookup::remember($paymentsByUuid);
 
         foreach ($paymentUuids as $uuid) {

@@ -297,6 +297,9 @@ class BranchSetupTest extends TestCase
             ZoneFactory::new()->count(2)->create(['branch_id' => BranchFactory::new()->create()->id]);
         }
 
+        // Saving a branch clears the branch memo; a real request starts without one anyway.
+        $this->get('/branches')->assertOk();
+
         $this->assertSame($before, $queriesFor(), 'More branches must not mean more queries.');
     }
 

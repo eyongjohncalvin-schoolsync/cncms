@@ -156,15 +156,34 @@ class PaymentController extends Controller
             // silently narrowing the signal to "this month".
             // Counted within the view picked (monthly bills / installation fees / all).
             'statusCounts' => [
-                // The default list: money that counts (pending + verified) — rejected ones have their own tab.
-                'all' => $this->countedPayments($filters['purpose'])->where('verification_status', '!=', 'rejected')->count(),
-                'pending' => $this->countedPayments($filters['purpose'])->where('verification_status', 'pending')->count(),
-                'verified' => $this->countedPayments($filters['purpose'])->where('verification_status', 'verified')->count(),
-                'rejected' => $this->countedPayments($filters['purpose'])->where('verification_status', 'rejected')->count(),
+                ...$this->statusCounts($filters['purpose']),
                 // Payments of customers who paid more than once in a month, not yet cleared.
                 'duplicates' => $this->countedPayments($filters['purpose'])->possibleDuplicate()->count(),
             ],
         ]);
+    }
+
+    /**
+     * The four status tab counts in one query. "all" is money that counts
+     * (pending + verified) — rejected ones have their own tab.
+     *
+     * @return array{all: int, pending: int, verified: int, rejected: int}
+     */
+    private function statusCounts(string $purpose): array
+    {
+        $counts = $this->countedPayments($purpose)->toBase()->selectRaw(<<<'SQL'
+            count(*) filter (where verification_status <> 'rejected') as all_count,
+            count(*) filter (where verification_status = 'pending') as pending,
+            count(*) filter (where verification_status = 'verified') as verified,
+            count(*) filter (where verification_status = 'rejected') as rejected
+            SQL)->first();
+
+        return [
+            'all' => (int) $counts->all_count,
+            'pending' => (int) $counts->pending,
+            'verified' => (int) $counts->verified,
+            'rejected' => (int) $counts->rejected,
+        ];
     }
 
     /**
@@ -355,6 +374,8 @@ class PaymentController extends Controller
         // offer an "Adjust Arrears" entry point without a page navigation —
         // see this feature's design doc, 2026-08-27 addendum.
         $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier', 'receipt', 'duplicateOf.receipt', 'duplicateOf.recordedBy']);
+        // Its receipt's email lookup reads payment → customer: already here.
+        $payment->receipt?->setRelation('payment', $payment);
 
         return Inertia::render('Payments/Show', [
             'payment' => $this->formatPayment($payment),

@@ -5,12 +5,14 @@ use App\Models\AuditLog;
 use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\CustomerCharge;
 use App\Models\Expenditure;
 use App\Models\ExpenseCategory;
 use App\Models\Manuscript;
 use App\Models\NotificationSetting;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
+use App\Models\RemittanceLine;
 use App\Models\User;
 use App\Models\Zone;
 use Illuminate\Database\Eloquent\Collection;
@@ -186,12 +188,15 @@ return [
         Branch::class,
         Company::class,
         Customer::class,
+        // Payment list rows eager-load these two (PaymentRepository::paginate()).
+        CustomerCharge::class,
         Expenditure::class,
         ExpenseCategory::class,
         Manuscript::class,
         NotificationSetting::class,
         Payment::class,
         PaymentVerification::class,
+        RemittanceLine::class,
         User::class,
         Zone::class,
         Collection::class,

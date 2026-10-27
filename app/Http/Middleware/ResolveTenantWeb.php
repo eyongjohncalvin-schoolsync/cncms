@@ -82,7 +82,7 @@ class ResolveTenantWeb
         // Branch switcher (branches v2): an unfenced user viewing one branch.
         $viewedBranchId = $request->session()->get(BranchViewController::SESSION_KEY);
 
-        if ($context->branchId === null && is_int($viewedBranchId) && Branch::query()->whereKey($viewedBranchId)->exists()) {
+        if ($context->branchId === null && is_int($viewedBranchId) && Branch::allMemoized()->has($viewedBranchId)) {
             $context = $context->viewingBranch($viewedBranchId);
         }
 

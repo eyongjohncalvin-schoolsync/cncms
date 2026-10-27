@@ -148,6 +148,23 @@ class ZoneTest extends TestCase
         $this->assertDatabaseHas('zones', ['id' => $zone->id]);
     }
 
+    /**
+     * Archived customers still hold their zone (the foreign key ignores soft
+     * deletes): the count must include them, or the delete hits the raw
+     * RESTRICT violation and the user gets a 500.
+     */
+    public function test_a_zone_holding_only_archived_customers_is_refused_politely(): void
+    {
+        $this->actingAsRole('super');
+
+        $zone = ZoneFactory::new()->create();
+        CustomerFactory::new()->create(['zone_id' => $zone->id, 'status' => 'active'])->delete();
+
+        $this->delete("/zones/{$zone->uuid}")->assertRedirect('/zones')->assertSessionHas('error');
+
+        $this->assertDatabaseHas('zones', ['id' => $zone->id]);
+    }
+
     public function test_agent_cannot_create_a_zone(): void
     {
         $this->actingAsRole('agent');

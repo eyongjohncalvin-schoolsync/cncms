@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\Branch;
+use App\Models\CustomerCharge;
 use App\Models\NotificationSetting;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
+use App\Models\RemittanceLine;
 use Database\Factories\BranchFactory;
+use Database\Factories\PaymentFactory;
 use Database\Factories\PaymentVerificationFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -78,5 +81,22 @@ class CacheSerializableClassesTest extends TestCase
         $restored = $this->assertSurvivesCacheRoundTrip($payment);
 
         $this->assertInstanceOf(PaymentVerification::class, $restored->verification);
+    }
+
+    /**
+     * The Payments list caches its page with every row's installation charge
+     * and handover line (PaymentRepository::paginate()); a fees-tab reload
+     * within 25 seconds crashed on them.
+     */
+    public function test_a_payment_list_row_with_its_charge_and_handover_line_survives_a_cache_round_trip(): void
+    {
+        $payment = PaymentFactory::new()->make()
+            ->setRelation('customerCharge', new CustomerCharge(['kind' => 'installation', 'amount' => 10000]))
+            ->setRelation('remittanceLine', new RemittanceLine(['amount' => 10000]));
+
+        $restored = $this->assertSurvivesCacheRoundTrip($payment);
+
+        $this->assertInstanceOf(CustomerCharge::class, $restored->customerCharge);
+        $this->assertInstanceOf(RemittanceLine::class, $restored->remittanceLine);
     }
 }

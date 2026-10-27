@@ -13,6 +13,7 @@ use App\Models\TechnicianZone;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
+use App\Support\BranchLookup;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -121,6 +122,9 @@ class TechnicianService
         if ($zones->count() !== count(array_unique($zoneUuids)) || $zones->contains(fn (Zone $zone): bool => $zone->branch_id !== $branch->id)) {
             throw ValidationException::withMessages(['zone_uuids' => 'Choose zones of this branch.']);
         }
+
+        // New technician_zones rows take their zone's branch from memory, not a query each.
+        BranchLookup::remember($zones);
 
         DB::transaction(function () use ($technician, $branch, $zones, $actor): void {
             TechnicianZone::query()->withoutGlobalScope(BranchScope::class)

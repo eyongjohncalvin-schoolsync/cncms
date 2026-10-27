@@ -38,6 +38,15 @@ class PaymentService
      */
     private ?array $earlierMemo = null;
 
+    /**
+     * Every payment of a batch's customers from 3 days before its first
+     * month on, for sameAmountAcrossMonthEnd(); keyed by customer id. Null
+     * outside a batch, like $earlierMemo.
+     *
+     * @var array<int, list<Payment>>|null
+     */
+    private ?array $monthEndMemo = null;
+
     public function __construct(
         private readonly PaymentRepositoryInterface $payments,
         private readonly CustomerRepositoryInterface $customers,
@@ -192,10 +201,12 @@ class PaymentService
 
             return $data->receiptNumber !== null
                 ? $this->createWithFieldReceipt($customer, $data, $attributes)
-                : $this->payments->create($customer->id, $attributes);
+                : $this->knownRelations($this->payments->create($customer->id, $attributes), $customer)->setRelation('receipt', null);
         });
 
         if ($data->receiptNumber !== null) {
+            $this->receipts->autoSend($payment->receipt, $payment);
+
             // A verified instalment with a field receipt (an offline field
             // installation, phase 3) may settle its charge too.
             if ($payment->verification_status === 'verified') {
@@ -207,7 +218,6 @@ class PaymentService
             return $payment;
         }
 
-        $payment->setRelation('customer', $customer);
         $this->rememberEarlier($payment);
 
         // A verified instalment may settle its installation charge.
@@ -458,23 +468,37 @@ class PaymentService
             ->map(fn (?string $at): Carbon => ($at !== null ? Carbon::parse($at) : Carbon::now())->setTimezone(BusinessTimezone::WAT));
 
         $this->earlierMemo = [];
+        $this->monthEndMemo = [];
 
         if ($customerIds === []) {
             return;
         }
 
+        $firstMonthStart = $months->min()->copy()->startOfMonth();
+
+        // From 3 days before the first month, so a month-end double entry is caught from memory too.
         Payment::query()
             ->with(['receipt', 'recordedBy'])
             ->whereIn('customer_id', $customerIds)
             ->subscription()
             ->where('verification_status', '!=', 'rejected')
             ->whereRaw('coalesce(collected_at, created_at) between ? and ?', [
-                $months->min()->copy()->startOfMonth()->setTimezone('UTC'),
+                $firstMonthStart->copy()->subDays(3)->setTimezone('UTC'),
                 $months->max()->copy()->endOfMonth()->setTimezone('UTC'),
             ])
             ->orderByRaw('coalesce(collected_at, created_at) asc')
             ->get()
-            ->each(fn (Payment $payment) => $this->rememberEarlier($payment));
+            ->each(function (Payment $payment) use ($firstMonthStart): void {
+                if (Carbon::parse($payment->collected_at ?? $payment->created_at)->gte($firstMonthStart)) {
+                    $this->rememberEarlier($payment);
+                } else {
+                    $this->monthEndMemo[$payment->customer_id][] = $payment;
+                }
+            });
+
+        foreach ($customerIds as $customerId) {
+            $this->monthEndMemo[$customerId] ??= [];
+        }
 
         // Every (customer, month) of the batch is now known: absent = none.
         foreach ($customerIds as $customerId) {
@@ -487,6 +511,7 @@ class PaymentService
     public function forgetEarlierPayments(): void
     {
         $this->earlierMemo = null;
+        $this->monthEndMemo = null;
     }
 
     /**
@@ -547,6 +572,21 @@ class PaymentService
             return null;
         }
 
+        $from = $moment->copy()->subDays(3);
+        $to = $moment->copy()->startOfMonth();
+
+        // A batch's customer: read memory (primeEarlierPayments() + payments the batch created).
+        if ($this->monthEndMemo !== null && array_key_exists($customer->id, $this->monthEndMemo)) {
+            return collect($this->monthEndMemo[$customer->id])
+                ->filter(function (Payment $payment) use ($amount, $from, $to): bool {
+                    $at = Carbon::parse($payment->collected_at ?? $payment->created_at);
+
+                    return bccomp((string) $payment->amount, $amount, 2) === 0 && $at->between($from, $to);
+                })
+                ->sortByDesc(fn (Payment $payment) => Carbon::parse($payment->collected_at ?? $payment->created_at)->getTimestamp())
+                ->first();
+        }
+
         return Payment::query()
             ->with(['receipt', 'recordedBy'])
             ->where('customer_id', $customer->id)
@@ -570,6 +610,11 @@ class PaymentService
 
         $month = Carbon::parse($payment->collected_at ?? $payment->created_at)->setTimezone(BusinessTimezone::WAT)->format('Y-m');
         $this->earlierMemo[$payment->customer_id.'|'.$month] = $payment;
+
+        // Only for a primed customer: an unprimed one's list would be incomplete.
+        if ($this->monthEndMemo !== null && array_key_exists($payment->customer_id, $this->monthEndMemo)) {
+            $this->monthEndMemo[$payment->customer_id][] = $payment;
+        }
     }
 
     /** "ABANG already paid 2,500 FCFA on 12 Oct (receipt 000231, recorded by DIVINE). …" */
@@ -610,8 +655,10 @@ class PaymentService
      * the field (docs/plans/cash-controls.md, wave 2). The receipt is checked
      * first (FieldReceiptService — number held by this collector and unused,
      * code genuine) and the payment, its receipt and the used number are
-     * written in ONE transaction: a refused receipt stores nothing, and a
-     * number can never end up used without its payment or vice versa.
+     * written in ONE transaction — createForCustomer()'s, which this always
+     * runs inside: a refused receipt stores nothing, and a number can never
+     * end up used without its payment or vice versa. The caller emails it
+     * once committed.
      *
      * @param  array<string, mixed>  $attributes
      */
@@ -620,27 +667,31 @@ class PaymentService
         BranchLookup::remember([$customer]);
         $actor = auth()->user();
 
-        $payment = DB::transaction(function () use ($customer, $data, $attributes, $actor): Payment {
-            $claim = $this->fieldReceipts->claim(
-                $actor,
-                $customer,
-                (string) $data->amount,
-                (string) $data->receiptNumber,
-                $data->securityCode,
-                $data->receiptIssuedAt,
-            );
+        $claim = $this->fieldReceipts->claim(
+            $actor,
+            $customer,
+            (string) $data->amount,
+            (string) $data->receiptNumber,
+            $data->securityCode,
+            $data->receiptIssuedAt,
+        );
 
-            $payment = $this->payments->create($customer->id, $attributes);
-            $payment->setRelation('customer', $customer);
+        $payment = $this->knownRelations($this->payments->create($customer->id, $attributes), $customer);
 
-            $this->receipts->issueField($payment, $claim['leaf'], $claim['issued_at'], $claim['device'], $data->securityCode, $actor);
-
-            return $payment;
-        });
-
-        $this->receipts->autoSend($payment->receipt, $payment);
+        $this->receipts->issueField($payment, $claim['leaf'], $claim['issued_at'], $claim['device'], $data->securityCode, $actor);
 
         return $payment;
+    }
+
+    /**
+     * A payment just created already has its customer, no verification and
+     * the signed-in recorder — set them so issuing its receipt loads none.
+     */
+    private function knownRelations(Payment $payment, Customer $customer): Payment
+    {
+        return $payment->setRelation('customer', $customer)
+            ->setRelation('verification', null)
+            ->setRelation('recordedBy', auth()->user());
     }
 
     /**

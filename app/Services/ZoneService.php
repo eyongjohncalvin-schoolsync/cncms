@@ -127,7 +127,12 @@ class ZoneService
      */
     public function delete(Zone $zone): void
     {
-        $assignments = $this->describeAssignments($zone->customers()->count(), $zone->agents()->count());
+        // Archived customers still hold the zone (the foreign key ignores soft
+        // deletes), so they count. A bulk delete's preloaded counts are reused.
+        $assignments = $this->describeAssignments(
+            (int) ($zone->customers_count ?? $zone->customers()->withoutGlobalScope(BranchScope::class)->withTrashed()->count()),
+            (int) ($zone->agents_count ?? $zone->agents()->withoutGlobalScope(BranchScope::class)->count()),
+        );
 
         if ($assignments !== null) {
             throw ValidationException::withMessages([

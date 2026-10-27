@@ -11,6 +11,7 @@ use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Models\Zone;
 use App\Models\ZoneAgent;
+use App\Support\BranchLookup;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -256,6 +257,8 @@ class ZoneCoverageService
             $zones = Zone::query()->withoutGlobalScope(BranchScope::class)
                 ->whereIn('uuid', array_values(array_unique($zoneUuids)))
                 ->orderBy('id')->lockForUpdate()->get(['id', 'uuid', 'branch_id']);
+            // New zone_agents rows take their zone's branch from memory, not a query each.
+            BranchLookup::remember($zones);
 
             if ($zones->isEmpty() || $zones->count() !== count(array_unique($zoneUuids)) || $zones->contains(fn (Zone $zone): bool => $zone->branch_id !== $branch->id)) {
                 throw ValidationException::withMessages(['zone_uuids' => 'Choose zones of this branch.']);

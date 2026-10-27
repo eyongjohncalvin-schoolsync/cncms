@@ -148,7 +148,8 @@ class HandleInertiaRequests extends Middleware
      */
     private function branchView(TenantContext $context): ?array
     {
-        $branches = Branch::query()->orderByDesc('is_headquarters')->orderBy('name')->get(['id', 'uuid', 'name', 'is_headquarters']);
+        // The request's branch memo (already loaded by most pages): no query of its own.
+        $branches = Branch::allMemoized()->sortBy([['is_headquarters', 'desc'], ['name', 'asc']])->values();
 
         if ($branches->count() < 2) {
             return null;

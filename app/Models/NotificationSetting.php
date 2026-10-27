@@ -54,6 +54,19 @@ class NotificationSetting extends Model
      */
     public const string CACHE_KEY = 'notification_settings:current';
 
+    /** @var array<string, self> per-tenant memo for cached() */
+    private static array $memo = [];
+
+    protected static function booted(): void
+    {
+        static::saved(static fn () => self::flushMemo());
+    }
+
+    public static function flushMemo(): void
+    {
+        self::$memo = [];
+    }
+
     /**
      * Cached read of the single NotificationSettings row, auto-creating it
      * on first access. Unlike Company (guaranteed to exist via
@@ -66,7 +79,11 @@ class NotificationSetting extends Model
      */
     public static function cached(): self
     {
-        return Cache::remember(
+        // Per-request memo in front of the cache (the cache store is the
+        // database): each receipt sent reads these settings twice.
+        $memoKey = (string) (tenant()?->getTenantKey() ?? 'central');
+
+        return self::$memo[$memoKey] ??= Cache::remember(
             self::CACHE_KEY,
             now()->addHour(),
             // The default `false` values are passed explicitly rather than
