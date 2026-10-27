@@ -116,7 +116,8 @@ class PaymentService
     {
         $branchId = TenantContext::currentBranchId();
 
-        return Cache::remember(
+        // Cast: Redis keeps a bare number raw, so a cache hit comes back as "5", not 5.
+        return (int) Cache::remember(
             'payments:pending_count:'.CacheVersion::of(CacheVersion::PAYMENTS).':'.($branchId ?? 'all'),
             now()->addSeconds(15),
             fn (): int => Payment::query()
