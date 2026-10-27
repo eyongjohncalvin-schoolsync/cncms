@@ -59,7 +59,9 @@ directory `/public`.
     settings depend on it, and the swecom archive only opens with it.
   - `DB_CONNECTION=pgsql`, `DB_HOST=127.0.0.1`, `DB_DATABASE=cncms` + the
     user/password from step 2
-  - `QUEUE_CONNECTION=database`, `CACHE_STORE=database`, `SESSION_DRIVER=database`
+  - `QUEUE_CONNECTION=database`, `SESSION_DRIVER=database`, and the cache on
+    Redis (`CACHE_STORE=redis`, see §5b); `DB_CACHE_CONNECTION`,
+    `DB_QUEUE_CONNECTION` and `SESSION_CONNECTION` all `pgsql`
   - `MAIL_*`: real SMTP. Receipts, voucher approvals, cash digests and
     maintenance notices all email.
 - **The test suite stays off the server.** `tests/` stays in Git — it guards
@@ -145,6 +147,41 @@ one before every deploy. **Copy those off the
 server** (rsync from your own machine, or Ploi's backup feature if your
 plan includes it), along with `storage/` (logos and issued receipt PDFs
 can't be regenerated). A lost VPS without an off-server copy means lost data.
+
+## 5b. Cache on Redis
+
+With `CACHE_STORE=database` every cache read is a Postgres query, and the
+request rate limiter adds ~5 statements to every request. Redis takes that
+off the database. Sessions and the queue stay on the database.
+
+1. **Redis running?** SSH in: `redis-cli ping` → `PONG`. If not:
+   `sudo apt install -y redis-server && sudo systemctl enable --now redis-server`.
+2. **Lock it down** in `/etc/redis/redis.conf`:
+   ```
+   bind 127.0.0.1 -::1
+   requirepass A_LONG_RANDOM_PASSWORD
+   maxmemory 256mb
+   maxmemory-policy volatile-lru
+   ```
+   `volatile-lru` (not `allkeys-lru`): only keys with an expiry are evicted.
+   The cache-version counters (App\Support\CacheVersion) never expire; were
+   one evicted, versions would restart and old cached screens could return.
+   Then `sudo systemctl restart redis-server` and check
+   `redis-cli -a 'A_LONG_RANDOM_PASSWORD' ping`.
+3. **PHP extension:** `php8.5 -m | grep redis`. Listed → `REDIS_CLIENT=phpredis`;
+   not listed → `REDIS_CLIENT=predis` (already a composer dependency).
+4. **Site → Environment:** `CACHE_STORE=redis`, `REDIS_CLIENT`, `REDIS_HOST=127.0.0.1`,
+   `REDIS_PORT=6379`, `REDIS_PASSWORD`, `REDIS_DB=0`, `REDIS_CACHE_DB=1`,
+   `REDIS_PREFIX=cncms-`. Keep `DB_CACHE_CONNECTION=pgsql` (used again if you
+   ever switch back).
+5. **Apply:** `php artisan optimize && php artisan queue:restart`, then reload
+   PHP-FPM (or just deploy).
+6. **Check:** `php artisan tinker --execute 'Cache::put("ping", "pong", 60); echo Cache::get("ping");'`
+   prints `pong`; `redis-cli -a '…' -n 1 dbsize` is above 0 after opening a few pages.
+
+Per-tenant isolation is automatic: App\Tenancy\CacheTenancyBootstrapper tags
+every cache call with the tenant on a store that supports tags (Redis does).
+**Undo:** `CACHE_STORE=database`, then step 5.
 
 ## 6. First deploy, then the data
 
