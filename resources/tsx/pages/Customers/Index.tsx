@@ -21,7 +21,7 @@ import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdow
 import { formatCurrency } from '@/lib/formatCurrency';
 import { hasPermission } from '@/lib/permissions';
 import { useDebounce } from '@/hooks/useDebounce';
-import type { Customer, CustomerLevel, CustomerStatus, PageProps, PaginatedResponse, Zone } from '@/types';
+import type { Customer, CustomerLevel, CustomerStatus, ImportReport, PageProps, PaginatedResponse, Zone } from '@/types';
 
 interface CustomersIndexFilters {
     zone_uuid: string | null;
@@ -39,6 +39,13 @@ interface CustomersIndexProps {
     /** ?pending_activation=1 — field registrations awaiting the office (installation phase 3). */
     pending_activation_view: boolean;
     pending_activation_count: number;
+    /** The viewer's latest big (background) import from the last day — progress, then its report. */
+    background_import: {
+        status: 'pending' | 'processing' | 'completed' | 'failed';
+        file_name: string;
+        total_rows: number | null;
+        report: ImportReport;
+    } | null;
 }
 
 const statusOptions: CustomerStatus[] = ['active', 'passive', 'disconnected', 'suspended'];
@@ -51,8 +58,21 @@ export default function CustomersIndex({
     archived_view: archivedView,
     pending_activation_view: pendingView,
     pending_activation_count: pendingCount,
+    background_import: backgroundImport,
 }: CustomersIndexProps) {
     const { auth, flash } = usePage<PageProps>().props;
+
+    // While a background import runs, ask for its progress alone every 5 s.
+    const importRunning = backgroundImport?.status === 'pending' || backgroundImport?.status === 'processing';
+    useEffect(() => {
+        if (!importRunning) {
+            return;
+        }
+
+        const timer = window.setInterval(() => router.reload({ only: ['background_import'] }), 5000);
+
+        return () => window.clearInterval(timer);
+    }, [importRunning]);
     // RBAC v2 Wave 4: display affordances from the shared permission matrix
     // (auth.user.permissions), not hardcoded role names. A bulk price
     // adjustment is the same "can edit customer billing" ability as the
@@ -231,6 +251,23 @@ export default function CustomersIndex({
             />
 
             <ImportReportCard report={flash.import} expectedType="customers" />
+
+            {/* A big import runs in the background: progress, then the same report. */}
+            {backgroundImport && (backgroundImport.status === 'pending' || backgroundImport.status === 'processing') && (
+                <Card className="mb-4 flex items-center gap-3 p-4 text-sm text-slate-700">
+                    <LoadingSpinner className="text-blue-600" />
+                    Importing <span className="font-medium">{backgroundImport.file_name}</span>
+                    {backgroundImport.total_rows ? ` (${backgroundImport.total_rows} rows)` : ''} — the report appears here when it's done.
+                </Card>
+            )}
+            {backgroundImport?.status === 'failed' && (
+                <Card className="mb-4 p-4 text-sm text-red-700">
+                    The import of {backgroundImport.file_name} failed: {backgroundImport.report.failed[0]?.reason ?? 'unknown error'}
+                </Card>
+            )}
+            {backgroundImport?.status === 'completed' && !flash.import && (
+                <ImportReportCard report={backgroundImport.report} expectedType="customers" />
+            )}
 
             <div className="animate-fade-up mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4" style={{ animationDelay: '0.05s' }}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">

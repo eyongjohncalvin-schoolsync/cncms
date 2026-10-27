@@ -7,11 +7,13 @@ namespace App\Services;
 use App\DataTransferObjects\CustomerData;
 use App\Http\Requests\StoreCustomerRequest;
 use App\Imports\CustomersImport;
+use App\Jobs\ImportCustomersJob;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\BranchLookup;
 use App\Support\UpperCaseLabel;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
 use Throwable;
@@ -55,9 +57,18 @@ final class CustomerImportService
     ) {}
 
     /**
-     * @return array{succeeded: array<int, array{row: int, uuid: string, name: string}>, failed: array<int, string>, upload_uuid: string}
+     * Sheets up to this many rows import while the user waits (the report
+     * comes straight back); larger ones go to the queue (ImportCustomersJob)
+     * so the web request never times out, and the Customers page shows the
+     * report when the worker is done.
      */
-    public function import(UploadedFile $file, User $user): array
+    public const int SYNC_ROW_LIMIT = 200;
+
+    /**
+     * @param  ?int  $branchId  the importer's branch fence: a fenced manager imports into their own branch's zones only
+     * @return array{succeeded: array<int, array{row: int, uuid: string, name: string}>, failed: array<int, string>, upload_uuid: string, queued: bool, rows: int}
+     */
+    public function import(UploadedFile $file, User $user, ?int $branchId = null): array
     {
         $upload = Upload::query()->create([
             'file_name' => $file->getClientOriginalName(),
@@ -67,19 +78,71 @@ final class CustomerImportService
             'imported_by' => $user->id,
         ]);
 
+        $rows = $this->readRows($upload);
+        $rowCount = $rows->filter(fn ($row): bool => ! $this->isBlank($row))->count();
+
+        if ($rowCount > self::SYNC_ROW_LIMIT) {
+            $upload->update(['status' => 'pending', 'total_rows' => $rowCount]);
+            ImportCustomersJob::dispatch($upload->id, $branchId);
+
+            return ['succeeded' => [], 'failed' => [], 'upload_uuid' => $upload->uuid, 'pending' => true, 'rows' => $rowCount];
+        }
+
+        return [...$this->importRows($rows, $upload, $branchId), 'pending' => false, 'rows' => $rowCount];
+    }
+
+    /**
+     * The queued half of import(): reads the stored sheet again and imports
+     * it (ImportCustomersJob). Runs only for a still-queued upload, so a
+     * retried job never imports a sheet twice.
+     */
+    public function importQueued(Upload $upload, ?int $branchId): void
+    {
+        $claimed = Upload::query()->whereKey($upload->id)->where('status', 'pending')->update(['status' => 'processing']);
+
+        if ($claimed === 0) {
+            return;
+        }
+
+        $this->importRows($this->readRows($upload), $upload->fresh(), $branchId);
+    }
+
+    /**
+     * @return Collection<int, mixed>
+     */
+    private function readRows(Upload $upload): Collection
+    {
         try {
-            $rows = (Excel::toCollection(new CustomersImport, $file))->first() ?? collect();
+            return Excel::toCollection(new CustomersImport, $upload->file_path, 'local')->first() ?? collect();
         } catch (Throwable $e) {
             $upload->update(['status' => 'failed', 'errors' => [1 => 'Could not read the spreadsheet: '.$e->getMessage()]]);
 
             throw $e;
         }
+    }
 
+    private function isBlank(mixed $row): bool
+    {
+        return $this->cleanString($row['name'] ?? null) === null
+            && $this->cleanString($row['zone'] ?? null) === null
+            && $this->cleanDecimal($row['bill'] ?? null) === null;
+    }
+
+    /**
+     * @param  Collection<int, mixed>  $rows
+     * @return array{succeeded: array<int, array{row: int, uuid: string, name: string}>, failed: array<int, string>, upload_uuid: string}
+     */
+    private function importRows(Collection $rows, Upload $upload, ?int $branchId): array
+    {
         // 29 zones, cached for an hour by ZoneService::all() — one lookup
         // for the whole file rather than a query per row.
         // Keyed and looked up by the normalised name, so a sheet's "thr01"
         // finds the stored "THR01" (zone names are upper-case, UpperCaseLabel).
-        $zonesByName = $this->zones->all()->keyBy(fn ($zone): string => (string) UpperCaseLabel::normalise($zone->name));
+        // A queued import has no signed-in branch fence of its own, so the
+        // importer's branch (when fenced) narrows the zones explicitly.
+        $zonesByName = $this->zones->all()
+            ->when($branchId !== null, fn ($zones) => $zones->where('branch_id', $branchId))
+            ->keyBy(fn ($zone): string => (string) UpperCaseLabel::normalise($zone->name));
         BranchLookup::remember($zonesByName);
 
         $succeeded = [];
@@ -107,7 +170,7 @@ final class CustomerImportService
 
             // A wholly blank row (trailing spreadsheet artifact) isn't a
             // real entry — skip it without reporting it as a failure.
-            if ($name === null && $zoneName === null && $bill === null) {
+            if ($this->isBlank($row)) {
                 continue;
             }
 

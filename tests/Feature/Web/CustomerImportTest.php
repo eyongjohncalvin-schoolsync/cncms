@@ -7,6 +7,7 @@ namespace Tests\Feature\Web;
 use App\Models\TenantUser;
 use App\Models\Upload;
 use App\Models\User;
+use App\Services\CustomerImportService;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
@@ -79,6 +80,32 @@ class CustomerImportTest extends TestCase
         });
 
         return new UploadedFile($path, 'customers.xlsx', null, null, true);
+    }
+
+    /**
+     * A sheet bigger than CustomerImportService::SYNC_ROW_LIMIT is imported
+     * by the queue (ImportCustomersJob — run at once by the test queue), and
+     * the Customers page shows its report.
+     */
+    public function test_a_big_sheet_imports_in_the_background_and_reports_on_the_customers_page(): void
+    {
+        $this->actingAsRole('manager');
+        ZoneFactory::new()->create(['name' => 'CBIG-ZONE']);
+
+        $rows = array_map(fn (int $i): array => ['name' => "CBIG Customer {$i}", 'zone' => 'CBIG-ZONE', 'bill' => 2500, 'status' => 'active'], range(1, CustomerImportService::SYNC_ROW_LIMIT + 1));
+        $rows[] = ['name' => 'CBIG Lost', 'zone' => 'NO-SUCH-ZONE', 'bill' => 2500, 'status' => 'active'];
+
+        $this->post('/customers/import', ['file' => $this->spreadsheet($rows)])
+            ->assertRedirect('/customers')
+            ->assertSessionHas('success', fn (string $message): bool => str_contains($message, 'in the background'));
+
+        $upload = Upload::query()->where('type', 'customers')->latest('id')->firstOrFail();
+        $this->assertSame(['completed', CustomerImportService::SYNC_ROW_LIMIT + 1, 1], [$upload->status, $upload->succeeded_count, $upload->failed_count]);
+
+        $this->get('/customers')->assertInertia(fn ($page) => $page
+            ->where('background_import.status', 'completed')
+            ->where('background_import.report.succeeded_count', CustomerImportService::SYNC_ROW_LIMIT + 1)
+            ->where('background_import.report.failed.0.reason', fn (string $reason): bool => str_contains($reason, 'NO-SUCH-ZONE')));
     }
 
     public function test_manager_can_import_customers_from_a_valid_spreadsheet(): void

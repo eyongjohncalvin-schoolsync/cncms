@@ -28,6 +28,7 @@ use App\Models\Payment;
 use App\Models\Service;
 use App\Models\ServiceVariant;
 use App\Models\TenantUser;
+use App\Models\Upload;
 use App\Models\User;
 use App\Models\Zone;
 use App\Services\ArrearsAdjustmentService;
@@ -97,25 +98,32 @@ class CustomerController extends Controller
 
         $filters = $request->only(['zone_uuid', 'status', 'level', 'search']);
 
-        $paginator = $this->customers->list([...$filters, 'archived' => $archived, 'pending_activation' => $pendingActivation], 15);
-
+        // Closures: the background-import progress poll (a partial reload of
+        // background_import alone) then never loads the list.
         return Inertia::render('Customers/Index', [
             'archived_view' => $archived,
             'pending_activation_view' => $pendingActivation,
-            'pending_activation_count' => app(FieldInstallationService::class)->pendingCount(),
-            'customers' => [
-                'data' => collect($paginator->items())
-                    ->map(fn (Customer $customer) => $this->shapeCustomer($customer))
-                    ->all(),
-                'links' => $paginator->linkCollection()->toArray(),
-                'meta' => [
-                    'current_page' => $paginator->currentPage(),
-                    'per_page' => $paginator->perPage(),
-                    'total' => $paginator->total(),
-                    'last_page' => $paginator->lastPage(),
-                ],
-            ],
-            'zones' => $this->zonesForSelect(),
+            'pending_activation_count' => fn (): int => app(FieldInstallationService::class)->pendingCount(),
+            'customers' => function () use ($filters, $archived, $pendingActivation): array {
+                $paginator = $this->customers->list([...$filters, 'archived' => $archived, 'pending_activation' => $pendingActivation], 15);
+
+                return [
+                    'data' => collect($paginator->items())
+                        ->map(fn (Customer $customer) => $this->shapeCustomer($customer))
+                        ->all(),
+                    'links' => $paginator->linkCollection()->toArray(),
+                    'meta' => [
+                        'current_page' => $paginator->currentPage(),
+                        'per_page' => $paginator->perPage(),
+                        'total' => $paginator->total(),
+                        'last_page' => $paginator->lastPage(),
+                    ],
+                ];
+            },
+            'zones' => fn (): array => $this->zonesForSelect(),
+            // A big import running in the background, then its report.
+            // A closure: the page's progress poll asks for this prop alone.
+            'background_import' => fn (): ?array => $this->backgroundImport($request->user()),
             'filters' => [
                 'zone_uuid' => $filters['zone_uuid'] ?? null,
                 'status' => $filters['status'] ?? null,
@@ -222,7 +230,11 @@ class CustomerController extends Controller
      */
     public function import(ImportCustomersRequest $request): RedirectResponse
     {
-        $result = $this->customerImports->import($request->file('file'), $request->user());
+        $result = $this->customerImports->import($request->file('file'), $request->user(), TenantContext::currentBranchId());
+
+        if ($result['pending']) {
+            return redirect()->route('customers.index')->with('success', "Importing {$result['rows']} rows in the background — the report will appear on this page when it's done.");
+        }
 
         $succeededCount = count($result['succeeded']);
         $failedCount = count($result['failed']);
@@ -256,6 +268,43 @@ class CustomerController extends Controller
      * layout. Same 'create' gate as the upload itself and as a manual "Add
      * Customer" form (CustomerPolicy::create()).
      */
+    /**
+     * The viewer's latest background import (one too big to run while they
+     * waited — CustomerImportService::SYNC_ROW_LIMIT) from the last day:
+     * its progress, then the same report a small import flashes.
+     *
+     * @return array{status: string, file_name: string, total_rows: ?int, report: array{type: string, succeeded_count: int, failed_count: int, failed: list<array{row: int, reason: string}>}}|null
+     */
+    private function backgroundImport(User $user): ?array
+    {
+        $upload = Upload::query()
+            ->where('type', 'customers')
+            ->where('imported_by', $user->id)
+            ->where('created_at', '>=', now()->subDay())
+            ->where(fn ($query) => $query->whereIn('status', ['pending', 'processing'])->orWhere('total_rows', '>', CustomerImportService::SYNC_ROW_LIMIT))
+            ->latest('id')
+            ->first();
+
+        if ($upload === null) {
+            return null;
+        }
+
+        return [
+            'status' => $upload->status,
+            'file_name' => $upload->file_name,
+            'total_rows' => $upload->total_rows,
+            'report' => [
+                'type' => 'customers',
+                'succeeded_count' => (int) $upload->succeeded_count,
+                'failed_count' => (int) $upload->failed_count,
+                'failed' => collect($upload->errors ?? [])
+                    ->map(fn (string $reason, int|string $row): array => ['row' => (int) $row, 'reason' => $reason])
+                    ->values()
+                    ->all(),
+            ],
+        ];
+    }
+
     public function importTemplate(): BinaryFileResponse
     {
         $this->authorize('create', Customer::class);
