@@ -10,10 +10,13 @@ use App\Models\ExpenseCategory;
 use App\Models\Payment;
 use App\Models\User;
 use App\Repositories\Contracts\AuditLogRepositoryInterface;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Collection;
+use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class AuditLogRepository implements AuditLogRepositoryInterface
 {
@@ -37,12 +40,29 @@ class AuditLogRepository implements AuditLogRepositoryInterface
      */
     private const CUSTOMER_FK_TABLES = ['payments', 'manuscripts', 'messages'];
 
+    /** Shorter search terms are ignored (they match nearly every name). */
+    public const int MIN_SEARCH_LENGTH = 3;
+
+    /** The total shown stops here: counting a whole, ever-growing table on every page view is the cost. */
+    public const int COUNT_CAP = 10_000;
+
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
-        return $this->scoped($filters)
+        $page = Paginator::resolveCurrentPage() ?: 1;
+
+        // Counts at most COUNT_CAP matching rows (a LIMITed subquery), not every row in the table.
+        $total = (int) DB::query()->fromSub($this->scoped($filters)->select('id')->limit(self::COUNT_CAP)->toBase(), 'capped')->count();
+
+        $items = $this->scoped($filters)
             ->with(['user', 'impersonator'])
             ->latest('created_at')
-            ->paginate($perPage);
+            ->forPage($page, $perPage)
+            ->get();
+
+        return new LengthAwarePaginator($items, $total, $perPage, $page, [
+            'path' => Paginator::resolveCurrentPath(),
+            'pageName' => 'page',
+        ]);
     }
 
     /**
@@ -65,8 +85,10 @@ class AuditLogRepository implements AuditLogRepositoryInterface
                 $filters['user_uuid'] ?? null,
                 fn (Builder $query, string $userUuid) => $query->where('user_id', $this->resolveUserId($userUuid))
             )
-            ->when($filters['from'] ?? null, fn (Builder $query, $from) => $query->whereDate('created_at', '>=', $from))
-            ->when($filters['to'] ?? null, fn (Builder $query, $to) => $query->whereDate('created_at', '<=', $to));
+            // Day bounds in business time compared directly with created_at
+            // (not created_at::date), so the created_at index serves them.
+            ->when($filters['from'] ?? null, fn (Builder $query, $from) => $query->where('created_at', '>=', Carbon::parse($from, BusinessTimezone::WAT)->startOfDay()->utc()))
+            ->when($filters['to'] ?? null, fn (Builder $query, $to) => $query->where('created_at', '<', Carbon::parse($to, BusinessTimezone::WAT)->addDay()->startOfDay()->utc()));
     }
 
     /**
@@ -103,13 +125,18 @@ class AuditLogRepository implements AuditLogRepositoryInterface
      */
     private function applySearch(Builder $query, string $term): Builder
     {
+        // Too short to mean anything: one or two letters match most names.
+        if (mb_strlen(trim($term)) < self::MIN_SEARCH_LENGTH) {
+            return $query;
+        }
+
         $like = '%'.addcslashes($term, '%_\\').'%';
 
+        // Subqueries, not id lists: a common name used to expand into
+        // thousands of literal ids (and every payment of those customers).
         $customerIds = $this->idsByName(Customer::query(), $like);
         $categoryIds = $this->idsByName(ExpenseCategory::query(), $like);
-        $paymentIdsForCustomers = $customerIds->isEmpty()
-            ? collect()
-            : Payment::query()->whereIn('customer_id', $customerIds)->pluck('id')->map(strval(...));
+        $paymentIdsForCustomers = Payment::query()->whereIn('customer_id', Customer::query()->where('name', 'ilike', $like)->select('id'))->selectRaw('id::text');
 
         return $query->where(function (Builder $q) use ($like, $customerIds, $categoryIds, $paymentIdsForCustomers) {
             $q->where(function (Builder $q2) use ($like) {
@@ -125,48 +152,41 @@ class AuditLogRepository implements AuditLogRepositoryInterface
                         $q3->where('old_values->description', 'ilike', $like)
                             ->orWhere('new_values->description', 'ilike', $like);
 
-                        if ($categoryIds->isNotEmpty()) {
-                            $q3->orWhereIn('old_values->category_id', $categoryIds)
-                                ->orWhereIn('new_values->category_id', $categoryIds);
-                        }
+                        $q3->orWhereIn('old_values->category_id', $categoryIds)
+                            ->orWhereIn('new_values->category_id', $categoryIds);
                     });
             });
 
-            if ($categoryIds->isNotEmpty()) {
-                $q->orWhere(function (Builder $q2) use ($categoryIds) {
-                    $q2->where('table_name', 'budgets')
-                        ->where(fn (Builder $q3) => $q3
-                            ->whereIn('old_values->category_id', $categoryIds)
-                            ->orWhereIn('new_values->category_id', $categoryIds));
-                });
-            }
+            $q->orWhere(function (Builder $q2) use ($categoryIds) {
+                $q2->where('table_name', 'budgets')
+                    ->where(fn (Builder $q3) => $q3
+                        ->whereIn('old_values->category_id', $categoryIds)
+                        ->orWhereIn('new_values->category_id', $categoryIds));
+            });
 
-            if ($customerIds->isNotEmpty()) {
-                $q->orWhere(function (Builder $q2) use ($customerIds) {
-                    $q2->whereIn('table_name', self::CUSTOMER_FK_TABLES)
-                        ->where(fn (Builder $q3) => $q3
-                            ->whereIn('old_values->customer_id', $customerIds)
-                            ->orWhereIn('new_values->customer_id', $customerIds));
-                });
-            }
+            $q->orWhere(function (Builder $q2) use ($customerIds) {
+                $q2->whereIn('table_name', self::CUSTOMER_FK_TABLES)
+                    ->where(fn (Builder $q3) => $q3
+                        ->whereIn('old_values->customer_id', $customerIds)
+                        ->orWhereIn('new_values->customer_id', $customerIds));
+            });
 
-            if ($paymentIdsForCustomers->isNotEmpty()) {
-                $q->orWhere(function (Builder $q2) use ($paymentIdsForCustomers) {
-                    $q2->where('table_name', 'payment_verifications')
-                        ->where(fn (Builder $q3) => $q3
-                            ->whereIn('old_values->payment_id', $paymentIdsForCustomers)
-                            ->orWhereIn('new_values->payment_id', $paymentIdsForCustomers));
-                });
-            }
+            $q->orWhere(function (Builder $q2) use ($paymentIdsForCustomers) {
+                $q2->where('table_name', 'payment_verifications')
+                    ->where(fn (Builder $q3) => $q3
+                        ->whereIn('old_values->payment_id', $paymentIdsForCustomers)
+                        ->orWhereIn('new_values->payment_id', $paymentIdsForCustomers));
+            });
         });
     }
 
     /**
-     * @return Collection<int, string>
+     * The ids (as text, like the JSON snapshot values) of rows named like
+     * $like — a subquery, run inside the audit query.
      */
-    private function idsByName(Builder $query, string $like): Collection
+    private function idsByName(Builder $query, string $like): Builder
     {
-        return $query->where('name', 'ilike', $like)->pluck('id')->map(strval(...));
+        return $query->where('name', 'ilike', $like)->selectRaw('id::text');
     }
 
     /**

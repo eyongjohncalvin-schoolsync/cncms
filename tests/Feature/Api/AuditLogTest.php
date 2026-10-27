@@ -110,6 +110,27 @@ class AuditLogTest extends TestCase
         );
     }
 
+    /**
+     * Query audit (2026-10-27): the day filters compare created_at with the
+     * day's bounds in business time (index-friendly), still including the
+     * whole of both days; a search shorter than three letters is ignored.
+     */
+    public function test_day_filters_cover_whole_business_days_and_short_searches_are_ignored(): void
+    {
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'name' => 'Qqwerty Day '.uniqid()]);
+        $log = AuditLog::query()->where('record_uuid', $customer->uuid)->firstOrFail();
+        // 23:30 in Cameroon on 3 March is 22:30 UTC the same day.
+        $log->forceFill(['created_at' => Carbon::parse('2026-03-03 22:30:00', 'UTC')])->saveQuietly();
+
+        $token = $this->tokenForRole('manager');
+        $search = fn (string $query): array => collect($this->withHeader('Authorization', "Bearer {$token}")->getJson('/api/v1/audit/logs?'.$query)->assertOk()->json('data'))->pluck('record_uuid')->all();
+
+        $this->assertContains($customer->uuid, $search('from=2026-03-03&to=2026-03-03&search=Qqwerty'), 'Late on the 3rd is still the 3rd.');
+        $this->assertNotContains($customer->uuid, $search('from=2026-03-04&search=Qqwerty'));
+        $this->assertNotContains($customer->uuid, $search('to=2026-03-02&search=Qqwerty'));
+        $this->assertNotEmpty($search('search=Qq'), 'Two letters filter nothing.');
+    }
+
     public function test_search_finds_nothing_for_a_name_that_does_not_exist(): void
     {
         $token = $this->tokenForRole('manager');

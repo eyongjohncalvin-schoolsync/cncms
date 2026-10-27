@@ -7,11 +7,8 @@ namespace App\Services;
 use App\Models\AuditLog;
 use App\Models\ExpenseCategory;
 use App\Repositories\Contracts\AuditLogRepositoryInterface;
-use App\Support\TenantContext;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class AuditLogService
@@ -21,26 +18,16 @@ class AuditLogService
     ) {}
 
     /**
-     * Audit logs are append-only and grow constantly, so there's no
-     * predictable invalidation key to forget on write (unlike
-     * ExpenditureService's dashboard cache) — the short TTL alone is the
-     * entire caching strategy here.
+     * Not cached: one page is two indexed queries (a capped count and 25
+     * rows — AuditLogRepository::paginate()), while caching stored a page
+     * of rows under every filter/page combination anyone ever opened.
      *
      * @param  array<string, mixed>  $filters  Supported keys: 'table_name', 'action',
      *                                         'user_uuid', 'search', 'record_uuid', 'from', 'to'.
      */
     public function list(array $filters, int $perPage): LengthAwarePaginator
     {
-        $page = Paginator::resolveCurrentPage() ?: 1;
-
-        // The viewer's branch fence changes what the page holds (branches v2).
-        $cacheKey = 'audit:logs:list:'.md5(json_encode([$filters, $perPage, $page, TenantContext::currentBranchId()]));
-
-        return Cache::remember(
-            $cacheKey,
-            now()->addSeconds(30),
-            fn (): LengthAwarePaginator => $this->auditLogs->paginate($filters, $perPage),
-        );
+        return $this->auditLogs->paginate($filters, $perPage);
     }
 
     /**
