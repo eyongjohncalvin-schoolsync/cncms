@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AnswerLayoutPoll;
 use App\Http\Middleware\BlockDuringImpersonation;
 use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\EnsureLandlord;
@@ -40,6 +41,9 @@ return Application::configure(basePath: dirname(__DIR__))
             // anything else (including the impersonation log) sees it.
             EnsureAccountIsActive::class,
             RecordImpersonatedActions::class,
+            // The layout's minute poll (bell + maintenance banner) answered
+            // without re-running the page controller.
+            AnswerLayoutPoll::class,
         ]);
 
         $middleware->alias([
