@@ -125,6 +125,13 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
     const [reviewing, setReviewing] = useState<Payment | null>(null);
     const [deleting, setDeleting] = useState<Payment | null>(null);
     const [reversing, setReversing] = useState<Payment | null>(null);
+
+    // Clears all of this customer's payments of that month from the tab.
+    function clearDuplicate(payment: Payment) {
+        if (confirm(`Mark ${payment.customer_name}'s payments of this month as genuine (not a duplicate)?`)) {
+            router.post(`/payments/${payment.uuid}/not-duplicate`, {}, { preserveScroll: true });
+        }
+    }
     const [destroying, setDestroying] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
     const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -564,6 +571,15 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 </div>
             )}
 
+            {activeTab === 'duplicates' && (
+                <p className="mb-3 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
+                    Customers who paid more than once in the same month, from any time — each customer's payments of a
+                    month are listed together. If they are genuine, choose <span className="font-medium">Not a duplicate</span>.
+                    If one is wrong: <span className="font-medium">Review → Reject</span> while it is pending, or{' '}
+                    <span className="font-medium">Reverse</span> once verified.
+                </p>
+            )}
+
             {payments.data.length === 0 ? (
                 <div className="animate-fade-up" style={{ animationDelay: '200ms' }}>
                     <EmptyState title="No payments found" description="Try a different filter or record a new payment." />
@@ -667,6 +683,9 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                             )}
                                             {payment.can_reverse && (
                                                 <DropdownItem onClick={() => setReversing(payment)}>Reverse</DropdownItem>
+                                            )}
+                                            {activeTab === 'duplicates' && payment.can_clear_duplicate && (
+                                                <DropdownItem onClick={() => clearDuplicate(payment)}>Not a duplicate</DropdownItem>
                                             )}
                                             {isDeletable(payment) && (
                                                 <>

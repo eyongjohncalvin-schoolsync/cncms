@@ -91,6 +91,12 @@ class PaymentController extends Controller
         // given, so nothing about today's explicit-range behavior changes.
         $isAllTimeScope = $request->query('scope') === 'all';
 
+        // Possible duplicates stay until cleared (the badge counts them all),
+        // so that tab opens on all time unless a month is picked.
+        if ($filters['duplicates'] && ! isset($filters['from']) && ! isset($filters['to'])) {
+            $isAllTimeScope = true;
+        }
+
         if (! $isAllTimeScope && ! isset($filters['from']) && ! isset($filters['to'])) {
             $filters['from'] = now()->startOfMonth()->toDateString();
             $filters['to'] = now()->endOfMonth()->toDateString();
@@ -155,9 +161,8 @@ class PaymentController extends Controller
                 'pending' => $this->countedPayments($filters['purpose'])->where('verification_status', 'pending')->count(),
                 'verified' => $this->countedPayments($filters['purpose'])->where('verification_status', 'verified')->count(),
                 'rejected' => $this->countedPayments($filters['purpose'])->where('verification_status', 'rejected')->count(),
-                // Possible duplicates still waiting for the office — the tab
-                // itself lists every flagged one in the period.
-                'duplicates' => $this->countedPayments($filters['purpose'])->whereNotNull('duplicate_of_id')->where('verification_status', 'pending')->count(),
+                // Payments of customers who paid more than once in a month, not yet cleared.
+                'duplicates' => $this->countedPayments($filters['purpose'])->possibleDuplicate()->count(),
             ],
         ]);
     }
@@ -441,6 +446,21 @@ class PaymentController extends Controller
     }
 
     /**
+     * "Not a duplicate": the office has checked this customer's payments of
+     * that month and they are genuine — all of them leave the Possible
+     * duplicates tab. A wrong one is rejected (pending) or reversed
+     * (verified) instead.
+     */
+    public function clearDuplicate(Payment $payment): RedirectResponse
+    {
+        $this->authorize('clearDuplicate', $payment);
+
+        $this->payments->clearDuplicateMonth($payment, request()->user());
+
+        return back()->with('success', 'Marked as not a duplicate.');
+    }
+
+    /**
      * Undo a verified payment that was wrong: it becomes rejected and its
      * receipt is voided (PaymentVerificationService::reverse()). Then record
      * the right payment again.
@@ -560,6 +580,8 @@ class PaymentController extends Controller
             'reversed_at' => $payment->reversed_at?->toIso8601String(),
             'reversal_reason' => $payment->reversal_reason,
             'can_reverse' => (bool) request()->user()?->can('reverse', $payment),
+            // "Not a duplicate" on the Possible duplicates tab.
+            'can_clear_duplicate' => (bool) request()->user()?->can('clearDuplicate', $payment),
             // Its cash went into a daily handover: reversing it must correct or refund.
             'handed_in' => $payment->relationLoaded('remittanceLine') ? $payment->remittanceLine !== null : $payment->remittanceLine()->exists(),
             // A second payment for the customer that month (PaymentService::flagPossibleDuplicate()).

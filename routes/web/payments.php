@@ -21,6 +21,7 @@ Route::middleware('not-impersonating:money')->group(function () {
     Route::delete('payments/{payment}', [PaymentController::class, 'destroy'])->name('payments.destroy');
     Route::post('payments/{payment}/verify', [PaymentController::class, 'verify'])->name('payments.verify');
     Route::post('payments/{payment}/reverse', [PaymentController::class, 'reverse'])->name('payments.reverse');
+    Route::post('payments/{payment}/not-duplicate', [PaymentController::class, 'clearDuplicate'])->name('payments.not-duplicate');
     Route::post('payments/{payment}/receipt', [PaymentController::class, 'uploadReceipt'])->name('payments.receipt');
     Route::post('payments/{payment}/receipt/issue', [PaymentReceiptController::class, 'issue'])->name('payments.receipt.issue');
 });

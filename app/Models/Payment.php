@@ -8,6 +8,7 @@ use App\Models\Concerns\BelongsToBranch;
 use App\Models\Concerns\HasUuid;
 use App\Models\Concerns\ScopesRouteBindingToBranch;
 use App\Models\Scopes\BranchScope;
+use App\Support\BusinessTimezone;
 use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\RouteKey;
@@ -39,6 +40,8 @@ use LogicException;
     'service_months',
     // A possible repeat of an earlier payment that month — see DUPLICATE_REASONS.
     'duplicate_of_id', 'duplicate_reason', 'duplicate_note',
+    // The office checked the month's payments: genuine (scopePossibleDuplicate()).
+    'duplicate_cleared_at', 'duplicate_cleared_by',
     // The prepayment offer it bought, and that offer's price then
     // (PaymentService::applyPrepaymentOffer()); the rest of the amount cleared old debt.
     'prepayment_offer_id', 'offer_price',
@@ -184,6 +187,7 @@ class Payment extends Model
             'processed_at' => 'datetime',
             'reversed_at' => 'datetime',
             'collected_at' => 'datetime',
+            'duplicate_cleared_at' => 'datetime',
             'recorded_offline' => 'boolean',
         ];
     }
@@ -203,6 +207,48 @@ class Payment extends Model
     public function isPossibleDuplicate(): bool
     {
         return $this->duplicate_of_id !== null;
+    }
+
+    /**
+     * The Possible duplicates tab (owner, 2026-10-27): a subscription payment
+     * (not rejected, not reversed) of a customer who has another one in the
+     * same month (business time, by when it was collected) — or one flagged
+     * when it was recorded — that the office has not yet marked
+     * "Not a duplicate".
+     */
+    public function scopePossibleDuplicate(Builder $query): Builder
+    {
+        $month = fn (string $table): string => "date_trunc('month', coalesce({$table}.collected_at, {$table}.created_at) at time zone '".BusinessTimezone::WAT."')";
+        $payments = $query->getModel()->getTable();
+
+        return $query->subscription()
+            ->where($query->qualifyColumn('verification_status'), '!=', 'rejected')
+            ->whereNull($query->qualifyColumn('reversed_at'))
+            ->whereNull($query->qualifyColumn('duplicate_cleared_at'))
+            ->where(fn (Builder $inner) => $inner
+                ->whereNotNull($query->qualifyColumn('duplicate_of_id'))
+                ->orWhereExists(fn ($other) => $other
+                    ->selectRaw('1')
+                    ->from("{$payments} as other")
+                    ->whereColumn('other.customer_id', "{$payments}.customer_id")
+                    ->whereColumn('other.id', '!=', "{$payments}.id")
+                    ->where('other.purpose', self::PURPOSE_SUBSCRIPTION)
+                    ->where('other.verification_status', '!=', 'rejected')
+                    ->whereNull('other.reversed_at')
+                    ->whereRaw("{$month('other')} = {$month($payments)}")));
+    }
+
+    /** Every subscription payment of the same customer in the same month as this one. */
+    public function scopeSameMonthAs(Builder $query, Payment $payment): Builder
+    {
+        $moment = ($payment->collected_at ?? $payment->created_at)->copy()->setTimezone(BusinessTimezone::WAT);
+
+        return $query->subscription()
+            ->where($query->qualifyColumn('customer_id'), $payment->customer_id)
+            ->whereRaw('coalesce(collected_at, created_at) between ? and ?', [
+                $moment->copy()->startOfMonth()->setTimezone('UTC'),
+                $moment->copy()->endOfMonth()->setTimezone('UTC'),
+            ]);
     }
 
     /**

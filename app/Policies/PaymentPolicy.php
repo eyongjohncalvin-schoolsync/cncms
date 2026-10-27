@@ -95,6 +95,17 @@ class PaymentPolicy
     }
 
     /**
+     * "Not a duplicate" on the Possible duplicates tab: the office, never
+     * whoever recorded it (the owner excepted) — the same second person as
+     * for verifying a possible duplicate.
+     */
+    public function clearDuplicate(User $user, Payment $payment): bool
+    {
+        return $this->context->can('payments.verify')
+            && ($payment->recorded_by !== $user->id || $this->context->isSuper());
+    }
+
+    /**
      * Takes the target $payment (unlike the class-level checks above) so an
      * agent's grant can be scoped to their own zone rather than being a
      * blanket role widening: an agent may verify a payment only for a

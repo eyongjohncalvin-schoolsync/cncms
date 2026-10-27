@@ -30,7 +30,12 @@ class PaymentRepository implements PaymentRepositoryInterface
                 // The default list is money: rejected payments only show under Rejected.
                 fn ($query) => ($filters['duplicates'] ?? false) ? $query : $query->where('verification_status', '!=', 'rejected'),
             )
-            ->when($filters['duplicates'] ?? false, fn ($query) => $query->whereNotNull('duplicate_of_id'))
+            // Every customer with more than one payment in a month, until the office clears it.
+            ->when($filters['duplicates'] ?? false, fn ($query) => $query->possibleDuplicate()
+                // A customer's payments of one month side by side, newest month first.
+                ->orderByRaw("date_trunc('month', coalesce(payments.collected_at, payments.created_at)) desc")
+                ->orderBy('customer_id')
+                ->orderByRaw('coalesce(payments.collected_at, payments.created_at)'))
             // Bill money vs one-off fees (installation, relocation, re-installation).
             ->when(($filters['purpose'] ?? null) === 'bill', fn ($query) => $query->subscription())
             ->when(($filters['purpose'] ?? null) === 'fees', fn ($query) => $query->where('purpose', Payment::PURPOSE_INSTALLATION))

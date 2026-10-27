@@ -8,6 +8,7 @@ use App\DataTransferObjects\PaymentData;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PrepaymentOffer;
+use App\Models\User;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
@@ -26,6 +27,9 @@ use Illuminate\Validation\ValidationException;
 
 class PaymentService
 {
+    /** First half of the per-customer advisory lock key (the customer id is the second). */
+    private const int PAYMENT_LOCK_KEY = 7301;
+
     /**
      * Earlier payments of a batch (primeEarlierPayments()), keyed
      * "customerId|Y-m"; null outside a batch, when each check queries.
@@ -175,11 +179,23 @@ class PaymentService
         }
 
         $attributes = $this->applyPrepaymentOffer($customer, $data, $attributes);
-        $attributes = $this->flagPossibleDuplicate($customer, $data, $attributes);
+
+        // Two payments for the same customer at the same moment (two
+        // collectors, two office tabs) would both pass the duplicate check
+        // and both save unflagged. One customer's payments are recorded one
+        // at a time instead: the second waits for the first to commit, then
+        // sees it. Other customers never wait.
+        $payment = DB::transaction(function () use ($customer, $data, $attributes): Payment {
+            DB::select('select pg_advisory_xact_lock(?, ?)', [self::PAYMENT_LOCK_KEY, $customer->id]);
+
+            $attributes = $this->flagPossibleDuplicate($customer, $data, $attributes);
+
+            return $data->receiptNumber !== null
+                ? $this->createWithFieldReceipt($customer, $data, $attributes)
+                : $this->payments->create($customer->id, $attributes);
+        });
 
         if ($data->receiptNumber !== null) {
-            $payment = $this->createWithFieldReceipt($customer, $data, $attributes);
-
             // A verified instalment with a field receipt (an offline field
             // installation, phase 3) may settle its charge too.
             if ($payment->verification_status === 'verified') {
@@ -191,7 +207,6 @@ class PaymentService
             return $payment;
         }
 
-        $payment = $this->payments->create($customer->id, $attributes);
         $payment->setRelation('customer', $customer);
         $this->rememberEarlier($payment);
 
@@ -498,6 +513,24 @@ class PaymentService
             ])
             ->orderByRaw('coalesce(collected_at, created_at) desc')
             ->first();
+    }
+
+    /**
+     * "Not a duplicate": stamps every payment of $payment's customer in that
+     * month (not rejected), so the month leaves the Possible duplicates tab.
+     * A payment recorded later that month brings it back. Saved one by one
+     * so the audit log records each.
+     */
+    public function clearDuplicateMonth(Payment $payment, User $actor): void
+    {
+        DB::transaction(function () use ($payment, $actor): void {
+            Payment::query()->sameMonthAs($payment)
+                ->where('verification_status', '!=', 'rejected')
+                ->whereNull('duplicate_cleared_at')
+                ->lockForUpdate()
+                ->get()
+                ->each(fn (Payment $paid) => $paid->update(['duplicate_cleared_at' => now(), 'duplicate_cleared_by' => $actor->id]));
+        });
     }
 
     /**

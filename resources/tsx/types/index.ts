@@ -441,6 +441,8 @@ export interface Payment {
     reversed_at?: string | null;
     reversal_reason?: string | null;
     can_reverse?: boolean;
+    /** May mark this customer's payments of the month "Not a duplicate" (Possible duplicates tab). */
+    can_clear_duplicate?: boolean;
     /** Its cash was already handed in at a daily handover. */
     handed_in?: boolean;
     duplicate_reason?: string | null;

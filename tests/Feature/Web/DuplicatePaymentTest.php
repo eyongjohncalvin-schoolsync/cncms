@@ -17,6 +17,7 @@ use Database\Factories\ZoneFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -254,10 +255,106 @@ class DuplicatePaymentTest extends TestCase
         $flagged = $this->payments()->whereNotNull('duplicate_of_id')->sole();
 
         $this->as('admin');
-        $this->get('/payments?duplicates=1')->assertOk()->assertInertia(fn (Assert $page) => $page
+        $this->get('/payments?duplicates=1&per_page=500')->assertOk()->assertInertia(fn (Assert $page) => $page
             ->where('filters.duplicates', true)
-            ->where('payments.data', fn ($rows) => collect($rows)->pluck('uuid')->all() === [$flagged->uuid])
-            ->where('statusCounts.duplicates', fn ($count) => $count >= 1));
+            // Both of the month's payments, side by side — not only the flagged one.
+            ->where('payments.data', fn ($rows) => collect($rows)->where('customer_name', $this->customer->name)->pluck('uuid')->sort()->values()->all()
+                === $this->payments()->pluck('uuid')->sort()->values()->all() && collect($rows)->contains('uuid', $flagged->uuid))
+            ->where('statusCounts.duplicates', fn ($count) => $count >= 2));
+    }
+
+    /**
+     * Double payments from before the check existed (owner, 2026-10-27):
+     * never flagged, verified, months ago — the tab still finds them.
+     */
+    public function test_the_tab_finds_old_unflagged_double_payments_of_a_month(): void
+    {
+        $double = $this->oldPayments([['2025-11-26 09:00', 2500], ['2025-11-26 09:05', 2500]]);
+        $twoMonths = $this->oldPayments([['2025-09-10 09:00', 2500], ['2025-10-10 09:00', 2500]], CustomerFactory::new()->create(['zone_id' => $this->customer->zone_id, 'bill' => 2500, 'status' => 'active']));
+        $rejected = $this->oldPayments([['2025-08-03 09:00', 2500]]);
+        $rejected[0]->update(['verification_status' => 'rejected']);
+
+        $this->as('admin');
+        $this->get('/payments?duplicates=1&per_page=500')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('filters.scope', 'all')
+            ->where('payments.data', function ($rows) use ($double, $twoMonths, $rejected): bool {
+                $uuids = collect($rows)->pluck('uuid');
+
+                return $uuids->contains($double[0]->uuid) && $uuids->contains($double[1]->uuid)
+                    && ! $uuids->contains($twoMonths[0]->uuid) && ! $uuids->contains($twoMonths[1]->uuid)
+                    && ! $uuids->contains($rejected[0]->uuid);
+            }));
+
+        // A month picked narrows it to that month.
+        $this->get('/payments?duplicates=1&per_page=500&from=2025-11-01&to=2025-11-30')->assertInertia(fn (Assert $page) => $page
+            ->where('payments.data', fn ($rows) => collect($rows)->pluck('uuid')->contains($double[1]->uuid)));
+    }
+
+    public function test_not_a_duplicate_clears_the_customers_month_from_the_tab(): void
+    {
+        $double = $this->oldPayments([['2025-11-26 09:00', 2500], ['2025-11-26 09:05', 2500]]);
+        $other = $this->oldPayments([['2025-07-26 09:00', 2500], ['2025-07-26 09:05', 2500]]);
+
+        $this->as('admin');
+        $this->post("/payments/{$double[1]->uuid}/not-duplicate")->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertNotNull($double[0]->fresh()->duplicate_cleared_at, 'The whole month is cleared, not just one payment.');
+        $this->assertSame($this->kelvin->id, $double[1]->fresh()->duplicate_cleared_by);
+        $this->assertNull($other[0]->fresh()->duplicate_cleared_at, 'Another month stays.');
+
+        $this->get('/payments?duplicates=1&per_page=500')->assertInertia(fn (Assert $page) => $page
+            ->where('payments.data', function ($rows) use ($double, $other): bool {
+                $uuids = collect($rows)->pluck('uuid');
+
+                return ! $uuids->contains($double[0]->uuid) && ! $uuids->contains($double[1]->uuid) && $uuids->contains($other[0]->uuid);
+            }));
+    }
+
+    public function test_only_the_office_and_not_the_recorder_clears_a_duplicate(): void
+    {
+        $double = $this->oldPayments([['2025-11-26 09:00', 2500], ['2025-11-26 09:05', 2500]]);
+
+        $this->as('agent');
+        $this->post("/payments/{$double[1]->uuid}/not-duplicate")->assertForbidden();
+
+        $double[1]->update(['recorded_by' => $this->kelvin->id]);
+        $this->as('admin');
+        $this->post("/payments/{$double[1]->uuid}/not-duplicate")->assertForbidden();
+        $this->assertNull($double[0]->fresh()->duplicate_cleared_at);
+    }
+
+    /**
+     * Two payments for one customer at the same moment: recording one holds
+     * that customer's lock until it commits, so the other waits and then
+     * sees it. The test's open tenant transaction stands in for "not yet
+     * committed"; a second database session plays the other collector.
+     */
+    public function test_recording_a_payment_holds_the_customers_lock_until_it_commits(): void
+    {
+        $this->as('manager');
+        $this->pay()->assertSessionHasNoErrors();
+
+        $other = DB::connection('pgsql');
+        $this->assertFalse((bool) $other->scalar('select pg_try_advisory_xact_lock(7301, ?)', [$this->customer->id]), 'Another session must wait for this customer.');
+
+        $someoneElse = CustomerFactory::new()->create(['zone_id' => $this->customer->zone_id, 'bill' => 2500, 'status' => 'active']);
+        $this->assertTrue((bool) $other->scalar('select pg_try_advisory_xact_lock(7301, ?)', [$someoneElse->id]), 'Other customers never wait.');
+    }
+
+    /**
+     * Verified, unflagged payments as the old system left them.
+     *
+     * @param  list<array{0: string, 1: int}>  $paid
+     * @return list<Payment>
+     */
+    private function oldPayments(array $paid, ?Customer $customer = null): array
+    {
+        return array_map(fn (array $one): Payment => PaymentFactory::new()->create([
+            'customer_id' => ($customer ?? $this->customer)->id,
+            'amount' => $one[1],
+            'collected_at' => Carbon::parse($one[0], 'Africa/Lagos'),
+            'created_at' => Carbon::parse($one[0], 'Africa/Lagos'),
+        ]), $paid);
     }
 
     private function pay(array $extra = []): TestResponse
