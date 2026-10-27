@@ -337,6 +337,8 @@ class ManuscriptGenerationBatchService
             BranchLookup::rememberFor(Customer::class, array_keys($customers));
             $processedPaymentIds = [];
             $processedAdjustmentIds = [];
+            $rows = [];
+            $now = Carbon::now();
 
             foreach ($customers as $customerId => $entry) {
                 $existing = $existingByCustomer->get((int) $customerId);
@@ -365,13 +367,24 @@ class ManuscriptGenerationBatchService
                 // including a republish of an already-existing row, so the link
                 // always reflects whichever run most recently committed this row's
                 // numbers.
-                ($existing ?? new Manuscript(['customer_id' => (int) $customerId, 'period' => $commandRun->period]))
-                    ->fill([...($entry['attributes'] ?? []), 'command_run_id' => $commandRun->id])
-                    ->save();
+                //
+                // Written in bulk below: the model only casts the values (the
+                // same raw column values save() would write).
+                // fill() first: like save() before, only the model's fillable columns are written.
+                $raw = (new Manuscript)->fill($entry['attributes'] ?? [])->forceFill([
+                    'customer_id' => (int) $customerId,
+                    'period' => $commandRun->period,
+                    'command_run_id' => $commandRun->id,
+                    'branch_id' => $existing?->branch_id ?? BranchLookup::get(Customer::class, (int) $customerId),
+                ])->getAttributes();
+
+                $rows[] = [...$raw, 'created_at' => $existing?->created_at ?? $now, 'updated_at' => $now];
 
                 array_push($processedPaymentIds, ...($entry['processed_payment_ids'] ?? []));
                 array_push($processedAdjustmentIds, ...($entry['processed_adjustment_ids'] ?? []));
             }
+
+            $this->writeManuscripts($rows);
 
             // Payments/adjustments are stamped in bulk after the loop (the
             // SET values and the guard are identical for every customer), so
@@ -424,6 +437,44 @@ class ManuscriptGenerationBatchService
         $this->manuscripts->forgetSummaryCache($commandRun->period);
 
         return $commandRun->fresh();
+    }
+
+    /**
+     * Publish's write: INSERT … ON CONFLICT (customer_id, period) DO UPDATE,
+     * 500 rows per statement, instead of an INSERT/UPDATE plus an audit row
+     * per customer (20,000 statements for 10,000 customers). The run itself
+     * — who published it, when, every customer's figures in computed_result
+     * — is the record of what was written. Rows are grouped by their column
+     * set, so a run computed before a column existed never blanks it on a
+     * customer it doesn't mention. uuid is left to the column default on a
+     * new row and never changed on an existing one.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function writeManuscripts(array $rows): void
+    {
+        if ($rows === []) {
+            return;
+        }
+
+        $byColumns = [];
+
+        foreach ($rows as $row) {
+            unset($row['uuid'], $row['id']);
+            ksort($row);
+            $byColumns[implode(',', array_keys($row))][] = $row;
+        }
+
+        foreach ($byColumns as $group) {
+            $update = array_values(array_diff(array_keys($group[0]), ['customer_id', 'period', 'created_at']));
+
+            foreach (array_chunk($group, 500) as $chunk) {
+                Manuscript::query()->upsert($chunk, ['customer_id', 'period'], $update);
+            }
+        }
+
+        // A bulk write fires no model events.
+        CacheVersion::bump(CacheVersion::MANUSCRIPTS);
     }
 
     /**

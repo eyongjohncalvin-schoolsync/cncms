@@ -737,7 +737,8 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
         DB::flushQueryLog();
         DB::enableQueryLog();
         $this->batches->publish($commandRun->fresh(), User::query()->first()?->id);
-        $queries = array_column(DB::getQueryLog(), 'query');
+        $log = DB::getQueryLog();
+        $queries = array_column($log, 'query');
         DB::disableQueryLog();
 
         $manuscriptSelects = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'select') && str_contains($sql, 'from "manuscripts"'));
@@ -745,6 +746,13 @@ class ManuscriptGenerationBatchServiceTest extends TestCase
 
         $this->assertCount(1, $manuscriptSelects);
         $this->assertCount(1, $paymentUpdates);
+
+        // The rows themselves: one bulk write for all four (500 a statement),
+        // not an INSERT/UPDATE plus an audit row per customer.
+        $manuscriptWrites = array_filter($queries, fn (string $sql): bool => str_starts_with($sql, 'insert into "manuscripts"') || str_starts_with($sql, 'update "manuscripts"'));
+        $manuscriptAudits = array_filter($log, fn (array $entry): bool => str_starts_with($entry['query'], 'insert into "audit_logs"') && in_array('manuscripts', $entry['bindings'], true));
+        $this->assertCount(1, $manuscriptWrites);
+        $this->assertCount(0, $manuscriptAudits);
 
         $this->assertSame(4, Manuscript::query()->where('period', $period)->whereIn('customer_id', $customers->pluck('id'))->count());
         $this->assertSame($commandRun->id, $preExisting->fresh()->command_run_id);
