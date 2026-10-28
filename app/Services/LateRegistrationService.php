@@ -35,6 +35,14 @@ class LateRegistrationService
     /** An approved old-debt charge undone (reverse()). */
     public const string REVERSAL_CATEGORY = 'late_registration_reversal';
 
+    /**
+     * What became of money a late-registered customer says they paid someone
+     * (settleSaysPaid()): it came in after all, nobody was paid, or it is lost.
+     *
+     * @var list<string>
+     */
+    public const array SAYS_PAID_OUTCOMES = ['found', 'mistaken', 'written_off'];
+
     /** The cancel reason endFreeMonths() stamps — and restoreFreeMonths() looks for. */
     private const string FREE_MONTHS_ENDED = 'Late registration: charged since connection';
 
@@ -108,6 +116,13 @@ class LateRegistrationService
             'connected_by' => $customer->connected_by_user_id !== null ? User::query()->whereKey($customer->connected_by_user_id)->value('name') : null,
             'says_paid_amount' => $customer->customer_says_paid_amount !== null ? (string) $customer->customer_says_paid_amount : null,
             'says_paid_to' => $customer->customer_says_paid_to,
+            // What a manager found became of that money (settleSaysPaid()); null while open.
+            'says_paid_settled' => $customer->says_paid_settled_at === null ? null : [
+                'outcome' => $customer->says_paid_outcome,
+                'note' => $customer->says_paid_note,
+                'by' => User::query()->whereKey($customer->says_paid_settled_by)->value('name'),
+                'at' => $customer->says_paid_settled_at->toIso8601String(),
+            ],
             'charge' => $charge === null ? null : [
                 'uuid' => $charge->uuid,
                 'amount' => (string) $charge->amount,
@@ -255,6 +270,36 @@ class LateRegistrationService
 
             $this->grants->recalculateFrom($customer, min($oldBillingStarts, (string) $customer->billing_starts_period));
         });
+    }
+
+    /**
+     * The customer said they paid someone for the connection: a manager
+     * says what became of that money (owner, 2026-10-28) — it came in, the
+     * customer was mistaken, or it is lost — with a reason. Never whoever
+     * connected the customer. Until then it stays on the cash alerts.
+     */
+    public function settleSaysPaid(Customer $customer, string $outcome, string $note, User $actor): void
+    {
+        if (! in_array($outcome, self::SAYS_PAID_OUTCOMES, true)) {
+            throw ValidationException::withMessages(['outcome' => 'Say what became of the money.']);
+        }
+
+        if ((float) $customer->customer_says_paid_amount <= 0 || $customer->says_paid_settled_at !== null) {
+            throw ValidationException::withMessages(['outcome' => 'There is nothing to settle.']);
+        }
+
+        if ($customer->connected_by_user_id === $actor->id) {
+            throw ValidationException::withMessages(['outcome' => 'You connected this customer — someone else in the office settles it.']);
+        }
+
+        $customer->forceFill([
+            'says_paid_outcome' => $outcome,
+            'says_paid_note' => mb_substr($note, 0, 500),
+            'says_paid_settled_by' => $actor->id,
+            'says_paid_settled_at' => now(),
+        ])->save();
+
+        CustomerService::forgetShowCache($customer->uuid);
     }
 
     /** Whoever asked for the old-debt charge takes the request back while it waits. */

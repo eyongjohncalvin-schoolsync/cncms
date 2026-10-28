@@ -715,6 +715,8 @@ export interface LateRegistration {
     connected_by: string | null;
     says_paid_amount: string | null;
     says_paid_to: string | null;
+    /** What a manager found became of that money; null while it is still on the cash alerts. */
+    says_paid_settled: { outcome: string; note: string | null; by: string | null; at: string } | null;
     charge: {
         uuid: string;
         amount: string;
@@ -735,6 +737,8 @@ export interface LateRegistration {
     can_withdraw: boolean;
     can_decide: boolean;
     can_reverse: boolean;
+    /** A manager (not whoever connected them) may settle what the customer says they paid. */
+    can_settle_says_paid: boolean;
 }
 
 /** Relocation and re-installation fees on the customer page (CustomerController::shapeOneOffCharges). */

@@ -269,6 +269,30 @@ class CustomerInstallationTest extends TestCase
         $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page->where('customer.installation.late', null));
     }
 
+    public function test_money_the_customer_says_they_paid_stays_on_the_alerts_until_a_manager_settles_it(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $customer = $this->lateCustomer(freeMonths: 1);
+        $customer->forceFill([
+            'customer_says_paid_amount' => 5000,
+            'customer_says_paid_to' => 'The technician',
+            'connected_by_user_id' => User::query()->where('email', 'kelvin@shalomtech.dev')->value('id'),
+        ])->save();
+        $alert = fn () => collect(app(CashAlertService::class)->alerts())->firstWhere('key', 'late_registration_paid_someone');
+        $this->assertNotNull($alert());
+
+        // Not whoever connected the customer.
+        $this->manager();
+        $this->post("/customers/{$customer->uuid}/late-registration/says-paid", ['outcome' => 'written_off', 'note' => 'Lost'])->assertSessionHasErrors('outcome');
+
+        $this->admin();
+        $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page->where('customer.installation.late.can_settle_says_paid', true));
+        $this->post("/customers/{$customer->uuid}/late-registration/says-paid", ['outcome' => 'found', 'note' => 'Handed in on RM-000123'])->assertSessionHas('success');
+
+        $this->assertNull($alert(), 'Settled — it leaves the alerts.');
+        $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page->where('customer.installation.late.says_paid_settled.outcome', 'found'));
+    }
+
     public function test_a_waiting_charge_is_withdrawn_by_whoever_asked_and_blocks_corrections(): void
     {
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));

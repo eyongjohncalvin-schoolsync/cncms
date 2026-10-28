@@ -112,6 +112,21 @@ class LateRegistrationController extends Controller
             .($validated['scope'] === 'all' ? '; the free months end when it is approved.' : '.'));
     }
 
+    /** A manager says what became of the money the customer says they paid someone (a loss decision: vouchers.approve). */
+    public function settleSaysPaid(Request $request, Customer $customer): RedirectResponse
+    {
+        abort_unless($this->context->can('vouchers.approve'), 403);
+
+        $validated = $request->validate([
+            'outcome' => ['required', 'in:'.implode(',', LateRegistrationService::SAYS_PAID_OUTCOMES)],
+            'note' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        $this->lateRegistrations->settleSaysPaid($customer, $validated['outcome'], $validated['note'], $request->user());
+
+        return back()->with('success', 'Settled — it leaves the cash alerts.');
+    }
+
     /** Correct the connection date and reason; the registration month undoes the late registration. */
     public function correct(Request $request, Customer $customer): RedirectResponse
     {

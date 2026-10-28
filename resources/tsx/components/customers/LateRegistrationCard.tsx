@@ -18,7 +18,7 @@ import type { LateRegistration } from '@/types';
  * undoes it), and the charge withdrawn, decided here, or reversed.
  */
 export function LateRegistrationCard({ customerUuid, late }: { customerUuid: string; late: LateRegistration }) {
-    const [open, setOpen] = useState<'charge' | 'correct' | 'reverse' | null>(null);
+    const [open, setOpen] = useState<'charge' | 'correct' | 'reverse' | 'says_paid' | null>(null);
     const free = late.months.filter((m) => m.free).map((m) => m.period);
     const missed = late.months.filter((m) => !m.free).map((m) => m.period);
 
@@ -37,9 +37,18 @@ export function LateRegistrationCard({ customerUuid, late }: { customerUuid: str
                         {late.connected_by && <p className="text-slate-600">Connected by: {late.connected_by}</p>}
                         {late.says_paid_amount !== null &&
                             (Number(late.says_paid_amount) > 0 ? (
-                                <p className="font-medium text-red-700">
-                                    The customer says they paid {formatCurrency(late.says_paid_amount)} to {late.says_paid_to ?? 'someone'} — check where that money went.
-                                </p>
+                                late.says_paid_settled ? (
+                                    <p className="text-slate-600">
+                                        The customer said they paid {formatCurrency(late.says_paid_amount)} to {late.says_paid_to ?? 'someone'} —{' '}
+                                        {SAYS_PAID_OUTCOMES[late.says_paid_settled.outcome] ?? late.says_paid_settled.outcome}
+                                        {late.says_paid_settled.by ? ` (${late.says_paid_settled.by})` : ''}: {late.says_paid_settled.note}
+                                    </p>
+                                ) : (
+                                    <p className="font-medium text-red-700">
+                                        The customer says they paid {formatCurrency(late.says_paid_amount)} to {late.says_paid_to ?? 'someone'} — check where that money
+                                        went, then settle it.
+                                    </p>
+                                )
                             ) : (
                                 <p className="text-slate-600">The customer says they paid nobody.</p>
                             ))}
@@ -107,12 +116,18 @@ export function LateRegistrationCard({ customerUuid, late }: { customerUuid: str
                                 Reverse charge
                             </Button>
                         )}
+                        {late.can_settle_says_paid && (
+                            <Button type="button" variant="secondary" onClick={() => setOpen('says_paid')}>
+                                Settle what they paid
+                            </Button>
+                        )}
                     </div>
                 </div>
             </CardBody>
             {open === 'charge' && <ChargeModal customerUuid={customerUuid} late={late} onClose={() => setOpen(null)} />}
             {open === 'correct' && <CorrectModal customerUuid={customerUuid} late={late} onClose={() => setOpen(null)} />}
             {open === 'reverse' && <ReverseModal customerUuid={customerUuid} late={late} onClose={() => setOpen(null)} />}
+            {open === 'says_paid' && <SaysPaidModal customerUuid={customerUuid} late={late} onClose={() => setOpen(null)} />}
         </Card>
     );
 }
@@ -189,6 +204,57 @@ function ReverseModal({ customerUuid, late, onClose }: { customerUuid: string; l
                     </Button>
                     <Button type="submit" disabled={processing || data.note.trim().length < 3}>
                         Ask for approval
+                    </Button>
+                </div>
+            </form>
+        </Modal>
+    );
+}
+
+const SAYS_PAID_OUTCOMES: Record<string, string> = {
+    found: 'the money came in',
+    mistaken: 'nobody was paid (customer mistaken)',
+    written_off: 'lost, written off',
+};
+
+/** What became of the money the customer says they paid someone (LateRegistrationService::settleSaysPaid()). */
+function SaysPaidModal({ customerUuid, late, onClose }: { customerUuid: string; late: LateRegistration; onClose: () => void }) {
+    const { data, setData, post, processing, errors } = useForm({ outcome: 'found', note: '' });
+
+    function submit(e: FormEvent) {
+        e.preventDefault();
+        post(`/customers/${customerUuid}/late-registration/says-paid`, { preserveScroll: true, onSuccess: onClose });
+    }
+
+    return (
+        <Modal open onClose={onClose} title="What became of the money?">
+            <form onSubmit={submit} className="flex flex-col gap-4">
+                <p className="text-sm text-slate-600">
+                    The customer says they paid {formatCurrency(late.says_paid_amount ?? '0')} to {late.says_paid_to ?? 'someone'}. Once settled it leaves the cash
+                    alerts; the answer stays on this card.
+                </p>
+                <fieldset className="flex flex-col gap-2">
+                    {Object.entries(SAYS_PAID_OUTCOMES).map(([value, label]) => (
+                        <label key={value} className={`flex cursor-pointer gap-3 rounded-lg border p-3 text-sm ${data.outcome === value ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
+                            <input type="radio" name="outcome" checked={data.outcome === value} onChange={() => setData('outcome', value)} />
+                            <span className="first-letter:uppercase">{label}</span>
+                        </label>
+                    ))}
+                </fieldset>
+                <TextInput
+                    id="late-says-paid-note"
+                    label={data.outcome === 'found' ? 'Where it came in (receipt, handover…)' : 'What you found'}
+                    required
+                    value={data.note}
+                    onChange={(e) => setData('note', e.target.value)}
+                    error={errors.note ?? errors.outcome}
+                />
+                <div className="flex justify-end gap-2">
+                    <Button type="button" variant="secondary" onClick={onClose}>
+                        Cancel
+                    </Button>
+                    <Button type="submit" variant={data.outcome === 'written_off' ? 'warning' : 'primary'} disabled={processing || data.note.trim().length < 3}>
+                        Settle
                     </Button>
                 </div>
             </form>

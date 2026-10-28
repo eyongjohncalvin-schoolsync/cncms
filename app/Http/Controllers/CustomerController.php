@@ -927,6 +927,9 @@ class CustomerController extends Controller
                     && request()->user()->can('approve', ArrearsAdjustment::query()->where('uuid', $late['charge']['uuid'])->first()),
                 'can_reverse' => $late['charge'] !== null && $late['charge']['status'] === 'approved' && ! $late['charge']['reversed']
                     && $late['charge']['reversal_status'] === null && $this->context->can('arrears.request'),
+                // What became of the money the customer says they paid someone — a manager, not whoever connected them.
+                'can_settle_says_paid' => (float) ($late['says_paid_amount'] ?? 0) > 0 && $late['says_paid_settled'] === null
+                    && $this->context->can('vouchers.approve') && $customer->connected_by_user_id !== request()->user()->id,
             ],
         ];
     }

@@ -42,6 +42,8 @@ Route::post('customers/{customer}/late-registration/charge', [LateRegistrationCo
 Route::patch('customers/{customer}/late-registration', [LateRegistrationController::class, 'correct'])->name('customers.late-registration.correct');
 Route::post('customers/{customer}/late-registration/withdraw', [LateRegistrationController::class, 'withdraw'])->name('customers.late-registration.withdraw');
 Route::post('customers/{customer}/late-registration/reverse', [LateRegistrationController::class, 'reverse'])->name('customers.late-registration.reverse');
+// What became of money the customer says they paid someone — clears the cash alert.
+Route::post('customers/{customer}/late-registration/says-paid', [LateRegistrationController::class, 'settleSaysPaid'])->name('customers.late-registration.says-paid');
 Route::patch('customers/{customer}/restore', [CustomerController::class, 'restore'])->name('customers.restore')->withTrashed();
 // Dedicated status actions (App\Services\CustomerStatusService) — a fast
 // alternative to the generic update() route above, distinct the same way

@@ -236,15 +236,16 @@ class CashAlertService
      */
     private function lateRegistrationsPaidSomeone(): array
     {
+        // Until a manager settles each one — however old (owner, 2026-10-28).
         $customers = Customer::query()
             ->where('customer_says_paid_amount', '>', 0)
-            ->where('created_at', '>=', now()->subDays(60))
+            ->whereNull('says_paid_settled_at')
             ->latest('id')->limit(100)
             ->get(['id', 'uuid', 'name', 'customer_says_paid_amount', 'customer_says_paid_to', 'connected_by_user_id']);
 
         $names = User::query()->whereIn('id', $customers->pluck('connected_by_user_id')->filter())->pluck('name', 'id');
 
-        return $this->alert('late_registration_paid_someone', 'danger', 'Customers who say they paid someone', 'Registered late, and the customer says they paid for the connection. Find where that money went — it never came through a receipt.',
+        return $this->alert('late_registration_paid_someone', 'danger', 'Customers who say they paid someone', 'Registered late, and the customer says they paid for the connection. Find where that money went, then settle it on the Late registration card of the customer.',
             $customers->map(fn (Customer $customer): array => [
                 'label' => $customer->name,
                 'detail' => 'Says paid '.($customer->customer_says_paid_to ?? 'someone').' · connected by '.($names[$customer->connected_by_user_id] ?? 'unknown'),

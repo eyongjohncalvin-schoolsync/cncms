@@ -71,6 +71,7 @@ class Customer extends Model
             'prepaid_paused' => 'boolean',
             'deleted_at' => 'datetime',
             'connected_on' => 'date:Y-m-d',
+            'says_paid_settled_at' => 'datetime',
         ];
     }
 
