@@ -91,12 +91,8 @@ class PaymentController extends Controller
         // given, so nothing about today's explicit-range behavior changes.
         $isAllTimeScope = $request->query('scope') === 'all';
 
-        // Possible duplicates stay until cleared (the badge counts them all),
-        // so that tab opens on all time unless a month is picked.
-        if ($filters['duplicates'] && ! isset($filters['from']) && ! isset($filters['to'])) {
-            $isAllTimeScope = true;
-        }
-
+        // Possible duplicates open on the current month like every tab
+        // (owner, 2026-10-28); "All time" shows older months.
         if (! $isAllTimeScope && ! isset($filters['from']) && ! isset($filters['to'])) {
             $filters['from'] = now()->startOfMonth()->toDateString();
             $filters['to'] = now()->endOfMonth()->toDateString();
@@ -157,8 +153,12 @@ class PaymentController extends Controller
             // Counted within the view picked (monthly bills / installation fees / all).
             'statusCounts' => [
                 ...$this->statusCounts($filters['purpose']),
-                // Payments of customers who paid more than once in a month, not yet cleared.
-                'duplicates' => $this->countedPayments($filters['purpose'])->possibleDuplicate()->count(),
+                // Payments of customers who paid more than once in a month, not yet
+                // cleared — in the period shown, so the badge matches the tab.
+                'duplicates' => $this->countedPayments($filters['purpose'])->possibleDuplicate()
+                    ->when($filters['from'] ?? null, fn ($query, $from) => $query->whereDate('payments.created_at', '>=', $from))
+                    ->when($filters['to'] ?? null, fn ($query, $to) => $query->whereDate('payments.created_at', '<=', $to))
+                    ->count(),
             ],
         ]);
     }

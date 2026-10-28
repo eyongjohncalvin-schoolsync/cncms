@@ -275,7 +275,14 @@ class DuplicatePaymentTest extends TestCase
         $rejected[0]->update(['verification_status' => 'rejected']);
 
         $this->as('admin');
+
+        // The tab opens on the current month (owner, 2026-10-28): last year's pair isn't there…
         $this->get('/payments?duplicates=1&per_page=500')->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('filters.scope', null)
+            ->where('payments.data', fn ($rows) => ! collect($rows)->pluck('uuid')->contains($double[0]->uuid)));
+
+        // …"All time" finds it.
+        $this->get('/payments?duplicates=1&scope=all&per_page=500')->assertOk()->assertInertia(fn (Assert $page) => $page
             ->where('filters.scope', 'all')
             ->where('payments.data', function ($rows) use ($double, $twoMonths, $rejected): bool {
                 $uuids = collect($rows)->pluck('uuid');
@@ -302,7 +309,7 @@ class DuplicatePaymentTest extends TestCase
         $this->assertSame($this->kelvin->id, $double[1]->fresh()->duplicate_cleared_by);
         $this->assertNull($other[0]->fresh()->duplicate_cleared_at, 'Another month stays.');
 
-        $this->get('/payments?duplicates=1&per_page=500')->assertInertia(fn (Assert $page) => $page
+        $this->get('/payments?duplicates=1&scope=all&per_page=500')->assertInertia(fn (Assert $page) => $page
             ->where('payments.data', function ($rows) use ($double, $other): bool {
                 $uuids = collect($rows)->pluck('uuid');
 

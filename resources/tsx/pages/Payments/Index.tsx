@@ -573,8 +573,8 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
 
             {activeTab === 'duplicates' && (
                 <p className="mb-3 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
-                    Customers who paid more than once in the same month, from any time — each customer's payments of a
-                    month are listed together. If they are genuine, choose <span className="font-medium">Not a duplicate</span>.
+                    Customers who paid more than once in the same month — the month shown (choose All time for older
+                    months), each customer's payments of a month listed together. If they are genuine, choose <span className="font-medium">Not a duplicate</span>.
                     If one is wrong: <span className="font-medium">Review → Reject</span> while it is pending, or{' '}
                     <span className="font-medium">Reverse</span> once verified.
                 </p>
