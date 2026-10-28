@@ -88,7 +88,9 @@ class PaymentPolicy
      */
     public function reverse(User $user, Payment $payment): bool
     {
-        return $payment->verification_status === 'verified'
+        // A pending payment its collector owes a handover for is rejected the
+        // same way: the money question decides what happens to it.
+        return ($payment->verification_status === 'verified' || ($payment->verification_status === 'pending' && $payment->isUnderCashControls()))
             && ! $payment->isReversed()
             && $this->context->can('payments.verify')
             && ($payment->recorded_by !== $user->id || $this->context->isSuper());

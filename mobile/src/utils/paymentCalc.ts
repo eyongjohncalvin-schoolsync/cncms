@@ -10,12 +10,17 @@ export type PaymentFrequency = 'monthly' | 'yearly' | 'months';
 /** How the customer paid — App\Models\Payment::METHODS (docs/plans/cash-controls.md). */
 export type PaymentMethod = 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
 
+/** What a collector may record in the field — bank payments are recorded by the office (owner, 2026-10-28). */
 export const PAYMENT_METHODS: Array<{ value: PaymentMethod; label: string }> = [
     { value: 'cash', label: 'Cash' },
     { value: 'mtn_momo', label: 'MTN MoMo' },
     { value: 'orange_money', label: 'Orange Money' },
-    { value: 'bank', label: 'Bank' },
 ];
+
+/** Every method's label, bank included (a payment the office recorded). */
+export function paymentMethodLabel(method: PaymentMethod | null | undefined): string {
+    return method === 'bank' ? 'Bank' : (PAYMENT_METHODS.find((option) => option.value === method)?.label ?? 'Cash');
+}
 
 /** MoMo / Orange Money must carry the operator transaction ID (Payment::METHODS_REQUIRING_REFERENCE). */
 export function methodNeedsReference(method: PaymentMethod): boolean {

@@ -95,6 +95,11 @@ class Remittance extends Model
         return $this->status === 'submitted';
     }
 
+    public function isReceived(): bool
+    {
+        return $this->status === 'received';
+    }
+
     /** Set by the creating service (BelongsToBranch). */
     protected function branchParent(): ?string
     {

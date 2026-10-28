@@ -216,7 +216,7 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                         )}
                         {can_reverse && (
                             <Button type="button" variant="secondary" onClick={() => setReversing(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
-                                Reverse Payment
+                                {payment.verification_status === 'pending' ? 'Reject Payment' : 'Reverse Payment'}
                             </Button>
                         )}
                         {can_delete && !isVerified && !receipt && !payment.handed_in && (
@@ -286,7 +286,11 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                         {payment.method_reference && <Row label="Transaction ID" value={payment.method_reference} />}
                         {payment.months !== null && <Row label="Months" value={String(payment.months)} />}
                         <Row label="Expiration" value={payment.expiration_date ?? '—'} />
-                        <Row label="Recorded" value={payment.recorded_offline ? 'Offline (field agent)' : 'Office'} />
+                        <Row
+                            label="Recorded"
+                            value={`${payment.recorded_offline ? 'Offline (field agent)' : 'Office'}${payment.recorded_by_name ? ` — ${payment.recorded_by_name}` : ''}`}
+                        />
+                        {payment.held_reason && <Row label="Held for the office" value={<span className="text-red-700">{payment.held_reason}</span>} />}
                         {payment.recorded_by_device && <Row label="Device" value={payment.recorded_by_device} />}
                         <Row label="Created" value={formatted.createdAt} />
                         {formatted.collectedAt && <Row label="Collected" value={formatted.collectedAt} />}

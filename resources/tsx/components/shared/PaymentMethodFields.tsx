@@ -1,11 +1,15 @@
+import { usePage } from '@inertiajs/react';
 import { TextInput } from '@/components/ui/TextInput';
-import type { PaymentMethod } from '@/types';
+import { hasPermission } from '@/lib/permissions';
+import type { PageProps, PaymentMethod } from '@/types';
 
 /**
  * How the customer paid + the operator transaction ID — App\Models\Payment::
- * METHODS / methodRules() (docs/plans/cash-controls.md). The ID is required
- * for MTN MoMo and Orange Money: it is what the cashier ticks off against
- * the company wallet statement at the daily remittance.
+ * METHODS / methodRules() (docs/plans/cash-controls.md). The ID (or, for a
+ * bank payment, the slip number) is required: it is what the cashier ticks
+ * off against the wallet or bank statement at the daily remittance. Only the
+ * office (`payments.verify` or `cash.receive`) records a bank payment
+ * (owner, 2026-10-28).
  */
 export const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
     { value: 'cash', label: 'Cash' },
@@ -19,7 +23,7 @@ export function paymentMethodLabel(method: PaymentMethod | null | undefined): st
 }
 
 export function referenceRequired(method: PaymentMethod): boolean {
-    return method === 'mtn_momo' || method === 'orange_money';
+    return method !== 'cash';
 }
 
 export function PaymentMethodFields({
@@ -37,6 +41,11 @@ export function PaymentMethodFields({
     methodError?: string;
     referenceError?: string;
 }) {
+    const { auth } = usePage<PageProps>().props;
+    // The office: whoever verifies payments or receives cash — never a field agent.
+    const mayRecordBank = hasPermission(auth.user?.permissions, 'payments.verify') || hasPermission(auth.user?.permissions, 'cash.receive');
+    const options = paymentMethodOptions.filter((option) => option.value !== 'bank' || mayRecordBank || method === 'bank');
+
     return (
         <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
@@ -47,7 +56,7 @@ export function PaymentMethodFields({
                     </span>
                 </span>
                 <div className="inline-flex w-fit flex-wrap rounded-lg bg-slate-100 p-1">
-                    {paymentMethodOptions.map((option) => (
+                    {options.map((option) => (
                         <button
                             key={option.value}
                             type="button"
@@ -67,13 +76,17 @@ export function PaymentMethodFields({
             {method !== 'cash' && (
                 <TextInput
                     id="method_reference"
-                    label={method === 'bank' ? 'Bank reference (optional)' : 'Transaction ID'}
+                    label={method === 'bank' ? 'Bank slip number' : 'Transaction ID'}
                     value={reference}
                     maxLength={100}
                     onChange={(e) => onReferenceChange(e.target.value)}
                     error={referenceError}
                     required={referenceRequired(method)}
-                    hint={referenceRequired(method) ? 'From the customer’s confirmation SMS — checked against the company wallet.' : undefined}
+                    hint={
+                        method === 'bank'
+                            ? 'From the stamped deposit slip — checked against the bank statement.'
+                            : 'From the customer’s confirmation SMS — checked against the company wallet.'
+                    }
                 />
             )}
         </div>

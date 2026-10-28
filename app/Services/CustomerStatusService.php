@@ -67,9 +67,14 @@ class CustomerStatusService
         return $this->suspendOne($customer, $reason, $note, $pausePrepaid);
     }
 
-    public function reconnect(Customer $customer, ?string $note = null, bool $includeFine = false, ?string $arrearsPayment = null): Customer
+    /**
+     * $method / $methodReference: how the fine and arrears money was paid
+     * (Payment::METHODS) — a MoMo fine is ticked off the wallet at the
+     * handover, never counted as cash (owner, 2026-10-28).
+     */
+    public function reconnect(Customer $customer, ?string $note = null, bool $includeFine = false, ?string $arrearsPayment = null, ?string $method = null, ?string $methodReference = null): Customer
     {
-        return $this->reconnectOne($customer, $note, $includeFine, $arrearsPayment);
+        return $this->reconnectOne($customer, $note, $includeFine, $arrearsPayment, $method, $methodReference);
     }
 
     /**
@@ -269,7 +274,7 @@ class CustomerStatusService
      * @throws ValidationException if the customer is not currently
      *                             disconnected or suspended.
      */
-    private function reconnectOne(Customer $customer, ?string $note, bool $includeFine, ?string $arrearsPayment = null): Customer
+    private function reconnectOne(Customer $customer, ?string $note, bool $includeFine, ?string $arrearsPayment = null, ?string $method = null, ?string $methodReference = null): Customer
     {
         $this->guardTransition($customer, 'active', ['disconnected', 'suspended']);
 
@@ -284,7 +289,7 @@ class CustomerStatusService
         $shouldExtendPrepaid = $previousStatus === 'disconnected'
             || ($previousStatus === 'suspended' && $customer->prepaid_paused === true);
 
-        return DB::transaction(function () use ($customer, $note, $includeFine, $fine, $hasArrearsPayment, $arrearsPayment, $shouldExtendPrepaid, $frozenSince): Customer {
+        return DB::transaction(function () use ($customer, $note, $includeFine, $fine, $hasArrearsPayment, $arrearsPayment, $shouldExtendPrepaid, $frozenSince, $method, $methodReference): Customer {
             // The reconnection fine is the technician's motivation fee (D13,
             // docs/plans/installation-and-promotions.md): recorded for the
             // audit trail, the receipt and the cashier's count, but never
@@ -296,6 +301,8 @@ class CustomerStatusService
                     customerUuid: $customer->uuid,
                     amount: $fine,
                     frequency: 'monthly',
+                    method: $method,
+                    methodReference: $methodReference,
                     purpose: Payment::PURPOSE_TECHNICIAN_FEE,
                 ));
             }
@@ -305,6 +312,8 @@ class CustomerStatusService
                     customerUuid: $customer->uuid,
                     amount: $arrearsPayment,
                     frequency: 'monthly',
+                    method: $method,
+                    methodReference: $methodReference,
                 ));
             }
 

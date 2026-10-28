@@ -39,4 +39,5 @@ Route::middleware('not-impersonating:money')->group(function () {
     Route::post('cash/remittances', [RemittanceController::class, 'store'])->name('cash.remittances.store');
     Route::post('cash/remittances/{remittance}/receive', [RemittanceController::class, 'receive'])->name('cash.remittances.receive');
     Route::post('cash/remittances/{remittance}/shortage', [RemittanceController::class, 'settleShortage'])->name('cash.remittances.shortage');
+    Route::post('cash/remittances/{remittance}/lines/{line}/settle', [RemittanceController::class, 'settleLine'])->name('cash.remittances.lines.settle')->scopeBindings();
 });

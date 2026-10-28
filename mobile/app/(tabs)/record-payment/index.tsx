@@ -25,6 +25,7 @@ import {
     calculateGuideAmount,
     methodNeedsReference,
     PAYMENT_METHODS,
+    paymentMethodLabel,
     validatePaymentForm,
     type PaymentFrequency,
     type PaymentMethod,
@@ -448,7 +449,7 @@ export default function RecordPaymentScreen() {
             const row = await insertLocalPayment({
                 local_uuid: localUuid,
                 method,
-                method_reference: methodNeedsReference(method) || method === 'bank' ? methodReference : null,
+                method_reference: methodNeedsReference(method) ? methodReference : null,
                 receipt_number: fieldReceipt?.receipt_number ?? null,
                 security_code: fieldReceipt?.security_code ?? null,
                 receipt_issued_at: fieldReceipt?.receipt_issued_at ?? null,
@@ -535,7 +536,7 @@ export default function RecordPaymentScreen() {
         const badge = confirmSynced ? CONFIRM_BADGE.synced : CONFIRM_BADGE.queued;
 
         if (issuedReceipt) {
-            const methodLabel = PAYMENT_METHODS.find((option) => option.value === confirmedPayment.method)?.label ?? 'Cash';
+            const methodLabel = paymentMethodLabel(confirmedPayment.method);
 
             return (
                 <ScrollView contentContainerStyle={styles.receiptScreen}>

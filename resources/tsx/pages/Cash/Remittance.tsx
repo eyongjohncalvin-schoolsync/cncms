@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { TextInput } from '@/components/ui/TextInput';
+import { SelectInput } from '@/components/ui/SelectInput';
+import { Modal } from '@/components/ui/Modal';
 import { Table, TableBody, TableHead, Th, Td } from '@/components/ui/Table';
 import { DenominationCounter, denominationTotal, type DenominationCounts } from '@/components/cash/DenominationCounter';
 import { paymentMethodLabel } from '@/components/shared/PaymentMethodFields';
@@ -21,8 +23,16 @@ interface Line {
     amount: string;
     reference: string | null;
     wallet_confirmed: boolean;
+    /** Non-cash only: null = not seen yet, still owed by the collector. */
+    outcome: 'found' | 'repaid' | 'written_off' | null;
+    account_name: string | null;
+    settled_by_name: string | null;
+    settled_at: string | null;
+    settled_note: string | null;
     purpose?: PaymentPurpose;
 }
+
+type LineOutcome = 'found' | 'repaid' | 'written_off';
 
 interface Props {
     remittance: {
@@ -52,35 +62,45 @@ interface Props {
         bons_total?: string;
         cash_to_hand_over?: string;
     };
-    can: { receive: boolean; repay_shortage: boolean; write_off_shortage: boolean };
+    can: { receive: boolean; repay_shortage: boolean; write_off_shortage: boolean; settle_line: Record<LineOutcome, boolean> };
+    /** The branch's bank accounts, when a bank payment is still to be ticked. */
+    bank_accounts: { uuid: string; name: string }[];
     denominations: number[];
 }
 
-const isWallet = (method: PaymentMethod) => method === 'mtn_momo' || method === 'orange_money';
+/** Money that went straight into a company account — ticked off its statement. */
+const isNonCash = (method: PaymentMethod) => method !== 'cash';
 
 /**
  * One handover — App\Http\Controllers\RemittanceController::show
  * (docs/plans/cash-controls.md, wave 4). The cashier counts the cash
- * themselves (never trusting the declared figure), ticks every mobile-money
- * line they can see in the company wallet, and receives it into their till.
+ * themselves (never trusting the declared figure), ticks every MoMo / Orange
+ * / bank line they can see on the account's statement, and receives it into
+ * their till. A line not ticked stays owed by the collector until it is
+ * found later, paid in cash or written off (owner, 2026-10-28).
  */
-export default function CashRemittance({ remittance, can, denominations }: Props) {
+export default function CashRemittance({ remittance, can, bank_accounts, denominations }: Props) {
     const [counts, setCounts] = useState<DenominationCounts>({});
     const [confirmed, setConfirmed] = useState<number[]>([]);
     const [shortageNote, setShortageNote] = useState('');
-    const { data, setData, post, processing, errors, transform } = useForm({ received_cash: '', note: '' });
+    const [settling, setSettling] = useState<{ line: Line; outcome: LineOutcome } | null>(null);
+    const { data, setData, post, processing, errors, transform } = useForm({ received_cash: '', note: '', bank_account: '' });
 
     const counted = denominationTotal(counts);
     const usingCounter = counted > 0;
     const received = usingCounter ? counted : Number(data.received_cash || 0);
     const variance = received - Number(remittance.cash_to_hand_over ?? remittance.expected.cash);
-    const walletLines = remittance.lines.filter((line) => isWallet(line.method));
+    const nonCashLines = remittance.lines.filter((line) => isNonCash(line.method));
+    const owedLines = nonCashLines.filter((line) => remittance.status === 'received' && line.outcome === null);
+    const tickingBank = remittance.lines.some((line) => line.method === 'bank' && confirmed.includes(line.id));
+    const canSettleAny = can.settle_line.found || can.settle_line.repaid || can.settle_line.written_off;
 
     transform((form) => ({
         ...form,
         received_cash: String(received),
         denominations: usingCounter ? counts : null,
         confirmed_lines: confirmed,
+        bank_account: form.bank_account || null,
     }));
 
     return (
@@ -164,7 +184,7 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                         <Th>Receipt</Th>
                         <Th>Paid by</Th>
                         <Th className="text-right">Amount</Th>
-                        <Th className="text-right">In wallet?</Th>
+                        <Th className="text-right">On the statement?</Th>
                     </TableHead>
                     <TableBody>
                         {remittance.lines.map((line) => (
@@ -190,10 +210,14 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                                 </Td>
                                 <Td className="text-right font-medium">{formatCurrency(line.amount)}</Td>
                                 <Td className="text-right">
-                                    {!isWallet(line.method) ? (
+                                    {!isNonCash(line.method) ? (
                                         <span className="text-xs text-slate-400">—</span>
                                     ) : remittance.status === 'received' ? (
-                                        line.wallet_confirmed ? <Badge tone="green">Seen</Badge> : <Badge tone="red">Not found</Badge>
+                                        <LineStatus
+                                            line={line}
+                                            can={can.settle_line}
+                                            onSettle={(outcome) => setSettling({ line, outcome })}
+                                        />
                                     ) : can.receive ? (
                                         <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
                                             <input
@@ -204,7 +228,7 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                                                 }
                                                 className="h-4 w-4 rounded border-slate-300 text-blue-600"
                                             />
-                                            Seen in wallet
+                                            {line.method === 'bank' ? 'Seen in the bank' : 'Seen in wallet'}
                                         </label>
                                     ) : (
                                         <span className="text-xs text-slate-400">to check</span>
@@ -249,12 +273,31 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                                     : variance < 0
                                       ? `${formatCurrency(-variance)} short — it will stay open on ${remittance.collector_name} until repaid or written off.`
                                       : `${formatCurrency(variance)} more than expected — it will be recorded.`}
-                                {walletLines.length > 0 && confirmed.length < walletLines.length && (
+                                {nonCashLines.length > 0 && confirmed.length < nonCashLines.length && (
                                     <div className="mt-1 text-xs">
-                                        {walletLines.length - confirmed.length} mobile-money payment(s) not ticked — they will be flagged as not found in the wallet.
+                                        {nonCashLines.length - confirmed.length} MoMo / bank payment(s) not ticked — {remittance.collector_name} will owe them until they
+                                        are found, paid in cash or written off.
                                     </div>
                                 )}
                             </div>
+                            {tickingBank && bank_accounts.length > 1 && (
+                                <SelectInput
+                                    id="bank_account"
+                                    label="Bank account the bank payments went into"
+                                    value={data.bank_account}
+                                    onChange={(e) => setData('bank_account', e.target.value)}
+                                    error={errors.bank_account}
+                                    required
+                                >
+                                    <option value="">Choose…</option>
+                                    {bank_accounts.map((account) => (
+                                        <option key={account.uuid} value={account.uuid}>
+                                            {account.name}
+                                        </option>
+                                    ))}
+                                </SelectInput>
+                            )}
+                            {!(tickingBank && bank_accounts.length > 1) && errors.bank_account && <p className="text-xs text-red-600">{errors.bank_account}</p>}
                             <TextInput id="receive_note" label="Note (optional)" value={data.note} onChange={(e) => setData('note', e.target.value)} />
                             <Button type="submit" disabled={processing}>
                                 Receive {formatCurrency(received)} into my till
@@ -273,6 +316,30 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                         {remittance.shortage_note && <div className="mt-1">Shortage: {remittance.shortage_note}</div>}
                     </CardBody>
                 </Card>
+            )}
+
+            {owedLines.length > 0 && (
+                <Card className="mb-6 border-red-200">
+                    <CardBody className="text-sm text-red-800">
+                        <strong>
+                            {owedLines.length} MoMo / bank payment(s) not found —{' '}
+                            {formatCurrency(owedLines.reduce((sum, line) => sum + Number(line.amount), 0))} still owed by {remittance.collector_name}.
+                        </strong>{' '}
+                        {canSettleAny
+                            ? 'Check the statement again: mark each one found, paid in cash, or written off.'
+                            : 'Someone else in the office settles them.'}
+                    </CardBody>
+                </Card>
+            )}
+
+            {settling && (
+                <SettleLineModal
+                    line={settling.line}
+                    outcome={settling.outcome}
+                    remittanceUuid={remittance.uuid}
+                    bankAccounts={bank_accounts}
+                    onClose={() => setSettling(null)}
+                />
             )}
 
             {(can.repay_shortage || can.write_off_shortage) && (
@@ -307,6 +374,107 @@ export default function CashRemittance({ remittance, can, denominations }: Props
                 </Card>
             )}
         </AppLayout>
+    );
+}
+
+const OUTCOME_LABELS: Record<LineOutcome, string> = { found: 'Found', repaid: 'Paid in cash', written_off: 'Written off' };
+
+/** A received handover's MoMo / bank line: seen, settled later, or still owed with the ways to settle it. */
+function LineStatus({ line, can, onSettle }: { line: Line; can: Record<LineOutcome, boolean>; onSettle: (outcome: LineOutcome) => void }) {
+    if (line.outcome !== null) {
+        return (
+            <div className="flex flex-col items-end gap-0.5">
+                <Badge tone={line.outcome === 'written_off' ? 'slate' : 'green'}>{OUTCOME_LABELS[line.outcome]}</Badge>
+                {line.settled_by_name && (
+                    <span className="text-xs text-slate-500">
+                        {line.settled_by_name}
+                        {line.settled_at ? `, ${new Date(line.settled_at).toLocaleDateString()}` : ''}
+                    </span>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex flex-col items-end gap-1">
+            <Badge tone="red">Not found — owed</Badge>
+            <div className="flex flex-wrap justify-end gap-1">
+                {(Object.keys(OUTCOME_LABELS) as LineOutcome[])
+                    .filter((outcome) => can[outcome])
+                    .map((outcome) => (
+                        <button key={outcome} type="button" onClick={() => onSettle(outcome)} className="text-xs font-medium text-blue-700 hover:underline">
+                            {outcome === 'found' ? 'Found it' : OUTCOME_LABELS[outcome]}
+                        </button>
+                    ))}
+            </div>
+        </div>
+    );
+}
+
+/** RemittanceController::settleLine — one owed line, one way. */
+function SettleLineModal({
+    line,
+    outcome,
+    remittanceUuid,
+    bankAccounts,
+    onClose,
+}: {
+    line: Line;
+    outcome: LineOutcome;
+    remittanceUuid: string;
+    bankAccounts: { uuid: string; name: string }[];
+    onClose: () => void;
+}) {
+    const { data, setData, post, processing, errors } = useForm({ outcome, note: '', bank_account: '' });
+    const amount = formatCurrency(line.amount);
+    const intro =
+        outcome === 'found'
+            ? `${amount} (${paymentMethodLabel(line.method)} ${line.reference ?? ''}) is on the statement after all — it is booked into the account.`
+            : outcome === 'repaid'
+              ? `The collector pays the ${amount} in cash — count it; it goes into your till.`
+              : `The ${amount} is lost. Say why — this is kept with the handover.`;
+
+    return (
+        <Modal open onClose={onClose} title={`${OUTCOME_LABELS[outcome]} — ${line.customer_name ?? 'payment'}`}>
+            <form
+                className="flex flex-col gap-4"
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    post(`/cash/remittances/${remittanceUuid}/lines/${line.id}/settle`, { preserveScroll: true, onSuccess: onClose });
+                }}
+            >
+                <p className="text-sm text-slate-600">{intro}</p>
+                {outcome === 'found' && line.method === 'bank' && bankAccounts.length > 1 && (
+                    <SelectInput id="settle_bank_account" label="Bank account" value={data.bank_account} onChange={(e) => setData('bank_account', e.target.value)} error={errors.bank_account} required>
+                        <option value="">Choose…</option>
+                        {bankAccounts.map((account) => (
+                            <option key={account.uuid} value={account.uuid}>
+                                {account.name}
+                            </option>
+                        ))}
+                    </SelectInput>
+                )}
+                {errors.bank_account && !(outcome === 'found' && line.method === 'bank' && bankAccounts.length > 1) && (
+                    <p className="text-xs text-red-600">{errors.bank_account}</p>
+                )}
+                <TextInput
+                    id="settle_note"
+                    label={outcome === 'written_off' ? 'Reason' : 'Note (optional)'}
+                    value={data.note}
+                    onChange={(e) => setData('note', e.target.value)}
+                    error={errors.note ?? errors.outcome}
+                    required={outcome === 'written_off'}
+                />
+                <div className="flex justify-end gap-2">
+                    <Button type="button" variant="secondary" onClick={onClose}>
+                        Cancel
+                    </Button>
+                    <Button type="submit" variant={outcome === 'written_off' ? 'warning' : 'primary'} disabled={processing}>
+                        {OUTCOME_LABELS[outcome]}
+                    </Button>
+                </div>
+            </form>
+        </Modal>
     );
 }
 

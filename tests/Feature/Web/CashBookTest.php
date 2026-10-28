@@ -12,6 +12,7 @@ use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Services\CashAlertService;
 use App\Services\CashBookService;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
@@ -71,14 +72,17 @@ class CashBookTest extends TestCase
         return CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'bill' => 2500, 'status' => 'active']);
     }
 
-    /** Records payments as the collector: 2 × 2 500 cash + 5 000 MTN MoMo. */
+    private int $collections = 0;
+
+    /** Records payments as the collector: 2 × 2 500 cash + 5 000 MTN MoMo (its own transaction each time — one transaction pays once). */
     private function collect(): void
     {
         $this->collector();
+        $this->collections++;
 
         $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 2500, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
         $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 2500, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
-        $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 5000, 'frequency' => 'monthly', 'method' => 'mtn_momo', 'method_reference' => 'CI-1'])
+        $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 5000, 'frequency' => 'monthly', 'method' => 'mtn_momo', 'method_reference' => "CI-{$this->collections}"])
             ->assertSessionHasNoErrors();
     }
 
@@ -264,6 +268,79 @@ class CashBookTest extends TestCase
 
         $this->expectException(LogicException::class);
         $movement->update(['amount' => 1]);
+    }
+
+    public function test_a_momo_payment_not_seen_at_the_handover_stays_owed_until_it_is_found(): void
+    {
+        $this->collect();
+        $remittance = $this->handOver('5000');
+        $this->cashier();
+        $this->post("/cash/remittances/{$remittance->uuid}/receive", ['received_cash' => '5000'])
+            ->assertSessionHas('success', fn (string $message) => str_contains($message, 'not found'));
+
+        // Owner, 2026-10-28: it no longer just drops — the collector owes it, and the alert stays until it is settled.
+        $line = $remittance->lines()->where('method', 'mtn_momo')->sole();
+        $this->assertTrue($line->isOwed());
+        $this->assertNotEmpty(collect(app(CashAlertService::class)->alerts())->firstWhere('key', 'wallet_not_found')['items'] ?? []);
+
+        // Never settled by the collector who owes it.
+        $this->collector();
+        $this->post("/cash/remittances/{$remittance->uuid}/lines/{$line->id}/settle", ['outcome' => 'found']);
+        $this->assertTrue($line->refresh()->isOwed());
+
+        // Seen on the statement after all: booked into the wallet.
+        $cashier = $this->cashier();
+        $this->post("/cash/remittances/{$remittance->uuid}/lines/{$line->id}/settle", ['outcome' => 'found'])->assertSessionHasNoErrors();
+
+        $line->refresh();
+        $this->assertSame('found', $line->outcome);
+        $this->assertSame($cashier->id, $line->settled_by);
+        $this->assertSame('5000.00', $this->balanceOf(app(CashBookService::class)->walletFor('mtn_momo')));
+        $this->assertNull(collect(app(CashAlertService::class)->alerts())->firstWhere('key', 'wallet_not_found'));
+    }
+
+    public function test_a_momo_payment_never_found_is_paid_in_cash_or_written_off(): void
+    {
+        $this->collect();
+        $first = $this->handOver('5000');
+        $cashier = $this->cashier();
+        $this->post("/cash/remittances/{$first->uuid}/receive", ['received_cash' => '5000']);
+        $line = $first->lines()->where('method', 'mtn_momo')->sole();
+
+        // The collector pays it in cash: into the cashier's till.
+        $this->post("/cash/remittances/{$first->uuid}/lines/{$line->id}/settle", ['outcome' => 'repaid'])->assertSessionHasNoErrors();
+        $this->assertSame('repaid', $line->refresh()->outcome);
+        $this->assertSame('10000.00', $this->balanceOf(app(CashBookService::class)->tillFor($cashier)));
+
+        $this->collect();
+        $second = $this->handOver('5000');
+        $this->cashier();
+        $this->post("/cash/remittances/{$second->uuid}/receive", ['received_cash' => '5000']);
+        $other = $second->lines()->where('method', 'mtn_momo')->sole();
+
+        // A loss is a manager's decision, with a reason — not the cashier's.
+        $this->post("/cash/remittances/{$second->uuid}/lines/{$other->id}/settle", ['outcome' => 'written_off', 'note' => 'Fake ID'])->assertForbidden();
+        $this->actingAs_('terence@shalomtech.dev', 'manager');
+        $this->post("/cash/remittances/{$second->uuid}/lines/{$other->id}/settle", ['outcome' => 'written_off'])->assertSessionHasErrors('note');
+        $this->post("/cash/remittances/{$second->uuid}/lines/{$other->id}/settle", ['outcome' => 'written_off', 'note' => 'Transaction ID was fake'])->assertSessionHasNoErrors();
+        $this->assertSame('written_off', $other->refresh()->outcome);
+    }
+
+    public function test_a_bank_payment_is_ticked_into_the_branch_bank_account(): void
+    {
+        $bank = app(CashBookService::class)->createAccount(CashAccount::KIND_BANK, 'Afriland', null, '0001');
+        $this->collector();
+        $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 30000, 'frequency' => 'monthly', 'method' => 'bank', 'method_reference' => 'SLIP-9'])
+            ->assertSessionHasNoErrors();
+        $remittance = $this->handOver('0');
+
+        $this->cashier();
+        $line = $remittance->lines()->sole();
+        $this->post("/cash/remittances/{$remittance->uuid}/receive", ['received_cash' => '0', 'confirmed_lines' => [$line->id]])->assertSessionHasNoErrors();
+
+        $this->assertSame('found', $line->refresh()->outcome);
+        $this->assertSame($bank->id, $line->cash_account_id);
+        $this->assertSame('30000.00', $this->balanceOf($bank));
     }
 
     public function test_access(): void

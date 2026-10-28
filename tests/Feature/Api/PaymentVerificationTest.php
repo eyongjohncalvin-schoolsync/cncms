@@ -46,11 +46,15 @@ class PaymentVerificationTest extends TestCase
         return CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'active']);
     }
 
+    /**
+     * From before cash controls started: a newer one its collector owes a
+     * handover for is rejected through reverse(), which asks about the money.
+     */
     private function pendingPayment(): Payment
     {
         $customer = $this->customer();
 
-        return PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
+        return PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'created_at' => now()->subYear()]);
     }
 
     public function test_manager_can_approve_a_pending_payment(): void

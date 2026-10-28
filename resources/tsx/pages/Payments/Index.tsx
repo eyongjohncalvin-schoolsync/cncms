@@ -120,7 +120,8 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
     const canDelete = hasPermission(auth.user?.permissions, 'payments.delete');
     // PaymentService::delete(): not verified, never handed in, and never receipted
     // (a reversed payment keeps its VOID receipt as proof, under Rejected).
-    const isDeletable = (payment: Payment) => canDelete && payment.verification_status !== 'verified' && !payment.receipt && !payment.handed_in;
+    const isDeletable = (payment: Payment) =>
+        canDelete && payment.verification_status !== 'verified' && !payment.receipt && !payment.handed_in && !payment.under_cash_controls;
 
     const [reviewing, setReviewing] = useState<Payment | null>(null);
     const [deleting, setDeleting] = useState<Payment | null>(null);
@@ -641,6 +642,11 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                         ) : (
                                             <VerificationBadge status={payment.verification_status} />
                                         )}
+                                        {payment.held_reason && (
+                                            <span className="ml-1 inline-block" title={payment.held_reason}>
+                                                <Badge tone="red">Held</Badge>
+                                            </span>
+                                        )}
                                         {payment.possible_duplicate && (
                                             <Link href={`/payments/${payment.uuid}`} className="ml-1 inline-block" title={payment.duplicate_reason ?? undefined}>
                                                 <Badge tone="yellow">Possible duplicate</Badge>
@@ -682,7 +688,9 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                                 <DropdownItem onClick={() => setReviewing(payment)}>Review</DropdownItem>
                                             )}
                                             {payment.can_reverse && (
-                                                <DropdownItem onClick={() => setReversing(payment)}>Reverse</DropdownItem>
+                                                <DropdownItem onClick={() => setReversing(payment)}>
+                                                    {payment.verification_status === 'pending' ? 'Reject…' : 'Reverse'}
+                                                </DropdownItem>
                                             )}
                                             {activeTab === 'duplicates' && payment.can_clear_duplicate && (
                                                 <DropdownItem onClick={() => clearDuplicate(payment)}>Not a duplicate</DropdownItem>
@@ -717,7 +725,14 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                 </Card>
             )}
 
-            <VerifyModal payment={reviewing} onClose={() => setReviewing(null)} />
+            <VerifyModal
+                payment={reviewing}
+                onClose={() => setReviewing(null)}
+                onReject={(payment) => {
+                    setReviewing(null);
+                    setReversing(payment);
+                }}
+            />
 
             <Modal
                 open={deleting !== null}
@@ -754,7 +769,12 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
     );
 }
 
-function VerifyModal({ payment, onClose }: { payment: Payment | null; onClose: () => void }) {
+/**
+ * Approve or reject a pending payment. One its collector owes a handover for
+ * is rejected through the Reject dialog instead, which asks what happened to
+ * the money (`onReject`, owner 2026-10-28).
+ */
+function VerifyModal({ payment, onClose, onReject }: { payment: Payment | null; onClose: () => void; onReject: (payment: Payment) => void }) {
     const { data, setData, transform, post, processing, errors, reset } = useForm({
         action: 'approve' as 'approve' | 'reject',
         momo_ref: '',
@@ -781,6 +801,13 @@ function VerifyModal({ payment, onClose }: { payment: Payment | null; onClose: (
         e.preventDefault();
 
         if (!payment) {
+            return;
+        }
+
+        if (action === 'reject' && payment.can_reverse) {
+            reset();
+            onReject(payment);
+
             return;
         }
 

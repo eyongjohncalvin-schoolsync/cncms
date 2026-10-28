@@ -8,7 +8,15 @@ import { formatCurrency } from '@/lib/formatCurrency';
 interface ReversePaymentModalProps {
     open: boolean;
     onClose: () => void;
-    payment: { uuid: string; customer_name: string; amount: string | number; handed_in?: boolean; purpose?: string };
+    payment: {
+        uuid: string;
+        customer_name: string;
+        amount: string | number;
+        handed_in?: boolean;
+        purpose?: string;
+        verification_status?: string;
+        recorded_by_name?: string | null;
+    };
     /** When given and allowed: "Give free months instead" (the usual allowance and approval apply). */
     freeMonths?: { can_request: boolean; max_months: number } | null;
 }
@@ -16,20 +24,26 @@ interface ReversePaymentModalProps {
 type MoneyChoice = 'correct' | 'refund' | 'none';
 
 /**
- * Undo a verified payment that was wrong (PaymentController::reverse()): it
- * becomes rejected and its receipt is voided. What happens to the money:
- *  - record the correct payment — the payment form opens on it and saving
- *    reverses this one too (a handed-in payment's place in the handover
- *    goes to the correct one);
- *  - give the money back — handed-in cash only: a refund bon, paid by the
- *    cashier once approved;
- *  - nothing — the cash is still with the collector (not handed in).
+ * Undo a payment that was wrong (PaymentController::reverse()): a verified
+ * one is reversed (rejected, receipt voided); a pending one whose collector
+ * owes a handover for it is rejected the same way. Either way the money
+ * question is answered, so nothing leaves the books without a trace (owner,
+ * 2026-10-28):
+ *  - record the correct payment — the payment form opens on it; the money
+ *    taken stands for the correct one, in the collector's name;
+ *  - recorded by mistake, no money was taken — off the collector's
+ *    handover; if they already handed cash in for it, a bon gives it back
+ *    to them;
+ *  - give the money back — a refund bon for the customer, paid by the
+ *    cashier once approved.
  */
 export function ReversePaymentModal({ open, onClose, payment, freeMonths = null }: ReversePaymentModalProps) {
     const handedIn = payment.handed_in === true;
+    const rejecting = payment.verification_status === 'pending';
+    const collector = payment.recorded_by_name ?? 'the collector';
     const [choice, setChoice] = useState<MoneyChoice>('correct');
     const [giveFree, setGiveFree] = useState(false);
-    const canGiveFree = freeMonths?.can_request === true && (payment.purpose ?? 'subscription') === 'subscription';
+    const canGiveFree = !rejecting && freeMonths?.can_request === true && (payment.purpose ?? 'subscription') === 'subscription';
     const { data, setData, transform, post, processing, errors, reset, clearErrors } = useForm({ reason: '', money: 'none' as 'none' | 'refund', free_months: '1' });
 
     function close() {
@@ -61,26 +75,38 @@ export function ReversePaymentModal({ open, onClose, payment, freeMonths = null 
         });
     }
 
+    const amount = formatCurrency(Number(payment.amount));
     const choices: { key: MoneyChoice; label: string; hint: string }[] = [
         {
             key: 'correct',
             label: 'Record the correct payment',
             hint: handedIn
                 ? 'Opens the payment form. The correct payment takes this one’s place in the handover; if it is less, the difference is refunded.'
-                : 'Opens the payment form; saving reverses this one and records the right one.',
+                : `Opens the payment form. ${collector} still hands in the ${amount}; if the correct payment is less, the difference is refunded.`,
         },
-        handedIn
-            ? { key: 'refund', label: 'Give the money back', hint: `A refund bon for ${formatCurrency(Number(payment.amount))} goes for approval; the cashier pays the customer.` }
-            : { key: 'none', label: 'Just reverse it', hint: 'Nothing was collected, or you will record the right payment later.' },
+        {
+            key: 'none',
+            label: 'Recorded by mistake — no money was taken',
+            hint: handedIn
+                ? `${collector} handed in ${amount} for it: a bon gives that cash back to them once approved.`
+                : `It leaves ${collector}'s handover — they no longer owe it.`,
+        },
+        {
+            key: 'refund',
+            label: 'Give the money back',
+            hint: handedIn
+                ? `A refund bon for ${amount} goes for approval; the cashier pays the customer.`
+                : `${collector} still hands in the ${amount}; a refund bon pays the customer back once approved.`,
+        },
     ];
 
     return (
-        <Modal open={open} onClose={close} title={`Reverse ${payment.customer_name}'s payment?`}>
+        <Modal open={open} onClose={close} title={`${rejecting ? 'Reject' : 'Reverse'} ${payment.customer_name}'s payment?`}>
             <form onSubmit={submit}>
                 <p className="text-sm text-slate-600">
-                    The payment of {formatCurrency(Number(payment.amount))} is marked rejected and its receipt is voided. If a bill already counted it,
-                    the bill is corrected.
-                    {handedIn && ' Its cash was already handed in, so say what happens to the money.'}
+                    {rejecting
+                        ? `The payment of ${amount} is marked rejected. Say what happened to the money.`
+                        : `The payment of ${amount} is marked rejected and its receipt is voided. If a bill already counted it, the bill is corrected. Say what happens to the money.`}
                 </p>
 
                 <fieldset className="mt-4 flex flex-col gap-2">
@@ -110,7 +136,7 @@ export function ReversePaymentModal({ open, onClose, payment, freeMonths = null 
                 {choice !== 'correct' && (
                     <>
                         <label htmlFor="reverse-reason" className="mt-4 block text-sm font-medium text-slate-700">
-                            Why is it being reversed?
+                            Why is it being {rejecting ? 'rejected' : 'reversed'}?
                         </label>
                         <textarea
                             id="reverse-reason"
@@ -166,7 +192,15 @@ export function ReversePaymentModal({ open, onClose, payment, freeMonths = null 
                         className="w-full rounded-lg px-4 py-2.5 text-sm font-semibold sm:w-auto"
                     >
                         {processing && <LoadingSpinner className="h-4 w-4" />}
-                        {choice === 'correct' ? 'Continue to the payment form' : processing ? 'Reversing…' : 'Reverse payment'}
+                        {choice === 'correct'
+                            ? 'Continue to the payment form'
+                            : processing
+                              ? rejecting
+                                  ? 'Rejecting…'
+                                  : 'Reversing…'
+                              : rejecting
+                                ? 'Reject payment'
+                                : 'Reverse payment'}
                     </Button>
                 </div>
             </form>

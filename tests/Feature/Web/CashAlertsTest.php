@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\ReceiptBlock;
 use App\Models\ReceiptLeaf;
 use App\Models\Remittance;
+use App\Models\SyncQueue;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
@@ -20,6 +21,7 @@ use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -100,6 +102,30 @@ class CashAlertsTest extends TestCase
         $this->assertStringContainsString('OM-1', $alerts['wallet_not_found']['items'][0]['label']);
     }
 
+    public function test_momo_and_rejected_money_still_owed_is_flagged_and_a_phone_payment_the_server_refused(): void
+    {
+        // Every method is money to hand over — MoMo too (it is only booked when ticked at a handover).
+        $momo = $this->recordCash('3000', 'mtn_momo', 'CI-9');
+        $momo->forceFill(['created_at' => now()->subHours(30)])->saveQuietly();
+        $this->assertSame('3000.00', $this->alerts()['cash_not_handed_over']['items'][0]['amount']);
+
+        // A payment refused at sync and never synced since — the office would never have seen it.
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'bill' => 2500, 'status' => 'active']);
+        $localUuid = (string) Str::uuid();
+        SyncQueue::query()->create([
+            'device_id' => 'device-1', 'direction' => 'up', 'entity_type' => 'payment', 'local_uuid' => $localUuid, 'status' => 'failed',
+            'payload' => ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'method' => 'cash'], 'attempt_count' => 1, 'error_message' => 'Something broke.',
+        ]);
+
+        $alert = $this->alerts()['phone_payments_not_synced'];
+        $this->assertStringContainsString($customer->name, $alert['items'][0]['label']);
+        $this->assertSame('2500.00', $alert['items'][0]['amount']);
+
+        // It synced in the end: the alert goes.
+        Payment::query()->whereKey($momo->id)->update(['local_uuid' => $localUuid]);
+        $this->assertArrayNotHasKey('phone_payments_not_synced', $this->alerts());
+    }
+
     public function test_receipt_numbers_scanned_but_never_recorded_and_unaccounted_ones(): void
     {
         $holder = $this->as('terence@shalomtech.dev', 'manager');
@@ -149,6 +175,6 @@ class CashAlertsTest extends TestCase
         $this->get('/cash/alerts')->assertForbidden();
 
         $mail = new CashAlertsDigestMail(app(CashAlertService::class)->alerts(), 'Terence');
-        $this->assertStringContainsString('Cash not handed over', $mail->render());
+        $this->assertStringContainsString('Collections not handed over', $mail->render());
     }
 }

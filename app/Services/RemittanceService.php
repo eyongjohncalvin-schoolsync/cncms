@@ -6,7 +6,6 @@ namespace App\Services;
 
 use App\Models\CashAccount;
 use App\Models\CashMovement;
-use App\Models\Company;
 use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\RemittanceLine;
@@ -48,16 +47,10 @@ class RemittanceService
      */
     public function outstandingQuery(User $collector): Builder
     {
-        $start = Company::cached()?->cash_controls_start_date;
-
-        return Payment::query()
-            ->where('recorded_by', $collector->id)
-            // Money taken with a field registration the office rejected
-            // (installation phase 3) is still handed over: receipts were
-            // issued, and its refund is paid out through a bon.
-            ->where(fn ($query) => $query->where('verification_status', '!=', 'rejected')->orWhereNotNull('field_installation_id'))
-            ->whereDoesntHave('remittanceLine')
-            ->when($start !== null, fn ($query) => $query->whereDate('created_at', '>=', $start));
+        // Rejected payments too, unless the office said no money was taken
+        // (Payment::scopeAwaitingHandover()) — e.g. a field registration the
+        // office rejected: its refund is paid out through a bon.
+        return Payment::query()->where('recorded_by', $collector->id)->awaitingHandover();
     }
 
     /**
@@ -160,15 +153,15 @@ class RemittanceService
 
     /**
      * @param  array<string, int>|null  $denominations
-     * @param  list<int>  $confirmedLineIds  mobile-money lines seen in the wallet
+     * @param  list<int>  $confirmedLineIds  MoMo / Orange / bank lines seen on the account's statement
      */
-    public function receive(Remittance $remittance, User $receiver, string $receivedCash, ?array $denominations, array $confirmedLineIds, ?string $note): Remittance
+    public function receive(Remittance $remittance, User $receiver, string $receivedCash, ?array $denominations, array $confirmedLineIds, ?string $note, ?string $bankAccountUuid = null): Remittance
     {
         if ($denominations !== null && bccomp(CashBookService::denominationTotal($denominations), $receivedCash, 2) !== 0) {
             throw ValidationException::withMessages(['received_cash' => 'The notes and coins you counted don\'t add up to the cash received.']);
         }
 
-        $remittance = DB::transaction(function () use ($remittance, $receiver, $receivedCash, $denominations, $confirmedLineIds, $note): Remittance {
+        $remittance = DB::transaction(function () use ($remittance, $receiver, $receivedCash, $denominations, $confirmedLineIds, $note, $bankAccountUuid): Remittance {
             $locked = Remittance::query()->whereKey($remittance->id)->lockForUpdate()->firstOrFail();
 
             if (! $locked->isSubmitted()) {
@@ -191,18 +184,9 @@ class RemittanceService
             }
 
             foreach ($locked->lines()->get() as $line) {
-                if (! array_key_exists($line->method, CashAccount::WALLET_PROVIDERS) || ! in_array($line->id, $confirmedLineIds, true)) {
-                    continue;
+                if ($line->isNonCash() && in_array($line->id, $confirmedLineIds, true)) {
+                    $this->bookFound($locked, $line, $receiver, $bankAccountUuid, null);
                 }
-
-                $line->update(['wallet_confirmed' => true]);
-
-                // The collector's branch's wallet (branches v2 D3: no joint account).
-                $this->cashBook->record($this->cashBook->walletFor($line->method, $locked->branch_id), 'in', (string) $line->amount, CashMovement::KIND_REMITTANCE_WALLET, $receiver, [
-                    'document_number' => $locked->number,
-                    'source' => $locked,
-                    'reference' => $line->reference,
-                ]);
             }
 
             // Bons the collector already paid out of this cash: the cashier
@@ -246,13 +230,17 @@ class RemittanceService
      */
     public function settleShortage(Remittance $remittance, string $outcome, User $actor, ?string $note): Remittance
     {
-        if ($remittance->shortage_status !== 'open') {
-            throw ValidationException::withMessages(['outcome' => 'This remittance has no open shortage.']);
-        }
+        $this->assertNotOwnHandover($remittance, $actor);
 
         return DB::transaction(function () use ($remittance, $outcome, $actor, $note): Remittance {
+            $remittance = Remittance::query()->whereKey($remittance->id)->lockForUpdate()->firstOrFail();
+
+            if ($remittance->shortage_status !== 'open') {
+                throw ValidationException::withMessages(['outcome' => 'This remittance has no open shortage.']);
+            }
+
             if ($outcome === 'repaid') {
-                $this->cashBook->record($this->cashBook->tillFor($actor), 'in', ltrim((string) $remittance->cash_variance, '-'), CashMovement::KIND_SHORTAGE_REPAYMENT, $actor, [
+                $this->cashBook->record($this->branchTill($remittance, $actor), 'in', ltrim((string) $remittance->cash_variance, '-'), CashMovement::KIND_SHORTAGE_REPAYMENT, $actor, [
                     'document_number' => $remittance->number,
                     'source' => $remittance,
                     'note' => $note,
@@ -268,6 +256,95 @@ class RemittanceService
 
             return $remittance;
         });
+    }
+
+    /**
+     * A MoMo / Orange / bank line the cashier could not see at the handover
+     * is still owed by the collector (owner, 2026-10-28). It is settled one
+     * of three ways, never by the collector themselves:
+     *  - `found`       — it shows on the statement after all: booked into
+     *                    the branch's wallet or bank account (`cash.receive`);
+     *  - `repaid`      — the collector pays it in cash into the settler's
+     *                    till (`cash.receive`);
+     *  - `written_off` — a manager accepts the loss, with a reason
+     *                    (`vouchers.approve`).
+     */
+    public function settleLine(RemittanceLine $line, string $outcome, User $actor, ?string $note, ?string $bankAccountUuid = null): RemittanceLine
+    {
+        $remittance = $line->remittance;
+        $this->assertNotOwnHandover($remittance, $actor);
+
+        return DB::transaction(function () use ($line, $remittance, $outcome, $actor, $note, $bankAccountUuid): RemittanceLine {
+            $line = RemittanceLine::query()->whereKey($line->id)->lockForUpdate()->firstOrFail();
+
+            if (! $remittance->isReceived() || ! $line->isOwed()) {
+                throw ValidationException::withMessages(['outcome' => 'This payment is not waiting to be found.']);
+            }
+
+            match ($outcome) {
+                RemittanceLine::OUTCOME_FOUND => $this->bookFound($remittance, $line, $actor, $bankAccountUuid, $note),
+                RemittanceLine::OUTCOME_REPAID => $this->settle($line, RemittanceLine::OUTCOME_REPAID, $actor, $note, $this->cashBook->record($this->branchTill($remittance, $actor), 'in', (string) $line->amount, CashMovement::KIND_SHORTAGE_REPAYMENT, $actor, [
+                    'document_number' => $remittance->number,
+                    'source' => $remittance,
+                    'reference' => $line->reference,
+                    'note' => 'Not found as '.(Payment::METHOD_LABELS[$line->method] ?? $line->method).' — paid in cash'.($note ? ": {$note}" : ''),
+                ])->cash_account_id),
+                RemittanceLine::OUTCOME_WRITTEN_OFF => $this->settle($line, RemittanceLine::OUTCOME_WRITTEN_OFF, $actor, $note),
+                default => throw ValidationException::withMessages(['outcome' => 'Say how it was settled.']),
+            };
+
+            return $line->fresh();
+        });
+    }
+
+    /** Books a non-cash line into the branch's wallet or bank account. */
+    private function bookFound(Remittance $remittance, RemittanceLine $line, User $actor, ?string $bankAccountUuid, ?string $note): void
+    {
+        // The collector's branch's account (branches v2 D3: no joint account).
+        $account = $line->method === 'bank'
+            ? $this->cashBook->bankFor($remittance->branch_id, $bankAccountUuid)
+            : $this->cashBook->walletFor($line->method, $remittance->branch_id);
+
+        $this->cashBook->record($account, 'in', (string) $line->amount, CashMovement::KIND_REMITTANCE_WALLET, $actor, [
+            'document_number' => $remittance->number,
+            'source' => $remittance,
+            'reference' => $line->reference,
+            'note' => $note,
+        ]);
+
+        $line->wallet_confirmed = true;
+        $this->settle($line, RemittanceLine::OUTCOME_FOUND, $actor, $note, $account->id);
+    }
+
+    private function settle(RemittanceLine $line, string $outcome, User $actor, ?string $note, ?int $accountId = null): void
+    {
+        $line->fill([
+            'outcome' => $outcome,
+            'cash_account_id' => $accountId,
+            'settled_by' => $actor->id,
+            'settled_at' => now(),
+            'settled_note' => $note,
+        ])->save();
+    }
+
+    /** Money a collector repays goes into a till of the handover's own branch. */
+    private function branchTill(Remittance $remittance, User $actor): CashAccount
+    {
+        $till = $this->cashBook->tillFor($actor);
+
+        if ($till->branch_id !== $remittance->branch_id) {
+            throw ValidationException::withMessages(['outcome' => "{$remittance->number} belongs to another branch — it is settled there."]);
+        }
+
+        return $till;
+    }
+
+    /** Nobody settles what they owe themselves — the owner included (owner, 2026-10-28). */
+    private function assertNotOwnHandover(Remittance $remittance, User $actor): void
+    {
+        if ($remittance->collector_user_id === $actor->id) {
+            throw ValidationException::withMessages(['outcome' => 'This is your own handover — someone else settles it.']);
+        }
     }
 
     /**

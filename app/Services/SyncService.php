@@ -351,8 +351,8 @@ class SyncService
      * resolved in three queries for the whole batch:
      * - synced: local_uuid => server uuid of already-synced payments (the
      *   idempotency check), kept current as the batch creates payments;
-     * - customers: every referenced customer, unscoped, for the
-     *   disconnected/suspended check (as before);
+     * - customers: every referenced customer, unscoped, for the branch
+     *   lookups the payments take;
      * - payable: the same customers through the branch-scoped repository,
      *   which is what PaymentService::create() would resolve.
      *
@@ -420,19 +420,6 @@ class SyncService
             }
         }
 
-        // Same disconnected/suspended block App\Services\PaymentService::
-        // createBulk()'s loop already applies before calling create() — this
-        // was missing here, letting a mobile push record a payment for a
-        // customer who isn't actually payable. Mirrors createBulk() exactly:
-        // only 'disconnected'/'suspended' are blocked ('passive' stays
-        // payable, per StorePaymentRequest's same rule), and it's a per-item
-        // skip (recorded into this sync response like any other failure),
-        // never a hard exception that would abort the rest of the batch.
-        // App\Services\CustomerStatusService::reconnectOne() is unaffected —
-        // it calls PaymentService::create() directly, never through this
-        // pushPayment() method, so its reconnection-fine payment (recorded
-        // while the customer is still `disconnected`) keeps working exactly
-        // as it does today.
         // One bad payment fails alone (SyncPushRequest checks only the shape).
         $invalid = Validator::make($item, self::PAYMENT_ITEM_RULES);
 
@@ -448,19 +435,11 @@ class SyncService
         }
 
         $customerUuid = $item['customer_uuid'] ?? null;
-        $customer = is_string($customerUuid) ? $lookups['customers']->get($customerUuid) : null;
 
-        if ($customer && in_array($customer->status, ['disconnected', 'suspended'], true)) {
-            $message = "{$customer->name} is currently {$customer->status} and cannot be paid until reconnected.";
-
-            $this->recordSyncQueue($deviceId, 'payment', null, $localUuid, $item, 'failed', $message);
-
-            return [
-                ['local_uuid' => $localUuid, 'status' => 'failed', 'error' => $message],
-                ['entity_type' => 'payment', 'local_uuid' => $localUuid, 'message' => $message],
-            ];
-        }
-
+        // A customer disconnected since the money was taken is not refused:
+        // the payment is held for the office (PaymentService::holdReason(),
+        // owner 2026-10-28) — a refusal would leave the cash on the phone,
+        // where nobody sees it.
         try {
             $data = PaymentData::fromArray([
                 'customer_uuid' => $item['customer_uuid'] ?? null,

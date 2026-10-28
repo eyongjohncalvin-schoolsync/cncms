@@ -12,6 +12,7 @@ use App\Models\Role;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Services\DocumentNumberService;
+use Database\Factories\AgentFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -143,33 +144,54 @@ class CashControlsFoundationTest extends TestCase
             ->assertSessionHasErrors('method');
     }
 
-    public function test_a_bank_payment_may_omit_its_reference(): void
+    public function test_a_bank_payment_needs_its_slip_number_and_is_recorded_by_the_office(): void
     {
         $this->actingAsRole('admin');
         $customer = $this->customer();
+        $bank = ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly', 'method' => 'bank'];
 
-        $this->post('/payments', ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly', 'method' => 'bank'])
-            ->assertSessionHasNoErrors();
-
-        $this->assertDatabaseHas('payments', ['customer_id' => $customer->id, 'method' => 'bank']);
+        // Owner, 2026-10-28: the slip number is what the cashier ticks off the bank statement.
+        $this->post('/payments', $bank)->assertSessionHasErrors('method_reference');
+        $this->post('/payments', [...$bank, 'method_reference' => 'SLIP-77'])->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('payments', ['customer_id' => $customer->id, 'method' => 'bank', 'method_reference' => 'SLIP-77']);
     }
 
-    public function test_editing_a_payment_can_correct_its_method(): void
+    public function test_a_field_agent_cannot_record_a_bank_payment_even_in_their_own_zone(): void
+    {
+        $agent = $this->actingAsRole('agent');
+        $customer = $this->customer();
+        AgentFactory::new()->create(['zone_id' => $customer->zone_id, 'user_id' => $agent->id]);
+
+        $this->post('/payments', ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly', 'method' => 'bank', 'method_reference' => 'SLIP-78'])
+            ->assertSessionHasErrors('method');
+        $this->assertDatabaseMissing('payments', ['customer_id' => $customer->id]);
+    }
+
+    public function test_one_transaction_pays_once(): void
+    {
+        $this->actingAsRole('admin');
+        $momo = ['amount' => 2500, 'frequency' => 'monthly', 'method' => 'mtn_momo', 'method_reference' => 'CI241020.0001'];
+
+        $this->post('/payments', [...$momo, 'customer_uuid' => $this->customer()->uuid])->assertSessionHasNoErrors();
+        $this->post('/payments', [...$momo, 'customer_uuid' => $this->customer()->uuid, 'method_reference' => ' ci241020.0001 '])
+            ->assertSessionHasErrors('method_reference');
+    }
+
+    public function test_a_payment_under_cash_controls_never_changes_its_money(): void
     {
         $this->actingAsRole('admin');
         $customer = $this->customer();
         $this->post('/payments', ['customer_uuid' => $customer->uuid, 'amount' => 2500, 'frequency' => 'monthly']);
         $payment = Payment::query()->where('customer_id', $customer->id)->latest('id')->firstOrFail();
-        // Still pending: a verified payment's money is reversed, not edited.
         $payment->update(['verification_status' => 'pending']);
 
-        $this->put("/payments/{$payment->uuid}", ['method' => 'mtn_momo'])->assertSessionHasErrors('method_reference');
-
-        $this->put("/payments/{$payment->uuid}", ['method' => 'mtn_momo', 'method_reference' => 'CI241020.0001'])
-            ->assertSessionHasNoErrors();
-
-        $this->assertSame('mtn_momo', $payment->refresh()->method);
-        $this->assertSame('CI241020.0001', $payment->method_reference);
+        // Owner, 2026-10-28: the collector owes a handover for this amount and method —
+        // a mistake is rejected (saying whether money was taken) and recorded again.
+        $this->put("/payments/{$payment->uuid}", ['method' => 'mtn_momo', 'method_reference' => 'CI241020.0001'])->assertSessionHasErrors('amount');
+        $this->put("/payments/{$payment->uuid}", ['amount' => 2000])->assertSessionHasErrors('amount');
+        $this->assertSame('cash', $payment->refresh()->method);
+        $this->delete("/payments/{$payment->uuid}")->assertSessionHasErrors('payment');
+        $this->assertModelExists($payment);
     }
 
     public function test_sync_push_stores_the_method_and_refuses_mobile_money_without_an_id(): void

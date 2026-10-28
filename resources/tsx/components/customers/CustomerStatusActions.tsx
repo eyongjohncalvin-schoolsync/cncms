@@ -7,7 +7,8 @@ import { SelectInput } from '@/components/ui/SelectInput';
 import { TextInput } from '@/components/ui/TextInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { formatCurrency } from '@/lib/formatCurrency';
-import type { Customer, CustomerManuscriptSummary, SuspendReason } from '@/types';
+import { PaymentMethodFields } from '@/components/shared/PaymentMethodFields';
+import type { Customer, CustomerManuscriptSummary, PaymentMethod, SuspendReason } from '@/types';
 
 export type StatusAction = 'disconnect' | 'suspend' | 'reconnect';
 
@@ -180,6 +181,8 @@ function CustomerStatusModal({ customer, action, onClose }: { customer: Customer
         reason: 'tv_problem' as SuspendReason,
         include_fine: false,
         arrears_payment: '',
+        method: 'cash' as PaymentMethod,
+        method_reference: '',
         // prepaid-pause-handling.md section 5: "Pause the prepaid countdown"
         // is the pre-selected, Recommended default — see
         // App\Services\CustomerStatusService::suspend()'s own $pausePrepaid
@@ -409,6 +412,18 @@ function CustomerStatusModal({ customer, action, onClose }: { customer: Customer
                                 </p>
                             )}
                         </div>
+                    )}
+
+                    {/* How the fine / arrears was paid — a MoMo fine is ticked off the wallet, never counted as cash. */}
+                    {action === 'reconnect' && (data.include_fine || Number(data.arrears_payment || 0) > 0) && (
+                        <PaymentMethodFields
+                            method={data.method}
+                            reference={data.method_reference}
+                            onMethodChange={(method) => setData('method', method)}
+                            onReferenceChange={(reference) => setData('method_reference', reference)}
+                            methodError={errors.method}
+                            referenceError={errors.method_reference}
+                        />
                     )}
 
                     <div className="flex flex-col gap-1">

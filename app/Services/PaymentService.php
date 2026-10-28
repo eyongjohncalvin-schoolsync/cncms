@@ -169,11 +169,14 @@ class PaymentService
         $canAutoVerify = $this->context->can('payments.verify')
             || $this->context->isAgentCovering($customer->zone_id);
 
-        $this->assertValidMethod($data);
+        $heldReason = $this->holdReason($customer, $data);
+
+        $this->assertValidMethod($data, customerId: $customer->id);
         $this->assertValidPurpose($data);
 
         $attributes = $data->toAttributes();
-        $attributes['verification_status'] = $canAutoVerify ? 'verified' : 'pending';
+        $attributes['verification_status'] = $canAutoVerify && $heldReason === null ? 'verified' : 'pending';
+        $attributes['held_reason'] = $heldReason;
         $attributes['recorded_by'] = auth()->id();
         $attributes['expiration_date'] = $this->computeExpirationDate($data->frequency, $data->months);
 
@@ -820,9 +823,9 @@ class PaymentService
 
     public function update(Payment $payment, PaymentData $data): Payment
     {
-        $this->assertValidMethod($data, $payment);
-        $this->assertNotHandedOver($payment, $data);
+        $this->assertValidMethod($data, $payment, $payment->customer_id);
         $this->assertNoMoneyChangeAfterReceipt($payment, $data);
+        $this->assertNotHandedOver($payment, $data);
 
         // An offer buys exactly its months: "4 months for 10,000" never becomes 12.
         if ($payment->prepayment_offer_id !== null
@@ -872,7 +875,7 @@ class PaymentService
      * mobile-money payment without its transaction ID can never be ticked
      * off the wallet statement, so it is refused rather than stored.
      */
-    private function assertValidMethod(PaymentData $data, ?Payment $existing = null): void
+    private function assertValidMethod(PaymentData $data, ?Payment $existing = null, ?int $customerId = null): void
     {
         $method = $data->method ?? $existing?->method ?? 'cash';
         $reference = $data->methodReference ?? $existing?->method_reference;
@@ -883,25 +886,108 @@ class PaymentService
 
         if (in_array($method, Payment::METHODS_REQUIRING_REFERENCE, true) && ($reference === null || $reference === '')) {
             throw ValidationException::withMessages([
-                'method_reference' => 'Enter the '.Payment::METHOD_LABELS[$method].' transaction ID.',
+                'method_reference' => $method === 'bank' ? 'Enter the bank slip number.' : 'Enter the '.Payment::METHOD_LABELS[$method].' transaction ID.',
+            ]);
+        }
+
+        // From a phone the money was already collected: held, not refused (holdReason()).
+        if ($data->recordedOffline === true) {
+            return;
+        }
+
+        // The office: whoever verifies payments or receives cash — never a field agent.
+        if ($method === 'bank' && ! $this->context->canAny('payments.verify', 'cash.receive')) {
+            throw ValidationException::withMessages(['method' => 'Bank payments are recorded by the office.']);
+        }
+
+        $usedBy = $this->paymentWithReference($method, $reference, $customerId, $existing);
+
+        if ($usedBy !== null) {
+            throw ValidationException::withMessages([
+                'method_reference' => "This transaction is already on {$usedBy->customer?->name}'s payment of ".number_format((float) $usedBy->amount, 0, '.', ',').' FCFA — one transaction pays once.',
             ]);
         }
     }
 
     /**
-     * Cash controls: once a payment's money has gone through a daily
-     * handover (a remittance line), its amount and method are part of the
-     * cash book — changing them would silently unbalance a counted handover.
-     * Other corrections (frequency, months) stay allowed.
+     * Another payment the same MoMo / Orange transaction or bank slip already
+     * stands for, for another customer (owner, 2026-10-28: one transaction
+     * pays once). One customer's own transfer may cover two payments made
+     * together (a reconnection fine and arrears); a real second payment of
+     * theirs is flagged as a possible duplicate instead. Rejected payments
+     * don't count — their money was refunded, corrected or never taken.
+     */
+    private function paymentWithReference(string $method, ?string $reference, ?int $customerId, ?Payment $existing = null): ?Payment
+    {
+        if (! in_array($method, Payment::NON_CASH_METHODS, true) || $reference === null || trim($reference) === '') {
+            return null;
+        }
+
+        return Payment::query()->withoutGlobalScope(BranchScope::class)
+            ->with('customer:id,name')
+            ->where('method', $method)
+            ->whereRaw('lower(trim(method_reference)) = ?', [mb_strtolower(trim($reference))])
+            ->where('verification_status', '!=', 'rejected')
+            ->when($customerId !== null, fn ($query) => $query->where('customer_id', '!=', $customerId))
+            ->when($existing !== null, fn ($query) => $query->whereKeyNot($existing->id))
+            ->first();
+    }
+
+    /**
+     * Why a phone payment is taken but held for the office instead of
+     * refused — the money was already collected, and a refused payment
+     * would sit on the phone where nobody sees it (owner, 2026-10-28).
+     */
+    private function holdReason(Customer $customer, PaymentData $data): ?string
+    {
+        if ($data->recordedOffline !== true) {
+            return null;
+        }
+
+        $method = $data->method ?? 'cash';
+
+        if (in_array($customer->status, ['disconnected', 'suspended'], true)) {
+            return "The customer was {$customer->status} when this came in — reconnect them, or refund the money.";
+        }
+
+        if ($method === 'bank') {
+            return 'A bank payment recorded on a phone — bank payments are recorded by the office. Check the slip.';
+        }
+
+        $usedBy = $this->paymentWithReference($method, $data->methodReference, $customer->id);
+
+        if ($usedBy !== null) {
+            return "Transaction {$data->methodReference} is already on {$usedBy->customer?->name}'s payment — one transaction pays once.";
+        }
+
+        return null;
+    }
+
+    /**
+     * Cash controls: a payment's amount and method are what its collector
+     * owes a handover for — changing them, before or after the handover,
+     * would quietly change what they owe (owner, 2026-10-28). A mistake is
+     * rejected, saying whether money was taken, and recorded again. Other
+     * corrections (frequency, months) stay allowed.
      */
     private function assertNotHandedOver(Payment $payment, PaymentData $data): void
     {
         $changesMoney = ($data->amount !== null && bccomp($data->amount, (string) $payment->amount, 2) !== 0)
             || ($data->method !== null && $data->method !== $payment->method);
 
-        if ($changesMoney && $payment->remittanceLine()->exists()) {
+        if (! $changesMoney) {
+            return;
+        }
+
+        if ($payment->remittanceLine()->exists()) {
             throw ValidationException::withMessages([
                 'amount' => 'This payment\'s money has already been handed over in a daily remittance — its amount and method can no longer change.',
+            ]);
+        }
+
+        if ($payment->isUnderCashControls()) {
+            throw ValidationException::withMessages([
+                'amount' => 'The collector owes a handover for this amount and method, so they can\'t change. Reject it — saying whether money was taken — and record it again.',
             ]);
         }
     }
@@ -918,7 +1004,9 @@ class PaymentService
             throw ValidationException::withMessages(['amount' => 'This payment was reversed and can no longer change. Record the correct payment again.']);
         }
 
-        if ($payment->verification_status !== 'verified') {
+        // A field receipt is printed before the office verifies: the
+        // customer's paper already says what was paid.
+        if ($payment->verification_status !== 'verified' && ! $payment->receipt()->exists()) {
             return;
         }
 
@@ -948,6 +1036,14 @@ class PaymentService
         if ($payment->remittanceLine()->exists()) {
             throw ValidationException::withMessages([
                 'payment' => 'This payment\'s money has already been handed over in a daily remittance and cannot be deleted.',
+            ]);
+        }
+
+        // Deleting it would quietly lower what its collector owes (owner,
+        // 2026-10-28) — rejecting it keeps the record and asks about the money.
+        if ($payment->isUnderCashControls()) {
+            throw ValidationException::withMessages([
+                'payment' => 'Its collector owes a handover for this payment — reject it instead, saying whether money was taken.',
             ]);
         }
 

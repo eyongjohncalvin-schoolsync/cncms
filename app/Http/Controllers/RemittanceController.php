@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\CashAccount;
 use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\RemittanceLine;
+use App\Models\Scopes\BranchScope;
 use App\Models\Voucher;
 use App\Services\CashBookService;
 use App\Services\RemittanceService;
@@ -90,7 +92,8 @@ class RemittanceController extends Controller
     {
         $this->authorize('view', $remittance);
 
-        $remittance->load(['collector', 'receivedBy', 'till', 'lines.payment.customer', 'lines.payment.receipt', 'bons']);
+        $remittance->load(['collector', 'receivedBy', 'till', 'lines.payment.customer', 'lines.payment.receipt', 'lines.account', 'lines.settledBy', 'bons']);
+        $hasBankLines = $remittance->lines->contains(fn (RemittanceLine $line): bool => $line->method === 'bank' && $line->outcome === null);
 
         return Inertia::render('Cash/Remittance', [
             'remittance' => [
@@ -130,6 +133,11 @@ class RemittanceController extends Controller
                     'amount' => (string) $line->amount,
                     'reference' => $line->reference,
                     'wallet_confirmed' => $line->wallet_confirmed,
+                    'outcome' => $line->outcome,
+                    'account_name' => $line->account?->name,
+                    'settled_by_name' => $line->settledBy?->name,
+                    'settled_at' => $line->settled_at?->toIso8601String(),
+                    'settled_note' => $line->settled_note,
                     'purpose' => $line->payment?->purpose ?? Payment::PURPOSE_SUBSCRIPTION,
                 ])->values()->all(),
                 // Technician fees are counted with the cash but belong to the
@@ -140,7 +148,18 @@ class RemittanceController extends Controller
                 'receive' => $request->user()->can('receive', $remittance),
                 'repay_shortage' => $request->user()->can('repayShortage', $remittance),
                 'write_off_shortage' => $request->user()->can('writeOffShortage', $remittance),
+                'settle_line' => [
+                    'found' => $request->user()->can('settleLine', [$remittance, RemittanceLine::OUTCOME_FOUND]),
+                    'repaid' => $request->user()->can('settleLine', [$remittance, RemittanceLine::OUTCOME_REPAID]),
+                    'written_off' => $request->user()->can('settleLine', [$remittance, RemittanceLine::OUTCOME_WRITTEN_OFF]),
+                ],
             ],
+            // A bank payment is ticked into one of the branch's bank accounts.
+            'bank_accounts' => $hasBankLines
+                ? CashAccount::query()->withoutGlobalScope(BranchScope::class)->where('kind', CashAccount::KIND_BANK)->where('is_active', true)
+                    ->where('branch_id', $remittance->branch_id)->orderBy('name')->get(['uuid', 'name'])
+                    ->map(fn (CashAccount $account): array => ['uuid' => $account->uuid, 'name' => $account->name])->values()->all()
+                : [],
             'denominations' => CashBookService::DENOMINATIONS,
         ]);
     }
@@ -152,6 +171,7 @@ class RemittanceController extends Controller
         $validated = $this->validateCount($request, 'received_cash', [
             'confirmed_lines' => ['nullable', 'array'],
             'confirmed_lines.*' => ['integer'],
+            'bank_account' => ['nullable', 'uuid'],
         ]);
 
         $remittance = $this->remittances->receive(
@@ -161,13 +181,36 @@ class RemittanceController extends Controller
             CashBookService::normalizeDenominations($validated['denominations'] ?? null),
             array_map('intval', $validated['confirmed_lines'] ?? []),
             $validated['note'] ?? null,
+            $validated['bank_account'] ?? null,
         );
 
         $variance = (float) $remittance->cash_variance;
+        $notFound = $remittance->lines()->whereIn('method', Payment::NON_CASH_METHODS)->whereNull('outcome')->count();
 
-        return back()->with('success', $variance < 0
+        return back()->with('success', ($variance < 0
             ? 'Received — '.number_format(-$variance, 0, '.', ' ').' FCFA short. The shortage stays open on the collector.'
-            : 'Received into your till.');
+            : 'Received into your till.')
+            .($notFound > 0 ? " {$notFound} MoMo / bank payment(s) not found — the collector owes them until they are found, repaid or written off." : ''));
+    }
+
+    /** RemittanceService::settleLine(). */
+    public function settleLine(Request $request, Remittance $remittance, RemittanceLine $line): RedirectResponse
+    {
+        $validated = $request->validate([
+            'outcome' => ['required', Rule::in([RemittanceLine::OUTCOME_FOUND, RemittanceLine::OUTCOME_REPAID, RemittanceLine::OUTCOME_WRITTEN_OFF])],
+            'note' => ['required_if:outcome,written_off', 'nullable', 'string', 'max:500'],
+            'bank_account' => ['nullable', 'uuid'],
+        ]);
+
+        $this->authorize('settleLine', [$remittance, $validated['outcome']]);
+
+        $this->remittances->settleLine($line, $validated['outcome'], $request->user(), $validated['note'] ?? null, $validated['bank_account'] ?? null);
+
+        return back()->with('success', match ($validated['outcome']) {
+            RemittanceLine::OUTCOME_FOUND => 'Found — booked into the account.',
+            RemittanceLine::OUTCOME_REPAID => 'Paid in cash — received into your till.',
+            default => 'Written off.',
+        });
     }
 
     public function settleShortage(Request $request, Remittance $remittance): RedirectResponse

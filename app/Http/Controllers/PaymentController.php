@@ -211,7 +211,7 @@ class PaymentController extends Controller
         if (is_string($request->query('replaces'))) {
             $old = (new Payment)->resolveRouteBinding($request->query('replaces')) ?? abort(404);
             $this->authorize('reverse', $old);
-            $line = $old->remittanceLine()->first();
+            $line = $old->handoverLine();
 
             $replacing = [
                 'uuid' => $old->uuid,
@@ -373,7 +373,7 @@ class PaymentController extends Controller
         // not a repository contract change) purely so Payments/Show.tsx can
         // offer an "Adjust Arrears" entry point without a page navigation —
         // see this feature's design doc, 2026-08-27 addendum.
-        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier', 'receipt', 'duplicateOf.receipt', 'duplicateOf.recordedBy']);
+        $payment->load(['customer.zone', 'customer.latestManuscript', 'verification.verifier', 'receipt', 'duplicateOf.receipt', 'duplicateOf.recordedBy', 'recordedBy']);
         // Its receipt's email lookup reads payment → customer: already here.
         $payment->receipt?->setRelation('payment', $payment);
 
@@ -400,7 +400,8 @@ class PaymentController extends Controller
             // Same idiom as can_manage above, but mirroring PaymentPolicy::
             // delete()'s stricter super/admin-only role check instead of
             // update()'s super/admin/manager.
-            'can_delete' => $this->context->can('payments.delete'),
+            // Its collector owes a handover for it: rejected (with the money question), never deleted.
+            'can_delete' => $this->context->can('payments.delete') && ! $payment->isUnderCashControls(),
             'can_reverse' => $request->user()->can('reverse', $payment),
         ]);
     }
@@ -523,15 +524,19 @@ class PaymentController extends Controller
     }
 
     /**
-     * @param  array{adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher}  $result
+     * @param  array{payment: Payment, adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher, was_pending: bool, to_collector: bool, off_handover: bool}  $result
      */
     private function reversedMessage(array $result): string
     {
+        $voucher = $result['refund_voucher'];
+        $toCollector = $result['to_collector'];
+
         return implode(' ', array_filter([
-            'Payment reversed and its receipt voided.',
+            $result['was_pending'] ? 'Payment rejected.' : 'Payment reversed and its receipt voided.',
+            $result['off_handover'] ? 'No money was taken, so it leaves the collector\'s handover.' : null,
             $result['replacement'] !== null ? 'The correct payment is recorded in its place.' : null,
-            $result['refund_voucher'] !== null
-                ? 'Refund bon '.$result['refund_voucher']->number.' for '.number_format((float) $result['refund_voucher']->amount, 0, '.', ',').' FCFA waits for approval on Vouchers; the cashier pays the customer from the till.'
+            $voucher !== null
+                ? ($toCollector ? 'Bon ' : 'Refund bon ').$voucher->number.' for '.number_format((float) $voucher->amount, 0, '.', ',').' FCFA waits for approval on Vouchers; the cashier pays '.($toCollector ? 'the collector back' : 'the customer').' from the till.'
                 : null,
             $result['adjustment_filed'] ? 'Its month\'s bill is closed, so an arrears adjustment adding it to this month waits for approval.' : null,
         ]));
@@ -593,6 +598,11 @@ class PaymentController extends Controller
             'verification_status' => $payment->verification_status,
             'recorded_offline' => $payment->recorded_offline,
             'recorded_by_device' => $payment->recorded_by_device,
+            'recorded_by_name' => $payment->relationLoaded('recordedBy') ? $payment->recordedBy?->name : null,
+            // A phone payment the server took but holds for the office (PaymentService::holdReason()).
+            'held_reason' => $payment->held_reason,
+            // Its collector owes a handover for it: rejected (with the money question), never deleted.
+            'under_cash_controls' => $payment->isUnderCashControls(),
             'created_at' => $payment->created_at?->toIso8601String(),
             'collected_at' => $payment->collected_at?->toIso8601String(),
             'processed_at' => $payment->processed_at?->toIso8601String(),

@@ -98,6 +98,28 @@ class CashBookService
         );
     }
 
+    /**
+     * The branch's bank account a bank payment is ticked into — the only one
+     * it has, or the one named when it has several.
+     */
+    public function bankFor(?int $branchId, ?string $accountUuid = null): CashAccount
+    {
+        $banks = CashAccount::query()->withoutGlobalScope(BranchScope::class)
+            ->where('kind', CashAccount::KIND_BANK)->where('is_active', true)
+            ->where('branch_id', $branchId ?? Branch::headquartersId())
+            ->get();
+
+        $bank = $accountUuid !== null ? $banks->firstWhere('uuid', $accountUuid) : ($banks->count() === 1 ? $banks->first() : null);
+
+        if ($bank === null) {
+            throw ValidationException::withMessages(['bank_account' => $banks->isEmpty()
+                ? 'This branch has no bank account in the cash book — add it there first.'
+                : 'Choose the bank account the payment went into.']);
+        }
+
+        return $bank;
+    }
+
     public function createAccount(string $kind, string $name, ?string $provider, ?string $accountNumber): CashAccount
     {
         return CashAccount::query()->create([

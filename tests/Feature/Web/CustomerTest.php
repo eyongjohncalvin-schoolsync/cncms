@@ -637,6 +637,22 @@ class CustomerTest extends TestCase
         ]);
     }
 
+    /** A fine and arrears paid by MoMo are recorded as MoMo, one transfer — never counted as cash (owner, 2026-10-28). */
+    public function test_a_reconnection_paid_by_momo_is_recorded_as_momo(): void
+    {
+        $this->actingAsRole('manager');
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'status' => 'disconnected']);
+
+        $this->patch("/customers/{$customer->uuid}/reconnect", ['include_fine' => true, 'arrears_payment' => 5000, 'method' => 'mtn_momo'])
+            ->assertSessionHasErrors('method_reference');
+
+        $this->patch("/customers/{$customer->uuid}/reconnect", ['include_fine' => true, 'arrears_payment' => 5000, 'method' => 'mtn_momo', 'method_reference' => 'CI-RC-1'])
+            ->assertSessionHasNoErrors()->assertSessionHas('success');
+        $this->assertSame('active', $customer->fresh()->status);
+
+        $this->assertSame(2, Payment::query()->where('customer_id', $customer->id)->where('method', 'mtn_momo')->where('method_reference', 'CI-RC-1')->count());
+    }
+
     /**
      * The other half of the 2026-08 owner decision: `include_fine` now works
      * identically for `suspended` as it does for `disconnected` — there is

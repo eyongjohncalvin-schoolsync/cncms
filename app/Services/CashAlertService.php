@@ -15,6 +15,7 @@ use App\Models\Payment;
 use App\Models\ReceiptLeaf;
 use App\Models\Remittance;
 use App\Models\RemittanceLine;
+use App\Models\SyncQueue;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Support\BusinessTimezone;
@@ -58,6 +59,7 @@ class CashAlertService
 
         return array_values(array_filter([
             $this->cashNotHandedOver($deadlineHours),
+            $this->phonePaymentsNotSynced(),
             $this->possibleDuplicatePayments(),
             $this->lateRegistrationsPaidSomeone(),
             $this->handoversNotReceived($deadlineHours),
@@ -148,15 +150,12 @@ class CashAlertService
 
     private function cashNotHandedOver(int $deadlineHours): array
     {
-        $start = Company::cached()?->cash_controls_start_date;
-
+        // Every method: MoMo / bank money is only booked into the company's
+        // accounts when the cashier ticks it at a handover.
         $rows = Payment::query()
             ->forBranch(TenantContext::currentBranchId())
-            ->where('method', 'cash')
             ->whereNotNull('recorded_by')
-            ->where('verification_status', '!=', 'rejected')
-            ->whereDoesntHave('remittanceLine')
-            ->when($start !== null, fn ($query) => $query->whereDate('created_at', '>=', $start))
+            ->awaitingHandover()
             ->where('created_at', '<', now()->subHours($deadlineHours))
             ->selectRaw('recorded_by, sum(amount) as total, count(*) as payments, min(created_at) as oldest')
             ->groupBy('recorded_by')
@@ -164,13 +163,41 @@ class CashAlertService
 
         $names = User::query()->whereIn('id', $rows->pluck('recorded_by'))->pluck('name', 'id');
 
-        return $this->alert('cash_not_handed_over', 'danger', 'Cash not handed over', "Collectors holding cash for more than {$deadlineHours} hours. Ask them to hand it over today.",
+        return $this->alert('cash_not_handed_over', 'danger', 'Collections not handed over', "Collectors holding money (cash, MoMo or bank) for more than {$deadlineHours} hours. Ask them to hand it over today.",
             $rows->map(fn ($row): array => [
                 'label' => $names[$row->recorded_by] ?? 'Unknown collector',
                 'detail' => "{$row->payments} payment(s) since ".Carbon::parse($row->oldest)->format('d M H:i'),
                 'amount' => number_format((float) $row->total, 2, '.', ''),
                 'link' => null,
             ])->all());
+    }
+
+    /**
+     * A payment a phone recorded (the cash was taken) that the server
+     * refused and that has not come in since — the phone keeps retrying, but
+     * the office would otherwise never see it (owner, 2026-10-28).
+     */
+    private function phonePaymentsNotSynced(): array
+    {
+        $failed = SyncQueue::query()
+            ->where('entity_type', 'payment')
+            ->where('status', 'failed')
+            ->whereNotNull('local_uuid')
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('payments')->whereColumn('payments.local_uuid', 'sync_queue.local_uuid'))
+            ->where('created_at', '>=', now()->subDays(self::LOOKBACK_DAYS))
+            ->orderByDesc('id')
+            ->get()
+            ->unique('local_uuid');
+
+        $customers = Customer::query()->withTrashed()->whereIn('uuid', $failed->map(fn (SyncQueue $row): mixed => $row->payload['customer_uuid'] ?? null)->filter()->unique())->pluck('name', 'uuid');
+
+        return $this->alert('phone_payments_not_synced', 'danger', 'Phone payments not synced', 'A collector recorded these on the phone but the server refused them. Call the collector, fix the cause (e.g. reconnect the customer), and they sync on their own.',
+            $failed->map(fn (SyncQueue $row): array => [
+                'label' => ($customers[$row->payload['customer_uuid'] ?? ''] ?? 'Unknown customer').' — '.(Payment::METHOD_LABELS[$row->payload['method'] ?? 'cash'] ?? 'Cash'),
+                'detail' => (string) $row->error_message,
+                'amount' => isset($row->payload['amount']) ? number_format((float) $row->payload['amount'], 2, '.', '') : null,
+                'link' => null,
+            ])->values()->all());
     }
 
     /**
@@ -251,12 +278,13 @@ class CashAlertService
 
     private function walletLinesNotFound(): array
     {
-        return $this->alert('wallet_not_found', 'danger', 'Mobile money not found in the wallet', 'The cashier could not see these MoMo / Orange Money transactions in the company wallet. Check the statement and the customer.',
+        // Until each one is settled — however old (owner, 2026-10-28: nothing drops off silently).
+        return $this->alert('wallet_not_found', 'danger', 'MoMo / bank payments not found', 'The cashier could not see these on the wallet or bank statement — the collector owes them. Open the handover: found it, paid in cash, or written off.',
             RemittanceLine::query()
                 ->with(['remittance.collector', 'payment.customer'])
-                ->whereIn('method', array_keys(CashAccount::WALLET_PROVIDERS))
-                ->where('wallet_confirmed', false)
-                ->whereHas('remittance', fn ($query) => $query->where('status', 'received')->where('received_at', '>=', now()->subDays(self::LOOKBACK_DAYS)))
+                ->whereIn('method', Payment::NON_CASH_METHODS)
+                ->whereNull('outcome')
+                ->whereHas('remittance', fn ($query) => $query->where('status', 'received'))
                 ->get()
                 ->map(fn (RemittanceLine $line): array => [
                     'label' => ($line->payment?->customer?->name ?? 'Customer').' — txn '.($line->reference ?? '?'),

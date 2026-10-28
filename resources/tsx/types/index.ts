@@ -435,6 +435,11 @@ export interface Payment {
     verification_status: VerificationStatus;
     recorded_offline: boolean;
     recorded_by_device?: string | null;
+    recorded_by_name?: string | null;
+    /** A phone payment the server took but holds for the office — why. */
+    held_reason?: string | null;
+    /** Recorded since cash controls started: its collector owes a handover for it, so it is rejected, never deleted. */
+    under_cash_controls?: boolean;
     created_at: string;
     // The field agent's actual offline-collection timestamp, distinct from
     // `created_at` (server-arrival time) — see App\Services\SyncService::

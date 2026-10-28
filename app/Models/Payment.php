@@ -47,6 +47,8 @@ use LogicException;
     // The prepayment offer it bought, and that offer's price then
     // (PaymentService::applyPrepaymentOffer()); the rest of the amount cleared old debt.
     'prepayment_offer_id', 'offer_price',
+    // Money can't leave the books silently — see scopeAwaitingHandover().
+    'money_taken', 'paid_with_payment_id', 'held_reason',
 ])]
 #[RouteKey('uuid')]
 class Payment extends Model
@@ -158,8 +160,16 @@ class Payment extends Model
      */
     public const array METHODS = ['cash', 'mtn_momo', 'orange_money', 'bank'];
 
-    /** @var list<string> */
-    public const array METHODS_REQUIRING_REFERENCE = ['mtn_momo', 'orange_money'];
+    /**
+     * Bank: the deposit slip number, so the cashier can tick it off the bank
+     * statement (owner, 2026-10-28 — and only the office records one).
+     *
+     * @var list<string>
+     */
+    public const array METHODS_REQUIRING_REFERENCE = ['mtn_momo', 'orange_money', 'bank'];
+
+    /** Money that goes straight into a company account and is ticked off its statement at the handover. */
+    public const array NON_CASH_METHODS = ['mtn_momo', 'orange_money', 'bank'];
 
     /** @var array<string, string> */
     public const array METHOD_LABELS = [
@@ -197,7 +207,52 @@ class Payment extends Model
             'collected_at' => 'datetime',
             'duplicate_cleared_at' => 'datetime',
             'recorded_offline' => 'boolean',
+            'money_taken' => 'boolean',
         ];
+    }
+
+    /**
+     * Money a collector still owes a handover for (owner, 2026-10-28: money
+     * can't leave the books silently). Every payment recorded since cash
+     * controls started and not yet in a handover — rejected ones too, unless
+     * the office said no money was taken. A correction recorded before the
+     * handover is left out: its money is the original's, which stays here.
+     */
+    public function scopeAwaitingHandover(Builder $query): Builder
+    {
+        $start = Company::cached()?->cash_controls_start_date;
+
+        return $query
+            ->where(fn (Builder $inner) => $inner
+                ->where($query->qualifyColumn('verification_status'), '!=', 'rejected')
+                ->orWhere($query->qualifyColumn('money_taken'), true))
+            ->whereNull($query->qualifyColumn('paid_with_payment_id'))
+            ->whereDoesntHave('remittanceLine')
+            ->when($start !== null, fn (Builder $inner) => $inner->where($query->qualifyColumn('created_at'), '>=', BusinessTimezone::dayBoundsUtc($start->toDateString())[0]));
+    }
+
+    /** Recorded since cash controls started: its money is followed through a handover. */
+    public function isUnderCashControls(): bool
+    {
+        $start = Company::cached()?->cash_controls_start_date;
+
+        return $start === null || $this->created_at === null || $this->created_at->gte(BusinessTimezone::dayBoundsUtc($start->toDateString())[0]);
+    }
+
+    /**
+     * The handover line this payment's money came in on — its own, or, for a
+     * correction recorded before the handover, the original payment's.
+     */
+    public function handoverLine(): ?RemittanceLine
+    {
+        return $this->remittanceLine()->first()
+            ?? ($this->paid_with_payment_id !== null ? RemittanceLine::query()->where('payment_id', $this->paid_with_payment_id)->first() : null);
+    }
+
+    /** The original payment whose money a correction stands for (see scopeAwaitingHandover()). */
+    public function paidWith(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'paid_with_payment_id');
     }
 
     /** The prepayment offer this payment bought, if any. */

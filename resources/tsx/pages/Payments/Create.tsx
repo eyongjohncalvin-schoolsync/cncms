@@ -404,12 +404,13 @@ function SinglePaymentForm({
                                     {replacing.collected_at ? ` (${new Date(replacing.collected_at).toLocaleDateString()})` : ''}.
                                 </p>
                                 <p className="mt-1">Saving reverses it — its receipt is voided — and records the payment below in its place.</p>
-                                {replacing.handed_in_amount && (
-                                    <p className="mt-1">
-                                        Its {formatCurrency(replacing.handed_in_amount)} was already handed in: keep the same method, and the correct amount
-                                        can&apos;t be more. If it is less, the difference goes back to the customer through a refund bon.
-                                    </p>
-                                )}
+                                <p className="mt-1">
+                                    {replacing.handed_in_amount
+                                        ? `Its ${formatCurrency(replacing.handed_in_amount)} was already handed in`
+                                        : `The collector still hands in its ${formatCurrency(replacing.amount)}`}
+                                    : keep the same method, and the correct amount can&apos;t be more. If it is less, the difference goes back to the
+                                    customer through a refund bon.
+                                </p>
                                 <div className="mt-3">
                                     <TextInput
                                         id="replace_reason"

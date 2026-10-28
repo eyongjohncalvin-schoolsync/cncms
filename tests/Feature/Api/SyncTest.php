@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Models\Voucher;
 use App\Models\Zone;
 use App\Services\NotificationService;
+use App\Services\PaymentVerificationService;
 use Database\Factories\AgentFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ExpenseCategoryFactory;
@@ -62,26 +63,13 @@ class SyncTest extends TestCase
     }
 
     /**
-     * Audit scenario, now fixed (business-rules.md #1 / StorePaymentRequest's
-     * doc comment): the disconnected/suspended payment block previously
-     * existed ONLY at the HTTP-validation layer (StorePaymentRequest) and
-     * inside PaymentService::createBulk()'s loop — deliberately NOT inside
-     * PaymentService::create() itself, so that CustomerStatusService::
-     * reconnectOne()'s direct create() call (recording the reconnection fine
-     * while status is still 'disconnected') keeps working. But
-     * SyncService::pushPayment() ALSO calls PaymentService::create()
-     * directly, the exact same way reconnectOne() does — bypassing
-     * StorePaymentRequest entirely, and unlike createBulk() had no block of
-     * its own. SyncService::pushPayment() now carries the identical
-     * disconnected/suspended check createBulk() already had, so a mobile
-     * push for a disconnected customer is skipped (a per-item 'failed' entry
-     * in the sync response, never a hard error that would abort the rest of
-     * the batch) instead of quietly doing what the web form and web
-     * bulk-entry both explicitly refuse to do. See
-     * test_push_payment_for_a_disconnected_customer_via_reconnection_still_works
-     * below for proof the legitimate reconnectOne() bypass is unaffected.
+     * A phone payment for a customer disconnected (or suspended) since the
+     * money was taken is held for the office, never refused (owner,
+     * 2026-10-28): a refusal left the cash on the phone, where nobody saw
+     * it. It syncs, stays pending with its reason, and its collector owes
+     * a handover for it like any other.
      */
-    public function test_push_payment_for_a_disconnected_customer_is_skipped(): void
+    public function test_push_payment_for_a_disconnected_customer_is_held_for_the_office(): void
     {
         $zone = ZoneFactory::new()->create();
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'disconnected']);
@@ -107,22 +95,14 @@ class SyncTest extends TestCase
         $response->assertOk();
 
         $entry = collect($response->json('results.payments'))->firstWhere('local_uuid', $localUuid);
+        $this->assertSame('synced', $entry['status']);
 
-        $this->assertSame('failed', $entry['status']);
-        $this->assertStringContainsString('disconnected', $entry['error']);
-        $this->assertNotEmpty($response->json('errors'));
-
-        $this->assertDatabaseMissing('payments', [
-            'customer_id' => $customer->id,
-            'amount' => 2500,
-        ]);
+        $payment = Payment::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame('pending', $payment->verification_status);
+        $this->assertStringContainsString('disconnected', (string) $payment->held_reason);
     }
 
-    /**
-     * A `suspended` customer must be blocked the same way — mirrors
-     * createBulk()'s own ['disconnected', 'suspended'] check exactly.
-     */
-    public function test_push_payment_for_a_suspended_customer_is_skipped(): void
+    public function test_push_payment_for_a_suspended_customer_is_held_for_the_office(): void
     {
         $zone = ZoneFactory::new()->create();
         $customer = CustomerFactory::new()->create(['zone_id' => $zone->id, 'bill' => 2500, 'status' => 'suspended']);
@@ -148,12 +128,35 @@ class SyncTest extends TestCase
         $response->assertOk();
 
         $entry = collect($response->json('results.payments'))->firstWhere('local_uuid', $localUuid);
+        $this->assertSame('synced', $entry['status']);
+        $this->assertStringContainsString('suspended', (string) Payment::query()->where('customer_id', $customer->id)->sole()->held_reason);
+    }
 
-        $this->assertSame('failed', $entry['status']);
-        $this->assertDatabaseMissing('payments', [
-            'customer_id' => $customer->id,
-            'amount' => 2500,
-        ]);
+    /**
+     * A transaction ID already on another customer's payment, or a bank
+     * payment from the field, is held for the office — never refused, never
+     * verified on the spot (owner, 2026-10-28).
+     */
+    public function test_push_holds_a_reused_transaction_id_and_a_bank_payment(): void
+    {
+        $paid = $this->customer();
+        PaymentFactory::new()->create(['customer_id' => $paid->id, 'method' => 'mtn_momo', 'method_reference' => 'CI-555', 'verification_status' => 'verified']);
+        $reused = $this->customer();
+        $bank = $this->customer();
+
+        $token = $this->tokenForRole('super');
+        $this->withHeader('Authorization', "Bearer {$token}")->postJson('/api/v1/sync/push', [
+            'device_id' => 'device-held-1',
+            'changes' => ['payments' => [
+                ['local_uuid' => (string) Str::uuid(), 'customer_uuid' => $reused->uuid, 'amount' => 2500, 'frequency' => 'monthly', 'method' => 'mtn_momo', 'method_reference' => 'ci-555'],
+                ['local_uuid' => (string) Str::uuid(), 'customer_uuid' => $bank->uuid, 'amount' => 2500, 'frequency' => 'monthly', 'method' => 'bank', 'method_reference' => 'SLIP-1'],
+            ]],
+        ])->assertOk()->assertJsonPath('results.payments.0.status', 'synced')->assertJsonPath('results.payments.1.status', 'synced');
+
+        $held = Payment::query()->where('customer_id', $reused->id)->sole();
+        $this->assertSame('pending', $held->verification_status, 'Even the owner\'s phone payment waits for the office.');
+        $this->assertStringContainsStringIgnoringCase('CI-555', (string) $held->held_reason);
+        $this->assertStringContainsString('office', (string) Payment::query()->where('customer_id', $bank->id)->sole()->held_reason);
     }
 
     /**
@@ -645,10 +648,8 @@ class SyncTest extends TestCase
 
         $serverUuid = collect($first->json('results.payments'))->firstWhere('local_uuid', $localUuid)['server_uuid'];
 
-        $managerToken = $this->tokenForRole('manager');
-        $this->withHeader('Authorization', "Bearer {$managerToken}")
-            ->postJson("/api/v1/payments/{$serverUuid}/verify", ['action' => 'reject', 'notes' => 'Amount mismatch.'])
-            ->assertOk();
+        // Rejected in the office (with the money question — PaymentVerificationService::reverse()).
+        app(PaymentVerificationService::class)->reverse(Payment::query()->where('uuid', $serverUuid)->sole(), 'Amount mismatch.', User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail(), 'none');
 
         $this->assertDatabaseHas('payments', ['uuid' => $serverUuid, 'verification_status' => 'rejected']);
 

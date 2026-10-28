@@ -18,7 +18,7 @@ class PaymentRepository implements PaymentRepositoryInterface
     {
         return $this->scopeToBranchDirect(Payment::query(), $this->currentBranchId())
             // remittanceLine: whether the cash was handed in (the Reverse dialog's choices).
-            ->with(['customer', 'verification.verifier', 'remittanceLine', 'customerCharge'])
+            ->with(['customer', 'verification.verifier', 'remittanceLine', 'customerCharge', 'recordedBy:id,name'])
             ->when($filters['customer_id'] ?? null, fn ($query, $customerId) => $query->where('customer_id', $customerId))
             ->when(
                 $filters['zone_id'] ?? null,

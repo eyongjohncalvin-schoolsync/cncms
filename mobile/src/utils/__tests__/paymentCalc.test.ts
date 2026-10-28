@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateGuideAmount, validatePaymentForm } from '../paymentCalc';
+import { PAYMENT_METHODS, calculateGuideAmount, paymentMethodLabel, validatePaymentForm } from '../paymentCalc';
 
 test('calculateGuideAmount: monthly is bill × 1', () => {
     assert.equal(calculateGuideAmount(5000, 'monthly', null), 5000);
@@ -98,4 +98,10 @@ test('validatePaymentForm: MoMo and Orange Money need a transaction ID, cash and
     assert.equal(validatePaymentForm({ ...base, method: 'cash' }).valid, true);
     assert.equal(validatePaymentForm({ ...base, method: 'bank' }).valid, true);
     assert.equal(validatePaymentForm(base).valid, true);
+});
+
+test('a collector cannot pick bank in the field — the office records bank payments', () => {
+    assert.equal(PAYMENT_METHODS.some((option) => option.value === 'bank'), false);
+    assert.equal(paymentMethodLabel('bank'), 'Bank');
+    assert.equal(paymentMethodLabel('mtn_momo'), 'MTN MoMo');
 });

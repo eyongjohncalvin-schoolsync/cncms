@@ -1046,7 +1046,7 @@ class PaymentTest extends TestCase
     public function test_manager_can_edit_a_payments_amount(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'amount' => 2500]);
+        $payment = PaymentFactory::new()->pending()->create(['created_at' => now()->subYear(), 'customer_id' => $customer->id, 'amount' => 2500]);
 
         $this->actingAsRole('manager');
 
@@ -1067,7 +1067,7 @@ class PaymentTest extends TestCase
     {
         foreach (['admin', 'super'] as $role) {
             $customer = $this->customer();
-            $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'amount' => 2500]);
+            $payment = PaymentFactory::new()->pending()->create(['created_at' => now()->subYear(), 'customer_id' => $customer->id, 'amount' => 2500]);
 
             $this->actingAsRole($role);
 
@@ -1133,6 +1133,7 @@ class PaymentTest extends TestCase
         $customer = $this->customer();
         $payment = PaymentFactory::new()->pending()->create([
             'customer_id' => $customer->id,
+            'created_at' => now()->subYear(),
             'amount' => 2500,
             'frequency' => 'monthly',
             'months' => null,
@@ -1232,7 +1233,7 @@ class PaymentTest extends TestCase
     public function test_super_can_delete_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['created_at' => now()->subYear(), 'customer_id' => $customer->id]);
 
         $this->actingAsRole('super');
 
@@ -1246,7 +1247,7 @@ class PaymentTest extends TestCase
     public function test_admin_can_delete_a_payment(): void
     {
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['created_at' => now()->subYear(), 'customer_id' => $customer->id]);
 
         $this->actingAsRole('admin');
 
@@ -1312,8 +1313,10 @@ class PaymentTest extends TestCase
     {
         // A verified payment is reversed, never deleted
         // (PaymentService::delete()) — a rejected one still has its record.
+        // From before cash controls started: one since then is never deleted
+        // (its collector owes a handover for it).
         $customer = $this->customer();
-        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'created_at' => now()->subYear()]);
 
         $this->actingAsRole('manager');
         $this->post("/payments/{$payment->uuid}/verify", [

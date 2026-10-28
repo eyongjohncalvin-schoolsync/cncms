@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Payment;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -47,6 +48,8 @@ class ReconnectCustomerRequest extends FormRequest
             'note' => ['nullable', 'string', 'max:1000'],
             'include_fine' => ['sometimes', 'boolean'],
             'arrears_payment' => ['nullable', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'],
+            // How the fine / arrears money was paid — a MoMo fine is never counted as cash.
+            ...Payment::methodRules(),
         ];
     }
 }

@@ -6,6 +6,7 @@ namespace Tests\Feature\Web;
 
 use App\Models\ArrearsAdjustment;
 use App\Models\CommandRun;
+use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerSubscription;
 use App\Models\FreeMonthGrant;
@@ -160,14 +161,25 @@ class ReversePaymentTest extends TestCase
         $this->assertNotNull($payment->fresh());
     }
 
-    public function test_handed_in_cash_must_be_corrected_or_refunded(): void
+    public function test_handed_in_cash_recorded_by_mistake_goes_back_to_the_collector(): void
     {
         $payment = $this->handedIn();
 
         $this->as('terence@shalomtech.dev', 'admin');
-        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Wrong amount'])->assertSessionHasErrors('money');
-        $this->assertSame('verified', $payment->fresh()->verification_status);
         $this->get("/payments/{$payment->uuid}")->assertInertia(fn (Assert $page) => $page->where('payment.handed_in', true));
+
+        // Owner, 2026-10-28: the cash in the till is the collector's own — a bon gives it back to them.
+        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Recorded on the wrong day', 'money' => 'none'])
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', fn (string $message) => str_contains($message, 'pays the collector back'));
+
+        $payment->refresh();
+        $this->assertSame('rejected', $payment->verification_status);
+        $bon = Voucher::query()->findOrFail($payment->refund_voucher_id);
+        $this->assertSame('2500.00', (string) $bon->amount);
+        $this->assertSame(User::query()->where('email', 'kelvin@shalomtech.dev')->value('name'), $bon->payee_name);
+        $this->assertTrue($bon->isPending(), 'Approved and paid like any bon.');
+        $this->assertTrue($payment->remittanceLine()->exists(), 'The handover still shows the cash it counted.');
     }
 
     public function test_handed_in_cash_given_back_raises_a_refund_bon(): void
@@ -239,13 +251,62 @@ class ReversePaymentTest extends TestCase
         ])->assertSessionHasNoErrors();
 
         $payment->refresh();
+        $replacement = Payment::query()->findOrFail($payment->replaced_by_payment_id);
         $this->assertSame('rejected', $payment->verification_status);
-        $this->assertSame('3000.00', (string) Payment::query()->findOrFail($payment->replaced_by_payment_id)->amount);
+        $this->assertSame('3000.00', (string) $replacement->amount);
         $this->assertNull($payment->refund_voucher_id);
 
-        // A refund is only for handed-in cash.
+        // The collector now owes the corrected 3,000 — in their name, not the corrector's.
+        $collector = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $this->assertSame($collector->id, $replacement->recorded_by);
+        $this->assertSame([$replacement->id], app(RemittanceService::class)->outstandingQuery($collector)->whereIn('id', [$payment->id, $replacement->id])->pluck('id')->all());
+    }
+
+    public function test_a_correction_for_less_keeps_the_money_owed_and_refunds_the_rest(): void
+    {
+        $payment = $this->verifiedPaymentRecordedBy('kelvin@shalomtech.dev');
+
+        $this->as('terence@shalomtech.dev', 'admin');
+        $this->post('/payments', [
+            'customer_uuid' => $this->customer->uuid, 'amount' => 2000, 'frequency' => 'monthly',
+            'replaces_payment_uuid' => $payment->uuid, 'replace_reason' => 'Charged too much',
+        ])->assertSessionHasNoErrors();
+
+        $payment->refresh();
+        $replacement = Payment::query()->findOrFail($payment->replaced_by_payment_id);
+        $this->assertSame('500.00', (string) Voucher::query()->findOrFail($payment->refund_voucher_id)->amount);
+
+        // The 2,500 taken is still handed in once, on the original; the correction stands on it.
+        $collector = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $this->assertSame([$payment->id], app(RemittanceService::class)->outstandingQuery($collector)->whereIn('id', [$payment->id, $replacement->id])->pluck('id')->all());
+        $this->assertSame($payment->id, $replacement->paid_with_payment_id);
+    }
+
+    public function test_money_not_handed_in_yet_can_be_refunded_and_stays_owed(): void
+    {
         $other = $this->subscriberPayment();
-        $this->post("/payments/{$other->uuid}/reverse", ['reason' => 'x', 'money' => 'refund'])->assertSessionHasErrors();
+
+        $this->post("/payments/{$other->uuid}/reverse", ['reason' => 'Paid twice', 'money' => 'refund'])->assertSessionHasNoErrors();
+
+        $other->refresh();
+        $this->assertSame('2500.00', (string) Voucher::query()->findOrFail($other->refund_voucher_id)->amount);
+        $collector = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $this->assertTrue(app(RemittanceService::class)->outstandingQuery($collector)->whereKey($other->id)->exists(), 'The collector still hands the cash in; the bon pays the customer.');
+    }
+
+    public function test_recorded_by_mistake_before_the_handover_leaves_it(): void
+    {
+        $other = $this->subscriberPayment();
+
+        $this->post("/payments/{$other->uuid}/reverse", ['reason' => 'Test entry', 'money' => 'none'])
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', fn (string $message) => str_contains($message, 'leaves the collector'));
+
+        $other->refresh();
+        $this->assertFalse($other->money_taken);
+        $this->assertNull($other->refund_voucher_id);
+        $collector = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
+        $this->assertFalse(app(RemittanceService::class)->outstandingQuery($collector)->whereKey($other->id)->exists());
     }
 
     public function test_the_recorder_cannot_reverse_their_own_payment_but_the_owner_can(): void
@@ -276,8 +337,20 @@ class ReversePaymentTest extends TestCase
         $this->post("/payments/{$payment->uuid}/verify", ['action' => 'reject', 'notes' => 'Wrong'])->assertSessionHasErrors('action');
         $this->assertSame('verified', $payment->fresh()->verification_status);
 
+        // Pending, but its collector owes a handover for it: a plain reject
+        // is refused — the Reject dialog asks what happened to the money.
         $payment->update(['verification_status' => 'pending']);
-        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Wrong'])->assertForbidden();
+        $this->post("/payments/{$payment->uuid}/verify", ['action' => 'reject', 'notes' => 'Wrong'])->assertSessionHasErrors('action');
+        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Wrong', 'money' => 'none'])
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', fn (string $message) => str_starts_with($message, 'Payment rejected.'));
+        $this->assertSame('rejected', $payment->fresh()->verification_status);
+
+        // From before cash controls started, a pending payment is still simply rejected.
+        $old = $this->subscriberPayment();
+        $old->forceFill(['verification_status' => 'pending', 'created_at' => Company::query()->firstOrFail()->cash_controls_start_date->copy()->subDays(2)])->save();
+        $this->post("/payments/{$old->uuid}/reverse", ['reason' => 'Wrong'])->assertForbidden();
+        $this->post("/payments/{$old->uuid}/verify", ['action' => 'reject', 'notes' => 'Wrong'])->assertSessionHasNoErrors();
     }
 
     public function test_the_money_on_a_verified_payment_cannot_be_edited(): void

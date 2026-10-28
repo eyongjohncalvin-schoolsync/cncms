@@ -534,7 +534,9 @@ class CustomerController extends Controller
             $customer,
             $request->validated('note'),
             $request->boolean('include_fine'),
-            $request->validated('arrears_payment'),
+            $request->validated('arrears_payment') !== null ? (string) $request->validated('arrears_payment') : null,
+            $request->validated('method'),
+            $request->validated('method_reference'),
         );
 
         return back()->with('success', "{$customer->name} reconnected.");
