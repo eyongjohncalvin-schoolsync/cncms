@@ -94,6 +94,21 @@ class ManuscriptTest extends TestCase
                 ->has('zones'));
     }
 
+    /** Regression: an archived customer's bill crashed the page ("uuid" on null). */
+    public function test_index_shows_an_archived_customers_bill(): void
+    {
+        // A month no other test bills, so this is the only row.
+        $period = '2001-01';
+        $customer = CustomerFactory::new()->create(['name' => 'ARCHIVED CUSTOMER']);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
+        $customer->delete();
+
+        $this->actingAsRole('manager');
+
+        $this->get("/manuscripts?period={$period}")->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->where('manuscripts.data.0.customer_name', 'ARCHIVED CUSTOMER'));
+    }
+
     public function test_index_search_filters_the_row_list_to_the_matching_customer(): void
     {
         $period = Carbon::now()->format('Y-m');

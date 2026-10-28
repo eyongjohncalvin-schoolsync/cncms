@@ -21,7 +21,8 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->scoped($filters)
-            ->with('customer.zone')
+            // An archived customer's bill is still history: it shows, with its customer.
+            ->with(['customer' => fn ($query) => $query->withTrashed(), 'customer.zone'])
             ->orderBy('customer_id')
             ->paginate($perPage);
     }
@@ -29,7 +30,8 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
     public function all(array $filters): Collection
     {
         return $this->scoped($filters)
-            ->with('customer.zone')
+            // An archived customer's bill is still history: it shows, with its customer.
+            ->with(['customer' => fn ($query) => $query->withTrashed(), 'customer.zone'])
             ->orderBy('customer_id')
             ->get();
     }
