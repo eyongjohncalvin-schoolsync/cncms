@@ -12,6 +12,7 @@ use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Requests\VerifyPaymentRequest;
 use App\Http\Resources\PaymentResource;
 use App\Models\Branch;
+use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PrepaymentOffer;
 use App\Services\PaymentService;
@@ -27,6 +28,34 @@ class PaymentController extends Controller
         private readonly PaymentService $payments,
         private readonly PaymentVerificationService $verifications,
     ) {}
+
+    /**
+     * Before the phone saves a payment, when it has signal (owner,
+     * 2026-10-28): has anyone — the office, another collector, this agent on
+     * another phone — already recorded one for this customer that a new
+     * payment of `amount` may repeat? The same check saving runs
+     * (PaymentService::earlierPaymentFor()), so the agent is asked in the
+     * field instead of the office finding it later.
+     */
+    public function check(Request $request, Customer $customer): JsonResponse
+    {
+        $this->authorize('view', $customer);
+
+        $validated = $request->validate(['amount' => ['required', 'numeric', 'gt:0']]);
+        $earlier = $this->payments->earlierPaymentFor($customer, (string) $validated['amount']);
+
+        return response()->json(['data' => [
+            'earlier' => $earlier === null ? null : [
+                'uuid' => $earlier->uuid,
+                'amount' => (string) $earlier->amount,
+                'collected_at' => ($earlier->collected_at ?? $earlier->created_at)->toIso8601String(),
+                'recorded_by' => $earlier->recordedBy?->name,
+                'recorded_by_me' => $earlier->recorded_by === $request->user()->id,
+                'receipt_number' => $earlier->receipt?->receipt_number,
+                'verification_status' => $earlier->verification_status,
+            ],
+        ]]);
+    }
 
     public function index(Request $request): JsonResponse
     {

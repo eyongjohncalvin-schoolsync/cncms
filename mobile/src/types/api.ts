@@ -298,6 +298,8 @@ export interface SyncPullCustomer {
     branch_uuid?: string | null;
     /** Old debt still unpaid, every collector's payments counted (PaymentService::unpaidDebts()). Absent from older servers. */
     unpaid_debt?: string | null;
+    /** The latest payment this month by anyone (owner, 2026-10-28). Absent from older servers. */
+    paid_this_month?: PaidThisMonthApi | null;
     /**
      * From the customer's `latestManuscript` (App\Models\Customer),
      * eager-loaded alongside `zone` in SyncService::upsertedCustomers() —
@@ -637,6 +639,26 @@ export interface ServiceVariantOptionApi {
     uuid: string;
     name: string;
     price: string;
+}
+
+/** A customer's latest payment this month, whoever recorded it (sync pull). */
+export interface PaidThisMonthApi {
+    amount: string;
+    collected_at: string;
+    recorded_by: string | null;
+}
+
+/** GET /customers/{uuid}/payment-check — the payment a new one may repeat, any collector's. */
+export interface PaymentCheckApi {
+    earlier: {
+        uuid: string;
+        amount: string;
+        collected_at: string;
+        recorded_by: string | null;
+        recorded_by_me: boolean;
+        receipt_number: string | null;
+        verification_status: string;
+    } | null;
 }
 
 /** A price option of a service (Settings → Services) — a quick pick besides its default price. */

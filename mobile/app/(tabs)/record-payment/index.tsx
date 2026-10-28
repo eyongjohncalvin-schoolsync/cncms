@@ -45,7 +45,17 @@ import {
 import { getCachedPrepaymentOffers, refreshPrepaymentOffers, type PrepaymentOfferApi } from '../../../src/api/prepaymentOffers';
 import { offerPriceFor } from '../../../src/utils/offerPrice';
 import type { DuplicateReason, LocalCustomer, LocalPayment } from '../../../src/types/db';
-import { DUPLICATE_REASONS, isDuplicateConfirmationComplete, startOfBusinessMonthIso } from '../../../src/utils/duplicatePayment';
+import {
+    DUPLICATE_REASONS,
+    REPEAT_BLOCK_MS,
+    earlierFromLastSync,
+    earlierFromPhone,
+    earlierFromServer,
+    isDuplicateConfirmationComplete,
+    startOfBusinessMonthIso,
+    type EarlierPayment,
+} from '../../../src/utils/duplicatePayment';
+import { checkEarlierPayment } from '../../../src/api/paymentCheck';
 import { splitPrepayment } from '../../../src/utils/prepaymentSplit';
 import { syncManager } from '../../../src/sync/SyncManager';
 
@@ -83,6 +93,9 @@ const CONFIRM_BADGE: Record<'queued' | 'synced', { label: string; tone: BadgeTon
 // back to the Customer List, and how often it polls this device's own
 // local row for a near-instant queued->synced transition within that
 // window. Never blocks navigation on the poll settling either way.
+/** Owner, 2026-10-28: an unsynced payment is not a failed one — never record it again. */
+const SAVED_NOT_SYNCED = 'Saved on this phone — it reaches the office when you have signal. Do not record it again.';
+
 const CONFIRM_DISPLAY_MS = 2800;
 const CONFIRM_POLL_MS = 500;
 
@@ -139,7 +152,9 @@ export default function RecordPaymentScreen() {
     const [submitting, setSubmitting] = useState(false);
     // A payment for this customer already on this phone this month: the agent
     // says why another is fine before it is saved (src/utils/duplicatePayment.ts).
-    const [duplicateOf, setDuplicateOf] = useState<LocalPayment | null>(null);
+    const [duplicateOf, setDuplicateOf] = useState<EarlierPayment | null>(null);
+    // This phone's own payment of the same amount minutes ago: not recorded again.
+    const [blockedBy, setBlockedBy] = useState<LocalPayment | null>(null);
     const [duplicateReason, setDuplicateReason] = useState<DuplicateReason | null>(null);
     const [duplicateNote, setDuplicateNote] = useState('');
     const scrollRef = useRef<ScrollView>(null);
@@ -298,6 +313,7 @@ export default function RecordPaymentScreen() {
 
     function clearDuplicateCheck() {
         setDuplicateOf(null);
+        setBlockedBy(null);
         setDuplicateReason(null);
         setDuplicateNote('');
     }
@@ -383,11 +399,33 @@ export default function RecordPaymentScreen() {
         setSubmitting(true);
 
         try {
-            // Already paid this month (on this phone)? Ask why before saving.
+            // Already paid? Ask why before saving (owner, 2026-10-28).
             if (duplicateOf === null) {
-                const earlier =
+                // The same amount this phone recorded for this customer in the
+                // last half hour is the first payment, not a new one: it is
+                // saved and will sync — never recorded twice.
+                const repeat = await getSameAmountRecentlyForCustomer(customer.uuid, validation.amountValue, new Date(Date.now() - REPEAT_BLOCK_MS).toISOString());
+
+                if (repeat !== null) {
+                    setBlockedBy(repeat);
+                    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+
+                    return;
+                }
+
+                // With signal, the server knows every collector's payments; else
+                // this phone's own, then what the last sync said.
+                const fromServer = await checkEarlierPayment(customer.uuid, validation.amountValue);
+                const fromPhone =
                     (await getPaymentThisMonthForCustomer(customer.uuid, startOfBusinessMonthIso(new Date()))) ??
                     (await getSameAmountRecentlyForCustomer(customer.uuid, validation.amountValue, new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()));
+                const earlier = fromServer
+                    ? earlierFromServer(fromServer)
+                    : fromPhone
+                      ? earlierFromPhone(fromPhone)
+                      : fromServer === undefined
+                        ? earlierFromLastSync(customer)
+                        : null;
 
                 if (earlier !== null) {
                     setDuplicateOf(earlier);
@@ -533,6 +571,7 @@ export default function RecordPaymentScreen() {
                             Check at {receiptCheckUrl(issuedReceipt.check_url_base, issuedReceipt.receipt_number, issuedReceipt.security_code)}
                         </Text>
                     </Card>
+                    {!confirmSynced ? <Text style={styles.confirmWarning}>{SAVED_NOT_SYNCED}</Text> : null}
                     <Button title="Done" size="large" onPress={finishConfirmation} />
                 </ScrollView>
             );
@@ -549,6 +588,7 @@ export default function RecordPaymentScreen() {
                     <Text style={styles.confirmHint}>
                         No receipt number on this phone yet — the office will issue the receipt. Sync to get receipt numbers.
                     </Text>
+                    {!confirmSynced ? <Text style={styles.confirmWarning}>{SAVED_NOT_SYNCED}</Text> : null}
                     <Text style={styles.confirmHint}>Returning to the customer list…</Text>
                 </Card>
             </View>
@@ -634,7 +674,8 @@ export default function RecordPaymentScreen() {
     }
 
     const arrears = customer.total_arrears ?? 0;
-    const submitDisabled = !validation.valid || submitting || (duplicateOf !== null && !isDuplicateConfirmationComplete(duplicateReason, duplicateNote));
+    const submitDisabled =
+        !validation.valid || submitting || blockedBy !== null || (duplicateOf !== null && !isDuplicateConfirmationComplete(duplicateReason, duplicateNote));
 
     return (
         <View style={styles.flex}>
@@ -921,14 +962,35 @@ export default function RecordPaymentScreen() {
                     )}
                 </View>
 
+                {/* The same payment again, minutes later: it is already saved. */}
+                {blockedBy ? (
+                    <View style={styles.duplicateCard} accessibilityRole="alert">
+                        <Text style={styles.duplicateTitle}>
+                            You already recorded {formatFcfa(blockedBy.amount)} for {customer?.name ?? 'this customer'} at{' '}
+                            {new Date(blockedBy.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {blockedBy.receipt_number ? ` (receipt ${blockedBy.receipt_number})` : ''}.
+                        </Text>
+                        <Text style={styles.duplicateHint}>
+                            {blockedBy.sync_status === 'synced'
+                                ? 'It has reached the office.'
+                                : 'It is saved on this phone and will reach the office when you have signal.'}{' '}
+                            Do not record it again.
+                        </Text>
+                        <Button title="OK — don't record it again" variant="secondary" onPress={clearDuplicateCheck} />
+                    </View>
+                ) : null}
+
                 {/* 8. Already paid this month — say why another payment is fine. */}
                 {duplicateOf ? (
                     <View style={styles.duplicateCard} accessibilityRole="alert">
                         <Text style={styles.duplicateTitle}>
-                            {customer?.name ?? 'This customer'} already paid {formatFcfa(duplicateOf.amount)} on{' '}
-                            {new Date(duplicateOf.created_at).toLocaleDateString()}
-                            {duplicateOf.receipt_number ? ` (receipt ${duplicateOf.receipt_number})` : ''}.
+                            {customer?.name ?? 'This customer'} already paid {formatFcfa(duplicateOf.amount)} on {new Date(duplicateOf.at).toLocaleDateString()}
+                            {duplicateOf.recordedBy ? ` — recorded by ${duplicateOf.recordedBy}` : ''}
+                            {duplicateOf.receiptNumber ? ` (receipt ${duplicateOf.receiptNumber})` : ''}.
                         </Text>
+                        {duplicateOf.source === 'last-sync' ? (
+                            <Text style={styles.duplicateHint}>From the last sync — there may be newer payments the phone hasn't seen.</Text>
+                        ) : null}
                         <Text style={styles.duplicateHint}>Why is another payment fine?</Text>
                         <View style={styles.duplicateReasons}>
                             {DUPLICATE_REASONS.map((reason) => {
@@ -1108,4 +1170,5 @@ const styles = StyleSheet.create({
     confirmAmount: { fontSize: fontSize.display, fontWeight: '800', color: colors.textPrimary, marginTop: spacing.sm },
     confirmSubtitle: { fontSize: fontSize.md, color: colors.textSecondary },
     confirmHint: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: spacing.md },
+    confirmWarning: { fontSize: fontSize.sm, fontWeight: '700', color: colors.status.offlineFg, marginTop: spacing.md, textAlign: 'center' },
 });

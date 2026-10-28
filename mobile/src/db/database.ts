@@ -238,6 +238,9 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN branch_uuid TEXT' },
     // Old debt still unpaid as the server counts it (every collector's payments), at cached_at.
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN unpaid_debt REAL' },
+    // The latest payment this month by anyone (JSON: amount, collected_at, recorded_by), at cached_at —
+    // warned about before a second one, even offline (owner, 2026-10-28).
+    { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN paid_this_month TEXT' },
 ];
 
 /**

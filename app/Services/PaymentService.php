@@ -8,6 +8,7 @@ use App\DataTransferObjects\PaymentData;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\PrepaymentOffer;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\PaymentRepositoryInterface;
@@ -392,8 +393,7 @@ class PaymentService
             return $attributes;
         }
 
-        $earlier = $this->earlierPaymentThisMonth($customer, $data->collectedAt)
-            ?? $this->sameAmountAcrossMonthEnd($customer, (string) $data->amount, $data->collectedAt);
+        $earlier = $this->earlierPaymentFor($customer, (string) $data->amount, $data->collectedAt);
 
         if ($earlier === null) {
             return $attributes;
@@ -517,6 +517,55 @@ class PaymentService
     {
         $this->earlierMemo = null;
         $this->monthEndMemo = null;
+    }
+
+    /**
+     * The earlier payment a new one of $amount may repeat — this month's,
+     * or the same amount just before the month began. What saving checks
+     * (flagPossibleDuplicate()) and what the phone asks before saving when
+     * it has signal (owner, 2026-10-28), so both see every collector's.
+     */
+    public function earlierPaymentFor(Customer $customer, string $amount, ?string $collectedAt = null): ?Payment
+    {
+        return $this->earlierPaymentThisMonth($customer, $collectedAt)
+            ?? $this->sameAmountAcrossMonthEnd($customer, $amount, $collectedAt);
+    }
+
+    /**
+     * Each customer's latest subscription payment (not rejected) this
+     * business month, whoever recorded it — one query for the whole set.
+     * The phone keeps it with the customer, so it can warn offline about a
+     * payment the office or another collector already took.
+     *
+     * @param  Collection<int, Customer>  $customers
+     * @return array<int, array{amount: string, collected_at: string, recorded_by: ?string}>
+     */
+    public static function latestThisMonth(Collection $customers): array
+    {
+        if ($customers->isEmpty()) {
+            return [];
+        }
+
+        $monthStart = Carbon::now()->setTimezone(BusinessTimezone::WAT)->startOfMonth()->setTimezone('UTC');
+
+        $payments = Payment::query()
+            ->withoutGlobalScope(BranchScope::class)
+            ->selectRaw('distinct on (payments.customer_id) payments.*')
+            ->whereIn('customer_id', $customers->pluck('id'))
+            ->subscription()
+            ->where('verification_status', '!=', 'rejected')
+            ->whereRaw('coalesce(collected_at, created_at) >= ?', [$monthStart])
+            ->orderBy('customer_id')
+            ->orderByRaw('coalesce(collected_at, created_at) desc')
+            ->get();
+
+        $names = User::query()->whereKey($payments->pluck('recorded_by')->filter()->unique())->pluck('name', 'id');
+
+        return $payments->mapWithKeys(fn (Payment $payment): array => [(int) $payment->customer_id => [
+            'amount' => (string) $payment->amount,
+            'collected_at' => ($payment->collected_at ?? $payment->created_at)->toIso8601String(),
+            'recorded_by' => $names[$payment->recorded_by] ?? null,
+        ]])->all();
     }
 
     /**

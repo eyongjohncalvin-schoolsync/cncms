@@ -47,6 +47,8 @@ export interface LocalCustomer {
      * next pull refreshes the row.
      */
     unpaid_debt?: number | null;
+    /** JSON PaidThisMonthApi — the latest payment this month by anyone, at cached_at. */
+    paid_this_month?: string | null;
 }
 
 export interface LocalPayment {

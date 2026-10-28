@@ -26,9 +26,10 @@ const STATUS_BADGE: Record<string, { label: string; tone: BadgeTone }> = {
 };
 
 const PAYMENT_SYNC_BADGE: Record<LocalPayment['sync_status'], { label: string; tone: BadgeTone }> = {
-    queued: { label: 'Saved · will sync', tone: 'offline' },
+    // Owner, 2026-10-28: plainly not lost — never recorded again.
+    queued: { label: 'Waiting to sync — saved, do not record again', tone: 'offline' },
     syncing: { label: 'Syncing…', tone: 'syncing' },
-    synced: { label: 'Synced', tone: 'synced' },
+    synced: { label: 'Reached the office', tone: 'synced' },
     failed: { label: 'Sync failed', tone: 'error' },
 };
 

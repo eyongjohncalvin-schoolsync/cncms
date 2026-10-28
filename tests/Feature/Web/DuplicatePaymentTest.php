@@ -331,6 +331,31 @@ class DuplicatePaymentTest extends TestCase
     }
 
     /**
+     * The phone (owner, 2026-10-28): with signal it asks before saving —
+     * someone else's payment this month is found; offline it warns from the
+     * latest payment this month that each sync brings with the customer.
+     */
+    public function test_the_phone_learns_of_anyones_payment_this_month(): void
+    {
+        $this->as('manager');
+        $this->pay()->assertSessionHasNoErrors();
+        $token = $this->tokenForRole('manager');
+
+        $this->withToken($token)->getJson("/api/v1/customers/{$this->customer->uuid}/payment-check?amount=2500")
+            ->assertOk()
+            ->assertJsonPath('data.earlier.amount', '2500.00')
+            ->assertJsonPath('data.earlier.recorded_by', $this->kelvin->name);
+
+        $other = CustomerFactory::new()->create(['zone_id' => $this->customer->zone_id, 'bill' => 2500, 'status' => 'active']);
+        $this->withToken($token)->getJson("/api/v1/customers/{$other->uuid}/payment-check?amount=2500")
+            ->assertOk()
+            ->assertJsonPath('data.earlier', null);
+
+        $pulled = collect($this->withToken($token)->getJson('/api/v1/sync/pull')->assertOk()->json('changes.customers.upserted'))->firstWhere('uuid', $this->customer->uuid);
+        $this->assertSame(['2500.00', $this->kelvin->name], [$pulled['paid_this_month']['amount'], $pulled['paid_this_month']['recorded_by']]);
+    }
+
+    /**
      * Two payments for one customer at the same moment: recording one holds
      * that customer's lock until it commits, so the other waits and then
      * sees it. The test's open tenant transaction stands in for "not yet

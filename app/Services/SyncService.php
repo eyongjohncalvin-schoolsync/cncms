@@ -825,6 +825,7 @@ class SyncService
         $currentPeriod = BusinessTimezone::currentPeriod();
         $branchUuids = Branch::query()->pluck('uuid', 'id');
         $unpaidDebts = PaymentService::unpaidDebts($customers);
+        $paidThisMonth = PaymentService::latestThisMonth($customers);
 
         return $customers
             ->map(fn (Customer $customer): array => [
@@ -844,6 +845,9 @@ class SyncService
                 // (PaymentService::unpaidDebts(), what an offer payment is
                 // checked against). The phone takes off what it collected since.
                 'unpaid_debt' => $unpaidDebts[$customer->id],
+                // The latest payment this month by anyone (owner, 2026-10-28): the
+                // phone warns about it before a second one, even offline.
+                'paid_this_month' => $paidThisMonth[$customer->id] ?? null,
                 'services' => $customer->subscriptions->map(fn (CustomerSubscription $row): array => [
                     'service_uuid' => $row->service->uuid,
                     'service_name' => $row->service->name,

@@ -14,4 +14,6 @@ Route::get('payments/prepayment-offers', [PaymentController::class, 'prepaymentO
 // panel's identically-shaped route names — see routes/web/payments.php.
 Route::apiResource('payments', PaymentController::class)->names('api.payments');
 Route::post('payments/{payment}/verify', [PaymentController::class, 'verify']);
+// The phone asks, when it has signal, before saving a payment (owner, 2026-10-28).
+Route::get('customers/{customer}/payment-check', [PaymentController::class, 'check']);
 Route::post('payments/{payment}/receipt', [PaymentController::class, 'uploadReceipt']);
