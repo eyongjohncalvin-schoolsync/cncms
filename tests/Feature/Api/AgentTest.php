@@ -106,82 +106,22 @@ class AgentTest extends TestCase
         $response->assertStatus(404);
     }
 
-    public function test_manager_can_create_an_agent(): void
-    {
-        $zone = ZoneFactory::new()->create();
-        $token = $this->tokenForRole('manager');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/agents', [
-                'zone_uuid' => $zone->uuid,
-                'name' => 'FIELD AGENT',
-                'location' => 'Main Street',
-                'phone' => '677000000',
-                'salary' => 50000,
-            ]);
-
-        $response->assertCreated()
-            ->assertJsonPath('data.name', 'FIELD AGENT')
-            ->assertJsonPath('data.zone_uuid', $zone->uuid);
-
-        $this->assertDatabaseHas('agents', ['name' => 'FIELD AGENT', 'zone_id' => $zone->id]);
-    }
-
-    public function test_admin_can_update_an_agent(): void
+    /**
+     * A field agent is a user (owner, 2026-10-28): accounts are created on
+     * the Users page and zones given on the Agents page — the API only reads.
+     */
+    public function test_the_api_no_longer_creates_edits_or_deletes_agents(): void
     {
         $zone = ZoneFactory::new()->create();
         $agent = AgentFactory::new()->create(['zone_id' => $zone->id, 'user_id' => null, 'status' => 'active']);
-
-        $token = $this->tokenForRole('admin');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->patchJson("/api/v1/agents/{$agent->uuid}", ['status' => 'inactive']);
-
-        $response->assertOk()->assertJsonPath('data.status', 'inactive');
-        $this->assertDatabaseHas('agents', ['id' => $agent->id, 'status' => 'inactive']);
-    }
-
-    public function test_super_can_delete_an_agent(): void
-    {
-        $zone = ZoneFactory::new()->create();
-        $agent = AgentFactory::new()->create(['zone_id' => $zone->id, 'user_id' => null]);
-
         $token = $this->tokenForRole('super');
+        $api = $this->withHeader('Authorization', "Bearer {$token}");
 
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->deleteJson("/api/v1/agents/{$agent->uuid}");
+        $api->postJson('/api/v1/agents', ['zone_uuid' => $zone->uuid, 'name' => 'NOT HERE'])->assertStatus(405);
+        $api->patchJson("/api/v1/agents/{$agent->uuid}", ['status' => 'inactive'])->assertStatus(405);
+        $api->deleteJson("/api/v1/agents/{$agent->uuid}")->assertStatus(405);
 
-        $response->assertOk()->assertJson(['message' => 'Agent deleted']);
-        $this->assertDatabaseMissing('agents', ['id' => $agent->id]);
-    }
-
-    public function test_store_fails_validation_when_required_fields_are_missing(): void
-    {
-        $token = $this->tokenForRole('super');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/agents', [
-                'name' => 'INCOMPLETE AGENT',
-            ]);
-
-        $response->assertStatus(422)->assertJsonValidationErrors(['zone_uuid', 'location', 'phone', 'salary']);
-    }
-
-    public function test_agent_role_cannot_create_an_agent(): void
-    {
-        $zone = ZoneFactory::new()->create();
-        $token = $this->tokenForRole('agent');
-
-        $response = $this->withHeader('Authorization', "Bearer {$token}")
-            ->postJson('/api/v1/agents', [
-                'zone_uuid' => $zone->uuid,
-                'name' => 'SHOULD NOT EXIST',
-                'location' => 'Main Street',
-                'phone' => '677000000',
-                'salary' => 50000,
-            ]);
-
-        $response->assertStatus(403);
-        $this->assertDatabaseMissing('agents', ['name' => 'SHOULD NOT EXIST']);
+        $this->assertDatabaseHas('agents', ['id' => $agent->id, 'status' => 'active']);
+        $this->assertDatabaseMissing('agents', ['name' => 'NOT HERE']);
     }
 }

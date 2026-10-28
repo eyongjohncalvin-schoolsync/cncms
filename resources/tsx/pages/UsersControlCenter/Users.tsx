@@ -238,10 +238,10 @@ export default function UsersControlCenterUsers({
                                                 {tenantUser.agent_setup && (
                                                     // An agent who can't work yet: the app would show them nothing.
                                                     <Link
-                                                        href={tenantUser.agent_setup === 'no_profile' ? '/agents/create' : '/zones/coverage'}
+                                                        href="/agents"
                                                         className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800 ring-1 ring-inset ring-red-200 hover:bg-red-100"
                                                     >
-                                                        {tenantUser.agent_setup === 'no_profile' ? 'No agent profile — set up' : 'No zones — give zones'} →
+                                                        No zones — give zones →
                                                     </Link>
                                                 )}
                                             </div>
@@ -454,8 +454,8 @@ export default function UsersControlCenterUsers({
                                     </SelectInput>
                                     <p className="-mt-2 text-xs text-slate-500">
                                         Fences this person to one branch's data only. Leave as "All branches" for
-                                        unrestricted access. Ignored for the Agent role — agents are scoped
-                                        automatically by their assigned zone's branch instead.
+                                        unrestricted access. A field agent works in this branch until given zones
+                                        on the Agents page — from then on, their zones' branch.
                                     </p>
                                 </>
                             )}

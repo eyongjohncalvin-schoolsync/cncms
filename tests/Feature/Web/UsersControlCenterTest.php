@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Models\Agent;
 use App\Models\Role;
+use App\Models\Scopes\BranchScope;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
@@ -253,7 +255,7 @@ class UsersControlCenterTest extends TestCase
         // This test commits real rows; a run killed before its finally ran
         // would otherwise leave the user behind and fail every later run.
         $leftoverIds = User::query()->where('email', 'newuctuser@example.test')->orWhere('username', 'newuctuser')->pluck('id');
-        TenantUser::query()->whereIn('user_id', $leftoverIds)->delete();
+        $this->removeHire($leftoverIds->all());
         User::query()->whereKey($leftoverIds)->delete();
 
         $user = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
@@ -278,13 +280,15 @@ class UsersControlCenterTest extends TestCase
 
             tenancy()->initialize(Tenant::find('swecom'));
             $this->assertDatabaseHas('tenant_users', ['user_id' => $createdUser->id, 'role' => 'agent']);
+            // A field agent is a user: their agent record comes with the account (owner, 2026-10-28).
+            $this->assertDatabaseHas('agents', ['user_id' => $createdUser->id, 'name' => 'New Test User', 'status' => 'active', 'zone_id' => null]);
         } finally {
             if (! tenancy()->initialized) {
                 tenancy()->initialize(Tenant::find('swecom'));
             }
 
             if ($createdUserId !== null) {
-                TenantUser::query()->where('user_id', $createdUserId)->delete();
+                $this->removeHire([$createdUserId]);
             }
             TenantUser::query()->where('user_id', $user->id)->update(['role' => $originalRole]);
 
@@ -296,5 +300,18 @@ class UsersControlCenterTest extends TestCase
 
             DB::connection('pgsql')->beginTransaction();
         }
+    }
+
+    /**
+     * A hire's tenant rows — membership, agent record, assignment history —
+     * before its central user can go.
+     *
+     * @param  list<int>  $userIds
+     */
+    private function removeHire(array $userIds): void
+    {
+        Agent::query()->withoutGlobalScope(BranchScope::class)->whereIn('user_id', $userIds)->delete();
+        DB::table('staff_assignments')->whereIn('user_id', $userIds)->delete();
+        TenantUser::query()->whereIn('user_id', $userIds)->delete();
     }
 }

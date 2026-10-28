@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api;
 
-use App\DataTransferObjects\AgentData;
 use App\DataTransferObjects\ZoneData;
 use App\Models\Agent;
 use App\Models\Branch;
@@ -180,7 +179,7 @@ class ZoneCoverageTest extends TestCase
         app(ZoneCoverageService::class)->addZone($agent, $this->zoneB, null);
         $bueaZone = ZoneFactory::new()->create(['branch_id' => BranchFactory::new()->create(['name' => 'BUEA'])->id]);
 
-        app(AgentService::class)->update($agent, AgentData::fromArray(['zone_uuid' => $bueaZone->uuid]));
+        app(AgentService::class)->changeZone($agent, $bueaZone->uuid);
 
         $this->assertSame(
             [$bueaZone->id],

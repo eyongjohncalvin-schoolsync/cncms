@@ -12,4 +12,5 @@ Route::get('agents/me', [AgentController::class, 'me']);
 
 // Named with an 'api.' prefix so these don't collide with the web
 // panel's identically-shaped route names — see routes/web/agents.php.
-Route::apiResource('agents', AgentController::class)->names('api.agents');
+// Read-only: a field agent is a user, created on the Users page (owner, 2026-10-28).
+Route::apiResource('agents', AgentController::class)->only(['index', 'show'])->names('api.agents');

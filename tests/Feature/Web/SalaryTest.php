@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
-use App\DataTransferObjects\AgentData;
 use App\Models\Agent;
 use App\Models\Branch;
 use App\Models\SalaryGrade;
 use App\Models\StaffSalary;
 use App\Models\TenantUser;
 use App\Models\User;
-use App\Services\AgentService;
 use App\Support\TenantContext;
 use Database\Factories\AgentFactory;
 use Database\Factories\BranchFactory;
@@ -133,12 +131,13 @@ class SalaryTest extends TestCase
         $agent = AgentFactory::new()->create(['zone_id' => ZoneFactory::new()->create(['branch_id' => $this->buea->id])->id, 'user_id' => $this->bueaStaff->user_id, 'salary' => 60000]);
         $this->setSalary($this->bueaStaff, '60000', $this->technician);
 
-        // Inside the range: approved, and the agent record shows it.
-        app(AgentService::class)->update($agent, AgentData::fromArray(['salary' => '70000']));
+        // A field agent's salary is set on the Users page like anyone's (owner,
+        // 2026-10-28). Inside the range: approved, and the agent record shows it.
+        $this->setSalary($this->bueaStaff, '70000', $this->technician);
         $this->assertSame('70000.00', (string) $agent->fresh()->salary);
 
         // Outside: waits for headquarters; the agent keeps the approved salary.
-        app(AgentService::class)->update($agent->fresh(), AgentData::fromArray(['salary' => '120000']));
+        $this->setSalary($this->bueaStaff, '120000', $this->technician);
         $this->assertSame('70000.00', (string) $agent->fresh()->salary);
         $this->assertSame(StaffSalary::STATUS_PENDING, $this->latest($this->bueaStaff)->status);
 

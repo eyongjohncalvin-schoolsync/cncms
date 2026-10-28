@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
-use App\DataTransferObjects\AgentData;
+use App\Models\Agent;
 use App\Models\Branch;
+use App\Models\Scopes\BranchScope;
 use App\Models\StaffAssignment;
 use App\Models\Tenant;
 use App\Models\TenantUser;
@@ -111,7 +112,7 @@ class StaffFenceTest extends TestCase
         $agent = AgentFactory::new()->create(['zone_id' => ZoneFactory::new()->create(['branch_id' => Branch::headquartersId()])->id, 'user_id' => $this->hqStaff->user_id]);
         $bueaZone = ZoneFactory::new()->create(['branch_id' => $this->buea->id]);
 
-        app(AgentService::class)->update($agent, AgentData::fromArray(['zone_uuid' => $bueaZone->uuid]));
+        app(AgentService::class)->changeZone($agent, $bueaZone->uuid);
 
         $open = StaffAssignment::query()->where('user_id', $this->hqStaff->user_id)->whereNull('ends_on')->sole();
         $this->assertSame($this->buea->id, $open->branch_id);
@@ -130,6 +131,12 @@ class StaffFenceTest extends TestCase
         DB::connection('pgsql')->rollBack();
 
         tenancy()->initialize(Tenant::find('swecom'));
+        // A run killed before its finally would leave the hire behind and fail every later run.
+        $leftoverIds = User::query()->where('email', 'branchhiretest@example.test')->orWhere('username', 'branchhiretest')->pluck('id');
+        Agent::query()->withoutGlobalScope(BranchScope::class)->whereIn('user_id', $leftoverIds)->delete();
+        StaffAssignment::query()->whereIn('user_id', $leftoverIds)->delete();
+        TenantUser::query()->whereIn('user_id', $leftoverIds)->delete();
+        User::query()->whereKey($leftoverIds)->delete();
         $kelvinTenantUser = TenantUser::query()->where('user_id', $this->kelvin->id)->firstOrFail();
         $original = ['role' => $kelvinTenantUser->role, 'branch_id' => $kelvinTenantUser->branch_id];
         $branch = BranchFactory::new()->create(['name' => 'Kumba-hire-test']);

@@ -1008,7 +1008,7 @@ export interface TenantUserRow {
      */
     is_investor: boolean;
     /** An agent-role account that can't work yet: no agent profile, or no zones. Null otherwise. */
-    agent_setup?: 'no_profile' | 'no_zones' | null;
+    agent_setup?: 'no_zones' | null;
 }
 
 export type CommandRunStatus = 'queued' | 'pending_review' | 'published' | 'failed' | 'rolled_back';
@@ -1395,6 +1395,8 @@ export interface Agent {
     customers_covered?: number;
     customer_limit?: number | null;
     workload_status?: 'normal' | 'busy' | 'overloaded' | null;
+    /** False for an old agent record from before agents were users — offered "Create login". */
+    has_login?: boolean;
 }
 
 export type ComplaintCategory = 'operational' | 'customer';

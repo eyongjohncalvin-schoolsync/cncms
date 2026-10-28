@@ -18,11 +18,11 @@ use App\Repositories\Contracts\BranchRepositoryInterface;
 use App\Services\AccountSecurityService;
 use App\Services\CashBookService;
 use App\Services\SalaryService;
+use App\Services\StaffAccountService;
 use App\Services\StaffAssignmentService;
 use App\Services\StaffRemovalService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -88,8 +88,8 @@ class UserController extends Controller
             'users' => $tenantUsers->map(fn (TenantUser $tenantUser): array => [
                 'salary' => $salaries[(int) $tenantUser->user_id] ?? null,
                 'agent_setup' => $tenantUser->role !== 'agent' ? null : match (true) {
-                    ! $agentProfiles->has($tenantUser->user_id) => 'no_profile',
-                    $agentProfiles[$tenantUser->user_id]->coverage_count === 0 => 'no_zones',
+                    // The agent record comes with the account (StaffAccountService); what can be missing is zones.
+                    ! $agentProfiles->has($tenantUser->user_id), $agentProfiles[$tenantUser->user_id]->coverage_count === 0 => 'no_zones',
                     default => null,
                 },
                 'id' => $tenantUser->id,
@@ -136,45 +136,20 @@ class UserController extends Controller
     }
 
     /**
-     * Creates the central User row and the tenant-scoped TenantUser row that
-     * links it to the current tenant. These two inserts are on DIFFERENT
-     * database connections (central `pgsql` vs the tenant connection), so
-     * they cannot be wrapped in a single DB::transaction(). We run two
-     * separate transactions instead: central user first, then tenant_users.
-     * If the second insert fails, the central user row is left orphaned (no
-     * tenant membership) — for a low-volume admin action this is an
-     * acceptable tradeoff. We deliberately do NOT swallow that failure; it
-     * propagates as a 500 so the admin notices and can retry.
+     * A new staff account (StaffAccountService::create() — the central user
+     * and its membership; a field agent's agent record with it).
      */
-    public function store(StoreTenantUserRequest $request): RedirectResponse
+    public function store(StoreTenantUserRequest $request, StaffAccountService $accounts): RedirectResponse
     {
         $data = $request->validated();
         // Branches v2 (D7): a fenced manager hires into their own branch.
         $branchId = $this->context->isFenced() ? $this->context->branchId : $this->resolveBranchId($data['branch_uuid'] ?? null);
 
-        $user = DB::connection('pgsql')->transaction(fn (): User => User::query()->create([
-            'name' => $data['name'],
-            'username' => $data['username'],
-            'email' => $data['email'],
-            // The 'password' attribute is cast to 'hashed' on the User model,
-            // so Eloquent hashes this automatically on save.
-            'password' => $data['password'],
-            'status' => 'active',
-        ]));
+        $accounts->create($data, $branchId, $request->user());
 
-        DB::transaction(function () use ($user, $data, $branchId): void {
-            TenantUser::query()->create([
-                'user_id' => $user->id,
-                'tenant_id' => $this->context->tenantUser->tenant_id,
-                'role' => $data['role'],
-                'job_title' => $data['job_title'] ?? null,
-                'branch_id' => $branchId,
-            ]);
-
-            $this->assignments->record($user->id, $branchId, $data['role'], request()->user(), 'Hired');
-        });
-
-        return redirect()->route('users.index')->with('success', 'User created.');
+        return redirect()->route('users.index')->with('success', $data['role'] === 'agent'
+            ? 'Field agent created — give them zones on the Agents page.'
+            : 'User created.');
     }
 
     public function update(UpdateTenantUserRequest $request, TenantUser $tenantUser): RedirectResponse
@@ -224,6 +199,11 @@ class UserController extends Controller
 
         $tenantUser->update($data);
 
+        // Becoming a field agent creates (or revives) their agent record; leaving the role retires it.
+        if ($tenantUser->wasChanged('role')) {
+            app(StaffAccountService::class)->syncAgent($tenantUser->load('user'));
+        }
+
         // Branches v2 (D7): a transfer or a new role opens the next assignment.
         if ($tenantUser->wasChanged(['branch_id', 'role'])) {
             $agentBranchId = $tenantUser->role === 'agent'
@@ -265,6 +245,8 @@ class UserController extends Controller
         $this->authorize('deactivate', $tenantUser);
 
         $account->deactivate($tenantUser->user);
+        // A field agent stops covering their zones.
+        app(StaffAccountService::class)->syncAgent($tenantUser->load('user'));
 
         return redirect()->route('users.index')->with('success', 'User deactivated.');
     }
@@ -277,6 +259,8 @@ class UserController extends Controller
         $this->authorize('activate', $tenantUser);
 
         $tenantUser->user->update(['status' => 'active']);
+        // A field agent is active again — with no zones until given some on the Agents page.
+        app(StaffAccountService::class)->syncAgent($tenantUser->load('user'));
 
         return redirect()->route('users.index')->with('success', 'User reactivated.');
     }

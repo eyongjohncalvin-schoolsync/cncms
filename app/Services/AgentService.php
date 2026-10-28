@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\DataTransferObjects\AgentData;
 use App\Models\Agent;
 use App\Models\Scopes\BranchScope;
-use App\Models\StaffSalary;
 use App\Models\User;
 use App\Repositories\Contracts\AgentRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
@@ -33,7 +31,6 @@ class AgentService
         private readonly AgentRepositoryInterface $agents,
         private readonly ZoneRepositoryInterface $zones,
         private readonly StaffAssignmentService $assignments,
-        private readonly SalaryService $salaries,
         private readonly ZoneCoverageService $coverage,
     ) {}
 
@@ -100,86 +97,32 @@ class AgentService
         return $agent;
     }
 
-    public function create(AgentData $data): Agent
+    /**
+     * The Agents page's "Change zone": the agent now covers that zone only
+     * (it becomes their home zone). Their old coverage goes first — their
+     * branch may change, and the database keeps coverage in it. Everything
+     * else about the person (name, role, salary, active or not) is their
+     * user account's, on the Users page (owner, 2026-10-28).
+     */
+    public function changeZone(Agent $agent, string $zoneUuid): Agent
     {
-        $zoneId = $this->resolveZoneId($data->zoneUuid);
-        $userId = $this->resolveUserId($data->userUuid);
+        $zoneId = $this->resolveZoneId($zoneUuid);
 
-        $agent = DB::transaction(function () use ($zoneId, $userId, $data): Agent {
-            $agent = $this->agents->create($zoneId, $userId, $data);
+        if ($zoneId === $agent->zone_id && $agent->coverage()->withoutGlobalScope(BranchScope::class)->count() === 1) {
+            return $agent;
+        }
+
+        $agent = DB::transaction(function () use ($agent, $zoneId): Agent {
+            $agent->coverage()->withoutGlobalScope(BranchScope::class)->delete();
+            $agent->update(['zone_id' => $zoneId]);
             $this->coverage->coverOnly($agent, $agent->zone()->withoutGlobalScope(BranchScope::class)->firstOrFail(), auth()->user());
 
             return $agent;
         });
 
-        Cache::forget('agents:all');
-        $this->recordAssignment($agent);
-        $this->recordSalary($agent, null);
-
-        return $agent->load(['zone', 'user']);
-    }
-
-    public function update(Agent $agent, AgentData $data): Agent
-    {
-        $zoneId = $data->zoneUuid !== null ? $this->resolveZoneId($data->zoneUuid) : null;
-        $userId = $data->userUuid !== null ? $this->resolveUserId($data->userUuid) : null;
-        $previousSalary = (string) $agent->salary;
-
-        $movesZone = $zoneId !== null && $zoneId !== $agent->zone_id;
-
-        $agent = DB::transaction(function () use ($agent, $data, $zoneId, $userId, $movesZone): Agent {
-            // Moving the agent's home zone on the agent form means they now
-            // cover that zone only. Their old coverage goes first: the agent's
-            // branch may change, and the database keeps coverage in it.
-            if ($movesZone) {
-                $agent->coverage()->withoutGlobalScope(BranchScope::class)->delete();
-            }
-
-            $agent = $this->agents->update($agent, $data, $zoneId, $userId);
-
-            if ($movesZone) {
-                $this->coverage->coverOnly($agent, $agent->zone()->withoutGlobalScope(BranchScope::class)->firstOrFail(), auth()->user());
-            }
-
-            return $agent;
-        });
-
-        Cache::forget('agents:all');
         $this->recordAssignment($agent);
 
-        if (bccomp((string) $agent->salary, $previousSalary, 2) !== 0) {
-            $this->recordSalary($agent, $previousSalary);
-        }
-
         return $agent->load(['zone', 'user']);
-    }
-
-    /**
-     * Branches v2 D8: an agent's salary follows the salary rules — on their
-     * current grade, inside its range it is approved at once; outside, it
-     * waits for headquarters and the agent keeps $previousSalary until then.
-     * Agents without a login have no salary history and keep the old direct field.
-     */
-    private function recordSalary(Agent $agent, ?string $previousSalary): void
-    {
-        $actor = auth()->user();
-
-        if ($agent->user_id === null || ! $actor instanceof User) {
-            return;
-        }
-
-        $salary = $this->salaries->set((int) $agent->user_id, $agent->branch_id, (string) $agent->salary, $this->salaries->currentGrade((int) $agent->user_id), 'Set on the agent form', $actor);
-
-        if ($salary->status === StaffSalary::STATUS_PENDING && $previousSalary !== null) {
-            $agent->forceFill(['salary' => $previousSalary])->save();
-        }
-    }
-
-    public function delete(Agent $agent): void
-    {
-        $this->agents->delete($agent);
-
-        Cache::forget('agents:all');
     }
 
     private function resolveZoneId(?string $zoneUuid): int
@@ -195,20 +138,5 @@ class AgentService
         }
 
         return $zone->id;
-    }
-
-    private function resolveUserId(?string $userUuid): ?int
-    {
-        if (! $userUuid) {
-            return null;
-        }
-
-        $user = User::query()->where('uuid', $userUuid)->first();
-
-        if (! $user) {
-            throw ValidationException::withMessages(['user_uuid' => ['The selected user does not exist.']]);
-        }
-
-        return $user->id;
     }
 }

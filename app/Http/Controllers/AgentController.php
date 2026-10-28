@@ -4,31 +4,33 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use App\DataTransferObjects\AgentData;
-use App\Http\Requests\StoreAgentRequest;
-use App\Http\Requests\UpdateAgentRequest;
+use App\Http\Requests\CreateAgentLoginRequest;
 use App\Models\Agent;
 use App\Models\Company;
+use App\Models\TenantUser;
 use App\Models\Zone;
 use App\Services\AgentService;
+use App\Services\StaffAccountService;
 use App\Services\ZoneCoverageService;
-use App\Services\ZoneService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Web (session-auth, Inertia) counterpart to Api\AgentController — same
- * AgentService/Requests, rendered as Inertia pages instead of JSON. See
- * web-admin-spec.md section 3.9.
+ * The Field agents page (owner, 2026-10-28): a field agent is a user —
+ * added, renamed, deactivated and paid on the Users page, their agent record
+ * kept in step with their account (StaffAccountService::syncAgent()). This
+ * page lists them with their zones and workload, moves an agent to another
+ * zone ("Change zone"; Zones → Coverage gives several), and gives an old
+ * agent record without a login one.
  */
 class AgentController extends Controller
 {
     public function __construct(
         private readonly AgentService $agents,
-        private readonly ZoneService $zones,
     ) {}
 
     public function index(Request $request, ZoneCoverageService $coverage): Response
@@ -59,71 +61,47 @@ class AgentController extends Controller
             'children' => $agent->children,
             'status' => $agent->status,
             'last_sync_at' => $agent->last_sync_at,
+            // An old record from before agents were users: offered "Create login".
+            'has_login' => $agent->user_id !== null,
         ]);
 
         return Inertia::render('Agents/Index', [
             'filters' => $filters,
             'agents' => $this->paginatorProps($paginated),
             'zones' => $this->zonesWithStats(),
+            'can_create_login' => $request->user()->can('create', TenantUser::class),
         ]);
     }
 
-    public function create(): Response
-    {
-        $this->authorize('create', Agent::class);
-
-        return Inertia::render('Agents/Create', [
-            'zones' => $this->zones->all(),
-        ]);
-    }
-
-    public function store(StoreAgentRequest $request): RedirectResponse
-    {
-        $this->agents->create(AgentData::fromArray($request->validated()));
-
-        return redirect()->route('agents.index')->with('success', 'Agent created.');
-    }
-
-    public function edit(Agent $agent): Response
+    public function changeZone(Request $request, Agent $agent): RedirectResponse
     {
         $this->authorize('update', $agent);
 
-        $agent = $this->agents->findOrFail($agent->uuid);
+        $validated = $request->validate(['zone_uuid' => ['required', 'string']]);
 
-        return Inertia::render('Agents/Edit', [
-            'agent' => [
-                'uuid' => $agent->uuid,
-                'name' => $agent->name,
-                'location' => $agent->location,
-                'phone' => $agent->phone,
-                'zone_uuid' => $agent->zone?->uuid,
-                'zone_name' => $agent->zone?->name,
-                'salary' => $agent->salary,
-                'email' => $agent->email,
-                'dob' => $agent->dob,
-                'marital_status' => $agent->marital_status,
-                'children' => $agent->children,
-                'status' => $agent->status,
-                'last_sync_at' => $agent->last_sync_at,
-            ],
-            'zones' => $this->zones->all(),
-        ]);
+        if ($agent->status !== 'active') {
+            throw ValidationException::withMessages(['zone_uuid' => "{$agent->name}'s account is deactivated — reactivate them on the Users page first."]);
+        }
+
+        $this->agents->changeZone($agent, $validated['zone_uuid']);
+
+        return redirect()->route('agents.index')->with('success', 'Zone changed.');
     }
 
-    public function update(UpdateAgentRequest $request, Agent $agent): RedirectResponse
+    /**
+     * An old agent record without a login becomes a field-agent user: the
+     * same account as one made on the Users page, keeping the record, its
+     * zones and its branch.
+     */
+    public function createLogin(CreateAgentLoginRequest $request, Agent $agent, StaffAccountService $accounts): RedirectResponse
     {
-        $this->agents->update($agent, AgentData::fromArray($request->validated()));
+        if ($agent->user_id !== null) {
+            throw ValidationException::withMessages(['username' => "{$agent->name} already has a login."]);
+        }
 
-        return redirect()->route('agents.index')->with('success', 'Agent updated.');
-    }
+        $accounts->create([...$request->validated(), 'name' => $agent->name, 'role' => 'agent'], $agent->branch_id, $request->user(), $agent);
 
-    public function destroy(Agent $agent): RedirectResponse
-    {
-        $this->authorize('delete', $agent);
-
-        $this->agents->delete($agent);
-
-        return redirect()->route('agents.index')->with('success', 'Agent deleted.');
+        return redirect()->route('agents.index')->with('success', "{$agent->name} can now sign in as {$request->validated('username')}.");
     }
 
     /**

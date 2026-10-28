@@ -10,7 +10,7 @@ import type { Agent, Zone } from '@/types';
 /**
  * The Agents/Index "Change Zone" quick action — a fast path to reassign a
  * field agent to a different zone without a full Edit-form detour. Submits
- * to the existing `PATCH /agents/{agent}` route (App\Http\Controllers\
+ * to the `PATCH /agents/{agent}/zone` route (App\Http\Controllers\
  * AgentController::update), sending only `zone_uuid`; the FormRequest/DTO/
  * Service chain already treats every Agent field as optional-on-update, so
  * a zone-only payload is a normal partial update — no backend change was
@@ -67,7 +67,7 @@ export function ChangeZoneModal({ agent, zones, onClose }: { agent: Agent | null
             return;
         }
 
-        patch(`/agents/${agent.uuid}`, {
+        patch(`/agents/${agent.uuid}/zone`, {
             preserveScroll: true,
             onSuccess: () => close(),
         });

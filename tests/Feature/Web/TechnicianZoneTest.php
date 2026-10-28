@@ -156,7 +156,7 @@ class TechnicianZoneTest extends TestCase
         $this->as('admin');
 
         $this->get('/users')->assertOk()->assertInertia(fn (Assert $page) => $page
-            ->where('users', fn ($users) => collect($users)->firstWhere('id', $noProfile->id)['agent_setup'] === 'no_profile'
+            ->where('users', fn ($users) => collect($users)->firstWhere('id', $noProfile->id)['agent_setup'] === 'no_zones'
                 && collect($users)->firstWhere('id', $noZones->id)['agent_setup'] === 'no_zones'));
     }
 

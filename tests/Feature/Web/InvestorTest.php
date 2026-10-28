@@ -70,7 +70,7 @@ class InvestorTest extends TestCase
         ['post', '/customers', 'CustomerPolicy::create'],
         ['get', '/manuscripts', 'ManuscriptPolicy::viewAny (worker excluded)'],
         ['get', '/zones/create', 'ZonePolicy::create'],
-        ['get', '/agents/create', 'AgentPolicy::create'],
+        ['post', '/users', 'TenantUserPolicy::create (field agents are users)'],
         ['get', '/disconnections', 'CustomerPolicy::viewStatusBoard'],
         ['get', '/payments/create', 'PaymentPolicy::create (can_record_payments is false)'],
         ['post', '/payments', 'PaymentPolicy::create (can_record_payments is false)'],
@@ -262,7 +262,7 @@ class InvestorTest extends TestCase
         $this->get('/customers/create')->assertForbidden();
         $this->get('/branches/create')->assertForbidden();
         $this->get('/zones/create')->assertForbidden();
-        $this->get('/agents/create')->assertForbidden();
+        $this->post('/users')->assertForbidden();
         $this->post('/payments')->assertForbidden();
     }
 
