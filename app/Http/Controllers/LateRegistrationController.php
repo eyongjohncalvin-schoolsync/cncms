@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\ArrearsAdjustment;
 use App\Models\Customer;
 use App\Models\User;
 use App\Services\LateRegistrationService;
@@ -109,5 +110,47 @@ class LateRegistrationController extends Controller
 
         return back()->with('success', 'Old debt of '.number_format((float) $validated['amount'], 0, '.', ',').' FCFA asked for — another approver confirms it on Arrears Adjustments'
             .($validated['scope'] === 'all' ? '; the free months end when it is approved.' : '.'));
+    }
+
+    /** Correct the connection date and reason; the registration month undoes the late registration. */
+    public function correct(Request $request, Customer $customer): RedirectResponse
+    {
+        $this->authorize('update', $customer);
+
+        $validated = $request->validate([
+            'connected_on' => ['required', 'date', 'before_or_equal:today'],
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $this->lateRegistrations->correct($customer, $validated['connected_on'], $validated['reason'] ?? null, $request->user());
+
+        return back()->with('success', 'Connection date corrected — free months and billing follow it.');
+    }
+
+    /** Whoever asked for the old-debt charge takes it back while it waits. */
+    public function withdraw(Request $request, Customer $customer): RedirectResponse
+    {
+        $charge = ArrearsAdjustment::query()
+            ->where('customer_id', $customer->id)
+            ->where('reason_category', LateRegistrationService::REASON_CATEGORY)
+            ->whereIn('status', ['pending', 'pending_second_approval'])
+            ->latest('id')
+            ->firstOrFail();
+
+        $this->lateRegistrations->withdraw($charge, $request->user());
+
+        return back()->with('success', 'Old-debt charge withdrawn.');
+    }
+
+    /** Undo an approved old-debt charge: an equal credit, approved by someone else. */
+    public function reverse(Request $request, Customer $customer): RedirectResponse
+    {
+        abort_unless($this->context->can('arrears.request'), 403);
+
+        $validated = $request->validate(['note' => ['required', 'string', 'min:3', 'max:500']]);
+
+        $this->lateRegistrations->reverse($customer, $validated['note'], $request->user());
+
+        return back()->with('success', 'Reversal asked for — another approver confirms it; the debt is credited back (and any free months it ended return).');
     }
 }

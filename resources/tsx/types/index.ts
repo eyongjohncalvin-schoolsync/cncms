@@ -710,8 +710,26 @@ export interface LateRegistration {
     connected_by: string | null;
     says_paid_amount: string | null;
     says_paid_to: string | null;
-    charge: { uuid: string; amount: string; status: string; cancels_free_months: boolean } | null;
+    charge: {
+        uuid: string;
+        amount: string;
+        status: string;
+        cancels_free_months: boolean;
+        /** Undone by an approved credit. */
+        reversed: boolean;
+        /** The reversal's status while one is asked for. */
+        reversal_status: string | null;
+        reversal_uuid: string | null;
+    } | null;
     can_charge: boolean;
+    /** Corrections (owner, 2026-10-28). */
+    connected_on: string | null;
+    /** "Y-m" — the connection date can't be later; this month undoes the late registration. */
+    registered_in: string;
+    can_correct: boolean;
+    can_withdraw: boolean;
+    can_decide: boolean;
+    can_reverse: boolean;
 }
 
 /** Relocation and re-installation fees on the customer page (CustomerController::shapeOneOffCharges). */

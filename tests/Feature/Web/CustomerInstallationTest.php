@@ -245,6 +245,84 @@ class CustomerInstallationTest extends TestCase
         $this->assertSame('7500.00', (string) $october->total_arrears, '…plus Aug–Sep (5,000) as old debt.');
     }
 
+    /**
+     * Corrections (owner, 2026-10-28): the connection date moves the free
+     * months with it, and the registration month undoes the late registration.
+     */
+    public function test_correcting_the_connection_date_moves_the_free_months_and_can_undo_it(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $customer = $this->lateCustomer(freeMonths: 1);
+        $this->manager();
+
+        $this->patch("/customers/{$customer->uuid}/late-registration", ['connected_on' => '2026-09-05'])->assertSessionHasErrors('reason');
+        $this->patch("/customers/{$customer->uuid}/late-registration", ['connected_on' => '2026-11-01', 'reason' => 'x'])->assertSessionHasErrors('connected_on');
+
+        $this->patch("/customers/{$customer->uuid}/late-registration", ['connected_on' => '2026-09-05', 'reason' => 'Wrong month typed'])->assertSessionHasNoErrors();
+        $this->assertSame(['2026-09-05', 'Wrong month typed'], [$customer->fresh()->connected_on->toDateString(), $customer->fresh()->late_registration_reason]);
+        $this->assertSame('2026-09', FreeMonthGrant::query()->where('customer_id', $customer->id)->sole()->start_period, 'The free month moved with the connection.');
+
+        // Connected in the month they were registered: not a late registration at all.
+        $this->patch("/customers/{$customer->uuid}/late-registration", ['connected_on' => '2026-10-02'])->assertSessionHasNoErrors();
+        $this->assertNull($customer->fresh()->late_registration_reason);
+        $this->assertSame('2026-10', FreeMonthGrant::query()->where('customer_id', $customer->id)->sole()->start_period);
+        $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page->where('customer.installation.late', null));
+    }
+
+    public function test_a_waiting_charge_is_withdrawn_by_whoever_asked_and_blocks_corrections(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $customer = $this->lateCustomer(freeMonths: 1);
+        $this->admin();
+        $this->post("/customers/{$customer->uuid}/late-registration/charge", ['scope' => 'missed', 'amount' => 2500, 'note' => 'He knew'])->assertSessionHasNoErrors();
+
+        $this->patch("/customers/{$customer->uuid}/late-registration", ['connected_on' => '2026-09-05', 'reason' => 'x'])->assertSessionHasErrors('connected_on');
+
+        $this->manager();
+        $this->post("/customers/{$customer->uuid}/late-registration/withdraw")->assertSessionHasErrors('charge');
+
+        $this->admin();
+        $this->post("/customers/{$customer->uuid}/late-registration/withdraw")->assertSessionHasNoErrors();
+        $this->assertSame('rejected', ArrearsAdjustment::query()->where('customer_id', $customer->id)->sole()->status);
+        $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page->where('customer.installation.late.can_charge', true));
+    }
+
+    public function test_reversing_an_approved_charge_credits_it_and_gives_the_free_months_back(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $customer = $this->lateCustomer(freeMonths: 3);
+        $october = fn (): Manuscript => Manuscript::query()->where('customer_id', $customer->id)->where('period', '2026-10')->firstOrFail();
+
+        $this->admin();
+        $this->post("/customers/{$customer->uuid}/late-registration/charge", ['scope' => 'all', 'amount' => 5000, 'note' => 'No free months were authorised'])->assertSessionHasNoErrors();
+        $this->manager();
+        $this->post('/arrears-adjustments/'.ArrearsAdjustment::query()->where('customer_id', $customer->id)->value('uuid').'/approve')->assertSessionHasNoErrors();
+        $this->assertSame(2, FreeMonthGrant::query()->where('customer_id', $customer->id)->sole()->months);
+
+        $this->admin();
+        $this->post("/customers/{$customer->uuid}/late-registration/reverse", ['note' => 'The free months were promised in writing'])->assertSessionHasNoErrors();
+        $reversal = ArrearsAdjustment::query()->where('customer_id', $customer->id)->where('reason_category', 'late_registration_reversal')->sole();
+        $this->assertSame(['decrease', '5000.00', 'pending'], [$reversal->direction, (string) $reversal->amount, $reversal->status]);
+        $this->post("/customers/{$customer->uuid}/late-registration/reverse", ['note' => 'Again'])->assertSessionHasErrors('charge');
+
+        $this->manager();
+        $this->post("/arrears-adjustments/{$reversal->uuid}/approve")->assertSessionHasNoErrors();
+
+        // A credit this size takes a second approver, like any other.
+        if ($reversal->fresh()->status === 'pending_second_approval') {
+            $this->actAs('terence@shalomtech.dev', 'super');
+            $this->post("/arrears-adjustments/{$reversal->uuid}/approve")->assertSessionHasNoErrors();
+        }
+
+        $this->assertSame('approved', $reversal->fresh()->status);
+        $grant = FreeMonthGrant::query()->where('customer_id', $customer->id)->sole();
+        $this->assertSame([3, FreeMonthGrant::STATUS_APPROVED, null], [$grant->months, $grant->status, $grant->cancelled_at], 'The free months are back.');
+        $this->assertSame(['0.00', '0.00'], [(string) $october()->total_bill, (string) $october()->total_arrears], 'October is free again and the 5,000 is credited back: nothing owed.');
+        $this->get("/customers/{$customer->uuid}")->assertInertia(fn (Assert $page) => $page
+            ->where('customer.installation.late.charge.reversed', true)
+            ->where('customer.installation.late.can_charge', true));
+    }
+
     public function test_only_an_arrears_approver_charges_late_months(): void
     {
         $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));

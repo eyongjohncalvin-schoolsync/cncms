@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DataTransferObjects\ArrearsAdjustmentData;
+use App\DataTransferObjects\RejectArrearsAdjustmentData;
 use App\Models\ArrearsAdjustment;
 use App\Models\Customer;
 use App\Models\FreeMonthGrant;
 use App\Models\User;
 use App\Support\Billing\ConnectionMonth;
 use App\Support\Billing\FreeMonthPlan;
+use App\Support\BusinessTimezone;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -28,6 +31,12 @@ use Illuminate\Validation\ValidationException;
 class LateRegistrationService
 {
     public const string REASON_CATEGORY = 'late_registration';
+
+    /** An approved old-debt charge undone (reverse()). */
+    public const string REVERSAL_CATEGORY = 'late_registration_reversal';
+
+    /** The cancel reason endFreeMonths() stamps — and restoreFreeMonths() looks for. */
+    private const string FREE_MONTHS_ENDED = 'Late registration: charged since connection';
 
     public function __construct(
         private readonly ArrearsAdjustmentService $adjustments,
@@ -79,6 +88,11 @@ class LateRegistrationService
             ->where('status', '!=', 'rejected')
             ->latest('id')
             ->first();
+        $reversal = $charge === null ? null : ArrearsAdjustment::query()
+            ->where('reverses_adjustment_id', $charge->id)
+            ->where('status', '!=', 'rejected')
+            ->latest('id')
+            ->first();
 
         return [
             'connection_month' => $connectionMonth,
@@ -99,6 +113,11 @@ class LateRegistrationService
                 'amount' => (string) $charge->amount,
                 'status' => $charge->status,
                 'cancels_free_months' => (bool) $charge->cancels_free_months,
+                'requested_by_id' => $charge->requested_by,
+                // Undone by an approved credit (reverse()); null status = no reversal asked.
+                'reversed' => $reversal?->status === 'approved',
+                'reversal_status' => $reversal?->status,
+                'reversal_uuid' => $reversal?->uuid,
             ],
         ];
     }
@@ -115,7 +134,7 @@ class LateRegistrationService
             throw ValidationException::withMessages(['amount' => 'This customer was registered in the month they were connected — there is nothing to charge.']);
         }
 
-        if ($summary['charge'] !== null) {
+        if ($summary['charge'] !== null && ! $summary['charge']['reversed']) {
             throw ValidationException::withMessages(['amount' => 'The late months were already charged (or are waiting for approval).']);
         }
 
@@ -146,12 +165,139 @@ class LateRegistrationService
 
         foreach ($this->runningInstallationGrants($customer) as $grant) {
             $used = max(0, FreeMonthGrantService::monthsBetween((string) $grant->start_period, $current));
+            // Remembered so reversing the charge gives the months back (restoreFreeMonths()).
+            $grant->forceFill(['months_before_cancel' => $grant->months]);
             $grant->update($used > 0
-                ? ['months' => $used, 'cancelled_at' => now(), 'cancel_reason' => 'Late registration: charged since connection']
-                : ['status' => FreeMonthGrant::STATUS_CANCELLED, 'cancelled_at' => now(), 'cancel_reason' => 'Late registration: charged since connection']);
+                ? ['months' => $used, 'cancelled_at' => now(), 'cancel_reason' => self::FREE_MONTHS_ENDED]
+                : ['status' => FreeMonthGrant::STATUS_CANCELLED, 'cancelled_at' => now(), 'cancel_reason' => self::FREE_MONTHS_ENDED]);
         }
 
         $this->grants->recalculateFrom($customer, $current);
+    }
+
+    /**
+     * A reversed "charge every month since connection": the free months it
+     * ended are back, as they were.
+     */
+    public function restoreFreeMonths(Customer $customer): void
+    {
+        $grants = FreeMonthGrant::query()
+            ->where('customer_id', $customer->id)
+            ->where('cancel_reason', self::FREE_MONTHS_ENDED)
+            ->whereNotNull('months_before_cancel')
+            ->get();
+
+        foreach ($grants as $grant) {
+            $grant->forceFill(['months_before_cancel' => null]);
+            $grant->update(['months' => $grant->getOriginal('months_before_cancel'), 'status' => FreeMonthGrant::STATUS_APPROVED, 'cancelled_at' => null, 'cancel_reason' => null]);
+        }
+
+        if ($grants->isNotEmpty()) {
+            $this->grants->recalculateFrom($customer, (string) $grants->min('start_period'));
+        }
+    }
+
+    /**
+     * Corrects the connection date (and reason) of a late registration
+     * (owner, 2026-10-28): the free months move with it and billing starts
+     * from the new month — or from the month they were registered in, if
+     * that came later. Setting it to the registration month undoes the late
+     * registration. Only open months are rewritten; closed ones never are.
+     * Refused while an old-debt charge stands: its amount was counted from
+     * the old date — withdraw or reverse it first.
+     */
+    public function correct(Customer $customer, string $connectedOn, ?string $reason, User $actor): void
+    {
+        $summary = $this->summary($customer);
+
+        if ($summary === null) {
+            throw ValidationException::withMessages(['connected_on' => 'This customer was not registered late.']);
+        }
+
+        if ($summary['charge'] !== null && ! $summary['charge']['reversed']) {
+            throw ValidationException::withMessages(['connected_on' => 'The late months were charged as old debt — withdraw or reverse that charge first.']);
+        }
+
+        $registeredIn = BusinessTimezone::periodOf($customer->created_at);
+        $oldMonth = $summary['connection_month'];
+        $newMonth = ConnectionMonth::of($connectedOn);
+
+        if ($newMonth > $registeredIn) {
+            throw ValidationException::withMessages(['connected_on' => 'The connection date cannot be after the month they were registered in.']);
+        }
+
+        $stillLate = $newMonth < $registeredIn;
+
+        if ($stillLate && blank($reason)) {
+            throw ValidationException::withMessages(['reason' => 'Say why they were registered late.']);
+        }
+
+        $oldBillingStarts = (string) $customer->billing_starts_period;
+        $shift = FreeMonthGrantService::monthsBetween($oldMonth, $newMonth);
+
+        DB::transaction(function () use ($customer, $connectedOn, $reason, $stillLate, $newMonth, $registeredIn, $shift, $oldBillingStarts): void {
+            // The installation free months count from the connection: they move with it.
+            if ($shift !== 0) {
+                FreeMonthGrant::query()
+                    ->where('customer_id', $customer->id)
+                    ->where('reason', FreeMonthGrant::REASON_INSTALLATION_OFFER)
+                    ->whereNotIn('status', [FreeMonthGrant::STATUS_CANCELLED, FreeMonthGrant::STATUS_REJECTED])
+                    ->whereNotNull('start_period')
+                    ->get()
+                    ->each(fn (FreeMonthGrant $grant) => $grant->update(['start_period' => FreeMonthGrant::addMonths((string) $grant->start_period, $shift)]));
+            }
+
+            $customer->forceFill([
+                'connected_on' => $connectedOn,
+                'billing_starts_period' => max($newMonth, $registeredIn),
+                'late_registration_reason' => $stillLate ? $reason : null,
+            ])->save();
+
+            $this->grants->recalculateFrom($customer, min($oldBillingStarts, (string) $customer->billing_starts_period));
+        });
+    }
+
+    /** Whoever asked for the old-debt charge takes the request back while it waits. */
+    public function withdraw(ArrearsAdjustment $charge, User $actor): void
+    {
+        if ($charge->requested_by !== $actor->id) {
+            throw ValidationException::withMessages(['charge' => 'Only whoever asked for this charge can withdraw it — others approve or reject it.']);
+        }
+
+        $this->adjustments->reject($charge, new RejectArrearsAdjustmentData("Withdrawn by {$actor->name}"));
+    }
+
+    /**
+     * Undoes an approved old-debt charge: an equal credit on the current
+     * bill, approved by someone else like any adjustment — the charge is
+     * never deleted. If the charge ended the free months, approving the
+     * reversal gives them back (ArrearsAdjustmentService::approve()).
+     */
+    public function reverse(Customer $customer, string $note, User $actor): ArrearsAdjustment
+    {
+        $summary = $this->summary($customer);
+        $charge = $summary === null || $summary['charge'] === null ? null : ArrearsAdjustment::query()->where('uuid', $summary['charge']['uuid'])->first();
+
+        if ($charge === null || $charge->status !== 'approved') {
+            throw ValidationException::withMessages(['charge' => 'There is no approved old-debt charge to reverse.']);
+        }
+
+        if ($summary['charge']['reversed'] || $summary['charge']['reversal_status'] !== null) {
+            throw ValidationException::withMessages(['charge' => 'This charge was already reversed (or the reversal is waiting for approval).']);
+        }
+
+        $reversal = $this->adjustments->create(new ArrearsAdjustmentData(
+            customerUuid: $customer->uuid,
+            targetPeriod: $this->lock->currentPeriod(),
+            direction: 'decrease',
+            amount: (string) $charge->amount,
+            reasonCategory: self::REVERSAL_CATEGORY,
+            reasonNote: $note,
+        ), $actor->id);
+
+        $reversal->forceFill(['reverses_adjustment_id' => $charge->id])->save();
+
+        return $reversal;
     }
 
     /**

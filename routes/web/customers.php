@@ -38,6 +38,10 @@ Route::patch('customers/{customer}/archive', [CustomerController::class, 'archiv
 // months that passed unbilled as old debt (LateRegistrationService).
 Route::get('late-registrations', [LateRegistrationController::class, 'index'])->name('late-registrations.index');
 Route::post('customers/{customer}/late-registration/charge', [LateRegistrationController::class, 'charge'])->name('customers.late-registration.charge');
+// Corrections (owner, 2026-10-28): the date and reason, and taking back or undoing the charge.
+Route::patch('customers/{customer}/late-registration', [LateRegistrationController::class, 'correct'])->name('customers.late-registration.correct');
+Route::post('customers/{customer}/late-registration/withdraw', [LateRegistrationController::class, 'withdraw'])->name('customers.late-registration.withdraw');
+Route::post('customers/{customer}/late-registration/reverse', [LateRegistrationController::class, 'reverse'])->name('customers.late-registration.reverse');
 Route::patch('customers/{customer}/restore', [CustomerController::class, 'restore'])->name('customers.restore')->withTrashed();
 // Dedicated status actions (App\Services\CustomerStatusService) — a fast
 // alternative to the generic update() route above, distinct the same way

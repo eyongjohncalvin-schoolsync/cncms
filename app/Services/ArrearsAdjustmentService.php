@@ -282,6 +282,11 @@ class ArrearsAdjustmentService
                 app(LateRegistrationService::class)->endFreeMonths($customer);
             }
 
+            // Its reversal, approved: the free months it ended are back.
+            if ($adjustment->reverses_adjustment_id !== null && ArrearsAdjustment::query()->whereKey($adjustment->reverses_adjustment_id)->value('cancels_free_months')) {
+                app(LateRegistrationService::class)->restoreFreeMonths($customer);
+            }
+
             $this->applyLedgerEffect($adjustment, $customer, $actor->id);
             $this->notifyApproved($adjustment);
 

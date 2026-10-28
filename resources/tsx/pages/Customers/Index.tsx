@@ -1,6 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
-import { IconArchive, IconCurrencyDollar, IconPlus, IconRestore, IconUpload, IconUserCheck } from '@tabler/icons-react';
+import { IconArchive, IconClockExclamation, IconCurrencyDollar, IconPlus, IconRestore, IconUpload, IconUserCheck } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { TextInput } from '@/components/ui/TextInput';
 import { SelectInput } from '@/components/ui/SelectInput';
@@ -82,6 +82,8 @@ export default function CustomersIndex({
     // Archive / restore / delete — CustomerPolicy::archive()/restore()/delete()
     // → `customers.archive`.
     const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
+    // The late registrations report — LateRegistrationController::index (audit.view or arrears.approve).
+    const canSeeLate = hasPermission(auth.user?.permissions, 'audit.view') || hasPermission(auth.user?.permissions, 'arrears.approve');
 
     const [search, setSearch] = useState(filters.search ?? '');
     const [loading, setLoading] = useState(false);
@@ -225,6 +227,16 @@ export default function CustomersIndex({
                                 <IconArchive size={18} stroke={2} />
                                 Archived
                             </Link>
+                            {/* Owner, 2026-10-28: rarely used — reached from here, not the menu. */}
+                            {canSeeLate && (
+                                <Link
+                                    href="/late-registrations"
+                                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
+                                >
+                                    <IconClockExclamation size={18} stroke={2} />
+                                    Registered late
+                                </Link>
+                            )}
                             <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
                                 <IconUpload size={18} stroke={2} />
                                 Import

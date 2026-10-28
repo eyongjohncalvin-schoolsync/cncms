@@ -914,7 +914,17 @@ class CustomerController extends Controller
             // Registered after their connection month closed: the months that passed unbilled, and the charge decision.
             'late' => ($late = app(LateRegistrationService::class)->summary($customer)) === null ? null : [
                 ...$late,
-                'can_charge' => $late['charge'] === null && $this->context->can('arrears.approve') && ! $customer->trashed(),
+                'can_charge' => ($late['charge'] === null || $late['charge']['reversed']) && $this->context->can('arrears.approve') && ! $customer->trashed(),
+                // Corrections (owner, 2026-10-28) — the server checks each again.
+                'connected_on' => $customer->connected_on?->toDateString(),
+                'registered_in' => BusinessTimezone::periodOf($customer->created_at),
+                'can_correct' => request()->user()->can('update', $customer) && ! $customer->trashed(),
+                'can_withdraw' => $late['charge'] !== null && in_array($late['charge']['status'], ['pending', 'pending_second_approval'], true)
+                    && $late['charge']['requested_by_id'] === request()->user()->id,
+                'can_decide' => $late['charge'] !== null && in_array($late['charge']['status'], ['pending', 'pending_second_approval'], true)
+                    && request()->user()->can('approve', ArrearsAdjustment::query()->where('uuid', $late['charge']['uuid'])->first()),
+                'can_reverse' => $late['charge'] !== null && $late['charge']['status'] === 'approved' && ! $late['charge']['reversed']
+                    && $late['charge']['reversal_status'] === null && $this->context->can('arrears.request'),
             ],
         ];
     }
