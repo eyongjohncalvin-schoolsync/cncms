@@ -39,6 +39,10 @@ interface PaymentsShowProps {
     can_delete: boolean;
     can_issue_receipt: boolean;
     can_reverse: boolean;
+    /** The collector's open request for the office to reverse it. */
+    reversal_request: { uuid: string; reason: string; requested_by: string | null; requested_at: string | null; can_decline: boolean } | null;
+    /** The collector who recorded it may ask the office to reverse it. */
+    can_request_reversal: boolean;
     /** The customer's months (free → paid → billed) and the "Give free months" dialog's options. */
     coverage?: CustomerCoverage | null;
     free_months?: CustomerFreeMonths | null;
@@ -50,7 +54,18 @@ const frequencyLabels: Record<Payment['frequency'], string> = {
     yearly: 'Yearly',
 };
 
-export default function PaymentsShow({ payment, receipt, can_manage, can_delete, can_issue_receipt, can_reverse, coverage, free_months }: PaymentsShowProps) {
+export default function PaymentsShow({
+    payment,
+    receipt,
+    can_manage,
+    can_delete,
+    can_issue_receipt,
+    can_reverse,
+    reversal_request,
+    can_request_reversal,
+    coverage,
+    free_months,
+}: PaymentsShowProps) {
     const [givingFreeMonths, setGivingFreeMonths] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [reversing, setReversing] = useState(false);
@@ -219,6 +234,21 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                                 {payment.verification_status === 'pending' ? 'Reject Payment' : 'Reverse Payment'}
                             </Button>
                         )}
+                        {can_request_reversal && (
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => {
+                                    const reason = window.prompt('Why should the office reverse this payment?');
+                                    if (reason && reason.trim().length >= 3) {
+                                        router.post(`/payments/${payment.uuid}/reversal-request`, { reason }, { preserveScroll: true });
+                                    }
+                                }}
+                                className="rounded-lg px-4 py-2 text-sm font-semibold"
+                            >
+                                Ask the office to reverse
+                            </Button>
+                        )}
                         {can_delete && !isVerified && !receipt && !payment.handed_in && (
                             <Button type="button" variant="danger" onClick={() => setConfirmingDelete(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
                                 Delete Payment
@@ -227,6 +257,38 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                     </div>
                 </div>
             </div>
+
+            {reversal_request && (
+                <div role="alert" className="mb-4 max-w-3xl rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">
+                        {reversal_request.requested_by ?? 'The collector'} asks the office to reverse this payment
+                        {reversal_request.requested_at ? ` (${new Date(reversal_request.requested_at).toLocaleString()})` : ''}.
+                    </p>
+                    <p className="mt-1">Reason: {reversal_request.reason}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {can_reverse && (
+                            <Button type="button" onClick={() => setReversing(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
+                                {payment.verification_status === 'pending' ? 'Reject it…' : 'Reverse it…'}
+                            </Button>
+                        )}
+                        {reversal_request.can_decline && (
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => {
+                                    const note = window.prompt('Why is the payment kept? The collector sees this.');
+                                    if (note && note.trim().length >= 3) {
+                                        router.post(`/reversal-requests/${reversal_request.uuid}/decline`, { note }, { preserveScroll: true });
+                                    }
+                                }}
+                                className="rounded-lg px-4 py-2 text-sm font-semibold"
+                            >
+                                Decline
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {payment.reversed_at && (
                 <div role="status" className="mb-4 max-w-3xl rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
@@ -530,7 +592,13 @@ export default function PaymentsShow({ payment, receipt, can_manage, can_delete,
                 </div>
             </Modal>
 
-            <ReversePaymentModal open={reversing} onClose={() => setReversing(false)} payment={payment} freeMonths={free_months} />
+            <ReversePaymentModal
+                open={reversing}
+                onClose={() => setReversing(false)}
+                payment={payment}
+                freeMonths={free_months}
+                initialReason={reversal_request ? `Asked by ${reversal_request.requested_by ?? "the collector"}: ${reversal_request.reason}` : undefined}
+            />
         </AppLayout>
     );
 }

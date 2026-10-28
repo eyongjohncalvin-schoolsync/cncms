@@ -64,6 +64,7 @@ class CashAlertService
             $this->lateRegistrationsPaidSomeone(),
             $this->handoversNotReceived($deadlineHours),
             $this->openShortages(),
+            $this->collectorCredits(),
             $this->walletLinesNotFound(),
             $this->receiptsScannedBeforeRecording($deadlineHours),
             $this->unaccountedReceiptNumbers(),
@@ -271,7 +272,24 @@ class CashAlertService
                 ->map(fn (Remittance $remittance): array => [
                     'label' => "{$remittance->number} — {$remittance->collector?->name}",
                     'detail' => 'Received '.$remittance->received_at?->format('d M H:i'),
-                    'amount' => ltrim((string) $remittance->cash_variance, '-'),
+                    'amount' => $remittance->shortageOwed(),
+                    'link' => "/cash/remittances/{$remittance->uuid}",
+                ])->all());
+    }
+
+    /**
+     * Cash handed in above what was expected, not yet used to cover a
+     * shortage (owner, 2026-10-28) — usually a payment that synced late. It
+     * stays visible until a later shortage uses it.
+     */
+    private function collectorCredits(): array
+    {
+        return $this->alert('collector_credits', 'warning', 'Extra cash handed in', 'More cash than expected came in on these handovers — usually a payment that synced late. It covers the collector\'s next shortage; find out where it came from.',
+            Remittance::query()->with('collector')->where('credit_remaining', '>', 0)->orderBy('received_at')->get()
+                ->map(fn (Remittance $remittance): array => [
+                    'label' => "{$remittance->number} — {$remittance->collector?->name}",
+                    'detail' => 'Received '.$remittance->received_at?->format('d M H:i'),
+                    'amount' => (string) $remittance->credit_remaining,
                     'link' => "/cash/remittances/{$remittance->uuid}",
                 ])->all());
     }

@@ -15,6 +15,7 @@ use App\Models\Expenditure;
 use App\Models\FieldInstallation;
 use App\Models\Manuscript;
 use App\Models\Payment;
+use App\Models\ReceiptLeaf;
 use App\Models\Scopes\BranchScope;
 use App\Models\Service;
 use App\Models\SyncQueue;
@@ -155,6 +156,10 @@ class SyncService
             }
         } finally {
             $this->payments->forgetEarlierPayments();
+        }
+
+        foreach ($changes['payment_cancellations'] ?? [] as $item) {
+            $results['payment_cancellations'][] = $this->pushPaymentCancellation($item, $deviceId, $actor);
         }
 
         foreach ($changes['bon_requests'] ?? [] as $item) {
@@ -1018,6 +1023,55 @@ class SyncService
      *
      * @param  array<string, mixed>  $payload
      */
+    /**
+     * A payment the agent cancelled on the phone before it synced (owner,
+     * 2026-10-28: "recorded it, then the customer didn't pay"). Nothing
+     * disappears quietly:
+     *  - never reached the server: its printed receipt number is cancelled
+     *    with the reason, so the receipt stock still adds up;
+     *  - it did reach the server (the phone missed the answer): it is not
+     *    undone here — the office gets a reversal request, and decides.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array{local_uuid: ?string, status: string, error?: string}
+     */
+    private function pushPaymentCancellation(array $item, string $deviceId, User $actor): array
+    {
+        $localUuid = $item['local_uuid'] ?? null;
+        $reason = 'Cancelled on the phone: '.trim((string) ($item['reason'] ?? ''));
+
+        try {
+            $payment = Payment::query()->withoutGlobalScope(BranchScope::class)->where('local_uuid', $localUuid)->first();
+
+            if ($payment !== null) {
+                if ($payment->verification_status !== 'rejected' && $payment->openReversalRequest()->doesntExist()) {
+                    app(PaymentReversalRequestService::class)->request($payment, $actor, $reason);
+                }
+
+                $status = $payment->verification_status === 'rejected' ? 'cancelled' : 'requested';
+            } else {
+                $leaf = is_string($item['receipt_number'] ?? null)
+                    ? ReceiptLeaf::query()->where('number', $item['receipt_number'])->first()
+                    : null;
+
+                if ($leaf?->isUnused()) {
+                    app(ReceiptStockService::class)->cancelLeaf($leaf, $reason, $actor);
+                }
+
+                $status = 'cancelled';
+            }
+
+            $this->recordSyncQueue($deviceId, 'payment_cancellation', $payment?->uuid, $localUuid, $item, 'synced');
+
+            return ['local_uuid' => $localUuid, 'status' => $status];
+        } catch (Throwable $e) {
+            $message = $this->errorMessage($e);
+            $this->recordSyncQueue($deviceId, 'payment_cancellation', null, $localUuid, $item, 'failed', $message);
+
+            return ['local_uuid' => $localUuid, 'status' => 'failed', 'error' => $message];
+        }
+    }
+
     private function recordSyncQueue(
         string $deviceId,
         string $entityType,

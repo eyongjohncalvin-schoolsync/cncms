@@ -146,6 +146,51 @@ export async function markPaymentSynced(localUuid: string, serverUuid: string): 
     );
 }
 
+/**
+ * "The customer didn't pay after all" — a payment still on this phone,
+ * not yet synced, is cancelled (owner, 2026-10-28). It never goes up as a
+ * payment; the next sync tells the server, which cancels its receipt number
+ * (or, had it arrived after all, asks the office to reverse it). Marked
+ * rejected locally so it stops counting in today's total and the
+ * second-payment checks. Returns false when it already synced.
+ */
+export async function cancelUnsyncedPayment(localUuid: string, reason: string): Promise<boolean> {
+    const db = await getDatabase();
+
+    const result = await db.runAsync(
+        `UPDATE payments
+         SET sync_status = 'cancelled', cancel_reason = ?, cancel_synced = 0,
+             verification_status = 'rejected', rejection_reason = ?, updated_at = ?
+         WHERE local_uuid = ? AND sync_status IN ('queued', 'failed')`,
+        [reason, `Cancelled on this phone: ${reason}`, nowIso(), localUuid],
+    );
+
+    return result.changes > 0;
+}
+
+/** Cancellations the server hasn't been told about yet. */
+export async function getUnsentCancellations(): Promise<Pick<LocalPayment, 'local_uuid' | 'receipt_number' | 'cancel_reason'>[]> {
+    const db = await getDatabase();
+
+    return db.getAllAsync(
+        `SELECT local_uuid, receipt_number, cancel_reason FROM payments WHERE sync_status = 'cancelled' AND cancel_synced = 0 LIMIT ?`,
+        [PUSH_BATCH_SIZE],
+    );
+}
+
+export async function markCancellationSent(localUuid: string): Promise<void> {
+    const db = await getDatabase();
+
+    await db.runAsync(`UPDATE payments SET cancel_synced = 1, updated_at = ? WHERE local_uuid = ?`, [nowIso(), localUuid]);
+}
+
+/** The agent asked the office to reverse this synced payment. */
+export async function markReversalRequested(localUuid: string): Promise<void> {
+    const db = await getDatabase();
+
+    await db.runAsync(`UPDATE payments SET reversal_requested_at = ?, updated_at = ? WHERE local_uuid = ?`, [nowIso(), nowIso(), localUuid]);
+}
+
 export async function markPaymentFailed(localUuid: string, error: string): Promise<void> {
     const db = await getDatabase();
 

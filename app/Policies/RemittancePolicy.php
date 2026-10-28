@@ -13,9 +13,10 @@ use App\Support\TenantContext;
  * The daily income form (docs/plans/cash-controls.md, wave 4).
  *
  *  - `cash.remit`   — hand over one's own collections, see one's own handovers.
- *  - `cash.receive` — receive someone ELSE's handover into one's till; the
- *    owner (super) may receive their own. Repaying a shortage is also a
- *    receipt of cash, so it needs this too.
+ *  - `cash.receive` — receive someone ELSE's handover into one's till —
+ *    never one's own, the owner included (owner, 2026-10-28; the super
+ *    bypass is refused again in RemittanceService). Repaying a shortage is
+ *    also a receipt of cash, so it needs this too.
  *  - `cash.view`    — see every handover.
  *  - writing a shortage off is a loss decision: `vouchers.approve` (the
  *    managers who approve spending), never the cashier who counted it.
@@ -46,7 +47,7 @@ class RemittancePolicy
     {
         return $remittance->isSubmitted()
             && $this->context->can('cash.receive')
-            && ($remittance->collector_user_id !== $user->id || $this->context->isSuper());
+            && $remittance->collector_user_id !== $user->id;
     }
 
     public function repayShortage(User $user, Remittance $remittance): bool

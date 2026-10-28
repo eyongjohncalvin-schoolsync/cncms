@@ -180,7 +180,7 @@ class PaymentVerificationService
             $refundAmount = $money === 'refund' ? $taken : '0.00';
 
             if ($money === 'correct') {
-                $replacement = app(PaymentService::class)->create($correction);
+                $replacement = app(PaymentService::class)->createCorrection($correction);
                 $locked->update(['replaced_by_payment_id' => $replacement->id]);
 
                 // The money taken now stands for the correct payment, in the
@@ -225,6 +225,9 @@ class PaymentVerificationService
                 'off_handover' => $money === 'none' && $line === null,
             ];
         });
+
+        // A collector's request to reverse it is answered.
+        app(PaymentReversalRequestService::class)->markDone($result['payment'], $actor);
 
         // After the commit, so a page load can't re-cache the old figures in between.
         ReportService::forgetCache(Carbon::now(BusinessTimezone::WAT), TenantContext::currentBranchId());

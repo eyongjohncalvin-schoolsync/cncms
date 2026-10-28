@@ -57,6 +57,31 @@ class PaymentController extends Controller
         ]]);
     }
 
+    /**
+     * This month's payments for customers in the agent's zones that someone
+     * else recorded — a walk-in at the office, another collector (owner,
+     * 2026-10-28). They stay under the zone and show on the agent's phone,
+     * named, so the agent never collects again and knows the money is not
+     * theirs to hand over.
+     */
+    public function byOthers(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Payment::class);
+
+        return response()->json(['data' => $this->payments->byOthersInMyZones($request->user())->map(fn (Payment $payment): array => [
+            'uuid' => $payment->uuid,
+            'customer_uuid' => $payment->customer?->uuid,
+            'customer_name' => $payment->customer?->name,
+            'amount' => (string) $payment->amount,
+            'method' => $payment->method ?? 'cash',
+            'collected_at' => ($payment->collected_at ?? $payment->created_at)?->toIso8601String(),
+            'recorded_by' => $payment->recordedBy?->name,
+            'where' => $payment->recorded_offline ? 'field' : 'office',
+            'receipt_number' => $payment->receipt?->receipt_number,
+            'verification_status' => $payment->verification_status,
+        ])->values()->all()]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Payment::class);

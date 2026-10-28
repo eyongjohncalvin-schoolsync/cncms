@@ -30,6 +30,7 @@ interface Props {
 
 const KIND_LABELS: Record<string, string> = {
     remittance_cash: 'Cash handover',
+    desk_payment: 'Desk payment',
     remittance_wallet: 'Mobile-money collection',
     deposit: 'Bank deposit',
     transfer: 'Transfer',

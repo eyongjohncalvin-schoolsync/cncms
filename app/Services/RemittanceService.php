@@ -12,6 +12,7 @@ use App\Models\RemittanceLine;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Support\BranchAttribution;
+use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -161,6 +162,8 @@ class RemittanceService
             throw ValidationException::withMessages(['received_cash' => 'The notes and coins you counted don\'t add up to the cash received.']);
         }
 
+        $this->assertNotOwnHandover($remittance, $receiver, 'received_cash');
+
         $remittance = DB::transaction(function () use ($remittance, $receiver, $receivedCash, $denominations, $confirmedLineIds, $note, $bankAccountUuid): Remittance {
             $locked = Remittance::query()->whereKey($remittance->id)->lockForUpdate()->firstOrFail();
 
@@ -201,6 +204,8 @@ class RemittanceService
             }
 
             $variance = bcsub(bcadd($receivedCash, $bonsPaid, 2), (string) $locked->expected_cash, 2);
+            $short = bccomp($variance, '0', 2) < 0;
+            $covered = $short ? $this->coverFromCredit($locked, ltrim($variance, '-')) : '0.00';
 
             $locked->update([
                 'status' => 'received',
@@ -212,7 +217,12 @@ class RemittanceService
                 'cash_variance' => $variance,
                 'receiver_note' => $note,
                 'bons_total' => $bonsPaid,
-                'shortage_status' => bccomp($variance, '0', 2) < 0 ? 'open' : null,
+                // Extra cash is the collector's credit for later shortages.
+                'credit_remaining' => bccomp($variance, '0', 2) > 0 ? $variance : null,
+                'shortage_covered' => $covered,
+                'shortage_status' => ! $short ? null : (bccomp($covered, ltrim($variance, '-'), 2) === 0 ? 'repaid' : 'open'),
+                'shortage_settled_at' => $short && bccomp($covered, ltrim($variance, '-'), 2) === 0 ? now() : null,
+                'shortage_note' => bccomp($covered, '0', 2) > 0 ? number_format((float) $covered, 0, '.', ' ').' FCFA covered by extra cash handed in earlier.' : null,
             ]);
 
             return $locked;
@@ -240,7 +250,7 @@ class RemittanceService
             }
 
             if ($outcome === 'repaid') {
-                $this->cashBook->record($this->branchTill($remittance, $actor), 'in', ltrim((string) $remittance->cash_variance, '-'), CashMovement::KIND_SHORTAGE_REPAYMENT, $actor, [
+                $this->cashBook->record($this->branchTill($remittance, $actor), 'in', $remittance->shortageOwed(), CashMovement::KIND_SHORTAGE_REPAYMENT, $actor, [
                     'document_number' => $remittance->number,
                     'source' => $remittance,
                     'note' => $note,
@@ -297,6 +307,104 @@ class RemittanceService
         });
     }
 
+    /**
+     * A short handover is covered first by the collector's credit — cash
+     * they handed in above what was expected before (a payment that synced
+     * late, an honest mistake). That cash is already in a till, so nothing
+     * moves; the oldest credit goes first. Returns how much was covered.
+     */
+    private function coverFromCredit(Remittance $short, string $shortage): string
+    {
+        $covered = '0.00';
+
+        $credits = Remittance::query()
+            ->where('collector_user_id', $short->collector_user_id)
+            ->whereKeyNot($short->id)
+            ->where('credit_remaining', '>', 0)
+            ->orderBy('received_at')
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($credits as $credit) {
+            $left = bcsub($shortage, $covered, 2);
+
+            if (bccomp($left, '0', 2) <= 0) {
+                break;
+            }
+
+            $use = bccomp((string) $credit->credit_remaining, $left, 2) < 0 ? (string) $credit->credit_remaining : $left;
+            $credit->update(['credit_remaining' => bcsub((string) $credit->credit_remaining, $use, 2)]);
+            $covered = bcadd($covered, $use, 2);
+        }
+
+        return $covered;
+    }
+
+    /**
+     * Cash taken at the desk by someone who holds a till goes straight into
+     * it (owner, 2026-10-28): a handover made and received at once, so the
+     * till's book and its day close count it, and it is never left as the
+     * recorder's outstanding cash. The day close (counted against the book)
+     * and the manager's pickup are its checks. Only cash — MoMo and bank
+     * money is still ticked off its statement by someone else at a handover.
+     * Returns null — and the payment goes through a handover as usual — when
+     * it doesn't apply (not cash, no till, the till's day closed).
+     */
+    public function receiveAtDesk(Payment $payment, User $recorder): ?Remittance
+    {
+        if (($payment->method ?? 'cash') !== 'cash' || $payment->recorded_offline || ! $payment->isUnderCashControls()
+            || ! app(TenantContext::class)->can('cash.receive')) {
+            return null;
+        }
+
+        $till = $this->cashBook->tillFor($recorder);
+
+        if ($this->cashBook->isDayClosed($till)) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($payment, $recorder, $till): Remittance {
+            $amount = (string) $payment->amount;
+            $now = now();
+
+            $remittance = Remittance::query()->create([
+                'number' => $this->documentNumbers->next(DocumentNumberService::REMITTANCE),
+                'collector_user_id' => $recorder->id,
+                'branch_id' => $till->branch_id,
+                'business_date' => $this->cashBook->today(),
+                'status' => 'received',
+                'at_desk' => true,
+                'expected_cash' => $amount,
+                'expected_mtn' => '0',
+                'expected_orange' => '0',
+                'expected_bank' => '0',
+                'declared_cash' => $amount,
+                'submitted_at' => $now,
+                'received_by' => $recorder->id,
+                'received_at' => $now,
+                'till_account_id' => $till->id,
+                'received_cash' => $amount,
+                'cash_variance' => '0',
+                'bons_total' => '0',
+            ]);
+
+            RemittanceLine::query()->create([
+                'remittance_id' => $remittance->id,
+                'payment_id' => $payment->id,
+                'method' => 'cash',
+                'amount' => $amount,
+            ]);
+
+            $this->cashBook->record($till, 'in', $amount, CashMovement::KIND_DESK_PAYMENT, $recorder, [
+                'document_number' => $remittance->number,
+                'source' => $remittance,
+                'note' => 'Desk payment — '.($payment->customer?->name ?? 'customer'),
+            ]);
+
+            return $remittance;
+        });
+    }
+
     /** Books a non-cash line into the branch's wallet or bank account. */
     private function bookFound(Remittance $remittance, RemittanceLine $line, User $actor, ?string $bankAccountUuid, ?string $note): void
     {
@@ -340,10 +448,10 @@ class RemittanceService
     }
 
     /** Nobody settles what they owe themselves — the owner included (owner, 2026-10-28). */
-    private function assertNotOwnHandover(Remittance $remittance, User $actor): void
+    private function assertNotOwnHandover(Remittance $remittance, User $actor, string $field = 'outcome'): void
     {
         if ($remittance->collector_user_id === $actor->id) {
-            throw ValidationException::withMessages(['outcome' => 'This is your own handover — someone else settles it.']);
+            throw ValidationException::withMessages([$field => 'This is your own handover — someone else in the office deals with it.']);
         }
     }
 
@@ -394,7 +502,7 @@ class RemittanceService
     {
         $remittance->loadMissing(['collector', 'receivedBy']);
         $money = fn ($value): string => number_format((float) $value, 0, '.', ' ').' FCFA';
-        $short = bccomp((string) $remittance->cash_variance, '0', 2) < 0;
+        $short = $remittance->shortage_status === 'open';
 
         if ($remittance->collector) {
             $this->notifications->broadcastToUser(
@@ -403,7 +511,7 @@ class RemittanceService
                 $short ? 'warning' : 'info',
                 $short ? 'Handover short' : 'Handover received',
                 "{$remittance->number}: {$remittance->receivedBy?->name} received {$money($remittance->received_cash)} cash"
-                    .($short ? ", {$money(ltrim((string) $remittance->cash_variance, '-'))} short of what you collected." : '.'),
+                    .($short ? ", {$money($remittance->shortageOwed())} short of what you collected." : '.'),
                 "/cash/remittances/{$remittance->uuid}",
                 'remittance',
                 $remittance->uuid,

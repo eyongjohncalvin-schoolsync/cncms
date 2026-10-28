@@ -241,6 +241,11 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     // The latest payment this month by anyone (JSON: amount, collected_at, recorded_by), at cached_at —
     // warned about before a second one, even offline (owner, 2026-10-28).
     { table: 'customers', ddl: 'ALTER TABLE customers ADD COLUMN paid_this_month TEXT' },
+    // A payment cancelled before it synced (sync_status 'cancelled'): why, and whether the server has been told.
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN cancel_reason TEXT' },
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN cancel_synced INTEGER NOT NULL DEFAULT 0' },
+    // When the agent asked the office to reverse it (owner, 2026-10-28).
+    { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN reversal_requested_at TEXT' },
 ];
 
 /**

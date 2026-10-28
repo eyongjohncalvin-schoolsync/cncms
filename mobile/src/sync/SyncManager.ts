@@ -5,6 +5,8 @@ import { isNetworkError, isMaintenanceError, extractErrorMessage } from '../api/
 import { upsertExpenseCategories } from '../db/categories';
 import {
     getFailedPaymentsCount,
+    getUnsentCancellations,
+    markCancellationSent,
     getPaymentsAwaitingReceiptUpload,
     getQueuedPayments,
     getQueuedPaymentsCount,
@@ -47,7 +49,13 @@ import { refreshFormData } from '../db/formCache';
 import { refreshPrepaymentOffers } from '../api/prepaymentOffers';
 import { OLD_SERVER_MESSAGE, serverAcceptsInstallations, type FieldInstallationItem } from '../utils/fieldInstallation';
 import { isFinalUploadFailure, withJitter } from '../utils/syncTuning';
-import type { SyncPushBonRequestItem, SyncPushComplaintItem, SyncPushPaymentItem, SyncPullNotificationItem } from '../types/api';
+import type {
+    SyncPushBonRequestItem,
+    SyncPushComplaintItem,
+    SyncPushPaymentCancellationItem,
+    SyncPushPaymentItem,
+    SyncPullNotificationItem,
+} from '../types/api';
 
 /**
  * Speaks the server's real sync protocol directly (POST /sync/push, GET
@@ -349,14 +357,15 @@ class SyncManagerImpl {
     }
 
     private async push(): Promise<void> {
-        const [queuedPayments, queuedExpenditures, queuedComplaints, queuedInstallations] = await Promise.all([
+        const [queuedPayments, queuedExpenditures, queuedComplaints, queuedInstallations, cancellations] = await Promise.all([
             getQueuedPayments(),
             getQueuedExpenditures(),
             getQueuedComplaints(),
             getQueuedInstallations(),
+            getUnsentCancellations(),
         ]);
 
-        const total = queuedPayments.length + queuedExpenditures.length + queuedComplaints.length + queuedInstallations.length;
+        const total = queuedPayments.length + queuedExpenditures.length + queuedComplaints.length + queuedInstallations.length + cancellations.length;
 
         if (total === 0) {
             return;
@@ -425,6 +434,14 @@ class SyncManagerImpl {
         // for one of them in the same push finds the customer.
         const installationItems: FieldInstallationItem[] = queuedInstallations.map((row) => JSON.parse(row.payload) as FieldInstallationItem);
 
+        // Payments cancelled here before they synced: the server cancels their
+        // receipt numbers, or asks the office if one reached it after all.
+        const cancellationItems: SyncPushPaymentCancellationItem[] = cancellations.map((row) => ({
+            local_uuid: row.local_uuid,
+            receipt_number: row.receipt_number ?? null,
+            reason: row.cancel_reason ?? 'Cancelled on the phone',
+        }));
+
         const response = await pushChanges({
             device_id: deviceId,
             last_sync_at: lastSyncAt,
@@ -433,6 +450,7 @@ class SyncManagerImpl {
                 bon_requests: bonRequestItems,
                 complaints: complaintItems,
                 ...(installationItems.length > 0 ? { installations: installationItems } : {}),
+                ...(cancellationItems.length > 0 ? { payment_cancellations: cancellationItems } : {}),
             },
         });
 
@@ -463,6 +481,10 @@ class SyncManagerImpl {
                     ? markInstallationSynced(result.local_uuid, result.activation, result.possible_duplicate)
                     : markInstallationFailed(result.local_uuid, result.error ?? 'Sync failed'),
             ),
+            // A failed one (or an older server that ignores them) is sent again next sync.
+            ...(response.results.payment_cancellations ?? [])
+                .filter((result) => result.status !== 'failed')
+                .map((result) => markCancellationSent(result.local_uuid)),
         ]);
 
         patchSyncState({

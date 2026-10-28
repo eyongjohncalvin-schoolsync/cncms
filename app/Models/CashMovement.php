@@ -32,6 +32,12 @@ class CashMovement extends Model
     /** Money handed over by a collector, into a till. */
     public const string KIND_REMITTANCE_CASH = 'remittance_cash';
 
+    /**
+     * Cash taken at the desk by someone who holds a till, straight into it
+     * (owner, 2026-10-28). Source: the desk App\Models\Remittance.
+     */
+    public const string KIND_DESK_PAYMENT = 'desk_payment';
+
     /** A mobile-money collection ticked off the wallet statement. */
     public const string KIND_REMITTANCE_WALLET = 'remittance_wallet';
 

@@ -31,6 +31,7 @@ const PAYMENT_SYNC_BADGE: Record<LocalPayment['sync_status'], { label: string; t
     syncing: { label: 'Syncing…', tone: 'syncing' },
     synced: { label: 'Reached the office', tone: 'synced' },
     failed: { label: 'Sync failed', tone: 'error' },
+    cancelled: { label: 'Cancelled on this phone', tone: 'neutral' },
 };
 
 function formatDate(iso: string): string {

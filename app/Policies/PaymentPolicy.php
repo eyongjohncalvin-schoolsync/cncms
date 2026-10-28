@@ -86,6 +86,21 @@ class PaymentPolicy
      * the office, never whoever recorded it (the owner excepted) — a second
      * person decides, as for a possible duplicate.
      */
+    /** The collector who recorded it asks the office to reverse it (PaymentReversalRequestService). */
+    public function requestReversal(User $user, Payment $payment): bool
+    {
+        return $payment->recorded_by === $user->id
+            && $payment->verification_status !== 'rejected'
+            && ! $payment->isReversed()
+            && $payment->openReversalRequest()->doesntExist();
+    }
+
+    /** The office turns a collector's request down — never the collector. */
+    public function declineReversal(User $user, Payment $payment): bool
+    {
+        return $this->context->can('payments.verify') && $payment->recorded_by !== $user->id;
+    }
+
     public function reverse(User $user, Payment $payment): bool
     {
         // A pending payment its collector owes a handover for is rejected the

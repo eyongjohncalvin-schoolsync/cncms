@@ -124,6 +124,12 @@ class RemittanceController extends Controller
                 'receiver_note' => $remittance->receiver_note,
                 'shortage_status' => $remittance->shortage_status,
                 'shortage_note' => $remittance->shortage_note,
+                // What is still owed after the collector's earlier extra cash covered part of it.
+                'shortage_owed' => $remittance->shortageOwed(),
+                // Extra cash handed in here, kept as the collector's credit for later shortages.
+                'credit_remaining' => $remittance->credit_remaining !== null ? (string) $remittance->credit_remaining : null,
+                // Cash taken at the desk, straight into the recorder's till (RemittanceService::receiveAtDesk()).
+                'at_desk' => $remittance->at_desk,
                 'lines' => $remittance->lines->map(fn (RemittanceLine $line): array => [
                     'id' => $line->id,
                     'payment_uuid' => $line->payment?->uuid,

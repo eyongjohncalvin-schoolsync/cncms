@@ -25,6 +25,7 @@ const SYNC_BADGE: Record<LocalExpenditure['sync_status'], { label: string; tone:
     syncing: { label: 'Syncing…', tone: 'syncing' },
     synced: { label: 'Synced', tone: 'synced' },
     failed: { label: 'Sync failed', tone: 'error' },
+    cancelled: { label: 'Cancelled', tone: 'neutral' },
 };
 
 /**

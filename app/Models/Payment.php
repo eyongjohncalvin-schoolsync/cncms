@@ -249,6 +249,12 @@ class Payment extends Model
             ?? ($this->paid_with_payment_id !== null ? RemittanceLine::query()->where('payment_id', $this->paid_with_payment_id)->first() : null);
     }
 
+    /** The collector's open request for the office to reverse it (App\Services\PaymentReversalRequestService). */
+    public function openReversalRequest(): HasOne
+    {
+        return $this->hasOne(PaymentReversalRequest::class)->where('status', PaymentReversalRequest::STATUS_PENDING);
+    }
+
     /** The original payment whose money a correction stands for (see scopeAwaitingHandover()). */
     public function paidWith(): BelongsTo
     {

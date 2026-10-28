@@ -90,6 +90,13 @@ class SyncPushRequest extends FormRequest
             'changes.payments.*.duplicate_note' => ['nullable'],
             'changes.payments.*.prepayment_offer_uuid' => ['nullable'],
 
+            // A payment cancelled on the phone before it synced (owner,
+            // 2026-10-28) — SyncService::pushPaymentCancellation().
+            'changes.payment_cancellations' => ['nullable', 'array'],
+            'changes.payment_cancellations.*.local_uuid' => ['required', 'uuid'],
+            'changes.payment_cancellations.*.receipt_number' => ['nullable', 'string', 'max:30'],
+            'changes.payment_cancellations.*.reason' => ['required', 'string', 'max:500'],
+
             // "Request a bon" from the phone
             // (docs/plans/expenditures-and-spending-controls.md, item 2) —
             // becomes a pending bon; the category is checked per item.

@@ -5,7 +5,8 @@
  * plain REST endpoint not from pull()).
  */
 
-export type SyncStatus = 'queued' | 'syncing' | 'synced' | 'failed';
+/** `cancelled` — cancelled on this phone before it synced (it never goes up as a payment). */
+export type SyncStatus = 'queued' | 'syncing' | 'synced' | 'failed' | 'cancelled';
 
 /** Mirrors App\Models\Payment::DUPLICATE_REASONS_PICKABLE. */
 export type DuplicateReason = 'advance' | 'arrears' | 'refund' | 'other';
@@ -83,6 +84,12 @@ export interface LocalPayment {
     sync_status: SyncStatus;
     sync_error: string | null;
     sync_attempts: number;
+    /** Cancelled before it synced: why (sync_status 'cancelled'). */
+    cancel_reason?: string | null;
+    /** 1 once the server has been told about the cancellation. */
+    cancel_synced?: number;
+    /** When the agent asked the office to reverse it. */
+    reversal_requested_at?: string | null;
     created_at: string;
     updated_at: string;
 }

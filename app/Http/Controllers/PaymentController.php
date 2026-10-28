@@ -16,6 +16,7 @@ use App\Models\Customer;
 use App\Models\FreeMonthGrant;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
+use App\Models\PaymentReversalRequest;
 use App\Models\PaymentVerification;
 use App\Models\PrepaymentOffer;
 use App\Models\ReceiptBlock;
@@ -132,6 +133,11 @@ class PaymentController extends Controller
                 'to' => $filters['to'] ?? null,
                 'scope' => $isAllTimeScope ? 'all' : null,
             ],
+            // Collectors waiting for the office to reverse a payment (owner, 2026-10-28).
+            'reversal_requests_count' => PaymentReversalRequest::query()
+                ->where('status', PaymentReversalRequest::STATUS_PENDING)
+                ->whereHas('payment', fn ($query) => $query->forBranch(TenantContext::currentBranchId()))
+                ->count(),
             // Tab badge counts — deliberately GLOBAL, i.e. NOT scoped to the
             // list's own from/to window (including the new current-month
             // default above). Two options were considered: (a) scope these
@@ -403,6 +409,15 @@ class PaymentController extends Controller
             // Its collector owes a handover for it: rejected (with the money question), never deleted.
             'can_delete' => $this->context->can('payments.delete') && ! $payment->isUnderCashControls(),
             'can_reverse' => $request->user()->can('reverse', $payment),
+            // A collector's request for the office to reverse it (owner, 2026-10-28).
+            'reversal_request' => ($open = $payment->openReversalRequest()->with('requestedBy:id,name')->first()) === null ? null : [
+                'uuid' => $open->uuid,
+                'reason' => $open->reason,
+                'requested_by' => $open->requestedBy?->name,
+                'requested_at' => $open->created_at?->toIso8601String(),
+                'can_decline' => $request->user()->can('declineReversal', $payment),
+            ],
+            'can_request_reversal' => $open === null && $request->user()->can('requestReversal', $payment),
         ]);
     }
 

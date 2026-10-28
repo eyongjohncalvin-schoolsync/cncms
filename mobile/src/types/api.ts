@@ -223,7 +223,42 @@ export interface SyncPushRequestBody {
         complaints?: SyncPushComplaintItem[];
         /** Customers registered in the field, offline (installation phase 3). */
         installations?: FieldInstallationItem[];
+        /** Payments cancelled on this phone before they synced (owner, 2026-10-28). */
+        payment_cancellations?: SyncPushPaymentCancellationItem[];
     };
+}
+
+/**
+ * A payment cancelled on the phone before it synced — App\Services\
+ * SyncService::pushPaymentCancellation(): its receipt number is cancelled,
+ * or, if the payment reached the server after all, the office gets a
+ * reversal request.
+ */
+export interface SyncPushPaymentCancellationItem {
+    local_uuid: string;
+    receipt_number: string | null;
+    reason: string;
+}
+
+/** `cancelled` — done; `requested` — it had reached the server, the office decides; `failed` — retried next sync. */
+export interface SyncPushCancellationResult {
+    local_uuid: string;
+    status: 'cancelled' | 'requested' | 'failed';
+    error?: string;
+}
+
+/** GET /payments/by-others — this month's payments in the agent's zones someone else took (Api\PaymentController::byOthers()). */
+export interface PaymentByOthersApi {
+    uuid: string;
+    customer_uuid: string | null;
+    customer_name: string | null;
+    amount: string;
+    method: 'cash' | 'mtn_momo' | 'orange_money' | 'bank';
+    collected_at: string | null;
+    recorded_by: string | null;
+    where: 'office' | 'field';
+    receipt_number: string | null;
+    verification_status: 'pending' | 'verified' | 'rejected';
 }
 
 /** One `results.installations[]` entry — `server_uuid` is the customer's uuid. */
@@ -263,6 +298,8 @@ export interface SyncPushResponse {
         complaints: SyncPushResultItem[];
         /** Absent on servers older than installation phase 3. */
         installations?: SyncPushInstallationResult[];
+        /** Absent on servers older than the cancel-before-sync change. */
+        payment_cancellations?: SyncPushCancellationResult[];
     };
     errors: Array<{ entity_type: string; local_uuid: string | null; message: string }>;
 }

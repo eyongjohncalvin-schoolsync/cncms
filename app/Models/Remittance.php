@@ -27,6 +27,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'declared_cash', 'declared_denominations', 'collector_note', 'submitted_at',
     'received_by', 'received_at', 'till_account_id', 'received_cash', 'received_denominations', 'cash_variance', 'receiver_note',
     'shortage_status', 'shortage_settled_by', 'shortage_settled_at', 'shortage_note', 'bons_total',
+    // Made and received at the desk (RemittanceService::receiveAtDesk()); extra cash kept as the collector's credit.
+    'at_desk', 'credit_remaining', 'shortage_covered',
 ])]
 #[RouteKey('uuid')]
 class Remittance extends Model
@@ -47,6 +49,9 @@ class Remittance extends Model
             'received_cash' => 'decimal:2',
             'received_denominations' => 'array',
             'cash_variance' => 'decimal:2',
+            'credit_remaining' => 'decimal:2',
+            'shortage_covered' => 'decimal:2',
+            'at_desk' => 'boolean',
             'submitted_at' => 'datetime',
             'received_at' => 'datetime',
             'shortage_settled_at' => 'datetime',
@@ -98,6 +103,16 @@ class Remittance extends Model
     public function isReceived(): bool
     {
         return $this->status === 'received';
+    }
+
+    /** What the collector still owes of a short handover — the shortage less what their extra cash covered. */
+    public function shortageOwed(): string
+    {
+        if (bccomp((string) $this->cash_variance, '0', 2) >= 0) {
+            return '0.00';
+        }
+
+        return bcsub(ltrim((string) $this->cash_variance, '-'), (string) ($this->shortage_covered ?? '0'), 2);
     }
 
     /** Set by the creating service (BelongsToBranch). */

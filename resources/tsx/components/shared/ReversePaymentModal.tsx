@@ -19,6 +19,8 @@ interface ReversePaymentModalProps {
     };
     /** When given and allowed: "Give free months instead" (the usual allowance and approval apply). */
     freeMonths?: { can_request: boolean; max_months: number } | null;
+    /** The collector's reason, when they asked the office to reverse it. */
+    initialReason?: string;
 }
 
 type MoneyChoice = 'correct' | 'refund' | 'none';
@@ -37,14 +39,14 @@ type MoneyChoice = 'correct' | 'refund' | 'none';
  *  - give the money back — a refund bon for the customer, paid by the
  *    cashier once approved.
  */
-export function ReversePaymentModal({ open, onClose, payment, freeMonths = null }: ReversePaymentModalProps) {
+export function ReversePaymentModal({ open, onClose, payment, freeMonths = null, initialReason }: ReversePaymentModalProps) {
     const handedIn = payment.handed_in === true;
     const rejecting = payment.verification_status === 'pending';
     const collector = payment.recorded_by_name ?? 'the collector';
     const [choice, setChoice] = useState<MoneyChoice>('correct');
     const [giveFree, setGiveFree] = useState(false);
     const canGiveFree = !rejecting && freeMonths?.can_request === true && (payment.purpose ?? 'subscription') === 'subscription';
-    const { data, setData, transform, post, processing, errors, reset, clearErrors } = useForm({ reason: '', money: 'none' as 'none' | 'refund', free_months: '1' });
+    const { data, setData, transform, post, processing, errors, reset, clearErrors } = useForm({ reason: (initialReason ?? '').slice(0, 500), money: 'none' as 'none' | 'refund', free_months: '1' });
 
     function close() {
         if (processing) {

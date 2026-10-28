@@ -343,6 +343,68 @@ class CashBookTest extends TestCase
         $this->assertSame('30000.00', $this->balanceOf($bank));
     }
 
+    public function test_cash_taken_at_the_desk_goes_straight_into_the_till(): void
+    {
+        $cashier = $this->cashier();
+        $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 2500, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
+
+        // Owner, 2026-10-28: in the drawer and in the book at once — never left as the cashier's outstanding cash.
+        $till = app(CashBookService::class)->tillFor($cashier);
+        $this->assertSame('2500.00', $this->balanceOf($till));
+        $this->assertSame(CashMovement::KIND_DESK_PAYMENT, CashMovement::query()->where('cash_account_id', $till->id)->value('kind'));
+        $this->assertTrue(Remittance::query()->where('collector_user_id', $cashier->id)->sole()->at_desk);
+        $this->get('/cash/hand-over')->assertInertia(fn (Assert $page) => $page->has('payments', 0));
+    }
+
+    public function test_momo_taken_at_the_desk_still_goes_through_a_handover(): void
+    {
+        $cashier = $this->cashier();
+        $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 2500, 'frequency' => 'monthly', 'method' => 'mtn_momo', 'method_reference' => 'CI-D1'])
+            ->assertSessionHasNoErrors();
+
+        // Someone else must tick it off the wallet statement.
+        $this->assertSame('0.00', $this->balanceOf(app(CashBookService::class)->tillFor($cashier)));
+        $this->get('/cash/hand-over')->assertInertia(fn (Assert $page) => $page->has('payments', 1));
+    }
+
+    public function test_nobody_receives_their_own_handover_not_even_the_owner(): void
+    {
+        $this->collect();
+        $remittance = $this->handOver('5000');
+
+        $this->actingAs_('kelvin@shalomtech.dev', 'super');
+        $this->post("/cash/remittances/{$remittance->uuid}/receive", ['received_cash' => '5000'])->assertForbidden();
+        $this->assertTrue($remittance->refresh()->isSubmitted());
+    }
+
+    public function test_extra_cash_covers_the_collectors_next_shortage(): void
+    {
+        $this->collect();
+        $first = $this->handOver('6000');
+        $this->cashier();
+        $this->post("/cash/remittances/{$first->uuid}/receive", ['received_cash' => '6000'])->assertSessionHasNoErrors();
+        $this->assertSame('1000.00', (string) $first->refresh()->credit_remaining);
+        $this->assertSame('1000.00', collect(app(CashAlertService::class)->alerts())->firstWhere('key', 'collector_credits')['items'][0]['amount']);
+
+        // 1,500 short next time: the 1,000 already handed in covers part of it, 500 stays owed.
+        $this->collect();
+        $second = $this->handOver('3500');
+        $this->cashier();
+        $this->post("/cash/remittances/{$second->uuid}/receive", ['received_cash' => '3500'])->assertSessionHasNoErrors();
+
+        $second->refresh();
+        $this->assertSame('open', $second->shortage_status);
+        $this->assertSame('1000.00', (string) $second->shortage_covered);
+        $this->assertSame('500.00', $second->shortageOwed());
+        $this->assertSame('0.00', (string) $first->refresh()->credit_remaining);
+
+        // Repaying it takes only what is still owed.
+        $cashier = $this->cashier();
+        $before = $this->balanceOf(app(CashBookService::class)->tillFor($cashier));
+        $this->post("/cash/remittances/{$second->uuid}/shortage", ['outcome' => 'repaid'])->assertSessionHasNoErrors();
+        $this->assertSame(bcadd($before, '500', 2), $this->balanceOf(app(CashBookService::class)->tillFor($cashier)));
+    }
+
     public function test_access(): void
     {
         $this->actingAs_('kelvin@shalomtech.dev', 'agent');

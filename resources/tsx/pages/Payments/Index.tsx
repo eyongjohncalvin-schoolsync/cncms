@@ -22,6 +22,8 @@ import type { PageProps, PaginatedResponse, Payment, PaymentFrequency, Verificat
 
 interface PaymentsIndexProps {
     payments: PaginatedResponse<Payment>;
+    /** Collectors waiting for the office to reverse a payment. */
+    reversal_requests_count?: number;
     filters: {
         verification_status: VerificationStatus | null;
         // The "Possible duplicates" tab (second payments in a month).
@@ -108,7 +110,7 @@ const frequencyLabels: Record<PaymentFrequency, string> = {
     yearly: 'Yearly',
 };
 
-export default function PaymentsIndex({ payments, filters, statusCounts }: PaymentsIndexProps) {
+export default function PaymentsIndex({ payments, filters, statusCounts, reversal_requests_count = 0 }: PaymentsIndexProps) {
     const { auth } = usePage<PageProps>().props;
     // RBAC v2 Wave 4: display affordances resolved from the shared
     // permission matrix (auth.user.permissions), not hardcoded role names.
@@ -428,6 +430,15 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                     <h2 className="font-display text-2xl text-slate-900">Payments</h2>
                     <p className="mt-1 text-sm text-slate-500">Track and verify customer payments across all zones.</p>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                {reversal_requests_count > 0 && (
+                    <Link
+                        href="/payments/reversal-requests"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 ring-1 ring-inset ring-amber-300 hover:bg-amber-100"
+                    >
+                        Reversal requests ({reversal_requests_count})
+                    </Link>
+                )}
                 <Link
                     href="/payments/create"
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700"
@@ -435,6 +446,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                     <IconPlus size={18} stroke={2} />
                     Record Payment
                 </Link>
+                </div>
             </div>
 
             {/* Monthly bills and installation fees are separate money — one view at a time (owner, 2026-10-26). */}
@@ -676,8 +688,10 @@ export default function PaymentsIndex({ payments, filters, statusCounts }: Payme
                                         )}
                                     </Td>
                                     <Td>
+                                        {/* Who took the money, and where — an office walk-in stays under its zone, named (owner, 2026-10-28). */}
                                         <Badge tone={payment.recorded_offline ? 'yellow' : 'slate'}>
-                                            {payment.recorded_offline ? 'Offline' : 'Office'}
+                                            {payment.recorded_offline ? 'Field' : 'Office'}
+                                            {payment.recorded_by_name ? ` — ${payment.recorded_by_name}` : ''}
                                         </Badge>
                                     </Td>
                                     <Td>

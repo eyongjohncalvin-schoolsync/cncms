@@ -27,6 +27,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class PaymentService
 {
@@ -49,6 +50,9 @@ class PaymentService
      * @var array<int, list<Payment>>|null
      */
     private ?array $monthEndMemo = null;
+
+    /** Off while recording a correction (createCorrection()). */
+    private bool $deskReceipts = true;
 
     public function __construct(
         private readonly PaymentRepositoryInterface $payments,
@@ -222,11 +226,13 @@ class PaymentService
             }
 
             $this->rememberEarlier($payment);
+            $this->receiveAtDesk($payment);
 
             return $payment;
         }
 
         $this->rememberEarlier($payment);
+        $this->receiveAtDesk($payment);
 
         // A verified instalment may settle its installation charge.
         if ($payment->verification_status === 'verified') {
@@ -241,6 +247,69 @@ class PaymentService
         }
 
         return $payment;
+    }
+
+    /**
+     * This business month's payments, not rejected, for customers in the
+     * zones the caller covers, that someone else recorded (Api\
+     * PaymentController::byOthers()). Empty for anyone not zone-scoped.
+     *
+     * @return EloquentCollection<int, Payment>
+     */
+    public function byOthersInMyZones(User $user): EloquentCollection
+    {
+        $zoneIds = TenantContext::currentZoneIds();
+
+        if ($zoneIds === null || $zoneIds === []) {
+            return new EloquentCollection;
+        }
+
+        [$monthStart] = BusinessTimezone::periodBoundsUtc(BusinessTimezone::currentPeriod());
+
+        return Payment::query()
+            ->with(['customer:id,uuid,name,zone_id', 'recordedBy:id,name', 'receipt'])
+            ->whereHas('customer', fn ($query) => $query->whereIn('zone_id', $zoneIds))
+            ->where('recorded_by', '!=', $user->id)
+            ->where('verification_status', '!=', 'rejected')
+            ->whereRaw('coalesce(collected_at, created_at) >= ?', [$monthStart])
+            ->orderByDesc('created_at')
+            ->limit(200)
+            ->get();
+    }
+
+    /**
+     * A correction recorded in a reversed payment's place
+     * (PaymentVerificationService::reverse()): its money is the reversed
+     * payment's, already counted or still owed — never received at the desk
+     * a second time.
+     */
+    public function createCorrection(PaymentData $data): Payment
+    {
+        $this->deskReceipts = false;
+
+        try {
+            return $this->create($data);
+        } finally {
+            $this->deskReceipts = true;
+        }
+    }
+
+    /** Cash taken at the desk goes straight into the recorder's till (RemittanceService::receiveAtDesk()). */
+    private function receiveAtDesk(Payment $payment): void
+    {
+        $recorder = auth()->user();
+
+        if (! $this->deskReceipts || ! $recorder instanceof User) {
+            return;
+        }
+
+        // The payment is saved either way: if the till can't take it, its
+        // recorder hands it over like any collector.
+        try {
+            app(RemittanceService::class)->receiveAtDesk($payment, $recorder);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /**

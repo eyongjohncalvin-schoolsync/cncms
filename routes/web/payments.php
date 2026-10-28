@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\PaymentReceiptController;
+use App\Http\Controllers\PaymentReversalRequestController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('payments', [PaymentController::class, 'index'])->name('payments.index');
+// Collectors' requests for the office to reverse a payment (owner, 2026-10-28).
+Route::get('payments/reversal-requests', [PaymentReversalRequestController::class, 'index'])->name('payments.reversal-requests');
 Route::get('payments/create', [PaymentController::class, 'create'])->name('payments.create');
 Route::get('payments/{payment}', [PaymentController::class, 'show'])->name('payments.show');
 Route::get('payments/{payment}/edit', [PaymentController::class, 'edit'])->name('payments.edit');
@@ -22,6 +25,8 @@ Route::middleware('not-impersonating:money')->group(function () {
     Route::post('payments/{payment}/verify', [PaymentController::class, 'verify'])->name('payments.verify');
     Route::post('payments/{payment}/reverse', [PaymentController::class, 'reverse'])->name('payments.reverse');
     Route::post('payments/{payment}/not-duplicate', [PaymentController::class, 'clearDuplicate'])->name('payments.not-duplicate');
+    Route::post('payments/{payment}/reversal-request', [PaymentReversalRequestController::class, 'store'])->name('payments.reversal-request');
+    Route::post('reversal-requests/{reversalRequest}/decline', [PaymentReversalRequestController::class, 'decline'])->name('reversal-requests.decline');
     Route::post('payments/{payment}/receipt', [PaymentController::class, 'uploadReceipt'])->name('payments.receipt');
     Route::post('payments/{payment}/receipt/issue', [PaymentReceiptController::class, 'issue'])->name('payments.receipt.issue');
 });

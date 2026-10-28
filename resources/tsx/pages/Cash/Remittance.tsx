@@ -54,6 +54,12 @@ interface Props {
         receiver_note: string | null;
         shortage_status: 'open' | 'repaid' | 'written_off' | null;
         shortage_note: string | null;
+        /** What is still owed after earlier extra cash covered part of it. */
+        shortage_owed: string;
+        /** Extra cash handed in here, kept as the collector's credit for later shortages. */
+        credit_remaining: string | null;
+        /** Cash taken at the desk, straight into the recorder's till. */
+        at_desk: boolean;
         lines: Line[];
         /** Technician fees are counted with the cash but belong to the technician (D13). */
         purpose_totals?: Record<PaymentPurpose, string>;
@@ -116,7 +122,16 @@ export default function CashRemittance({ remittance, can, bank_accounts, denomin
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    {remittance.status === 'submitted' ? <Badge tone="yellow">Waiting for cashier</Badge> : <Badge tone="green">Received</Badge>}
+                    {remittance.at_desk ? (
+                        <Badge tone="blue">Taken at the desk</Badge>
+                    ) : remittance.status === 'submitted' ? (
+                        <Badge tone="yellow">Waiting for cashier</Badge>
+                    ) : (
+                        <Badge tone="green">Received</Badge>
+                    )}
+                    {remittance.credit_remaining !== null && Number(remittance.credit_remaining) > 0 && (
+                        <Badge tone="yellow">{formatCurrency(remittance.credit_remaining)} extra — collector&apos;s credit</Badge>
+                    )}
                     {remittance.shortage_status === 'open' && <Badge tone="red">Shortage open</Badge>}
                     {remittance.shortage_status === 'repaid' && <Badge tone="green">Shortage repaid</Badge>}
                     {remittance.shortage_status === 'written_off' && <Badge>Shortage written off</Badge>}
@@ -271,8 +286,8 @@ export default function CashRemittance({ remittance, can, bank_accounts, denomin
                                 {variance === 0
                                     ? 'The count matches the cash the system expects.'
                                     : variance < 0
-                                      ? `${formatCurrency(-variance)} short — it will stay open on ${remittance.collector_name} until repaid or written off.`
-                                      : `${formatCurrency(variance)} more than expected — it will be recorded.`}
+                                      ? `${formatCurrency(-variance)} short — any extra cash ${remittance.collector_name} handed in before covers it first; the rest stays open until repaid or written off.`
+                                      : `${formatCurrency(variance)} more than expected — kept as ${remittance.collector_name}'s credit for a later shortage.`}
                                 {nonCashLines.length > 0 && confirmed.length < nonCashLines.length && (
                                     <div className="mt-1 text-xs">
                                         {nonCashLines.length - confirmed.length} MoMo / bank payment(s) not ticked — {remittance.collector_name} will owe them until they
@@ -346,7 +361,7 @@ export default function CashRemittance({ remittance, can, bank_accounts, denomin
                 <Card>
                     <CardHeader>
                         <h3 className="text-sm font-semibold text-slate-900">
-                            Settle the {formatCurrency(-Number(remittance.cash_variance ?? 0))} shortage
+                            Settle the {formatCurrency(remittance.shortage_owed)} shortage
                         </h3>
                     </CardHeader>
                     <CardBody className="flex flex-col gap-3">
