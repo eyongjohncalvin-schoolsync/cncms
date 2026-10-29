@@ -49,3 +49,34 @@ export async function fetchZones(): Promise<ZoneListResponse> {
 
     return data;
 }
+
+/**
+ * GET /api/v1/zones/performance — App\Http\Controllers\Api\ZoneController::
+ * performance(): how the agent's own zones collect this month, beside their
+ * usual at the same day of the month (owner, 2026-10-29). An agent only
+ * ever gets the zones they cover. Live call, like the zone list.
+ */
+export interface ZonePerformanceApi {
+    uuid: string;
+    name: string;
+    billed: string;
+    collected: string;
+    rate: number | null;
+    usual_rate: number | null;
+    customers_billed: number;
+    customers_paid: number;
+    paid_share: number | null;
+    usual_paid_share: number | null;
+    dropped: boolean;
+}
+
+export interface ZonePerformanceResponse {
+    data: ZonePerformanceApi[];
+    meta: { period: string; judged: boolean };
+}
+
+export async function fetchZonePerformance(): Promise<ZonePerformanceResponse> {
+    const { data } = await apiClient.get<ZonePerformanceResponse>('/zones/performance');
+
+    return data;
+}

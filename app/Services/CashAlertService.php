@@ -82,6 +82,7 @@ class CashAlertService
             $this->approvedVouchersUnpaid(),
             $this->vouchersWithoutSignedCopy(),
             $this->monthInDeficit(),
+            $this->zonesBelowUsual(),
             $this->branchTransfersInTransit(),
             $this->branchesNotSendingToHeadquarters(),
         ], fn (?array $alert): bool => $alert !== null && $alert['items'] !== []));
@@ -143,6 +144,25 @@ class CashAlertService
                 'amount' => null,
                 'link' => '/cash/branch-transfers',
             ])->values()->all());
+    }
+
+    /**
+     * A zone collecting well below its usual this month, at the same point
+     * of the month (owner, 2026-10-29) — money taken without a receipt shows
+     * nowhere else. Cached (ZonePerformanceService).
+     */
+    private function zonesBelowUsual(): array
+    {
+        $period = BusinessTimezone::currentPeriod();
+        $pct = fn (?float $value): string => $value === null ? '—' : "{$value}%";
+
+        return $this->alert('zones_below_usual', 'warning', 'Zones collecting well below usual', 'Ask the collector why — customers who paid without a receipt are found by visiting them.',
+            array_map(fn (array $zone): array => [
+                'label' => $zone['name'].($zone['collector'] ? " — {$zone['collector']}" : ''),
+                'detail' => "{$pct($zone['paid_share'])} of customers paid (usual {$pct($zone['usual_paid_share'])}) · {$pct($zone['rate'])} of the bills collected (usual {$pct($zone['usual_rate'])})",
+                'amount' => null,
+                'link' => '/cash/balance',
+            ], app(ZonePerformanceService::class)->dropped($period)));
     }
 
     /** @return array<string, int> key => item count, for the dashboard. */

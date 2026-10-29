@@ -2,7 +2,8 @@ import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { useAuth } from '../src/auth/AuthContext';
-import { fetchZones, type ZoneApi } from '../src/api/zones';
+import { fetchZonePerformance, fetchZones, type ZoneApi, type ZonePerformanceApi } from '../src/api/zones';
+import { formatFcfa } from '../src/utils/format';
 import { getMyZoneUuids } from '../src/db/zones';
 import { isNetworkError, extractErrorMessage } from '../src/api/client';
 import { getSyncState, subscribeSyncState } from '../src/sync/syncStore';
@@ -41,6 +42,9 @@ export default function ZonesScreen() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [zones, setZones] = useState<ZoneApi[]>([]);
     const [myZoneUuids, setMyZoneUuids] = useState<string[]>([]);
+    // This month's collections in the agent's own zones (owner, 2026-10-29) — never blocks the screen.
+    const [performance, setPerformance] = useState<Record<string, ZonePerformanceApi>>({});
+    const [judged, setJudged] = useState(true);
     const phaseRef = useRef<Phase>('loading');
 
     const load = useCallback(() => {
@@ -58,6 +62,12 @@ export default function ZonesScreen() {
         // call — stale/missing zones never block the directory list below
         // from rendering.
         void getMyZoneUuids().then(setMyZoneUuids);
+        fetchZonePerformance()
+            .then((response) => {
+                setPerformance(Object.fromEntries(response.data.map((zone) => [zone.uuid, zone])));
+                setJudged(response.meta.judged);
+            })
+            .catch(() => setPerformance({}));
 
         fetchZones()
             .then((response) => {
@@ -139,6 +149,7 @@ export default function ZonesScreen() {
                             <Text style={styles.heroEyebrow}>{myZones.length > 1 ? 'ONE OF YOUR ZONES' : 'YOUR ZONE'}</Text>
                             <Text style={styles.heroName}>{zone.name}</Text>
                             <Text style={styles.heroTown}>{zone.town}</Text>
+                            {performance[zone.uuid] && <ZoneMonth zone={performance[zone.uuid]} judged={judged} />}
                         </Card>
                     ))
                 ) : (
@@ -169,6 +180,28 @@ export default function ZonesScreen() {
     );
 }
 
+const percent = (value: number | null) => (value === null ? '—' : `${value}%`);
+
+/**
+ * This month so far in one of the agent's zones: customers who paid and
+ * money collected against the bills, each beside the zone's usual at the
+ * same day of the month.
+ */
+function ZoneMonth({ zone, judged }: { zone: ZonePerformanceApi; judged: boolean }) {
+    return (
+        <View style={styles.month}>
+            <Text style={styles.monthTitle}>THIS MONTH SO FAR</Text>
+            <Text style={styles.monthLine}>
+                {zone.customers_paid} of {zone.customers_billed} customers paid · {percent(zone.paid_share)} (usual {percent(zone.usual_paid_share)})
+            </Text>
+            <Text style={styles.monthLine}>
+                {formatFcfa(Number(zone.collected))} of {formatFcfa(Number(zone.billed))} billed · {percent(zone.rate)} (usual {percent(zone.usual_rate)})
+            </Text>
+            {judged && zone.dropped && <Text style={styles.monthWarning}>Well below usual — visit the customers who have not paid.</Text>}
+        </View>
+    );
+}
+
 const styles = StyleSheet.create({
     flex: { flex: 1, backgroundColor: colors.background },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
@@ -182,4 +215,8 @@ const styles = StyleSheet.create({
     zoneName: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     zoneTown: { fontSize: fontSize.sm, color: colors.textSecondary },
     emptyHint: { fontSize: fontSize.sm, color: colors.textSecondary },
+    month: { marginTop: spacing.md, gap: spacing.xs },
+    monthTitle: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textInverse, letterSpacing: 1 },
+    monthLine: { fontSize: fontSize.sm, color: colors.textInverse },
+    monthWarning: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textInverse },
 });

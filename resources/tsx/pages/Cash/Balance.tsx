@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TableBody, TableHead, Td, Th } from '@/components/ui/Table';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { Rate, ZoneTrend, type ZonePerformance } from '@/components/cash/ZonePerformance';
 
 type Stage = 'handed_in' | 'not_confirmed' | 'written_off' | 'waiting' | 'with_collector' | 'before_controls';
 
@@ -60,7 +61,7 @@ interface Props {
     };
     shortages: { rows: { kind: string; label: string; count: number; open: string; repaid: string; written_off: string }[]; open: string; repaid: string; written_off: string };
     in_transit: { handovers: string; deposits: string; branches: string; count: number };
-    zones: { uuid: string; name: string; expected: string; collected: string; rate: number | null; usual_rate: number | null; dropped: boolean }[];
+    zones: ZonePerformance[];
     checks: Check[];
 }
 
@@ -380,7 +381,8 @@ export default function MoneyBalance({
             <section className="mb-6">
                 <h3 className="mb-1 text-sm font-semibold text-slate-900">Zones — collections against bills</h3>
                 <p className="mb-2 text-xs text-slate-500">
-                    Money taken without a receipt never reaches any ledger; a zone collecting well below its usual rate is where to look.
+                    Money taken without a receipt never reaches any ledger; a zone collecting well below its usual is where to look.
+                    {is_current && ' Earlier months are counted up to the same day, so the comparison is fair mid-month.'}
                 </p>
                 {zones.length === 0 ? (
                     <Card>
@@ -392,8 +394,9 @@ export default function MoneyBalance({
                             <Th>Zone</Th>
                             <Th className="text-right">Billed</Th>
                             <Th className="text-right">Collected</Th>
-                            <Th className="text-right">Rate</Th>
-                            <Th className="text-right">Usual</Th>
+                            <Th className="text-right">Of the bills</Th>
+                            <Th className="text-right">Customers paid</Th>
+                            <Th>6 months</Th>
                         </TableHead>
                         <TableBody>
                             {zones.map((zone) => (
@@ -405,11 +408,22 @@ export default function MoneyBalance({
                                                 <Badge tone="red">Well below usual</Badge>
                                             </span>
                                         )}
+                                        <div className="text-xs text-slate-500">{zone.collector ?? 'No responsible collector'}</div>
                                     </Td>
-                                    <Td className="text-right">{formatCurrency(zone.expected)}</Td>
+                                    <Td className="text-right">{formatCurrency(zone.billed)}</Td>
                                     <Td className="text-right">{formatCurrency(zone.collected)}</Td>
-                                    <Td className={`text-right ${zone.dropped ? 'font-semibold text-red-700' : ''}`}>{zone.rate === null ? '—' : `${zone.rate}%`}</Td>
-                                    <Td className="text-right text-slate-500">{zone.usual_rate === null ? '—' : `${zone.usual_rate}%`}</Td>
+                                    <Td className="text-right">
+                                        <Rate now={zone.rate} usual={zone.usual_rate} />
+                                    </Td>
+                                    <Td className="text-right">
+                                        <Rate now={zone.paid_share} usual={zone.usual_paid_share} />
+                                        <div className="text-xs text-slate-500">
+                                            {zone.customers_paid} of {zone.customers_billed}
+                                        </div>
+                                    </Td>
+                                    <Td>
+                                        <ZoneTrend trend={zone.trend} />
+                                    </Td>
                                 </tr>
                             ))}
                         </TableBody>

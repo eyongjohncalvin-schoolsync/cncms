@@ -12,12 +12,10 @@ use App\Models\CashShortage;
 use App\Models\CashStatementCount;
 use App\Models\CashTransfer;
 use App\Models\Company;
-use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\TechnicianFeePayout;
 use App\Models\Voucher;
-use App\Models\Zone;
 use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Builder;
@@ -37,12 +35,6 @@ use Illuminate\Support\Collection;
  */
 class MoneyBalanceService
 {
-    /** A zone whose collection rate falls this many points below its usual stands out. */
-    public const int ZONE_DROP_POINTS = 15;
-
-    /** How many earlier months make a zone's usual rate. */
-    public const int ZONE_HISTORY_MONTHS = 3;
-
     /** Movement kinds that only move money between the company's own accounts. */
     public const array INTERNAL_KINDS = [
         CashMovement::KIND_TRANSFER,
@@ -79,6 +71,7 @@ class MoneyBalanceService
 
     public function __construct(
         private readonly CashBookService $cashBook,
+        private readonly ZonePerformanceService $zonePerformance,
     ) {}
 
     /**
@@ -92,7 +85,7 @@ class MoneyBalanceService
         $accounts = $this->accounts($period);
         $moneyOut = $this->moneyOut($period);
         $shortages = $this->shortages($period);
-        $zones = $this->zones($period, $branchId);
+        $zones = $this->zonePerformance->forPeriod($period);
 
         return [
             'period' => $period,
@@ -105,7 +98,7 @@ class MoneyBalanceService
             'shortages' => $shortages,
             'in_transit' => $this->inTransit(),
             'zones' => $zones,
-            'checks' => $this->checks($period, $collections, $handovers, $accounts, $moneyOut, $shortages, $zones),
+            'checks' => $this->checks($period, $collections, $handovers, $accounts, $moneyOut, $shortages),
         ];
     }
 
@@ -460,81 +453,19 @@ class MoneyBalanceService
     }
 
     /**
-     * Each zone's bills against what it collected, beside its usual rate —
-     * a zone that suddenly collects less stands out (money taken without a
-     * receipt never reaches any ledger; only this shows it).
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function zones(string $period, ?int $branchId): array
-    {
-        $periods = [$period];
-
-        for ($i = 0; $i < self::ZONE_HISTORY_MONTHS; $i++) {
-            $periods[] = BusinessTimezone::previousPeriod(end($periods));
-        }
-
-        $expected = Manuscript::query()
-            ->join('customers', 'customers.id', '=', 'manuscripts.customer_id')
-            ->whereIn('manuscripts.period', $periods)
-            ->when($branchId !== null, fn (Builder $query) => $query->where('manuscripts.branch_id', $branchId))
-            ->selectRaw('customers.zone_id, manuscripts.period, sum(manuscripts.bill) as total')
-            ->groupBy('customers.zone_id', 'manuscripts.period')->get()
-            ->groupBy('zone_id')->map(fn (Collection $rows): array => $rows->mapWithKeys(fn ($row): array => [$row->period => $this->money($row->total)])->all());
-
-        [$from] = BusinessTimezone::periodBoundsUtc(end($periods));
-        [, $to] = BusinessTimezone::periodBoundsUtc($period);
-        $tz = BusinessTimezone::WAT;
-
-        $collected = Payment::query()->subscription()
-            ->join('customers', 'customers.id', '=', 'payments.customer_id')
-            ->whereBetween('payments.created_at', [$from, $to])
-            ->whereNull('payments.paid_with_payment_id')
-            ->where(fn (Builder $query) => $query->where('payments.verification_status', '!=', 'rejected')->orWhere('payments.money_taken', true))
-            ->when($branchId !== null, fn (Builder $query) => $query->where('payments.branch_id', $branchId))
-            ->selectRaw("customers.zone_id, to_char(payments.created_at at time zone '{$tz}', 'YYYY-MM') as period, sum(payments.amount) as total")
-            ->groupByRaw('1, 2')->get()
-            ->groupBy('zone_id')->map(fn (Collection $rows): array => $rows->mapWithKeys(fn ($row): array => [$row->period => $this->money($row->total)])->all());
-
-        $rate = fn (?string $got, ?string $due): ?float => $due !== null && bccomp($due, '0', 2) > 0 ? round(100 * (float) ($got ?? 0) / (float) $due, 1) : null;
-
-        return Zone::query()
-            ->when($branchId !== null, fn ($query) => $query->where('branch_id', $branchId))
-            ->orderBy('name')->get()
-            ->map(function (Zone $zone) use ($expected, $collected, $period, $periods, $rate): array {
-                $due = $expected->get($zone->id, []);
-                $got = $collected->get($zone->id, []);
-                $earlier = collect(array_slice($periods, 1))->map(fn (string $month): ?float => $rate($got[$month] ?? null, $due[$month] ?? null))->filter(fn (?float $value): bool => $value !== null);
-                $usual = $earlier->isEmpty() ? null : round($earlier->avg(), 1);
-                $now = $rate($got[$period] ?? null, $due[$period] ?? null);
-
-                return [
-                    'uuid' => $zone->uuid,
-                    'name' => $zone->name,
-                    'expected' => $due[$period] ?? '0.00',
-                    'collected' => $got[$period] ?? '0.00',
-                    'rate' => $now,
-                    'usual_rate' => $usual,
-                    'dropped' => $now !== null && $usual !== null && $usual - $now >= self::ZONE_DROP_POINTS,
-                ];
-            })
-            ->filter(fn (array $zone): bool => bccomp($zone['expected'], '0', 2) > 0 || bccomp($zone['collected'], '0', 2) > 0)
-            ->values()->all();
-    }
-
-    /**
      * The proof, one line per rule: ok, or what is out of place.
      *
      * @return list<array{key: string, status: string, title: string, detail: string}>
      */
-    private function checks(string $period, array $collections, array $handovers, array $accounts, array $moneyOut, array $shortages, array $zones): array
+    private function checks(string $period, array $collections, array $handovers, array $accounts, array $moneyOut, array $shortages): array
     {
         $isCurrent = $period === BusinessTimezone::currentPeriod();
         $fmt = fn (string $amount): string => number_format((float) $amount, 0, '.', ' ').' FCFA';
         $notIn = bcadd($collections['totals']['with_collector'], $collections['totals']['waiting'], 2);
         $missing = bcadd($collections['totals']['not_confirmed'], $collections['totals']['written_off'], 2);
         $tillGap = bcsub($handovers['received'], $handovers['into_tills'], 2);
-        $dropped = collect($zones)->where('dropped', true)->pluck('name');
+        // Judged only once enough of the month is in (ZonePerformanceService::JUDGE_FROM_DAY).
+        $dropped = collect($this->zonePerformance->dropped($period))->pluck('name');
         $refunds = count($moneyOut['refunds_unpaid']);
 
         $check = fn (string $key, bool $ok, string $title, string $detail, bool $danger = false): array => [

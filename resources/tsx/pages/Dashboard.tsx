@@ -15,6 +15,7 @@ import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { Rate, type ZonePerformance } from '@/components/cash/ZonePerformance';
 
 interface DashboardProps {
     period: string;
@@ -33,6 +34,15 @@ interface DashboardProps {
         cap_pct: number | null;
         budget_warnings: number;
     } | null;
+    /** How the zones collect this month (owner, 2026-10-29) — deferred, cash book viewers only. */
+    zone_performance?: {
+        period: string;
+        judged: boolean;
+        zones_count: number;
+        best: ZonePerformance[];
+        worst: ZonePerformance[];
+        dropped: ZonePerformance[];
+    } | null;
     stats: {
         total_customers: number;
         active_customers: number;
@@ -50,7 +60,7 @@ interface DashboardProps {
     };
 }
 
-export default function Dashboard({ period, stats, cash_alerts, uncovered_zones, spending }: DashboardProps) {
+export default function Dashboard({ period, stats, cash_alerts, uncovered_zones, spending, zone_performance }: DashboardProps) {
     // Memoized so the derived hint string isn't recomputed on every render
     // (e.g. re-renders triggered by unrelated layout/navigation state) —
     // only when the stats payload itself changes.
@@ -256,6 +266,67 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                     </div>
                 </CardBody>
             </Card>
+
+            {zone_performance && zone_performance.zones_count > 0 && <ZonesCard summary={zone_performance} />}
         </AppLayout>
+    );
+}
+
+/**
+ * Zones this month: the best and worst by the share of billed customers who
+ * paid, and any well below its usual (App\Services\ZonePerformanceService).
+ * The whole table is on the Money balance page.
+ */
+function ZonesCard({ summary }: { summary: NonNullable<DashboardProps['zone_performance']> }) {
+    return (
+        <Card className="mt-4 animate-fade-up p-0" style={{ animationDelay: '420ms' }}>
+            <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h2 className="text-sm font-semibold text-slate-900">Zones this month</h2>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                            Customers who paid, against each zone&apos;s usual at the same day of the month.
+                            {!summary.judged && ' Too early in the month to judge a zone.'}
+                        </p>
+                    </div>
+                    <Link href="/cash/balance" className="text-sm font-medium text-blue-700 hover:underline">
+                        See all {summary.zones_count} zones
+                    </Link>
+                </div>
+            </CardHeader>
+            {summary.dropped.length > 0 && (
+                <div className="border-b border-red-100 bg-red-50 px-5 py-3 text-sm text-red-800">
+                    <span className="font-semibold">Well below usual:</span>{' '}
+                    {summary.dropped.map((zone) => `${zone.name}${zone.collector ? ` (${zone.collector})` : ''}`).join(', ')}
+                </div>
+            )}
+            <div className="grid gap-0 sm:grid-cols-2 sm:divide-x sm:divide-slate-100">
+                <ZoneList title="Best" zones={summary.best} />
+                {summary.worst.length > 0 && <ZoneList title="Lowest" zones={summary.worst} />}
+            </div>
+        </Card>
+    );
+}
+
+function ZoneList({ title, zones }: { title: string; zones: ZonePerformance[] }) {
+    return (
+        <div className="px-5 py-3">
+            <div className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</div>
+            <ul className="divide-y divide-slate-100 text-sm">
+                {zones.map((zone) => (
+                    <li key={zone.uuid} className="flex items-center justify-between gap-3 py-2">
+                        <div className="min-w-0">
+                            <div className="truncate font-medium text-slate-900">{zone.name}</div>
+                            <div className="truncate text-xs text-slate-500">
+                                {zone.collector ?? 'No responsible collector'} · {zone.customers_paid} of {zone.customers_billed} paid · {formatCurrency(zone.collected)}
+                            </div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                            <Rate now={zone.paid_share} usual={zone.usual_paid_share} />
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </div>
     );
 }
