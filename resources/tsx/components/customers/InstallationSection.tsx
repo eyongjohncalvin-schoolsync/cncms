@@ -372,8 +372,7 @@ export function InstallationSection({
                     )}
                 </div>
 
-                {options.can_manage &&
-                    ticked.map((service) => {
+                {ticked.map((service) => {
                         const plan = values.service_plans.find((p) => p.service_uuid === service.uuid) ?? defaultPlan(service.uuid, firstMonth, offer);
                         const timeline = preview?.services.find((t) => t.service_uuid === service.uuid);
                         const start = plan.free_from ?? firstMonth;
@@ -419,8 +418,10 @@ export function InstallationSection({
                                             })}
                                         </div>
                                         <p className="mt-1 text-xs text-slate-500">
-                                            The connection month is free by default — tap the last free month to set them (up to {options.max_free_months}; more
-                                            needs an admin/owner). Faded months have already passed.
+                                            {options.can_manage
+                                                ? `The connection month is free by default — tap the last free month to set them (up to ${options.max_free_months}; more needs an admin/owner).`
+                                                : 'The connection month is free by default. Any other free month is a request — it applies once a manager approves it.'}{' '}
+                                            Faded months have already passed.
                                         </p>
                                     </div>
                                 )}

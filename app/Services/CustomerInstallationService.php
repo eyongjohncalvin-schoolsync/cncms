@@ -205,6 +205,10 @@ class CustomerInstallationService
                     $plan['free_needs_approval'] ? $installation->reason : null,
                 );
 
+                // Free months beyond the default, asked by someone who may
+                // not give them: one request, approved by someone else.
+                $grants = $grants->concat($this->grants->createInstallationGrants($customer, $charge, $offer, $plan['free_requested_by_service_id'], true, $actor, $installation->reason));
+
                 // Months paid upfront first, so the installation receipt
                 // (issued when the fee is paid) already shows them.
                 if ($plan['service_months'] !== []) {
@@ -510,7 +514,7 @@ class CustomerInstallationService
      * offer's fee is not compared with it again.
      *
      * @param  list<CustomerServiceSelection>  $services
-     * @return array{offer: ?InstallationOffer, standard_fee: ?string, charge_amount: ?string, fee_needs_approval: bool, waiver_needed: bool, free_by_service_id: array<int, array{from: string, months: int}>, free_needs_approval: bool, service_months: list<array{service_id: int, months: int, rate: string}>, upfront_amount: string, connected_on: string, installation_month: string, summary: array<string, mixed>}
+     * @return array{offer: ?InstallationOffer, standard_fee: ?string, charge_amount: ?string, fee_needs_approval: bool, waiver_needed: bool, free_by_service_id: array<int, array{from: string, months: int}>, free_needs_approval: bool, free_requested_by_service_id: array<int, array{from: string, months: int}>, service_months: list<array{service_id: int, months: int, rate: string}>, upfront_amount: string, connected_on: string, installation_month: string, summary: array<string, mixed>}
      */
     private function planFor(array $services, InstallationData $installation, bool $field = false, bool $activation = false, ?CustomerCharge $charge = null, ?int $branchId = null, bool $preview = false): array
     {
@@ -663,6 +667,16 @@ class CustomerInstallationService
             }
         }
 
+        // Each service's whole run as chosen, for the timelines below.
+        $chosenFree = $freeById;
+        $requestedById = $this->splitOffRequestedMonths($freeById, $connectionMonth, $field || $activation);
+
+        if ($requestedById !== []) {
+            // What stays applies straight away (the connection month only):
+            // the cap never concerns it — the request carries the rest.
+            $beyondCap = false;
+        }
+
         $settledAtRegistration = ! $feeNeedsApproval && ! $waiverNeeded && ($chargeAmount === null || bccomp($paidNow, $chargeAmount, 2) >= 0);
         $freeNeedsApproval = $freeById !== [] && (! $settledAtRegistration || $beyondCap || $beyondOffer);
 
@@ -672,6 +686,7 @@ class CustomerInstallationService
             $freeById !== [] && ! $settledAtRegistration ? 'Free months without the installation fully paid' : null,
             $beyondCap ? "More than {$max} free months" : null,
             $beyondOffer ? 'Free months beyond the offer' : null,
+            $requestedById !== [] ? 'Free months beyond the connection month' : null,
         ]));
 
         // A field registration's reason is the office's to give, at activation.
@@ -689,7 +704,7 @@ class CustomerInstallationService
         // free months shown as if approved.
         $windows = [];
 
-        foreach ($freeById as $serviceId => $row) {
+        foreach ($chosenFree as $serviceId => $row) {
             $windows[] = ['service_id' => $serviceId, 'start' => $row['from'], 'end' => FreeMonthGrant::addMonths($row['from'], $row['months'] - 1)];
         }
 
@@ -734,6 +749,7 @@ class CustomerInstallationService
             'waiver_needed' => $waiverNeeded,
             'free_by_service_id' => $freeById,
             'free_needs_approval' => $freeNeedsApproval,
+            'free_requested_by_service_id' => $requestedById,
             'service_months' => $serviceMonths,
             'upfront_amount' => $upfront,
             'connected_on' => $connectedOn,
@@ -759,9 +775,45 @@ class CustomerInstallationService
                 'collect_now' => $collectNow,
                 'needs_approval' => $needsApproval,
                 'max_free_months' => $max,
-                'line' => $this->line($collectNow, $timelines, $freeNeedsApproval),
+                'line' => $this->line($collectNow, $timelines, $freeNeedsApproval || $requestedById !== []),
             ],
         ];
+    }
+
+    /**
+     * Without `installations.manage` (owner, 2026-10-29) the company's
+     * default — the connection month free — applies straight away; every
+     * other free month chosen is a request someone else approves. Trims
+     * $freeById to the default and returns the requested months per service.
+     * A field registration's months are settled by the office at activation.
+     *
+     * @param  array<int, array{from: string, months: int}>  $freeById
+     * @return array<int, array{from: string, months: int}>
+     */
+    private function splitOffRequestedMonths(array &$freeById, string $connectionMonth, bool $settledByOffice): array
+    {
+        if ($settledByOffice || app(TenantContext::class)->can('installations.manage')) {
+            return [];
+        }
+
+        $requested = [];
+
+        foreach ($freeById as $serviceId => $row) {
+            $coversDefault = $row['from'] === $connectionMonth;
+            $extra = $coversDefault ? $row['months'] - 1 : $row['months'];
+
+            if ($extra > 0) {
+                $requested[$serviceId] = ['from' => $coversDefault ? FreeMonthGrant::addMonths($row['from'], 1) : $row['from'], 'months' => $extra];
+            }
+
+            if ($coversDefault) {
+                $freeById[$serviceId]['months'] = 1;
+            } else {
+                unset($freeById[$serviceId]);
+            }
+        }
+
+        return $requested;
     }
 
     /**

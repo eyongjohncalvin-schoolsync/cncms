@@ -98,16 +98,4 @@ final readonly class InstallationData
 
         return false;
     }
-
-    /** Free months chosen on any service. */
-    public function choosesFreeMonths(): bool
-    {
-        foreach ($this->servicePlans ?? [] as $plan) {
-            if ($plan['free_months'] > 0) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

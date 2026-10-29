@@ -14,6 +14,7 @@ use App\Models\InstallationOffer;
 use App\Models\Manuscript;
 use App\Models\Payment;
 use App\Models\PaymentReceipt;
+use App\Models\Role;
 use App\Models\Service;
 use App\Models\TenantUser;
 use App\Models\User;
@@ -727,6 +728,82 @@ class CustomerInstallationTest extends TestCase
 
         $this->assertSame(CustomerCharge::STATUS_WAIVED, $charge->fresh()->status);
         $this->assertSame('2026-10', $grant->fresh()->start_period);
+    }
+
+    /** A role that may add customers but not decide installations (owner, 2026-10-29: "technician"). */
+    private function technician(): User
+    {
+        Role::query()->create(['name' => 'technician', 'label' => 'Technician', 'is_system' => false])->syncPermissions(['customers.view', 'customers.create']);
+
+        return $this->actAs('kelvin@shalomtech.dev', 'technician');
+    }
+
+    public function test_a_technician_adds_a_customer_with_the_connection_month_free(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->technician();
+
+        $this->post('/customers', $this->form(['service_plans' => [$this->plan($this->tv, free: 1)]]))->assertSessionHasNoErrors();
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $this->created()->id)->sole();
+        $this->assertSame(FreeMonthGrant::STATUS_APPROVED, $grant->status, 'the default needs no approval');
+        $this->assertSame(['2026-10', 1], [$grant->start_period, $grant->months]);
+    }
+
+    public function test_a_technicians_extra_free_months_are_a_request_someone_else_approves(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->technician();
+        $form = ['service_plans' => [$this->plan($this->tv, free: 3)]];
+
+        $this->post('/customers', $this->form($form))->assertSessionHasErrors(['installation_reason' => 'Give the reason for free months beyond the connection month — it needs approval.']);
+        $this->post('/customers', $this->form([...$form, 'installation_reason' => 'Neighbour of the chief']))->assertSessionHasNoErrors();
+
+        $customer = $this->created();
+        $grants = FreeMonthGrant::query()->where('customer_id', $customer->id)->orderBy('id')->get();
+        $this->assertSame([[FreeMonthGrant::STATUS_APPROVED, '2026-10', 1], [FreeMonthGrant::STATUS_PENDING_APPROVAL, '2026-11', 2]], $grants->map(fn (FreeMonthGrant $g): array => [$g->status, $g->start_period, $g->months])->all());
+        $this->assertSame('Neighbour of the chief', $grants->last()->note);
+        $this->assertSame('0.00', (string) $this->bill($customer, '2026-10')->bill, 'the connection month is free now');
+        $this->assertSame('2500.00', (string) $this->bill($customer, '2026-11')->bill, 'billed while the request waits');
+
+        $this->post("/free-months/{$grants->last()->uuid}/approve")->assertForbidden();
+        $this->admin();
+        $this->post("/free-months/{$grants->last()->uuid}/approve")->assertSessionHasNoErrors();
+
+        $this->assertSame('0.00', (string) $this->bill($customer, '2026-11')->bill, 'November free once approved');
+        $this->assertSame('0.00', (string) $this->bill($customer, '2026-12')->bill);
+    }
+
+    public function test_a_technicians_free_months_not_starting_at_connection_all_wait_for_approval(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->technician();
+
+        $this->post('/customers', $this->form(['service_plans' => [$this->plan($this->tv, free: 1, from: '2026-11')], 'installation_reason' => 'Away in October']))->assertSessionHasNoErrors();
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $this->created()->id)->sole();
+        $this->assertSame([FreeMonthGrant::STATUS_PENDING_APPROVAL, '2026-11', 1], [$grant->status, $grant->start_period, $grant->months]);
+    }
+
+    public function test_a_technician_cannot_set_a_promotion_or_fee_and_is_told_why(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->technician();
+
+        $this->post('/customers', $this->form(['installation_fee' => '10000']))
+            ->assertSessionHasErrors(['installation_offer_uuid' => 'You may not set a promotion or an installation fee.']);
+        $this->post('/customers', $this->form(['installation_offer_uuid' => $this->offer()->uuid]))->assertSessionHasErrors('installation_offer_uuid');
+    }
+
+    public function test_a_manager_still_gives_free_months_up_to_the_cap_straight_away(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-10 09:00', 'Africa/Lagos'));
+        $this->manager();
+
+        $this->post('/customers', $this->form(['service_plans' => [$this->plan($this->tv, free: 3)]]))->assertSessionHasNoErrors();
+
+        $grant = FreeMonthGrant::query()->where('customer_id', $this->created()->id)->sole();
+        $this->assertSame([FreeMonthGrant::STATUS_APPROVED, 3], [$grant->status, $grant->months]);
     }
 
     public function test_an_agent_cannot_set_an_installation(): void

@@ -111,7 +111,8 @@ class StoreCustomerRequest extends FormRequest
     }
 
     /**
-     * Picking an offer / fee / free months is `installations.manage`; months
+     * Picking an offer / fee is `installations.manage` (free months beyond
+     * the default are a request instead); months
      * paid upfront are a payment (`payments.create`); and no money is taken while
      * a landlord impersonates (E9).
      *
@@ -123,11 +124,13 @@ class StoreCustomerRequest extends FormRequest
             $context = app(TenantContext::class);
             $installation = InstallationData::fromArray($this->all());
 
+            // Free months are open to whoever adds the customer: beyond the
+            // connection month they become a request (CustomerInstallationService).
             $touchesInstallation = $installation->offerUuid !== null || $installation->fee !== null
-                || bccomp($installation->paidNow, '0', 2) > 0 || $installation->choosesFreeMonths();
+                || bccomp($installation->paidNow, '0', 2) > 0;
 
             if ($touchesInstallation && ! $context->can('installations.manage')) {
-                $validator->errors()->add('installation_offer_uuid', 'You may not set an installation fee or free months.');
+                $validator->errors()->add('installation_offer_uuid', 'You may not set a promotion or an installation fee.');
             }
 
             if ($installation->paysUpfront() && ! $context->can('payments.create')) {

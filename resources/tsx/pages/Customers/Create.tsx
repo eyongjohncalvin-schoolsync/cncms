@@ -275,6 +275,18 @@ export default function CustomersCreate({ zones, service_catalogue, installation
                         </label>
                     )}
 
+                    {/* Every refusal, beside the button — an error on a field this role can't see must never leave Save doing nothing. */}
+                    {Object.keys(errors).length > 0 && (
+                        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                            <p className="font-medium">The customer was not saved:</p>
+                            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                                {Object.entries(errors).map(([field, message]) => (
+                                    <li key={field}>{message}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
                     {/* Action Bar */}
                     <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                         <Link
