@@ -672,8 +672,8 @@ class CustomerInstallationService
         $requestedById = $this->splitOffRequestedMonths($freeById, $connectionMonth, $field || $activation);
 
         if ($requestedById !== []) {
-            // What stays applies straight away (the connection month only):
-            // the cap never concerns it — the request carries the rest.
+            // What stays applies straight away (within the cap): the
+            // request carries the rest.
             $beyondCap = false;
         }
 
@@ -686,7 +686,7 @@ class CustomerInstallationService
             $freeById !== [] && ! $settledAtRegistration ? 'Free months without the installation fully paid' : null,
             $beyondCap ? "More than {$max} free months" : null,
             $beyondOffer ? 'Free months beyond the offer' : null,
-            $requestedById !== [] ? 'Free months beyond the connection month' : null,
+            $requestedById !== [] ? "Free months beyond {$max} from the connection month" : null,
         ]));
 
         // A field registration's reason is the office's to give, at activation.
@@ -781,11 +781,13 @@ class CustomerInstallationService
     }
 
     /**
-     * Without `installations.manage` (owner, 2026-10-29) the company's
-     * default — the connection month free — applies straight away; every
-     * other free month chosen is a request someone else approves. Trims
-     * $freeById to the default and returns the requested months per service.
-     * A field registration's months are settled by the office at activation.
+     * Without `installations.manage` (owner, 2026-10-29) free months from
+     * the connection month apply straight away up to the company's cap
+     * (FreeMonthGrantService::maxMonths(), 3 by default); the months beyond
+     * it — or a run not starting at the connection month — are a request
+     * someone else approves. Trims $freeById to what applies and returns the
+     * requested months per service. A field registration's months are
+     * settled by the office at activation.
      *
      * @param  array<int, array{from: string, months: int}>  $freeById
      * @return array<int, array{from: string, months: int}>
@@ -796,18 +798,19 @@ class CustomerInstallationService
             return [];
         }
 
+        $cap = FreeMonthGrantService::maxMonths();
         $requested = [];
 
         foreach ($freeById as $serviceId => $row) {
-            $coversDefault = $row['from'] === $connectionMonth;
-            $extra = $coversDefault ? $row['months'] - 1 : $row['months'];
+            $applies = $row['from'] === $connectionMonth ? min($row['months'], $cap) : 0;
+            $extra = $row['months'] - $applies;
 
             if ($extra > 0) {
-                $requested[$serviceId] = ['from' => $coversDefault ? FreeMonthGrant::addMonths($row['from'], 1) : $row['from'], 'months' => $extra];
+                $requested[$serviceId] = ['from' => FreeMonthGrant::addMonths($row['from'], $applies), 'months' => $extra];
             }
 
-            if ($coversDefault) {
-                $freeById[$serviceId]['months'] = 1;
+            if ($applies > 0) {
+                $freeById[$serviceId]['months'] = $applies;
             } else {
                 unset($freeById[$serviceId]);
             }

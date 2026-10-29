@@ -420,7 +420,7 @@ export function InstallationSection({
                                         <p className="mt-1 text-xs text-slate-500">
                                             {options.can_manage
                                                 ? `The connection month is free by default — tap the last free month to set them (up to ${options.max_free_months}; more needs an admin/owner).`
-                                                : 'The connection month is free by default. Any other free month is a request — it applies once a manager approves it.'}{' '}
+                                                : `The connection month is free by default — tap the last free month to set them. Up to ${options.max_free_months} from the connection month apply at once; any more is a request a manager approves.`}{' '}
                                             Faded months have already passed.
                                         </p>
                                     </div>
