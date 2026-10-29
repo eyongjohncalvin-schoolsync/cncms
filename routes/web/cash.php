@@ -6,6 +6,7 @@ use App\Http\Controllers\BranchTransferController;
 use App\Http\Controllers\CashAlertController;
 use App\Http\Controllers\CashBookController;
 use App\Http\Controllers\CashTransferController;
+use App\Http\Controllers\MoneyBalanceController;
 use App\Http\Controllers\RemittanceController;
 use App\Http\Controllers\TechnicianFeeController;
 use Illuminate\Support\Facades\Route;
@@ -14,6 +15,8 @@ use Illuminate\Support\Facades\Route;
 // CashAccountPolicy / RemittancePolicy.
 Route::get('cash', [CashBookController::class, 'index'])->name('cash.index');
 Route::get('cash/alerts', [CashAlertController::class, 'index'])->name('cash.alerts');
+// Wave 5 (owner, 2026-10-28): one branch's month, proving the money adds up.
+Route::get('cash/balance', [MoneyBalanceController::class, 'index'])->name('cash.balance');
 Route::get('cash/accounts/{cashAccount}', [CashBookController::class, 'show'])->name('cash.accounts.show');
 Route::get('cash/technician-fees', [TechnicianFeeController::class, 'index'])->name('cash.technician-fees');
 Route::get('cash/hand-over', [RemittanceController::class, 'create'])->name('cash.hand-over');

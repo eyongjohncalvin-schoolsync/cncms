@@ -135,6 +135,11 @@ export default function CashIndex({
                             <Button variant="secondary">Alerts</Button>
                         </Link>
                     )}
+                    {can.view_all && (
+                        <Link href="/cash/balance">
+                            <Button variant="secondary">Money balance</Button>
+                        </Link>
+                    )}
                     {(can.view_all || can.receive) && (
                         <Link href="/cash/technician-fees">
                             <Button variant="secondary">Technician fees</Button>
