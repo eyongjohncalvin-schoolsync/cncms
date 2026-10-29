@@ -195,7 +195,7 @@ class BranchSpineTest extends TestCase
         $cashBook = app(CashBookService::class);
         CashAccount::query()->where('holder_user_id', $cashier->id)->update(['holder_user_id' => null]);
 
-        $cashBook->openingBalance($cashBook->tillFor($cashier), '10000', $cashier);
+        $cashBook->record($cashBook->tillFor($cashier), 'in', '10000', CashMovement::KIND_TRANSFER, $cashier);
 
         $this->assertSame($this->buea->id, CashMovement::query()->latest('id')->firstOrFail()->branch_id);
     }

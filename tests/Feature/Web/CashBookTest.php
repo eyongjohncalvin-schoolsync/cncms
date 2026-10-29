@@ -17,6 +17,8 @@ use App\Services\CashBookService;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use LogicException;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
@@ -220,13 +222,18 @@ class CashBookTest extends TestCase
         $till = app(CashBookService::class)->tillFor($cashier);
         $bank = app(CashBookService::class)->createAccount(CashAccount::KIND_BANK, 'Afriland — main', null, '0012345');
 
-        $this->post('/cash/transfers', ['from_account' => $till->uuid, 'to_account' => $bank->uuid, 'amount' => 4000])->assertSessionHasErrors('reference');
-        $this->post('/cash/transfers', ['from_account' => $till->uuid, 'to_account' => $bank->uuid, 'amount' => 9000, 'reference' => 'SLIP-1'])->assertSessionHasErrors('amount');
-        $this->post('/cash/transfers', ['from_account' => $till->uuid, 'to_account' => $bank->uuid, 'amount' => 4000, 'reference' => 'SLIP-1'])->assertSessionHasNoErrors();
+        Storage::fake(config('filesystems.default', 'local'));
+        $slip = fn (): UploadedFile => UploadedFile::fake()->image('slip-'.uniqid().'.jpg');
 
+        $this->post('/cash/transfers', ['from_account' => $till->uuid, 'to_account' => $bank->uuid, 'amount' => 4000, 'slip_photo' => $slip()])->assertSessionHasErrors('reference');
+        $this->post('/cash/transfers', ['from_account' => $till->uuid, 'to_account' => $bank->uuid, 'amount' => 4000, 'reference' => 'SLIP-1'])->assertSessionHasErrors('slip_photo');
+        $this->post('/cash/transfers', ['from_account' => $till->uuid, 'to_account' => $bank->uuid, 'amount' => 9000, 'reference' => 'SLIP-1', 'slip_photo' => $slip()])->assertSessionHasErrors('amount');
+        $this->post('/cash/transfers', ['from_account' => $till->uuid, 'to_account' => $bank->uuid, 'amount' => 4000, 'reference' => 'SLIP-1', 'slip_photo' => $slip()])->assertSessionHasNoErrors();
+
+        // Out of the till at once; in the bank only once confirmed (CashHandoversAndDepositsTest).
         $this->assertSame('1000.00', $this->balanceOf($till));
-        $this->assertSame('4000.00', $this->balanceOf($bank));
-        $this->assertStringStartsWith('DP-', (string) CashMovement::query()->where('cash_account_id', $bank->id)->value('document_number'));
+        $this->assertSame('0.00', $this->balanceOf($bank));
+        $this->assertStringStartsWith('DP-', (string) CashMovement::query()->where('cash_account_id', $till->id)->where('kind', CashMovement::KIND_DEPOSIT)->value('document_number'));
     }
 
     public function test_closing_the_day_records_a_difference_and_locks_the_till(): void

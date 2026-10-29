@@ -106,7 +106,10 @@ class BranchGapsTest extends TestCase
         $till = $cashBook->tillFor($staff->user);
         $cashBook->record($till, 'in', '5000', CashMovement::KIND_OPENING_BALANCE, $this->kelvin);
 
+        // Only the till's holder sends money out of it (wave 3).
         $this->as('admin');
+        $this->post('/cash/branch-transfers', ['from_account' => $till->uuid, 'to_branch' => $this->buea->uuid, 'amount' => '5000'])->assertSessionHasErrors('from_account');
+        $this->as('admin', null, 'terence@shalomtech.dev');
         $this->post('/cash/branch-transfers', ['from_account' => $till->uuid, 'to_branch' => $this->buea->uuid, 'amount' => '5000'])->assertSessionHasNoErrors();
         $staff->update(['branch_id' => $this->buea->id]);
 
@@ -193,10 +196,12 @@ class BranchGapsTest extends TestCase
         return $tenantUser;
     }
 
-    private function as(string $role, ?int $branchId = null): void
+    /** Acts as kelvin, or as $email — a second person where the sender may not receive (wave 3). */
+    private function as(string $role, ?int $branchId = null, ?string $email = null): void
     {
-        TenantUser::query()->where('user_id', $this->kelvin->id)->update(['role' => $role, 'branch_id' => $branchId]);
+        $user = $email !== null ? User::query()->where('email', $email)->firstOrFail() : $this->kelvin;
+        TenantUser::query()->where('user_id', $user->id)->update(['role' => $role, 'branch_id' => $branchId]);
         app()->forgetInstance(TenantContext::class);
-        $this->actingAs($this->kelvin);
+        $this->actingAs($user);
     }
 }

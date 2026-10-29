@@ -74,7 +74,7 @@ class BranchMoneyTest extends TestCase
         // Buea cannot receive what it sent to headquarters.
         $this->post("/cash/branch-transfers/{$transfer->uuid}/receive", ['account' => $bueaSafe->uuid])->assertForbidden();
 
-        $this->as('admin');
+        $this->as('admin', null, 'patience@shalomtech.dev');
         $this->post("/cash/branch-transfers/{$transfer->uuid}/receive", ['account' => $hqSafe->uuid])
             ->assertRedirect('/cash/branch-transfers')->assertSessionHasNoErrors();
 
@@ -90,7 +90,7 @@ class BranchMoneyTest extends TestCase
         $this->post('/cash/branch-transfers', ['from_account' => $bueaSafe->uuid, 'to_branch' => $this->headquarters->uuid, 'amount' => '10000']);
         $transfer = BranchTransfer::query()->latest('id')->firstOrFail();
 
-        $this->as('admin');
+        $this->as('admin', null, 'patience@shalomtech.dev');
         $this->post("/cash/branch-transfers/{$transfer->uuid}/receive", ['account' => $bueaSafe->uuid])->assertSessionHasErrors('account');
         $this->assertTrue($transfer->fresh()->isInTransit());
     }
@@ -102,7 +102,7 @@ class BranchMoneyTest extends TestCase
         $this->post('/cash/branch-transfers', ['from_account' => $bueaSafe->uuid, 'to_branch' => $this->headquarters->uuid, 'amount' => '20000']);
         $transfer = BranchTransfer::query()->latest('id')->firstOrFail();
 
-        $this->as('admin', $this->headquarters->id);
+        $this->as('admin', $this->headquarters->id, 'patience@shalomtech.dev');
         $this->post("/cash/branch-transfers/{$transfer->uuid}/reject", ['reason' => 'Wrong amount'])->assertSessionHasNoErrors();
 
         $this->assertSame(BranchTransfer::STATUS_REJECTED, $transfer->fresh()->status);
@@ -212,10 +212,12 @@ class BranchMoneyTest extends TestCase
         return number_format((float) $balance, 2, '.', '');
     }
 
-    private function as(string $role, ?int $branchId = null): void
+    /** Acts as kelvin, or as $email — a second person where the sender may not receive (wave 3). */
+    private function as(string $role, ?int $branchId = null, ?string $email = null): void
     {
-        TenantUser::query()->where('user_id', $this->kelvin->id)->update(['role' => $role, 'branch_id' => $branchId]);
+        $user = $email !== null ? User::query()->where('email', $email)->firstOrFail() : $this->kelvin;
+        TenantUser::query()->where('user_id', $user->id)->update(['role' => $role, 'branch_id' => $branchId]);
         app()->forgetInstance(TenantContext::class);
-        $this->actingAs($this->kelvin);
+        $this->actingAs($user);
     }
 }

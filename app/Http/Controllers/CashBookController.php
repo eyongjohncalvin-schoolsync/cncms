@@ -8,9 +8,16 @@ use App\Models\Branch;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
+use App\Models\CashShortage;
+use App\Models\CashStatementCount;
+use App\Models\CashTransfer;
 use App\Models\Remittance;
 use App\Models\Scopes\BranchScope;
+use App\Models\User;
 use App\Services\CashBookService;
+use App\Services\CashTransferService;
+use App\Services\ShortageService;
+use App\Support\BusinessTimezone;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -81,8 +88,57 @@ class CashBookController extends Controller
                 ? Remittance::query()->with(['collector', 'receivedBy'])->where('status', 'received')->latest('received_at')->limit(20)->get()
                     ->map(fn (Remittance $remittance): array => $this->shapeRemittance($remittance))->values()->all()
                 : [],
+            // Wave 3: money waiting for someone, and money missing that someone owes.
+            'in_transit' => CashTransfer::query()->inTransit()->with(['fromAccount', 'toAccount', 'sentBy', 'toUser', 'confirmations.user'])
+                ->when(! $canViewAll, fn ($query) => $query->where(fn ($mine) => $mine->where('sent_by', $user->id)->orWhere('to_user_id', $user->id)))
+                ->orderBy('sent_at')->get()
+                ->map(fn (CashTransfer $transfer): array => $this->shapeTransfer($transfer, $user))->values()->all(),
+            'shortages' => CashShortage::query()->open()->with('owner')
+                ->when(! $canViewAll, fn ($query) => $query->where('owner_user_id', $user->id))
+                ->orderBy('created_at')->get()
+                ->map(fn (CashShortage $shortage): array => [
+                    'uuid' => $shortage->uuid,
+                    'kind' => CashShortage::KIND_LABELS[$shortage->kind] ?? $shortage->kind,
+                    'owner_name' => $shortage->owner?->name,
+                    'amount' => (string) $shortage->amount,
+                    'note' => $shortage->note,
+                    'created_at' => $shortage->created_at?->toIso8601String(),
+                    'can_repay' => $shortage->owner_user_id !== $user->id && $canReceive,
+                    'can_write_off' => $shortage->owner_user_id !== $user->id && $this->context()->can('vouchers.approve'),
+                ])->values()->all(),
+            'deposit_confirmations' => CashTransferService::confirmationsNeeded(),
             'denominations' => CashBookService::DENOMINATIONS,
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function shapeTransfer(CashTransfer $transfer, User $viewer): array
+    {
+        $isDeposit = $transfer->isDeposit();
+        $confirmedByMe = $transfer->confirmations->contains('user_id', $viewer->id);
+        $checksDeposits = $isDeposit && $transfer->sent_by !== $viewer->id && $this->context()->can('cash.view');
+
+        return [
+            'uuid' => $transfer->uuid,
+            'number' => $transfer->number,
+            'kind' => $transfer->kind,
+            'from' => $transfer->fromAccount?->name,
+            'to' => $transfer->toAccount?->name,
+            'to_user_name' => $transfer->toUser?->name,
+            'sent_by_name' => $transfer->sentBy?->name,
+            'amount' => (string) $transfer->amount,
+            'slip_number' => $transfer->slip_number,
+            'note' => $transfer->note,
+            'sent_at' => $transfer->sent_at?->toIso8601String(),
+            'confirmed_by' => $transfer->confirmations->map(fn ($confirmation): string => (string) $confirmation->user?->name)->values()->all(),
+            'required_confirmations' => $transfer->required_confirmations,
+            'can_accept' => ! $isDeposit && $transfer->to_user_id === $viewer->id,
+            'can_recall' => ! $isDeposit && $transfer->sent_by === $viewer->id,
+            'can_confirm' => $checksDeposits && ! $confirmedByMe,
+            'can_refuse_deposit' => $checksDeposits,
+        ];
     }
 
     public function show(Request $request, CashAccount $cashAccount): Response
@@ -125,7 +181,18 @@ class CashBookController extends Controller
                 'has_movements' => $movements->isNotEmpty(),
             ],
             'movements' => $rows->values()->all(),
-            'can_set_opening_balance' => $request->user()->can('update', $cashAccount) && $movements->isEmpty(),
+            'can_set_opening_balance' => $request->user()->can('update', $cashAccount) && $movements->isEmpty() && ! $cashAccount->isTill(),
+            // Wave 3: the month's statement or count against the book.
+            'can_count_statement' => $request->user()->can('countStatement', $cashAccount),
+            'last_month' => BusinessTimezone::now()->subMonthNoOverflow()->format('Y-m'),
+            'statements' => CashStatementCount::query()->with('countedBy')->where('cash_account_id', $cashAccount->id)->latest('period')->limit(12)->get()
+                ->map(fn (CashStatementCount $count): array => [
+                    'period' => $count->period,
+                    'book_balance' => (string) $count->book_balance,
+                    'statement_balance' => (string) $count->statement_balance,
+                    'difference' => (string) $count->difference,
+                    'counted_by_name' => $count->countedBy?->name,
+                ])->values()->all(),
         ]);
     }
 
@@ -175,18 +242,72 @@ class CashBookController extends Controller
             'amount' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'reference' => ['nullable', 'string', 'max:100'],
             'note' => ['nullable', 'string', 'max:500'],
+            'slip_photo' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
         ]);
 
         $from = CashAccount::query()->where('uuid', $validated['from_account'])->firstOrFail();
         $to = CashAccount::query()->where('uuid', $validated['to_account'])->firstOrFail();
+        $user = $request->user();
+        $amount = (string) $validated['amount'];
+        $note = $validated['note'] ?? null;
 
         // A cashier moves money out of their own till; only cash.view
-        // holders (managers, the owner) move it out of other accounts.
-        abort_unless($from->holder_user_id === $request->user()->id || $this->context()->can('cash.view'), 403);
+        // holders (managers, the owner) move it out of the safe, bank or wallets.
+        abort_unless($from->holder_user_id === $user->id || $this->context()->can('cash.view'), 403);
 
-        $number = $this->cashBook->transfer($from, $to, (string) $validated['amount'], $request->user(), $validated['reference'] ?? null, $validated['note'] ?? null);
+        // Wave 3: the bank and another person's till wait for someone else.
+        if ($to->kind === CashAccount::KIND_BANK) {
+            $request->validate([
+                'reference' => ['required', 'string', 'max:100'],
+                'slip_photo' => ['required'],
+            ], ['reference.required' => 'Enter the bank deposit slip number.', 'slip_photo.required' => 'Add a photo of the stamped deposit slip.']);
+
+            $deposit = app(CashTransferService::class)->sendDeposit($from, $to, $amount, (string) $validated['reference'], $request->file('slip_photo'), $user, $note);
+
+            return back()->with('success', "{$deposit->number}: in transit until {$deposit->required_confirmations} other person(s) confirm it against the bank.");
+        }
+
+        if ($to->isTill() && $to->holder_user_id !== $user->id) {
+            $handover = app(CashTransferService::class)->sendHandover($from, $to, $amount, $user, $note);
+
+            return back()->with('success', "{$handover->number}: handed to {$to->holder?->name} — it is theirs once they accept what they count.");
+        }
+
+        $number = $this->cashBook->transfer($from, $to, $amount, $user, $validated['reference'] ?? null, $note);
 
         return back()->with('success', "{$number}: moved to {$to->name}.");
+    }
+
+    /** A month's statement balance (bank, wallet) or the safe's count, against the book. */
+    public function countStatement(Request $request, CashAccount $cashAccount): RedirectResponse
+    {
+        $this->authorize('countStatement', $cashAccount);
+
+        $validated = $request->validate([
+            'period' => ['required', 'date_format:Y-m'],
+            'statement_balance' => ['required', 'numeric', 'min:-999999999.99', 'max:999999999.99', 'decimal:0,2'],
+            'photo' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
+            'note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $count = $this->cashBook->recordStatementCount($cashAccount, $validated['period'], number_format((float) $validated['statement_balance'], 2, '.', ''), $request->file('photo'), $validated['note'] ?? null, $request->user());
+
+        return back()->with('success', bccomp((string) $count->difference, '0', 2) === 0
+            ? "{$validated['period']}: the statement matches the book."
+            : "{$validated['period']}: the statement differs from the book by ".number_format((float) $count->difference, 0, '.', ' ').' FCFA — it stays on the alerts until found.');
+    }
+
+    /** Repaid into the settler's till, or written off by a manager — never by its owner. */
+    public function settleShortage(Request $request, CashShortage $cashShortage): RedirectResponse
+    {
+        $validated = $request->validate([
+            'outcome' => ['required', Rule::in(ShortageService::OUTCOMES)],
+            'note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        app(ShortageService::class)->settle($cashShortage, $validated['outcome'], $request->user(), $validated['note'] ?? null);
+
+        return back()->with('success', $validated['outcome'] === CashShortage::STATUS_REPAID ? 'Repayment taken into your till.' : 'Shortage written off.');
     }
 
     public function closeDay(Request $request, CashAccount $cashAccount): RedirectResponse
@@ -209,10 +330,12 @@ class CashBookController extends Controller
         $close = $this->cashBook->closeDay($cashAccount, number_format((float) $validated['counted'], 2, '.', ''), $denominations, $validated['note'] ?? null, $request->user());
 
         $variance = (float) $close->variance;
+        $closedDate = $close->business_date?->toDateString();
+        $day = $closedDate === $this->cashBook->today() ? 'Day' : "{$closedDate}";
 
         return back()->with('success', $variance === 0.0
-            ? 'Day closed — the count matches the book.'
-            : 'Day closed with a difference of '.number_format($variance, 0, '.', ' ').' FCFA. It has been recorded.');
+            ? "{$day} closed — the count matches the book."
+            : "{$day} closed with a difference of ".number_format($variance, 0, '.', ' ').' FCFA. It has been recorded.');
     }
 
     public function reopenDay(Request $request, CashAccount $cashAccount): RedirectResponse
@@ -236,8 +359,13 @@ class CashBookController extends Controller
     private function shapeAccount(CashAccount $account, array $balances, $closesToday): array
     {
         $close = $closesToday->get($account->id);
+        // Wave 3: the day this till counts next — yesterday's before today's.
+        $dayToClose = $account->isTill() ? $this->cashBook->dayToClose($account) : null;
 
         return [
+            'day_to_close' => $dayToClose,
+            'close_book' => $dayToClose !== null ? $this->cashBook->balanceOn($account, $dayToClose) : null,
+            'can_close' => $account->isTill() && request()->user()->can('closeDay', $account),
             'uuid' => $account->uuid,
             'kind' => $account->kind,
             'name' => $account->name,

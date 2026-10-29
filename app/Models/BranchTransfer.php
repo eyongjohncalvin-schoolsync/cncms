@@ -25,7 +25,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'number', 'from_branch_id', 'to_branch_id', 'from_account_id', 'to_account_id', 'amount', 'status', 'note',
-    'sent_by', 'sent_at', 'received_by', 'received_at', 'receive_note',
+    'sent_by', 'sent_at', 'received_by', 'received_at', 'receive_note', 'received_amount',
 ])]
 #[RouteKey('uuid')]
 class BranchTransfer extends Model
@@ -42,6 +42,7 @@ class BranchTransfer extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'received_amount' => 'decimal:2',
             'sent_at' => 'datetime',
             'received_at' => 'datetime',
         ];

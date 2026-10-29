@@ -62,6 +62,7 @@ class BranchTransferController extends Controller
                     'from_account' => $transfer->fromAccount?->name,
                     'to_account' => $transfer->toAccount?->name,
                     'amount' => (string) $transfer->amount,
+                    'received_amount' => $transfer->received_amount !== null ? (string) $transfer->received_amount : null,
                     'status' => $transfer->status,
                     'note' => $transfer->note,
                     'receive_note' => $transfer->receive_note,
@@ -69,7 +70,7 @@ class BranchTransferController extends Controller
                     'sent_at' => $transfer->sent_at?->toIso8601String(),
                     'received_by' => $transfer->receivedBy?->name,
                     'received_at' => $transfer->received_at?->toIso8601String(),
-                    'can_receive' => $transfer->isInTransit() && $this->receivesFor($transfer),
+                    'can_receive' => $transfer->isInTransit() && $this->receivesFor($transfer) && $transfer->sent_by !== request()->user()->id,
                 ])->values()->all(),
         ]);
     }
@@ -105,12 +106,15 @@ class BranchTransferController extends Controller
 
         $validated = $request->validate([
             'account' => ['required', 'uuid'],
+            // What was counted on arrival (owner, 2026-10-28) — the whole amount when not given.
+            'received_amount' => ['nullable', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'note' => ['nullable', 'string', 'max:500'],
         ]);
 
         $into = CashAccount::query()->where('uuid', $validated['account'])->where('is_active', true)->firstOrFail();
+        $received = isset($validated['received_amount']) ? number_format((float) $validated['received_amount'], 2, '.', '') : null;
 
-        $this->transfers->receive($branchTransfer, $into, $validated['note'] ?? null, $request->user());
+        $this->transfers->receive($branchTransfer, $into, $validated['note'] ?? null, $request->user(), $received);
 
         return redirect()->route('cash.branch-transfers')->with('success', "{$branchTransfer->number}: received into {$into->name}.");
     }

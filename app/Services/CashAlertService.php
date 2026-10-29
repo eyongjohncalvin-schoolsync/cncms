@@ -9,6 +9,9 @@ use App\Models\BranchTransfer;
 use App\Models\CashAccount;
 use App\Models\CashDayClose;
 use App\Models\CashMovement;
+use App\Models\CashShortage;
+use App\Models\CashStatementCount;
+use App\Models\CashTransfer;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Payment;
@@ -64,12 +67,16 @@ class CashAlertService
             $this->lateRegistrationsPaidSomeone(),
             $this->handoversNotReceived($deadlineHours),
             $this->openShortages(),
+            $this->ownedShortages(),
+            $this->moneyWaitingForSomeone($deadlineHours),
             $this->collectorCredits(),
             $this->walletLinesNotFound(),
             $this->receiptsScannedBeforeRecording($deadlineHours),
             $this->unaccountedReceiptNumbers(),
             $this->tillsNotClosed(),
             $this->closeDifferences(),
+            $this->statementsNotCounted(),
+            $this->statementDifferences(),
             $this->advancesNotJustified(),
             $this->approvedVouchersUnpaid(),
             $this->vouchersWithoutSignedCopy(),
@@ -275,6 +282,78 @@ class CashAlertService
                     'detail' => 'Received '.$remittance->received_at?->format('d M H:i'),
                     'amount' => $remittance->shortageOwed(),
                     'link' => "/cash/remittances/{$remittance->uuid}",
+                ])->all());
+    }
+
+    /** Every other shortage (wave 3): a till count, a handover or branch transfer received short, a refused deposit — until someone else settles it. */
+    private function ownedShortages(): array
+    {
+        return $this->alert('owned_shortages', 'danger', 'Money missing — owned', 'Each is owed by the person named. They repay it into a till, or a manager writes it off with a reason — never they themselves.',
+            CashShortage::query()->open()->with('owner')->orderBy('created_at')->get()
+                ->map(fn (CashShortage $shortage): array => [
+                    'label' => (CashShortage::KIND_LABELS[$shortage->kind] ?? $shortage->kind).' — '.($shortage->owner?->name ?? '—'),
+                    'detail' => (string) ($shortage->note ?? $shortage->created_at?->format('d M')),
+                    'amount' => (string) $shortage->amount,
+                    'link' => '/cash#shortages',
+                ])->all());
+    }
+
+    /**
+     * Handovers not accepted within the handover deadline, and every deposit
+     * not yet confirmed against the bank: money out of one account and in
+     * no other until someone acts (wave 3).
+     */
+    private function moneyWaitingForSomeone(int $deadlineHours): array
+    {
+        return $this->alert('cash_transfers_waiting', 'warning', 'Money in transit', 'A handover waits for the person it was handed to; a deposit for its confirmers to check it against the bank.',
+            CashTransfer::query()->inTransit()->with(['toUser', 'sentBy', 'confirmations'])
+                ->where(fn ($query) => $query->where('kind', CashTransfer::KIND_DEPOSIT)->orWhere('sent_at', '<', now()->subHours($deadlineHours)))
+                ->orderBy('sent_at')->get()
+                ->map(fn (CashTransfer $transfer): array => [
+                    'label' => $transfer->isDeposit()
+                        ? "{$transfer->number} — deposit by {$transfer->sentBy?->name}, slip {$transfer->slip_number}"
+                        : "{$transfer->number} — {$transfer->sentBy?->name} → {$transfer->toUser?->name}",
+                    'detail' => 'Sent '.$transfer->sent_at?->format('d M H:i').($transfer->isDeposit() ? " · {$transfer->confirmations->count()}/{$transfer->required_confirmations} confirmed" : ''),
+                    'amount' => (string) $transfer->amount,
+                    'link' => '/cash#in-transit',
+                ])->all());
+    }
+
+    /** Last month's statement (bank, wallet) or count (safe) not entered by the 5th. */
+    private function statementsNotCounted(): array
+    {
+        $now = BusinessTimezone::now();
+
+        if ($now->day <= 5) {
+            return $this->alert('statements_not_counted', 'warning', '', '', []);
+        }
+
+        $period = $now->copy()->subMonthNoOverflow()->format('Y-m');
+        $counted = CashStatementCount::query()->where('period', $period)->pluck('cash_account_id');
+
+        return $this->alert('statements_not_counted', 'warning', "Statements not counted for {$period}", 'Enter each bank and wallet statement balance (and count the safe) for the month just ended.',
+            CashAccount::query()->where('is_active', true)->where('kind', '!=', CashAccount::KIND_TILL)->whereNotIn('id', $counted)
+                ->where('created_at', '<', $now->copy()->startOfMonth())->orderBy('name')->get()
+                ->map(fn (CashAccount $account): array => [
+                    'label' => $account->name,
+                    'detail' => "No statement for {$period}",
+                    'amount' => null,
+                    'link' => "/cash/accounts/{$account->uuid}",
+                ])->all());
+    }
+
+    /** A statement that did not match the book: stays until the missing items are booked and it is counted again. */
+    private function statementDifferences(): array
+    {
+        $period = BusinessTimezone::now()->subMonthNoOverflow()->format('Y-m');
+
+        return $this->alert('statement_differences', 'danger', 'Statements that do not match the book', 'Find what the book is missing (bank charges, a deposit, a withdrawal), record it, then enter the statement again.',
+            CashStatementCount::query()->with('account')->where('period', '>=', $period)->where('difference', '!=', 0)->get()
+                ->map(fn (CashStatementCount $count): array => [
+                    'label' => (string) $count->account?->name,
+                    'detail' => "{$count->period}: statement ".number_format((float) $count->statement_balance, 0, '.', ' ').', book '.number_format((float) $count->book_balance, 0, '.', ' '),
+                    'amount' => (string) $count->difference,
+                    'link' => $count->account ? "/cash/accounts/{$count->account->uuid}" : null,
                 ])->all());
     }
 

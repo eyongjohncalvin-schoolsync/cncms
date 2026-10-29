@@ -26,6 +26,17 @@ interface Props {
     account: { uuid: string; name: string; kind: string; account_number: string | null; balance: string; has_movements: boolean };
     movements: Movement[];
     can_set_opening_balance: boolean;
+    can_count_statement: boolean;
+    last_month: string;
+    statements: Statement[];
+}
+
+interface Statement {
+    period: string;
+    book_balance: string;
+    statement_balance: string;
+    difference: string;
+    counted_by_name: string | null;
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -47,7 +58,86 @@ const KIND_LABELS: Record<string, string> = {
  * (docs/plans/cash-controls.md, wave 4). Newest first, with the balance
  * after each line. Lines are never edited; corrections appear as new lines.
  */
-export default function CashAccountLedger({ account, movements, can_set_opening_balance }: Props) {
+/**
+ * The month's statement (bank, wallet) or count (safe) against the book
+ * (wave 3). A difference stays on the alerts until what the book is missing
+ * is recorded and the statement entered again.
+ */
+function StatementCard({ account, lastMonth, statements }: { account: Props['account']; lastMonth: string; statements: Statement[] }) {
+    const { data, setData, post, processing, errors, reset } = useForm<{ period: string; statement_balance: string; note: string; photo: File | null }>({
+        period: lastMonth,
+        statement_balance: '',
+        note: '',
+        photo: null,
+    });
+
+    return (
+        <Card className="mb-6">
+            <CardHeader>
+                <h3 className="text-sm font-semibold text-slate-900">{account.kind === 'safe' ? 'Monthly safe count' : 'Monthly statement'}</h3>
+            </CardHeader>
+            <CardBody className="space-y-4">
+                <form
+                    className="grid gap-3 sm:grid-cols-2"
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        post(`/cash/accounts/${account.uuid}/statement`, { preserveScroll: true, onSuccess: () => reset('statement_balance', 'note', 'photo') });
+                    }}
+                >
+                    <TextInput id="period" label="Month" type="month" value={data.period} max={lastMonth} onChange={(e) => setData('period', e.target.value)} error={errors.period} required />
+                    <TextInput
+                        id="statement_balance"
+                        label={account.kind === 'safe' ? 'Counted at month end (FCFA)' : 'Statement balance at month end (FCFA)'}
+                        type="number"
+                        value={data.statement_balance}
+                        onChange={(e) => setData('statement_balance', e.target.value)}
+                        error={errors.statement_balance}
+                        required
+                    />
+                    <div>
+                        <label htmlFor="statement_photo" className="mb-1 block text-sm font-medium text-slate-700">
+                            Photo of the statement (optional)
+                        </label>
+                        <input id="statement_photo" type="file" accept="image/*,application/pdf" onChange={(e) => setData('photo', e.target.files?.[0] ?? null)} className="block w-full text-sm" />
+                    </div>
+                    <TextInput id="statement_note" label="Note (optional)" value={data.note} onChange={(e) => setData('note', e.target.value)} />
+                    <div className="sm:col-span-2 flex justify-end">
+                        <Button type="submit" disabled={processing}>
+                            Record
+                        </Button>
+                    </div>
+                </form>
+                {statements.length > 0 && (
+                    <Table label="Statements">
+                        <TableHead>
+                            <Th>Month</Th>
+                            <Th className="text-right">Book</Th>
+                            <Th className="text-right">Statement</Th>
+                            <Th className="text-right">Difference</Th>
+                        </TableHead>
+                        <TableBody>
+                            {statements.map((statement) => (
+                                <tr key={statement.period}>
+                                    <Td>
+                                        {statement.period}
+                                        <div className="text-xs text-slate-500">{statement.counted_by_name}</div>
+                                    </Td>
+                                    <Td className="text-right">{formatCurrency(statement.book_balance)}</Td>
+                                    <Td className="text-right">{formatCurrency(statement.statement_balance)}</Td>
+                                    <Td className={`text-right font-medium ${Number(statement.difference) !== 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                                        {formatCurrency(statement.difference)}
+                                    </Td>
+                                </tr>
+                            ))}
+                        </TableBody>
+                    </Table>
+                )}
+            </CardBody>
+        </Card>
+    );
+}
+
+export default function CashAccountLedger({ account, movements, can_set_opening_balance, can_count_statement, last_month, statements }: Props) {
     const { data, setData, post, processing, errors } = useForm({ amount: '' });
 
     return (
@@ -91,6 +181,8 @@ export default function CashAccountLedger({ account, movements, can_set_opening_
                     </CardBody>
                 </Card>
             )}
+
+            {can_count_statement && <StatementCard account={account} lastMonth={last_month} statements={statements} />}
 
             <Card>
                 <CardHeader>

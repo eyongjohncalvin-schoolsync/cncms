@@ -90,7 +90,7 @@ class VoucherTest extends TestCase
     private function fundCashierTill(string $amount): void
     {
         $cashier = User::query()->where('email', 'patience@shalomtech.dev')->firstOrFail();
-        app(CashBookService::class)->openingBalance(app(CashBookService::class)->tillFor($cashier), $amount, $cashier);
+        app(CashBookService::class)->record(app(CashBookService::class)->tillFor($cashier), 'in', $amount, CashMovement::KIND_TRANSFER, $cashier, ['note' => 'Float']);
     }
 
     public function test_a_voucher_within_the_limit_needs_one_manager_then_the_cashier_pays_it(): void

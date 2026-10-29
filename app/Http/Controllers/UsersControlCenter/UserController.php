@@ -9,6 +9,7 @@ use App\Http\Requests\StoreTenantUserRequest;
 use App\Http\Requests\UpdateTenantUserRequest;
 use App\Models\Agent;
 use App\Models\Branch;
+use App\Models\CashTransfer;
 use App\Models\Role;
 use App\Models\SalaryGrade;
 use App\Models\Scopes\BranchScope;
@@ -178,6 +179,12 @@ class UserController extends Controller
             if ($till !== null && bccomp(app(CashBookService::class)->balance($till), '0', 2) !== 0) {
                 throw ValidationException::withMessages(['branch_uuid' => ['Their till still holds money — hand it over (and close the day) before moving them to another branch.']]);
             }
+
+            // Wave 3: nor while money they sent or must accept is in transit.
+            if ($data['branch_id'] !== $tenantUser->branch_id && CashTransfer::query()->withoutGlobalScope(BranchScope::class)->inTransit()
+                ->where(fn ($query) => $query->where('sent_by', $tenantUser->user_id)->orWhere('to_user_id', $tenantUser->user_id))->exists()) {
+                throw ValidationException::withMessages(['branch_uuid' => ['Money they sent or must accept is still in transit — it is accepted, refused or recalled first.']]);
+            }
         }
 
         // Defensive: a role change away from 'worker' also clears the
@@ -243,6 +250,13 @@ class UserController extends Controller
     public function deactivate(TenantUser $tenantUser, AccountSecurityService $account): RedirectResponse
     {
         $this->authorize('deactivate', $tenantUser);
+
+        // Nobody leaves holding the company's money (owner, 2026-10-29).
+        $held = app(CashBookService::class)->moneyHeldBy($tenantUser->user);
+
+        if ($held !== []) {
+            return back()->withErrors(['user' => "{$tenantUser->user->name} cannot be deactivated yet: ".implode('; ', $held).'.']);
+        }
 
         $account->deactivate($tenantUser->user);
         // A field agent stops covering their zones.

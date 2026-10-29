@@ -359,7 +359,7 @@ class RemittanceService
 
         $till = $this->cashBook->tillFor($recorder);
 
-        if ($this->cashBook->isDayClosed($till)) {
+        if (! $this->cashBook->takesMovementsToday($till)) {
             return null;
         }
 

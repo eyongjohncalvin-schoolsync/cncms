@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\BranchTransferController;
 use App\Http\Controllers\CashAlertController;
 use App\Http\Controllers\CashBookController;
+use App\Http\Controllers\CashTransferController;
 use App\Http\Controllers\RemittanceController;
 use App\Http\Controllers\TechnicianFeeController;
 use Illuminate\Support\Facades\Route;
@@ -19,6 +20,7 @@ Route::get('cash/hand-over', [RemittanceController::class, 'create'])->name('cas
 Route::get('cash/remittances/{remittance}', [RemittanceController::class, 'show'])->name('cash.remittances.show');
 // Money between branches (branches v2 §4.7).
 Route::get('cash/branch-transfers', [BranchTransferController::class, 'index'])->name('cash.branch-transfers');
+Route::get('cash/transfers/{cashTransfer}/slip', [CashTransferController::class, 'slip'])->name('cash.transfers.slip');
 
 // Every write moves or accounts for money — refused while a landlord
 // impersonates (E9, docs/plans/expenditures-and-spending-controls.md).
@@ -28,6 +30,14 @@ Route::middleware('not-impersonating:money')->group(function () {
     Route::post('cash/accounts/{cashAccount}/close-day', [CashBookController::class, 'closeDay'])->name('cash.accounts.close-day');
     Route::post('cash/accounts/{cashAccount}/reopen-day', [CashBookController::class, 'reopenDay'])->name('cash.accounts.reopen-day');
     Route::post('cash/transfers', [CashBookController::class, 'transfer'])->name('cash.transfers.store');
+    // Wave 3 (owner, 2026-10-28): money that waits for someone else, owned shortages, monthly statements.
+    Route::post('cash/transfers/{cashTransfer}/accept', [CashTransferController::class, 'accept'])->name('cash.transfers.accept');
+    Route::post('cash/transfers/{cashTransfer}/refuse', [CashTransferController::class, 'refuse'])->name('cash.transfers.refuse');
+    Route::post('cash/transfers/{cashTransfer}/recall', [CashTransferController::class, 'recall'])->name('cash.transfers.recall');
+    Route::post('cash/transfers/{cashTransfer}/confirm', [CashTransferController::class, 'confirm'])->name('cash.transfers.confirm');
+    Route::post('cash/transfers/{cashTransfer}/refuse-deposit', [CashTransferController::class, 'refuseDeposit'])->name('cash.transfers.refuse-deposit');
+    Route::post('cash/shortages/{cashShortage}/settle', [CashBookController::class, 'settleShortage'])->name('cash.shortages.settle');
+    Route::post('cash/accounts/{cashAccount}/statement', [CashBookController::class, 'countStatement'])->name('cash.accounts.statement');
     Route::post('cash/branch-transfers', [BranchTransferController::class, 'store'])->name('cash.branch-transfers.store');
     Route::post('cash/branch-transfers/{branchTransfer}/receive', [BranchTransferController::class, 'receive'])->name('cash.branch-transfers.receive');
     Route::post('cash/branch-transfers/{branchTransfer}/reject', [BranchTransferController::class, 'reject'])->name('cash.branch-transfers.reject');

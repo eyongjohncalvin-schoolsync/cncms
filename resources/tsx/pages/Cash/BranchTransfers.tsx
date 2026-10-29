@@ -34,6 +34,7 @@ interface TransferRow {
     from_account: string | null;
     to_account: string | null;
     amount: string;
+    received_amount: string | null;
     status: 'sent' | 'received' | 'rejected';
     note: string | null;
     receive_note: string | null;
@@ -120,7 +121,12 @@ export default function BranchTransfers({
                                             {transfer.note && <span className="block text-xs text-slate-500">{transfer.note}</span>}
                                             {transfer.receive_note && <span className="block text-xs text-slate-500">{transfer.receive_note}</span>}
                                         </Td>
-                                        <Td>{formatCurrency(transfer.amount)}</Td>
+                                        <Td>
+                                            {formatCurrency(transfer.amount)}
+                                            {transfer.received_amount !== null && transfer.received_amount !== transfer.amount && (
+                                                <span className="block text-xs font-medium text-red-700">counted {formatCurrency(transfer.received_amount)}</span>
+                                            )}
+                                        </Td>
                                         <Td>
                                             <Badge tone={STATUS[transfer.status].tone}>{STATUS[transfer.status].label}</Badge>
                                             {transfer.to_account && <span className="block text-xs text-slate-500">into {transfer.to_account}</span>}
@@ -226,6 +232,19 @@ export default function BranchTransfers({
                                             </option>
                                         ))}
                                 </SelectInput>
+                                <TextInput
+                                    id="received_amount"
+                                    name="received_amount"
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    inputMode="decimal"
+                                    label="Amount you counted (FCFA)"
+                                    defaultValue={receiving.amount}
+                                    error={errors.received_amount}
+                                    required
+                                />
+                                <p className="-mt-2 text-xs text-slate-500">Less than was sent is the sender&apos;s shortage.</p>
                                 <TextInput id="receive-note" name="note" label="Note (optional)" error={errors.note} />
                                 <div className="flex justify-end gap-2">
                                     <Button type="button" variant="secondary" onClick={() => setReceiving(null)}>

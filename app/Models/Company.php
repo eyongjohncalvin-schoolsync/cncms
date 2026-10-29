@@ -16,7 +16,7 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'voucher_approval_limit', 'voucher_daily_limit', 'monthly_spending_cap', 'remittance_deadline_hours', 'advance_settlement_days', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page', 'max_free_months', 'relocation_fee', 'reinstallation_fee', 'agent_customer_limit', 'compensation_months_without_approval'])]
+#[Fillable(['branch_id', 'name', 'location', 'head_office', 'email', 'phone', 'tech_number', 'momo_number', 'momo_name', 'reconnection_fine', 'arrears_second_approval_threshold', 'voucher_approval_limit', 'voucher_daily_limit', 'monthly_spending_cap', 'remittance_deadline_hours', 'advance_settlement_days', 'rccm_number', 'niu', 'default_locale', 'bill_template', 'bills_per_page', 'max_free_months', 'relocation_fee', 'reinstallation_fee', 'agent_customer_limit', 'compensation_months_without_approval', 'deposit_confirmations'])]
 #[RouteKey('uuid')]
 class Company extends Model implements HasMedia
 {
