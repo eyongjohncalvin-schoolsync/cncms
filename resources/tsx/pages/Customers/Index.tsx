@@ -429,6 +429,9 @@ export default function CustomersIndex({
                                                     {customer.archived_reason}
                                                 </span>
                                             )}
+                                            {customer.left_owing && (
+                                                <span className="block font-medium text-red-700">Left owing {formatCurrency(customer.left_owing)}</span>
+                                            )}
                                         </Td>
                                     ) : (
                                         <>

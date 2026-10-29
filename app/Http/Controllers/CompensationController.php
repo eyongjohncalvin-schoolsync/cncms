@@ -55,6 +55,8 @@ class CompensationController extends Controller
 
         $singles = FreeMonthGrant::query()
             ->with(['customer', 'service', 'requestedBy', 'decidedBy'])
+            // Never an archived customer's (owner, 2026-10-29).
+            ->whereHas('customer')
             ->where('reason', FreeMonthGrant::REASON_COMPENSATION)
             ->whereNull('compensation_batch_id')
             ->when($branchId !== null, fn ($query) => $query->where('branch_id', $branchId))
@@ -140,6 +142,7 @@ class CompensationController extends Controller
     {
         $running = FreeMonthGrant::query()
             ->active()
+            ->whereHas('customer')
             ->where('reason', FreeMonthGrant::REASON_COMPENSATION)
             ->where('start_period', '<=', $period)
             ->when($branchId !== null, fn ($query) => $query->where('branch_id', $branchId))

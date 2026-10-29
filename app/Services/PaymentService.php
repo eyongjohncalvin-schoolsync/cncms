@@ -127,6 +127,7 @@ class PaymentService
             now()->addSeconds(15),
             fn (): int => Payment::query()
                 ->where('verification_status', 'pending')
+                ->whereHas('customer')
                 ->when($branchId !== null, fn ($query) => $query->where('payments.branch_id', $branchId))
                 ->count(),
         );

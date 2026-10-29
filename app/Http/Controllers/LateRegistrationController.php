@@ -42,8 +42,8 @@ class LateRegistrationController extends Controller
         $months = (int) $request->integer('months', 12);
         $months = in_array($months, [3, 6, 12, 24], true) ? $months : 12;
 
+        // Archived customers are out of the report (owner, 2026-10-29).
         $customers = Customer::query()
-            ->withTrashed()
             ->with(['zone.branch'])
             ->whereNotNull('connected_on')
             ->whereNotNull('billing_starts_period')

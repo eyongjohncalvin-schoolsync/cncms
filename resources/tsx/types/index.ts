@@ -289,6 +289,8 @@ export interface Customer {
     archived_at?: string | null;
     archived_by_name?: string | null;
     archived_reason?: string | null;
+    /** What an archived customer left owing — on their record only, never in "owed now". */
+    left_owing?: string | null;
     /**
      * This customer's ticked services/options (services.md section 6) —
      * `bill` above is the sum of these. Present only where

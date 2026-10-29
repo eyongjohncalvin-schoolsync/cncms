@@ -202,6 +202,8 @@ class PaymentController extends Controller
     {
         return Payment::query()
             ->forBranch(TenantContext::currentBranchId())
+            // The tab counts match the list: never an archived customer's.
+            ->whereHas('customer')
             ->when($purpose === 'bill', fn ($query) => $query->subscription())
             ->when($purpose === 'fees', fn ($query) => $query->where('purpose', Payment::PURPOSE_INSTALLATION));
     }

@@ -6,13 +6,16 @@ namespace Tests\Feature\Web;
 
 use App\Models\AuditLog;
 use App\Models\Customer;
+use App\Models\Payment;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Services\CustomerService;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ManuscriptFactory;
+use Database\Factories\PaymentFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -75,6 +78,49 @@ class CustomerArchiveTest extends TestCase
         ]);
         // History untouched.
         $this->assertDatabaseHas('manuscripts', ['customer_id' => $customer->id]);
+    }
+
+    /** Owner, 2026-10-29: archiving never hides money still moving — it says what is open. */
+    public function test_archiving_is_refused_while_money_is_open(): void
+    {
+        $this->actingAsRole('manager');
+        $customer = $this->customerWithHistory();
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id]);
+
+        $this->from("/customers/{$customer->uuid}")->patch("/customers/{$customer->uuid}/archive", ['name' => $customer->name, 'reason' => 'Moved away'])
+            ->assertSessionHasErrors(['reason' => "{$customer->name} still has a payment waiting for verification, money not yet handed over by its collector. Settle it first — an archived customer is never looked at again."]);
+        $this->assertNotSoftDeleted('customers', ['id' => $customer->id]);
+
+        // Settled (here: from before cash controls, rejected — nothing left to hand over): it archives.
+        $payment->forceFill(['verification_status' => 'rejected', 'money_taken' => false])->save();
+        $this->patch("/customers/{$customer->uuid}/archive", ['name' => $customer->name, 'reason' => 'Moved away'])->assertSessionHas('success');
+        $this->assertSoftDeleted('customers', ['id' => $customer->id]);
+    }
+
+    /** Option B (owner, 2026-10-29): old debt doesn't block — it stays on their record, shown on the Archived tab. */
+    public function test_a_customer_leaving_owing_money_is_archived_and_the_debt_shown(): void
+    {
+        $this->actingAsRole('manager');
+        $customer = CustomerFactory::new()->create(['zone_id' => ZoneFactory::new()->create()->id, 'name' => 'OWING-'.uniqid()]);
+        ManuscriptFactory::new()->create(['customer_id' => $customer->id, 'total_arrears' => 12500]);
+
+        $this->patch("/customers/{$customer->uuid}/archive", ['name' => $customer->name, 'reason' => 'Deceased'])->assertSessionHas('success');
+
+        $this->get('/customers?archived=1&search='.$customer->name)->assertInertia(fn (Assert $page) => $page
+            ->where('customers.data.0.uuid', $customer->uuid)
+            ->where('customers.data.0.left_owing', '12500.00'));
+    }
+
+    /** Out of every list: their payments leave the Payments list and the pending badge. */
+    public function test_an_archived_customers_payments_leave_the_lists(): void
+    {
+        $customer = $this->customerWithHistory();
+        $payment = PaymentFactory::new()->pending()->create(['customer_id' => $customer->id, 'created_at' => now()->subYear()]);
+        $customer->delete();
+
+        $this->actingAsRole('admin');
+        $this->get('/payments?scope=all&search='.$customer->name)->assertInertia(fn (Assert $page) => $page->has('payments.data', 0));
+        $this->assertSame(0, Payment::query()->whereKey($payment->id)->whereHas('customer')->count());
     }
 
     public function test_archiving_writes_one_archived_customer_audit_row_and_no_delete_row(): void

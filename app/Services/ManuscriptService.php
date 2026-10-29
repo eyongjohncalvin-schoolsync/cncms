@@ -142,10 +142,8 @@ class ManuscriptService
         $scoped = $this->scopedFilters($filters);
 
         $customers = $this->manuscripts->all($scoped)
-            // Never an archived customer — the register loads them (their
-            // bills are history), but nobody is billed after archiving.
+            // Archived customers never get here (ManuscriptRepository::scoped()).
             ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active'
-                && ! $manuscript->customer->trashed()
                 && bccomp((string) $manuscript->total_bill, '0', 2) > 0)
             ->sortBy(fn (Manuscript $manuscript): string => mb_strtolower(
                 ($manuscript->customer?->zone?->name ?? '')."\0".($manuscript->customer?->name ?? '')
@@ -473,10 +471,10 @@ class ManuscriptService
             .md5(json_encode($scopedFilters));
     }
 
-    /** v2: pages cached before an archived customer's bill carried its customer are never served. */
+    /** v3: pages cached while archived customers were still listed are never served. */
     private function listCacheKey(array $scopedFilters, int $perPage, int $page): string
     {
-        return 'manuscripts:list:v2:'.$scopedFilters['period'].':'.self::versions().':'.(TenantContext::currentBranchId() ?? 'all').':'
+        return 'manuscripts:list:v3:'.$scopedFilters['period'].':'.self::versions().':'.(TenantContext::currentBranchId() ?? 'all').':'
             .md5(json_encode([$scopedFilters, $perPage, $page]));
     }
 

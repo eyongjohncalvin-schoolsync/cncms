@@ -11,7 +11,6 @@ use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Message;
-use App\Models\Scopes\BranchScope;
 use App\Services\BillNotificationService;
 use App\Services\ManuscriptGenerationBatchService;
 use App\Services\ManuscriptPreRunReviewService;
@@ -57,11 +56,10 @@ class ManuscriptController extends Controller
 
         $paginated = $this->manuscripts->list($filters, 25);
 
-        // A bill's customer may be archived — it still shows. A page cached
-        // before that was loaded comes back without it: fetched here instead.
-        $paginated->through(fn (Manuscript $manuscript): array => $this->shapeRow($manuscript->relationLoaded('customer') && $manuscript->customer !== null
-            ? $manuscript
-            : $manuscript->setRelation('customer', Customer::withTrashed()->withoutGlobalScope(BranchScope::class)->with('zone')->find($manuscript->customer_id))));
+        // Archived customers are out of the register (ManuscriptRepository::scoped()).
+        // A new collection, never through() (it rewrites the items in place): the
+        // paginator may be the cached object itself (ManuscriptService::list()).
+        $paginated = (clone $paginated)->setCollection($paginated->getCollection()->map(fn (Manuscript $manuscript): array => $this->shapeRow($manuscript)));
 
         return Inertia::render('Manuscripts/Index', [
             'period' => $period,

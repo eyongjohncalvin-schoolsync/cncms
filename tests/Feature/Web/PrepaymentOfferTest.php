@@ -8,6 +8,7 @@ use App\Models\Branch;
 use App\Models\BranchPrice;
 use App\Models\Customer;
 use App\Models\Payment;
+use App\Models\PaymentReceipt;
 use App\Models\PrepaymentOffer;
 use App\Models\TenantUser;
 use App\Models\User;
@@ -209,6 +210,8 @@ class PrepaymentOfferTest extends TestCase
         $this->payOffer()->assertSessionHasNoErrors();
         $payment = Payment::query()->where('customer_id', $this->customer->id)->sole();
         $payment->update(['verification_status' => 'pending']);
+        // No receipt in the customer's hand, so the offer's own rule is what answers.
+        PaymentReceipt::query()->where('payment_id', $payment->id)->delete();
 
         $this->put("/payments/{$payment->uuid}", ['amount' => 10000, 'frequency' => 'months', 'months' => 12])->assertSessionHasErrors('months');
         $this->assertSame(4, $payment->fresh()->months);

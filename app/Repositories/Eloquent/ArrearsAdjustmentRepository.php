@@ -105,6 +105,8 @@ class ArrearsAdjustmentRepository implements ArrearsAdjustmentRepositoryInterfac
     private function scoped(array $filters): Builder
     {
         return $this->fenced()
+            // An archived customer is out of every list (owner, 2026-10-29).
+            ->whereHas('customer')
             // 'awaiting_approval' = both pending stages — the same set the
             // dashboard's pending_approval count uses (dashboardCounts()).
             ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $status === 'awaiting_approval'

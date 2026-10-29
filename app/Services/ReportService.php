@@ -527,8 +527,11 @@ class ReportService
      */
     private function installationsAndPromotions(string $period, Carbon $start, Carbon $end, ?int $branchId, ?array $zoneIds): array
     {
+        // Counts and charges leave archived customers out; money that came in
+        // (incomeByKind) keeps them (owner, 2026-10-29).
         $charges = fn () => $this->fenceZones(CustomerCharge::query()
             ->join('customers', 'customers.id', '=', 'customer_charges.customer_id')
+            ->whereNull('customers.deleted_at')
             ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneIds);
 
         $byOffer = $charges()
@@ -577,12 +580,14 @@ class ReportService
 
         $manuscripts = fn () => $this->fenceZones(Manuscript::query()
             ->join('customers', 'customers.id', '=', 'manuscripts.customer_id')
+            ->whereNull('customers.deleted_at')
             ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneIds)
             ->where('manuscripts.period', $period)
             ->where('manuscripts.free_value', '>', 0);
 
         $grants = fn () => $this->fenceZones(FreeMonthGrant::query()
             ->join('customers', 'customers.id', '=', 'free_month_grants.customer_id')
+            ->whereNull('customers.deleted_at')
             ->join('zones', 'zones.id', '=', 'customers.zone_id'), $branchId, $zoneIds);
 
         $nextPeriod = Carbon::createFromFormat('!Y-m', $period)->addMonthNoOverflow()->format('Y-m');
@@ -714,7 +719,9 @@ class ReportService
             ->join('customers', 'customers.id', '=', 'manuscripts.customer_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id')
             ->where('manuscripts.period', $period)
-            ->where('customers.status', 'active');
+            ->where('customers.status', 'active')
+            // "Owed now": an archived customer's debt stays on their record only (owner, 2026-10-29).
+            ->whereNull('customers.deleted_at');
 
         $query = $this->fenceZones($query, $branchId, $zoneIds);
 
@@ -949,6 +956,8 @@ class ReportService
             ->join('customers', 'customers.id', '=', 'audit_logs.record_id')
             ->join('zones', 'zones.id', '=', 'customers.zone_id')
             ->where('audit_logs.table_name', 'customers')
+            // A customer count: archived customers are out (owner, 2026-10-29).
+            ->whereNull('customers.deleted_at')
             ->where('audit_logs.action', 'update')
             ->whereBetween('audit_logs.created_at', [$start, $end])
             ->whereRaw("audit_logs.old_values->>'status' IS DISTINCT FROM audit_logs.new_values->>'status'");

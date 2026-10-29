@@ -124,6 +124,8 @@ class ComplaintRepository implements ComplaintRepositoryInterface
     private function scoped(array $filters): Builder
     {
         return Complaint::query()
+            // Not about an archived customer (owner, 2026-10-29); general complaints have none.
+            ->where(fn (Builder $query) => $query->whereNull('customer_id')->orWhereHas('customer'))
             ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $query->where('status', $status))
             ->when($filters['category'] ?? null, fn (Builder $query, string $category) => $query->where('category', $category))
             ->when(

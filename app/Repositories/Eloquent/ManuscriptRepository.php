@@ -21,8 +21,7 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->scoped($filters)
-            // An archived customer's bill is still history: it shows, with its customer.
-            ->with(['customer' => fn ($query) => $query->withTrashed(), 'customer.zone'])
+            ->with('customer.zone')
             ->orderBy('customer_id')
             ->paginate($perPage);
     }
@@ -30,8 +29,7 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
     public function all(array $filters): Collection
     {
         return $this->scoped($filters)
-            // An archived customer's bill is still history: it shows, with its customer.
-            ->with(['customer' => fn ($query) => $query->withTrashed(), 'customer.zone'])
+            ->with('customer.zone')
             ->orderBy('customer_id')
             ->get();
     }
@@ -130,12 +128,17 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
     }
 
     /**
+     * An archived customer is out of the register altogether — its rows,
+     * count, totals, export and bills (owner, 2026-10-29). Their bills stay
+     * in the database and come back with them if they are reinstated.
+     *
      * @param  array<string, mixed>  $filters
      */
     private function scoped(array $filters): Builder
     {
         return $this->scopeToBranchDirect(Manuscript::query(), $this->currentBranchId())
             ->where('period', $filters['period'])
+            ->whereHas('customer')
             ->when(
                 ($filters['zone_id'] ?? null) !== null,
                 // One zone, or the zones an agent covers — an empty list matches nothing.

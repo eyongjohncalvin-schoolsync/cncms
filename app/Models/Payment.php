@@ -249,6 +249,12 @@ class Payment extends Model
             ?? ($this->paid_with_payment_id !== null ? RemittanceLine::query()->where('payment_id', $this->paid_with_payment_id)->first() : null);
     }
 
+    /** The bon that gives this payment's money back (a refund, or cash returned to its collector). */
+    public function refundVoucher(): BelongsTo
+    {
+        return $this->belongsTo(Voucher::class, 'refund_voucher_id');
+    }
+
     /** The collector's open request for the office to reverse it (App\Services\PaymentReversalRequestService). */
     public function openReversalRequest(): HasOne
     {

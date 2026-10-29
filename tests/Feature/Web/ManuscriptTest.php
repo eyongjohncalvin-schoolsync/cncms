@@ -15,6 +15,7 @@ use Database\Factories\ManuscriptFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -94,19 +95,33 @@ class ManuscriptTest extends TestCase
                 ->has('zones'));
     }
 
-    /** Regression: an archived customer's bill crashed the page ("uuid" on null). */
-    public function test_index_shows_an_archived_customers_bill(): void
+    /**
+     * An archived customer is out of the register altogether (owner,
+     * 2026-10-29) — and their old row once crashed the page ("uuid" on null).
+     */
+    public function test_an_archived_customer_is_out_of_the_register(): void
     {
-        // A month no other test bills, so this is the only row.
+        // A month no other test bills, so these are the only rows.
         $period = '2001-01';
-        $customer = CustomerFactory::new()->create(['name' => 'ARCHIVED CUSTOMER']);
-        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $customer->id]);
-        $customer->delete();
+        $kept = CustomerFactory::new()->create(['name' => 'KEPT CUSTOMER']);
+        $archived = CustomerFactory::new()->create(['name' => 'ARCHIVED CUSTOMER']);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $kept->id]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $archived->id]);
+        $archived->delete();
 
         $this->actingAsRole('manager');
 
         $this->get("/manuscripts?period={$period}")->assertOk()
-            ->assertInertia(fn (Assert $page) => $page->where('manuscripts.data.0.customer_name', 'ARCHIVED CUSTOMER'));
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('manuscripts.data', 1)
+                ->where('manuscripts.data.0.customer_name', 'KEPT CUSTOMER')
+                ->where('summary.total_customers', 1));
+
+        // Reinstated, they are back with their bills.
+        $archived->restore();
+        // The restore's cache-version bump waits for a commit this test transaction never makes.
+        Cache::flush();
+        $this->get("/manuscripts?period={$period}")->assertInertia(fn (Assert $page) => $page->has('manuscripts.data', 2));
     }
 
     /** An archived customer's bill shows in the register, but nobody is billed after archiving. */

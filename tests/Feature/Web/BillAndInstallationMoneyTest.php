@@ -74,12 +74,14 @@ class BillAndInstallationMoneyTest extends TestCase
 
     public function test_rejected_payments_only_show_under_rejected_and_can_be_deleted_unless_receipted(): void
     {
-        $rejected = PaymentFactory::new()->pending()->create(['customer_id' => $this->customer->id, 'amount' => 3000]);
+        // From before cash controls: plainly rejected and deleted (a newer one's
+        // rejection asks about the money, and it is never deleted).
+        $rejected = PaymentFactory::new()->pending()->create(['customer_id' => $this->customer->id, 'amount' => 3000, 'created_at' => now()->subYear()]);
         $this->post("/payments/{$rejected->uuid}/verify", ['action' => 'reject', 'notes' => 'Wrong customer'])->assertSessionHasNoErrors();
 
         $uuids = fn (string $url): array => collect($this->get($url)->assertOk()->viewData('page')['props']['payments']['data'])->pluck('uuid')->all();
         $this->assertNotContains($rejected->uuid, $uuids('/payments'), 'Not money: not in the default list.');
-        $this->assertContains($rejected->uuid, $uuids('/payments?verification_status=rejected'));
+        $this->assertContains($rejected->uuid, $uuids('/payments?verification_status=rejected&scope=all'));
 
         $this->delete("/payments/{$rejected->uuid}")->assertSessionHasNoErrors();
         $this->assertNull(Payment::query()->find($rejected->id));

@@ -299,7 +299,9 @@ class FieldInstallationService
             ]);
 
             $customer->forceFill(['activation_status' => null])->save();
-            $this->customers->archive($customer, $actor->id, mb_substr("Field registration rejected: {$reason}", 0, 255));
+            // Its money is refunded through the bon just raised — settling money
+            // still open on an archived customer is allowed.
+            $this->customers->archive($customer, $actor->id, mb_substr("Field registration rejected: {$reason}", 0, 255), whileMoneyIsOpen: true);
 
             return $locked->fresh(['customer']);
         });

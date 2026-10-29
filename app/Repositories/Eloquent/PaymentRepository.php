@@ -17,6 +17,8 @@ class PaymentRepository implements PaymentRepositoryInterface
     public function paginate(array $filters, int $perPage): LengthAwarePaginator
     {
         return $this->scopeToBranchDirect(Payment::query(), $this->currentBranchId())
+            // An archived customer is out of every list (owner, 2026-10-29) — their payments stay on their own page.
+            ->whereHas('customer')
             // remittanceLine: whether the cash was handed in (the Reverse dialog's choices).
             ->with(['customer', 'verification.verifier', 'remittanceLine', 'customerCharge', 'recordedBy:id,name'])
             ->when($filters['customer_id'] ?? null, fn ($query, $customerId) => $query->where('customer_id', $customerId))

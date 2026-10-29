@@ -21,7 +21,8 @@ class CustomerRepository implements CustomerRepositoryInterface
         return $this->scopeToBranchDirect(Customer::query(), $this->currentBranchId())
             ->when(
                 ! empty($filters['archived']),
-                fn ($query) => $query->onlyTrashed()->with('archivedBy'),
+                // latestManuscript: what they left owing, shown on the Archived tab (owner, 2026-10-29).
+                fn ($query) => $query->onlyTrashed()->with(['archivedBy', 'latestManuscript']),
             )
             ->with('zone')
             ->when(! empty($filters['pending_activation']), fn ($query) => $query->pendingActivation())

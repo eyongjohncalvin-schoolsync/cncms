@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DataTransferObjects\CustomerData;
+use App\Models\ArrearsAdjustment;
 use App\Models\Customer;
+use App\Models\CustomerCharge;
+use App\Models\Payment;
+use App\Models\PaymentReversalRequest;
 use App\Repositories\Contracts\CustomerRepositoryInterface;
 use App\Repositories\Contracts\ZoneRepositoryInterface;
 use App\Support\CacheVersion;
@@ -288,11 +292,43 @@ class CustomerService
      * already IS the archive record, and a second "deleted" row would just
      * be noise.
      */
-    public function archive(Customer $customer, int $actorId, string $reason): void
+    public function archive(Customer $customer, int $actorId, string $reason, bool $whileMoneyIsOpen = false): void
     {
+        if (! $whileMoneyIsOpen) {
+            $this->assertNoMoneyOpen($customer);
+        }
+
         DB::transaction(fn () => $this->customers->archive($customer, $actorId, $reason));
 
         $this->forgetShowCache($customer->uuid);
+    }
+
+    /**
+     * An archived customer is untouched by every job, list and queue (owner,
+     * 2026-10-29), so archiving must never hide money still moving: it is
+     * refused while any of it is open, saying what. Old debt is not open
+     * money — it stays on their record ("left owing"), out of the "owed now"
+     * figures (option B, owner 2026-10-29).
+     */
+    public function assertNoMoneyOpen(Customer $customer): void
+    {
+        $open = array_keys(array_filter([
+            'a payment waiting for verification' => Payment::query()->where('customer_id', $customer->id)->where('verification_status', 'pending')->exists(),
+            'money not yet handed over by its collector' => Payment::query()->where('customer_id', $customer->id)->awaitingHandover()->exists(),
+            'a refund bon not yet paid' => Payment::query()->where('customer_id', $customer->id)
+                ->whereHas('refundVoucher', fn ($query) => $query->whereIn('status', ['pending', 'approved']))->exists(),
+            'an arrears adjustment waiting for approval' => ArrearsAdjustment::query()->where('customer_id', $customer->id)
+                ->whereIn('status', ['pending', 'pending_second_approval'])->exists(),
+            'an unpaid installation / relocation fee' => CustomerCharge::query()->where('customer_id', $customer->id)->where('status', CustomerCharge::STATUS_OPEN)->exists(),
+            'a reversal request the office has not decided' => PaymentReversalRequest::query()->where('status', PaymentReversalRequest::STATUS_PENDING)
+                ->whereHas('payment', fn ($query) => $query->where('customer_id', $customer->id))->exists(),
+        ]));
+
+        if ($open !== []) {
+            throw ValidationException::withMessages([
+                'reason' => "{$customer->name} still has ".implode(', ', $open).'. Settle it first — an archived customer is never looked at again.',
+            ]);
+        }
     }
 
     /**

@@ -666,6 +666,10 @@ class CustomerController extends Controller
             'archived_at' => $customer->deleted_at?->toISOString(),
             'archived_by_name' => $customer->relationLoaded('archivedBy') ? $customer->archivedBy?->name : null,
             'archived_reason' => $customer->archived_reason,
+            // What an archived customer left owing — kept on their record, never in "owed now" (owner, 2026-10-29).
+            'left_owing' => $customer->trashed() && $customer->relationLoaded('latestManuscript') && bccomp((string) ($customer->latestManuscript?->total_arrears ?? '0'), '0', 2) > 0
+                ? (string) $customer->latestManuscript->total_arrears
+                : null,
             // services.md section 6 — the customer's ticked services/options,
             // feeding both the Edit form's prefill and the Show page's
             // "Services" card. Omitted (not just empty) when `subscriptions`
