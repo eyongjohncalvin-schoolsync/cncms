@@ -179,9 +179,9 @@ export default function UsersControlCenterUsers({
                 </p>
             </div>
 
-            {errors.user && (
+            {(errors.user || errors.period) && (
                 <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                    {errors.user}
+                    {errors.user ?? errors.period}
                 </div>
             )}
 
@@ -351,6 +351,24 @@ export default function UsersControlCenterUsers({
                                                 >
                                                     Set salary
                                                 </button>
+                                                {/* Wave 4: a month's salary is paid only through its own bon. */}
+                                                {tenantUser.salary?.current && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const period = window.prompt(
+                                                                `Raise the salary bon for ${tenantUser.name} — which month? (YYYY-MM)`,
+                                                                new Date().toISOString().slice(0, 7),
+                                                            );
+                                                            if (period) {
+                                                                router.post(`/users/${tenantUser.id}/salary/pay`, { period });
+                                                            }
+                                                        }}
+                                                        className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                                                    >
+                                                        Pay a month
+                                                    </button>
+                                                )}
                                             </div>
                                         </Td>
                                     )}

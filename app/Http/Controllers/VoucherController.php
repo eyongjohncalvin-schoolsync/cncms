@@ -154,6 +154,11 @@ class VoucherController extends Controller
                 'from_collections' => (bool) $voucher->from_collections,
                 'remittance' => $voucher->remittance ? ['uuid' => $voucher->remittance->uuid, 'number' => $voucher->remittance->number] : null,
                 'has_receipt' => $voucher->receipt_path !== null,
+                // Wave 4: refund / return bons are only paid; refund and salary bons need the signed copy at pay.
+                'origin' => $voucher->origin,
+                'is_locked' => $voucher->isLocked(),
+                'needs_signed_copy' => $voucher->needsSignedCopyAtPay(),
+                'salary_period' => $voucher->salary_period,
                 'expenditures' => $voucher->expenditures->map(fn ($row): array => [
                     'uuid' => $row->uuid,
                     'amount' => (string) $row->amount,
@@ -256,6 +261,7 @@ class VoucherController extends Controller
             'returned_amount' => ['required', 'numeric', 'min:0', 'max:999999999.99', 'decimal:0,2'],
             'note' => ['nullable', 'string', 'max:500'],
             'category_uuid' => ['nullable', 'uuid', Rule::exists('expense_categories', 'uuid')],
+            'receipt' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
         ]);
 
         $this->vouchers->settle(
@@ -265,6 +271,7 @@ class VoucherController extends Controller
             number_format((float) $validated['returned_amount'], 2, '.', ''),
             $validated['note'] ?? null,
             $validated['category_uuid'] ?? null,
+            $request->file('receipt'),
         );
 
         return back()->with('success', "{$voucher->number} settled.");
@@ -302,6 +309,11 @@ class VoucherController extends Controller
     public function uploadSignedCopy(Request $request, Voucher $voucher): RedirectResponse
     {
         abort_unless(in_array($voucher->status, ['paid', 'settled'], true) && app(TenantContext::class)->can('vouchers.pay'), 403);
+
+        // Evidence is attached once and never swapped afterwards (wave 4).
+        if ($voucher->signed_copy_path !== null) {
+            return back()->withErrors(['signed_copy' => "{$voucher->number} already has its signed copy — it is never replaced."]);
+        }
 
         $validated = $request->validate(['signed_copy' => ['required', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120']]);
 

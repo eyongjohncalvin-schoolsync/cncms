@@ -40,12 +40,15 @@ class CashShortage extends Model
 
     public const string KIND_SAFE_COUNT = 'safe_count';
 
+    public const string KIND_ADVANCE = 'advance';
+
     public const array KIND_LABELS = [
         self::KIND_TILL_CLOSE => 'Till day close',
         self::KIND_HANDOVER => 'Handed over short',
         self::KIND_DEPOSIT => 'Deposit not in the bank',
         self::KIND_BRANCH_TRANSFER => 'Branch transfer received short',
         self::KIND_SAFE_COUNT => 'Safe count',
+        self::KIND_ADVANCE => 'Advance not accounted for',
     ];
 
     public const string STATUS_OPEN = 'open';

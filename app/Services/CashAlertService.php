@@ -69,6 +69,7 @@ class CashAlertService
             $this->openShortages(),
             $this->ownedShortages(),
             $this->moneyWaitingForSomeone($deadlineHours),
+            $this->refundBonsWaiting($deadlineHours),
             $this->collectorCredits(),
             $this->walletLinesNotFound(),
             $this->receiptsScannedBeforeRecording($deadlineHours),
@@ -283,6 +284,22 @@ class CashAlertService
                     'amount' => $remittance->shortageOwed(),
                     'link' => "/cash/remittances/{$remittance->uuid}",
                 ])->all());
+    }
+
+    /**
+     * Refund and return bons not yet paid after the handover deadline (wave
+     * 4): they are never rejected, so one left waiting means a customer (or
+     * collector) not given back money the cash book already counts as theirs.
+     */
+    private function refundBonsWaiting(int $deadlineHours): array
+    {
+        return $this->alert('refund_bons_waiting', 'warning', 'Refunds not paid out', 'Money already taken off a payment is owed back — approve and pay these bons.',
+            Voucher::query()->whereIn('origin', [Voucher::ORIGIN_REFUND, Voucher::ORIGIN_RETURN_TO_COLLECTOR])
+                ->whereIn('status', ['pending', 'approved'])
+                ->where('created_at', '<', now()->subHours($deadlineHours))
+                ->orderBy('created_at')->get()
+                ->map(fn (Voucher $voucher): array => $this->voucherItem($voucher, 'Raised '.$voucher->created_at?->format('d M').", {$voucher->status}"))
+                ->all());
     }
 
     /** Every other shortage (wave 3): a till count, a handover or branch transfer received short, a refused deposit — until someone else settles it. */

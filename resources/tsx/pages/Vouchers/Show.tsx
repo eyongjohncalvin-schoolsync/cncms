@@ -36,6 +36,10 @@ interface Props {
         from_collections: boolean;
         remittance: { uuid: string; number: string } | null;
         has_receipt: boolean;
+        origin: 'refund' | 'return_to_collector' | 'salary' | null;
+        is_locked: boolean;
+        needs_signed_copy: boolean;
+        salary_period: string | null;
         expenditures: { uuid: string; amount: string; spent_at: string | null; source: string; status: string }[];
         approvals: { name: string | null; decision: 'approved' | 'rejected'; note: string | null; decided_at: string | null }[];
         stakeholders: { name: string; approved: boolean }[];
@@ -185,7 +189,7 @@ export default function VoucherShow({ voucher, can, pay_accounts, categories, is
                             {approval.note && <span className="text-slate-600">— {approval.note}</span>}
                         </div>
                     ))}
-                    {can.decide && <DecisionForm uuid={voucher.uuid} />}
+                    {can.decide && <DecisionForm uuid={voucher.uuid} locked={voucher.is_locked} />}
                     {can.cancel && (
                         <div>
                             <Button variant="ghost" onClick={() => router.post(`/vouchers/${voucher.uuid}/cancel`, {}, { preserveScroll: true })}>
@@ -224,7 +228,7 @@ export default function VoucherShow({ voucher, can, pay_accounts, categories, is
                                 {!voucher.has_signed_copy && <SignedCopyForm uuid={voucher.uuid} />}
                             </div>
                         ) : (
-                            <PayForm uuid={voucher.uuid} accounts={pay_accounts} amount={voucher.amount} payee={voucher.payee_name} />
+                            <PayForm uuid={voucher.uuid} accounts={pay_accounts} amount={voucher.amount} payee={voucher.payee_name} needsSignedCopy={voucher.needs_signed_copy} />
                         )}
                     </CardBody>
                 </Card>
@@ -282,23 +286,41 @@ export default function VoucherShow({ voucher, can, pay_accounts, categories, is
     );
 }
 
-function DecisionForm({ uuid }: { uuid: string }) {
+function DecisionForm({ uuid, locked }: { uuid: string; locked: boolean }) {
     const [note, setNote] = useState('');
 
     return (
         <div className="flex flex-col gap-2 rounded-lg border border-slate-200 p-3">
-            <TextInput id="decision_note" label="Note (required to reject)" value={note} onChange={(e) => setNote(e.target.value)} />
+            {locked ? (
+                <p className="text-xs text-slate-600">This bon pays back money already taken off a payment — it can only be approved and paid, never rejected.</p>
+            ) : (
+                <TextInput id="decision_note" label="Note (required to reject)" value={note} onChange={(e) => setNote(e.target.value)} />
+            )}
             <div className="flex gap-2">
                 <Button onClick={() => router.post(`/vouchers/${uuid}/approve`, { note }, { preserveScroll: true })}>Approve</Button>
-                <Button variant="danger" disabled={note.trim() === ''} onClick={() => router.post(`/vouchers/${uuid}/reject`, { reason: note }, { preserveScroll: true })}>
-                    Reject
-                </Button>
+                {!locked && (
+                    <Button variant="danger" disabled={note.trim() === ''} onClick={() => router.post(`/vouchers/${uuid}/reject`, { reason: note }, { preserveScroll: true })}>
+                        Reject
+                    </Button>
+                )}
             </div>
         </div>
     );
 }
 
-function PayForm({ uuid, accounts, amount, payee }: { uuid: string; accounts: Props['pay_accounts']; amount: string; payee: string }) {
+function PayForm({
+    uuid,
+    accounts,
+    amount,
+    payee,
+    needsSignedCopy,
+}: {
+    uuid: string;
+    accounts: Props['pay_accounts'];
+    amount: string;
+    payee: string;
+    needsSignedCopy: boolean;
+}) {
     const { data, setData, post, processing, errors } = useForm<{ account: string; method: string; reference: string; received_by_name: string; signed_copy: File | null }>({
         account: accounts[0]?.uuid ?? '',
         method: 'cash',
@@ -341,8 +363,15 @@ function PayForm({ uuid, accounts, amount, payee }: { uuid: string; accounts: Pr
                 required
             />
             <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-700">
-                Signed voucher photo (optional now — can be added after printing)
-                <input type="file" accept="image/*,application/pdf" onChange={(e) => setData('signed_copy', e.target.files?.[0] ?? null)} className="text-sm" />
+                {needsSignedCopy ? 'Photo of the voucher signed by the person paid' : 'Signed voucher photo (optional now — can be added after printing)'}
+                <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => setData('signed_copy', e.target.files?.[0] ?? null)}
+                    className="text-sm"
+                    required={needsSignedCopy}
+                />
+                {errors.signed_copy && <span className="text-xs text-red-600">{errors.signed_copy}</span>}
             </label>
             <Button type="submit" disabled={processing}>
                 Pay {formatCurrency(amount)}
@@ -403,24 +432,46 @@ function CorrectForm({ uuid }: { uuid: string }) {
 }
 
 function SettleForm({ uuid, amount, needsCategory, categories }: { uuid: string; amount: string; needsCategory: boolean; categories: { uuid: string; name: string }[] }) {
-    const { data, setData, post, processing, errors } = useForm({ spent_amount: '', returned_amount: '', note: '', category_uuid: '' });
+    const { data, setData, post, processing, errors } = useForm<{ spent_amount: string; returned_amount: string; note: string; category_uuid: string; receipt: File | null }>({
+        spent_amount: '',
+        returned_amount: '',
+        note: '',
+        category_uuid: '',
+        receipt: null,
+    });
     const total = Number(data.spent_amount || 0) + Number(data.returned_amount || 0);
+    const gap = Number(amount) - total;
 
     return (
         <form
             className="flex flex-col gap-3"
             onSubmit={(e) => {
                 e.preventDefault();
-                post(`/vouchers/${uuid}/settle`, { preserveScroll: true });
+                post(`/vouchers/${uuid}/settle`, { preserveScroll: true, forceFormData: true });
             }}
         >
             <div className="grid gap-3 sm:grid-cols-2">
                 <TextInput id="spent_amount" label="Spent (receipts in hand)" type="number" min="0" value={data.spent_amount} onChange={(e) => setData('spent_amount', e.target.value)} error={errors.spent_amount} required />
                 <TextInput id="returned_amount" label="Change returned to the till" type="number" min="0" value={data.returned_amount} onChange={(e) => setData('returned_amount', e.target.value)} required />
             </div>
-            <p className={`text-xs ${total === Number(amount) ? 'text-green-700' : 'text-amber-700'}`}>
+            <p className={`text-xs ${gap === 0 ? 'text-green-700' : 'text-amber-700'}`}>
                 {formatCurrency(total)} of {formatCurrency(amount)} accounted for.
+                {gap > 0 && ` The ${formatCurrency(gap)} not accounted for becomes the requester's shortage.`}
             </p>
+            {Number(data.spent_amount || 0) > 0 && (
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-700">
+                    Photo of the receipts
+                    <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        capture="environment"
+                        onChange={(e) => setData('receipt', e.target.files?.[0] ?? null)}
+                        className="text-sm"
+                        required
+                    />
+                    {errors.receipt && <span className="text-xs text-red-600">{errors.receipt}</span>}
+                </label>
+            )}
             {needsCategory && (
                 <SelectInput id="settle_category" label="Expense category of what was spent" value={data.category_uuid} onChange={(e) => setData('category_uuid', e.target.value)} error={errors.category_uuid}>
                     <option value="">Choose…</option>

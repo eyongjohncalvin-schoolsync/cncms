@@ -15,8 +15,10 @@ use App\Models\Voucher;
 use App\Services\CashBookService;
 use Database\Factories\ExpenseCategoryFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -47,6 +49,8 @@ class VoucherTest extends TestCase
 
         $this->category = ExpenseCategoryFactory::new()->create(['name' => 'Fuel']);
         TenantUser::query()->where('tenant_id', 'swecom')->update(['is_investor' => false]);
+        // An owner other than the requester, to approve bons above the limits (wave 4: nobody approves their own).
+        TenantUser::query()->where('user_id', User::query()->where('email', 'divine@shalomtech.dev')->value('id'))->update(['role' => 'super']);
         $this->limits('50000', null);
     }
 
@@ -257,8 +261,11 @@ class VoucherTest extends TestCase
         $this->assertNull($voucher->expenditure_id);
         $this->assertNotNull($voucher->settle_due_on);
 
-        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 7000, 'returned_amount' => 2000])->assertSessionHasErrors('spent_amount');
-        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 7500, 'returned_amount' => 2500])->assertSessionHasNoErrors();
+        Storage::fake(config('filesystems.default', 'local'));
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 9000, 'returned_amount' => 2000])->assertSessionHasErrors('spent_amount');
+        // Wave 4: what was spent is backed by a photo of the receipts.
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 7500, 'returned_amount' => 2500])->assertSessionHasErrors('receipt');
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 7500, 'returned_amount' => 2500, 'receipt' => UploadedFile::fake()->image('receipts.jpg')])->assertSessionHasNoErrors();
 
         $voucher->refresh();
         $this->assertSame('settled', $voucher->status);

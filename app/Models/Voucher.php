@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'paid_by', 'paid_at', 'paid_from_account_id', 'payment_method', 'payment_reference', 'received_by_name', 'signed_copy_path', 'expenditure_id',
     'settle_due_on', 'spent_amount', 'returned_amount', 'settled_by', 'settled_at', 'settlement_note',
     'from_collections', 'remittance_id', 'local_uuid', 'recorded_by_device', 'receipt_path', 'branch_id',
+    'origin', 'salary_user_id', 'salary_period',
 ])]
 #[RouteKey('uuid')]
 class Voucher extends Model
@@ -35,6 +36,13 @@ class Voucher extends Model
     public const string KIND_EXPENSE = 'expense';
 
     public const string KIND_ADVANCE = 'advance';
+
+    /** A bon the system raises (wave 4): money back to a customer, cash back to a collector, a month's salary. */
+    public const string ORIGIN_REFUND = 'refund';
+
+    public const string ORIGIN_RETURN_TO_COLLECTOR = 'return_to_collector';
+
+    public const string ORIGIN_SALARY = 'salary';
 
     public const string TIER_STANDARD = 'standard';
 
@@ -55,6 +63,28 @@ class Voucher extends Model
             'settled_at' => 'datetime',
             'from_collections' => 'boolean',
         ];
+    }
+
+    /**
+     * Pays back money already taken off a payment (a refund, cash returned
+     * to a collector): never rejected or cancelled, only paid — rejecting it
+     * would leave the cash in the till explained by nothing (wave 4).
+     */
+    public function isLocked(): bool
+    {
+        return in_array($this->origin, [self::ORIGIN_REFUND, self::ORIGIN_RETURN_TO_COLLECTOR], true);
+    }
+
+    /** A refund or salary bon is paid only with the receiver's signed copy (wave 4). */
+    public function needsSignedCopyAtPay(): bool
+    {
+        return in_array($this->origin, [self::ORIGIN_REFUND, self::ORIGIN_SALARY], true);
+    }
+
+    // Cross-schema — User is pinned to the central connection.
+    public function salaryUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'salary_user_id');
     }
 
     public function approvals(): HasMany

@@ -12,6 +12,7 @@ use App\Models\Scopes\BranchScope;
 use App\Models\StaffSalary;
 use App\Models\TenantUser;
 use App\Services\SalaryService;
+use App\Services\VoucherService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -79,6 +80,22 @@ class SalaryController extends Controller
         return redirect()->route('users.index')->with('success', $salary->status === StaffSalary::STATUS_APPROVED
             ? 'Salary saved.'
             : 'Salary is outside the grade\'s range — sent to headquarters for approval. The current salary stays until then.');
+    }
+
+    /**
+     * Raises the bon that pays a person's salary for one month (wave 4): the
+     * amount is their approved salary; approved and paid like any bon, never
+     * by the person paid. Whoever may set their salary may ask for it.
+     */
+    public function pay(Request $request, TenantUser $tenantUser): RedirectResponse
+    {
+        Gate::authorize('salaries.setFor', $tenantUser);
+
+        $validated = $request->validate(['period' => ['required', 'date_format:Y-m']]);
+
+        $voucher = app(VoucherService::class)->requestSalary($tenantUser->user, $validated['period'], $request->user());
+
+        return redirect()->route('vouchers.show', $voucher)->with('success', "{$voucher->number}: salary bon for {$validated['period']} — waiting for approval.");
     }
 
     public function approve(Request $request, StaffSalary $staffSalary): RedirectResponse

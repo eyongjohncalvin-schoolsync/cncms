@@ -321,6 +321,7 @@ class CustomerChargeService
                 'purpose' => "{$locked->kindLabel()} refund — {$locked->customer->name} ({$locked->customer->accountCode()}): {$locked->refund_reason}",
                 'category_uuid' => $category->uuid,
                 'amount' => (string) $locked->refund_amount,
+                'origin' => Voucher::ORIGIN_REFUND,
             ], $requester, branchId: $locked->branch_id);
 
             if ($vouchers->canDecide($voucher, $actor, app(TenantContext::class))) {

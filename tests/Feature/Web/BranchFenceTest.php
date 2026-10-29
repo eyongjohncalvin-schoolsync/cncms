@@ -56,6 +56,8 @@ class BranchFenceTest extends TestCase
 
         $this->initializeTenant();
         Mail::fake();
+        // An owner other than the requester, to approve bons above the limits (wave 4: nobody approves their own).
+        TenantUser::query()->where('user_id', User::query()->where('email', 'divine@shalomtech.dev')->value('id'))->update(['role' => 'super']);
 
         $this->headquarters = Branch::query()->where('is_headquarters', true)->sole();
         $this->buea = BranchFactory::new()->create(['name' => 'Buea']);

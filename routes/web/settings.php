@@ -115,4 +115,6 @@ Route::middleware('not-impersonating:money')->group(function () {
     Route::post('settings/salaries/{staffSalary}/approve', [SalaryController::class, 'approve'])->name('settings.salaries.approve');
     Route::post('settings/salaries/{staffSalary}/reject', [SalaryController::class, 'reject'])->name('settings.salaries.reject');
     Route::post('users/{tenantUser}/salary', [SalaryController::class, 'set'])->name('users.salary.set');
+    // Wave 4: a month's salary is paid only through its own bon.
+    Route::post('users/{tenantUser}/salary/pay', [SalaryController::class, 'pay'])->name('users.salary.pay');
 });

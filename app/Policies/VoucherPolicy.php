@@ -12,7 +12,8 @@ use App\Support\TenantContext;
 /**
  * Vouchers / bons de caisse (docs/plans/cash-controls.md, wave 5). Three
  * different people for three steps: whoever requests never approves or pays
- * their own voucher (the owner excepted for paying). Above-limit approvals
+ * their own voucher — the owner included (owner, 2026-10-29), nor one
+ * that pays their own salary. Above-limit approvals
  * belong to the investors — the `is_investor` flag, not a permission — and
  * VoucherService::canDecide() is the one rule for who may decide now.
  *
@@ -51,7 +52,8 @@ class VoucherPolicy
 
     public function cancel(User $user, Voucher $voucher): bool
     {
-        return $voucher->isPending() && $voucher->requested_by === $user->id;
+        // A refund or return bon pays back money already taken off a payment: never cancelled (wave 4).
+        return $voucher->isPending() && $voucher->requested_by === $user->id && ! $voucher->isLocked();
     }
 
     public function pay(User $user, Voucher $voucher): bool
@@ -61,7 +63,7 @@ class VoucherPolicy
         return $voucher->status === 'approved'
             && ! $voucher->from_collections
             && $this->context()->can('vouchers.pay')
-            && ($voucher->requested_by !== $user->id || $this->context()->isSuper());
+            && ! app(VoucherService::class)->isOwn($voucher, $user);
     }
 
     /**
@@ -81,6 +83,6 @@ class VoucherPolicy
         return $voucher->kind === Voucher::KIND_ADVANCE
             && $voucher->status === 'paid'
             && $this->context()->can('vouchers.pay')
-            && ($voucher->requested_by !== $user->id || $this->context()->isSuper());
+            && ! app(VoucherService::class)->isOwn($voucher, $user);
     }
 }

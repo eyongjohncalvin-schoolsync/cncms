@@ -7,11 +7,13 @@ namespace App\Services;
 use App\Mail\VoucherApprovalMail;
 use App\Models\CashAccount;
 use App\Models\CashMovement;
+use App\Models\CashShortage;
 use App\Models\Company;
 use App\Models\Expenditure;
 use App\Models\ExpenseCategory;
 use App\Models\Role;
 use App\Models\Scopes\BranchScope;
+use App\Models\StaffSalary;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
@@ -56,6 +58,9 @@ use Throwable;
  */
 class VoucherService
 {
+    /** The expense category salary bons are booked under (wave 4). */
+    public const string SALARY_CATEGORY = 'Salaries';
+
     public const string STAGE_APPROVE = 'approve';
 
     public const string STAGE_PAY = 'pay';
@@ -157,7 +162,7 @@ class VoucherService
         $superRoles = Role::query()->where('is_super', true)->pluck('name');
 
         return [
-            'ids' => TenantUser::query()->where('tenant_id', $tenantId)->whereIn('role', $superRoles)->pluck('user_id')->map(fn ($id): int => (int) $id)->values()->all(),
+            'ids' => TenantUser::query()->where('tenant_id', $tenantId)->whereIn('role', $superRoles)->where('user_id', '!=', $requesterId)->pluck('user_id')->map(fn ($id): int => (int) $id)->values()->all(),
             'mode' => 'any',
         ];
     }
@@ -166,7 +171,7 @@ class VoucherService
      * Every bon carries a category (E1) so every franc out reaches the P&L:
      * an expense at request, an advance at the latest when it is settled.
      *
-     * @param  array{kind: string, payee_name: string, purpose: string, category_uuid?: ?string, amount: string, needed_on?: ?string, from_collections?: bool, local_uuid?: ?string, recorded_by_device?: ?string}  $data
+     * @param  array{kind: string, payee_name: string, purpose: string, category_uuid?: ?string, amount: string, needed_on?: ?string, from_collections?: bool, local_uuid?: ?string, recorded_by_device?: ?string, origin?: ?string, salary_user_id?: ?int, salary_period?: ?string}  $data
      * @param  ?int  $branchId  a bon the system raises for a customer (a refund) belongs to the customer's branch; otherwise the requester's (branches v2)
      */
     public function request(array $data, User $requester, ?UploadedFile $attachment = null, ?int $branchId = null): Voucher
@@ -185,6 +190,12 @@ class VoucherService
 
         $tier = $this->tierFor($data['amount']);
         $approvers = $tier['tier'] === Voucher::TIER_STAKEHOLDERS ? $this->stakeholderApprovers($requester->id) : ['ids' => [], 'mode' => 'any'];
+
+        // Nobody approves their own bon, the owner included (wave 4): above
+        // the limits someone else must exist to approve it.
+        if ($tier['tier'] === Voucher::TIER_STAKEHOLDERS && $approvers['ids'] === []) {
+            throw ValidationException::withMessages(['amount' => 'This bon is above the limits and nobody else can approve it — add an investor or a second owner first.']);
+        }
 
         $voucher = DB::transaction(fn (): Voucher => Voucher::query()->create([
             'number' => $this->documentNumbers->next(DocumentNumberService::VOUCHER),
@@ -205,6 +216,9 @@ class VoucherService
             'from_collections' => $fromCollections,
             'local_uuid' => $data['local_uuid'] ?? null,
             'recorded_by_device' => $data['recorded_by_device'] ?? null,
+            'origin' => $data['origin'] ?? null,
+            'salary_user_id' => $data['salary_user_id'] ?? null,
+            'salary_period' => $data['salary_period'] ?? null,
         ]));
 
         $this->notifyApprovers($voucher);
@@ -223,10 +237,10 @@ class VoucherService
         }
 
         if ($voucher->needsStakeholders()) {
-            return in_array($user->id, $voucher->requiredApproverIds(), true);
+            return in_array($user->id, $voucher->requiredApproverIds(), true) && ! $this->isOwn($voucher, $user);
         }
 
-        return $context->can('vouchers.approve') && ($voucher->requested_by !== $user->id || $context->isSuper());
+        return $context->can('vouchers.approve') && ! $this->isOwn($voucher, $user);
     }
 
     /**
@@ -236,6 +250,8 @@ class VoucherService
      */
     public function approve(Voucher $voucher, User $user, ?string $note): string
     {
+        $this->assertNotOwn($voucher, $user);
+
         return DB::transaction(function () use ($voucher, $user, $note): string {
             $this->lockLimits();
             $locked = Voucher::query()->whereKey($voucher->id)->lockForUpdate()->firstOrFail();
@@ -267,8 +283,18 @@ class VoucherService
 
     public function reject(Voucher $voucher, User $user, string $reason): Voucher
     {
+        $this->assertNotOwn($voucher, $user);
+
         return DB::transaction(function () use ($voucher, $user, $reason): Voucher {
             $locked = Voucher::query()->whereKey($voucher->id)->lockForUpdate()->firstOrFail();
+
+            if (! $locked->isPending()) {
+                throw ValidationException::withMessages(['reason' => "{$locked->number} is {$locked->status} — only a waiting bon is rejected."]);
+            }
+
+            if ($locked->isLocked()) {
+                throw ValidationException::withMessages(['reason' => "{$locked->number} pays back money already taken off a payment — it is only paid, never rejected."]);
+            }
 
             VoucherApproval::query()->create(['voucher_id' => $locked->id, 'user_id' => $user->id, 'decision' => 'rejected', 'note' => $reason, 'decided_at' => now()]);
             $locked->update(['status' => 'rejected', 'rejected_by' => $user->id, 'rejection_reason' => $reason]);
@@ -279,8 +305,66 @@ class VoucherService
         });
     }
 
+    /**
+     * A month's salary for one person (owner, 2026-10-28, wave 4): the
+     * amount is their approved salary, never typed; one live bon per person
+     * and month; never for a future month or someone inactive. Approved and
+     * paid like any bon — never by the person being paid.
+     */
+    public function requestSalary(User $payee, string $period, User $requester): Voucher
+    {
+        if ($period > BusinessTimezone::now()->format('Y-m')) {
+            throw ValidationException::withMessages(['period' => 'A salary is paid for this month or one already past, never ahead.']);
+        }
+
+        if ($payee->status !== 'active') {
+            throw ValidationException::withMessages(['period' => "{$payee->name} is not active — no salary is paid."]);
+        }
+
+        $salary = StaffSalary::query()->where('user_id', $payee->id)->where('status', StaffSalary::STATUS_APPROVED)->latest('id')->first();
+
+        if ($salary === null) {
+            throw ValidationException::withMessages(['period' => "{$payee->name} has no approved salary — set it first."]);
+        }
+
+        if (Voucher::query()->withoutGlobalScope(BranchScope::class)->where('salary_user_id', $payee->id)->where('salary_period', $period)->whereNotIn('status', ['rejected', 'cancelled'])->exists()) {
+            throw ValidationException::withMessages(['period' => "{$payee->name}'s salary for {$period} already has a bon."]);
+        }
+
+        $category = ExpenseCategory::query()->firstOrCreate(['name' => self::SALARY_CATEGORY], ['icon' => 'ti-users', 'is_active' => true]);
+
+        return $this->request([
+            'kind' => Voucher::KIND_EXPENSE,
+            'payee_name' => mb_substr((string) $payee->name, 0, 150),
+            'purpose' => "Salary — {$payee->name}, {$period}",
+            'category_uuid' => $category->uuid,
+            'amount' => (string) $salary->amount,
+            'origin' => Voucher::ORIGIN_SALARY,
+            'salary_user_id' => $payee->id,
+            'salary_period' => $period,
+        ], $requester, branchId: $salary->branch_id);
+    }
+
+    /** The requester, or the person a salary bon pays. */
+    public function isOwn(Voucher $voucher, User $user): bool
+    {
+        return $voucher->requested_by === $user->id || $voucher->salary_user_id === $user->id;
+    }
+
+    /** Nobody decides, pays or settles their own bon — the owner included (owner, 2026-10-29). */
+    private function assertNotOwn(Voucher $voucher, User $user, string $field = 'voucher'): void
+    {
+        if ($this->isOwn($voucher, $user)) {
+            throw ValidationException::withMessages([$field => "{$voucher->number} is your own bon — someone else approves, pays or settles it."]);
+        }
+    }
+
     public function cancel(Voucher $voucher): Voucher
     {
+        if ($voucher->isLocked()) {
+            throw ValidationException::withMessages(['voucher' => "{$voucher->number} pays back money already taken off a payment — it is only paid, never cancelled."]);
+        }
+
         $voucher->update(['status' => 'cancelled']);
 
         return $voucher;
@@ -295,6 +379,10 @@ class VoucherService
      */
     public function pay(Voucher $voucher, User $payer, CashAccount $from, string $method, ?string $reference, string $receivedByName, ?UploadedFile $signedCopy): Voucher
     {
+        if ($signedCopy === null && $voucher->needsSignedCopyAtPay()) {
+            throw ValidationException::withMessages(['signed_copy' => 'Add a photo of the bon signed by '.($voucher->origin === Voucher::ORIGIN_SALARY ? 'the staff member' : 'the customer').' — a refund or salary is paid only against their signature.']);
+        }
+
         $outcome = DB::transaction(fn (): string => $this->payLocked($voucher, $payer, $from, $method, $reference, $receivedByName, $signedCopy));
 
         if ($outcome === 'escalated') {
@@ -340,17 +428,25 @@ class VoucherService
     }
 
     /**
-     * Justifies a cash advance: what was spent (backed by receipts, becomes
-     * the Expenditure) plus the change returned must equal the advance. An
+     * Justifies a cash advance: what was spent (backed by a photo of its
+     * receipts, becomes the Expenditure) plus the change returned. Whatever
+     * neither covers is the requester's shortage (owner, 2026-10-29: whoever
+     * last held the money owns the gap) — never more than the advance. An
      * advance requested without a category gets it now.
      */
-    public function settle(Voucher $voucher, User $actor, string $spent, string $returned, ?string $note, ?string $categoryUuid = null): Voucher
+    public function settle(Voucher $voucher, User $actor, string $spent, string $returned, ?string $note, ?string $categoryUuid = null, ?UploadedFile $receipt = null): Voucher
     {
-        if (bccomp(bcadd($spent, $returned, 2), (string) $voucher->amount, 2) !== 0) {
-            throw ValidationException::withMessages(['spent_amount' => 'What was spent plus the change returned must equal the advance of '.number_format((float) $voucher->amount, 0, '.', ' ').' FCFA.']);
+        $this->assertNotOwn($voucher, $actor, 'spent_amount');
+
+        if (bccomp(bcadd($spent, $returned, 2), (string) $voucher->amount, 2) > 0) {
+            throw ValidationException::withMessages(['spent_amount' => 'What was spent plus the change returned cannot be more than the advance of '.number_format((float) $voucher->amount, 0, '.', ' ').' FCFA.']);
         }
 
-        return DB::transaction(function () use ($voucher, $actor, $spent, $returned, $note, $categoryUuid): Voucher {
+        if (bccomp($spent, '0', 2) > 0 && $receipt === null) {
+            throw ValidationException::withMessages(['receipt' => 'Add a photo of the receipts for what was spent.']);
+        }
+
+        return DB::transaction(function () use ($voucher, $actor, $spent, $returned, $note, $categoryUuid, $receipt): Voucher {
             $locked = Voucher::query()->whereKey($voucher->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->kind !== Voucher::KIND_ADVANCE || $locked->status !== 'paid') {
@@ -380,9 +476,21 @@ class VoucherService
                 ]);
             }
 
+            if ($receipt !== null) {
+                // Before the Expenditure is written: it carries the bon's receipt.
+                $locked->receipt_path = $receipt->store('vouchers', $this->disk());
+            }
+
             $expenditure = bccomp($spent, '0', 2) > 0
                 ? $this->writeExpenditure($locked, $spent, (string) $locked->received_by_name, $locked->paid_at)
                 : null;
+
+            $unaccounted = bcsub((string) $locked->amount, bcadd($spent, $returned, 2), 2);
+
+            if (bccomp($unaccounted, '0', 2) > 0) {
+                app(ShortageService::class)->open($locked->requested_by, $locked->branch_id, $unaccounted, CashShortage::KIND_ADVANCE, $locked, $actor,
+                    "{$locked->number}: advance not accounted for by receipts or change".($note ? " — {$note}" : ''));
+            }
 
             $locked->update([
                 'status' => 'settled',
@@ -485,6 +593,8 @@ class VoucherService
         if ($locked->status !== 'approved') {
             throw ValidationException::withMessages(['account' => "Voucher {$locked->number} is {$locked->status}, not approved."]);
         }
+
+        $this->assertNotOwn($locked, $payer, 'account');
 
         // Branches v2 §4.7: no joint account — a bon is paid from its own branch's money.
         if ($from->branch_id !== $locked->branch_id) {

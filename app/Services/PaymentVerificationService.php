@@ -293,6 +293,7 @@ class PaymentVerificationService
             'purpose' => mb_substr("Cash returned to the collector — {$payment->customer->name}'s payment recorded by mistake: {$reason}", 0, 500),
             'category_uuid' => $category->uuid,
             'amount' => $amount,
+            'origin' => Voucher::ORIGIN_RETURN_TO_COLLECTOR,
         ], $actor, branchId: $payment->customer->branch_id);
     }
 
@@ -308,6 +309,7 @@ class PaymentVerificationService
             'purpose' => mb_substr("Refund — payment reversed: {$customer->name} ({$customer->accountCode()}): {$reason}", 0, 500),
             'category_uuid' => $category->uuid,
             'amount' => $amount,
+            'origin' => Voucher::ORIGIN_REFUND,
         ], $actor, branchId: $customer->branch_id);
     }
 

@@ -266,6 +266,7 @@ class FieldInstallationService
                     'purpose' => mb_substr("Refund — field registration rejected: {$customer->name} ({$customer->accountCode()}): {$reason}", 0, 500),
                     'category_uuid' => $category->uuid,
                     'amount' => $taken,
+                    'origin' => Voucher::ORIGIN_REFUND,
                 ], $actor, branchId: $customer->branch_id);
             }
 

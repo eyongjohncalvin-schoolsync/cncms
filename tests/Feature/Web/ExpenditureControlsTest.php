@@ -26,10 +26,12 @@ use Database\Factories\ExpenseCategoryFactory;
 use Database\Factories\ZoneFactory;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -56,10 +58,13 @@ class ExpenditureControlsTest extends TestCase
         parent::setUp();
 
         $this->initializeTenant();
+        Storage::fake(config('filesystems.default', 'local'));
         Mail::fake();
 
         $this->category = ExpenseCategoryFactory::new()->create(['name' => 'Fuel']);
         TenantUser::query()->where('tenant_id', 'swecom')->update(['is_investor' => false]);
+        // An owner other than the requester, to approve bons above the limits (wave 4: nobody approves their own).
+        TenantUser::query()->where('user_id', User::query()->where('email', 'divine@shalomtech.dev')->value('id'))->update(['role' => 'super']);
         // Nothing else spent this month gets in the way of the figures below.
         Expenditure::query()->update(['status' => 'void']);
         Voucher::query()->whereIn('status', ['approved', 'paid'])->update(['status' => 'cancelled']);
@@ -164,8 +169,8 @@ class ExpenditureControlsTest extends TestCase
         $this->approve($voucher);
         $this->pay($voucher);
 
-        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 8000, 'returned_amount' => 2000])->assertSessionHasErrors('category_uuid');
-        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 8000, 'returned_amount' => 2000, 'category_uuid' => $this->category->uuid])->assertSessionHasNoErrors();
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 8000, 'returned_amount' => 2000, 'receipt' => UploadedFile::fake()->image('receipts.jpg')])->assertSessionHasErrors('category_uuid');
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 8000, 'returned_amount' => 2000, 'category_uuid' => $this->category->uuid, 'receipt' => UploadedFile::fake()->image('receipts.jpg')])->assertSessionHasNoErrors();
 
         $voucher->refresh();
         $this->assertSame('settled', $voucher->status);
@@ -479,7 +484,7 @@ class ExpenditureControlsTest extends TestCase
         $this->pay($voucher);
 
         $this->travelTo(Carbon::parse('2026-11-02 10:00', BusinessTimezone::WAT));
-        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 10000, 'returned_amount' => 0])->assertSessionHasNoErrors();
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 10000, 'returned_amount' => 0, 'receipt' => UploadedFile::fake()->image('receipts.jpg')])->assertSessionHasNoErrors();
 
         $expenditure = Expenditure::query()->findOrFail($voucher->refresh()->expenditure_id);
         $this->assertSame('2026-11-02', $expenditure->spent_at->toDateString());
