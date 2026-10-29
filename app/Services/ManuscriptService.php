@@ -470,9 +470,10 @@ class ManuscriptService
             .md5(json_encode($scopedFilters));
     }
 
+    /** v2: pages cached before an archived customer's bill carried its customer are never served. */
     private function listCacheKey(array $scopedFilters, int $perPage, int $page): string
     {
-        return 'manuscripts:list:'.$scopedFilters['period'].':'.self::versions().':'.(TenantContext::currentBranchId() ?? 'all').':'
+        return 'manuscripts:list:v2:'.$scopedFilters['period'].':'.self::versions().':'.(TenantContext::currentBranchId() ?? 'all').':'
             .md5(json_encode([$scopedFilters, $perPage, $page]));
     }
 

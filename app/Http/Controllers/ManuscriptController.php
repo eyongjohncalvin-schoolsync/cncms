@@ -11,6 +11,7 @@ use App\Models\CommandRun;
 use App\Models\Customer;
 use App\Models\Manuscript;
 use App\Models\Message;
+use App\Models\Scopes\BranchScope;
 use App\Services\BillNotificationService;
 use App\Services\ManuscriptGenerationBatchService;
 use App\Services\ManuscriptPreRunReviewService;
@@ -56,7 +57,36 @@ class ManuscriptController extends Controller
 
         $paginated = $this->manuscripts->list($filters, 25);
 
-        $paginated->through(fn (Manuscript $manuscript): array => [
+        // A bill's customer may be archived — it still shows. A page cached
+        // before that was loaded comes back without it: fetched here instead.
+        $paginated->through(fn (Manuscript $manuscript): array => $this->shapeRow($manuscript->relationLoaded('customer') && $manuscript->customer !== null
+            ? $manuscript
+            : $manuscript->setRelation('customer', Customer::withTrashed()->withoutGlobalScope(BranchScope::class)->with('zone')->find($manuscript->customer_id))));
+
+        return Inertia::render('Manuscripts/Index', [
+            'period' => $period,
+            'filters' => $filters,
+            'manuscripts' => $this->paginatorProps($paginated),
+            'summary' => $this->manuscripts->summary($filters),
+            'zones' => $this->zones->all(),
+            // Asynchronous bill-generation runs for this period (owner's
+            // 2026-08-30 ask — App\Services\BillBatchService). Polled from
+            // the page with router.reload({ only: ['billBatches'] }) while
+            // any run is still queued/processing.
+            'billBatches' => $this->billBatchesForPeriod($period),
+            // Bills of these zones would print no collector — warned before generating.
+            'uncoveredZones' => app(ZoneCoverageService::class)->uncoveredZoneCount(),
+        ]);
+    }
+
+    /**
+     * One register row.
+     *
+     * @return array<string, mixed>
+     */
+    private function shapeRow(Manuscript $manuscript): array
+    {
+        return [
             'customer_uuid' => $manuscript->customer->uuid,
             'customer_name' => $manuscript->customer->name,
             'customer_code' => substr($manuscript->customer->uuid, 0, 8),
@@ -80,22 +110,7 @@ class ManuscriptController extends Controller
             // displayed on this row — see BillNotificationService::waLink()'s
             // optional $manuscript parameter.
             'wa_link' => $this->billNotifications->waLink($manuscript->customer, $manuscript),
-        ]);
-
-        return Inertia::render('Manuscripts/Index', [
-            'period' => $period,
-            'filters' => $filters,
-            'manuscripts' => $this->paginatorProps($paginated),
-            'summary' => $this->manuscripts->summary($filters),
-            'zones' => $this->zones->all(),
-            // Asynchronous bill-generation runs for this period (owner's
-            // 2026-08-30 ask — App\Services\BillBatchService). Polled from
-            // the page with router.reload({ only: ['billBatches'] }) while
-            // any run is still queued/processing.
-            'billBatches' => $this->billBatchesForPeriod($period),
-            // Bills of these zones would print no collector — warned before generating.
-            'uncoveredZones' => app(ZoneCoverageService::class)->uncoveredZoneCount(),
-        ]);
+        ];
     }
 
     /**
