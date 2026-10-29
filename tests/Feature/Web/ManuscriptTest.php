@@ -109,6 +109,22 @@ class ManuscriptTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page->where('manuscripts.data.0.customer_name', 'ARCHIVED CUSTOMER'));
     }
 
+    /** An archived customer's bill shows in the register, but nobody is billed after archiving. */
+    public function test_an_archived_customer_gets_no_printed_bill(): void
+    {
+        $period = '2001-02';
+        $kept = CustomerFactory::new()->create(['status' => 'active']);
+        $archived = CustomerFactory::new()->create(['status' => 'active']);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $kept->id, 'total_bill' => 2500]);
+        ManuscriptFactory::new()->forPeriod($period)->create(['customer_id' => $archived->id, 'total_bill' => 2500]);
+        $archived->delete();
+
+        $this->actingAsRole('manager');
+
+        $recipients = app(ManuscriptService::class)->billRecipients(['period' => $period])['customers'];
+        $this->assertSame([$kept->id], $recipients->pluck('id')->all());
+    }
+
     public function test_index_search_filters_the_row_list_to_the_matching_customer(): void
     {
         $period = Carbon::now()->format('Y-m');

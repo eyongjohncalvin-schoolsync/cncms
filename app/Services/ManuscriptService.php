@@ -142,7 +142,10 @@ class ManuscriptService
         $scoped = $this->scopedFilters($filters);
 
         $customers = $this->manuscripts->all($scoped)
+            // Never an archived customer — the register loads them (their
+            // bills are history), but nobody is billed after archiving.
             ->filter(fn (Manuscript $manuscript): bool => $manuscript->customer?->status === 'active'
+                && ! $manuscript->customer->trashed()
                 && bccomp((string) $manuscript->total_bill, '0', 2) > 0)
             ->sortBy(fn (Manuscript $manuscript): string => mb_strtolower(
                 ($manuscript->customer?->zone?->name ?? '')."\0".($manuscript->customer?->name ?? '')
