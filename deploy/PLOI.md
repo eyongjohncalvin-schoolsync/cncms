@@ -242,7 +242,7 @@ can only see the files it created, never the rest of the Drive.
    rclone from rclone.org/downloads (Windows, Intel/AMD 64-bit), unzip it,
    open PowerShell in that folder and run:
    ```
-   .\rclone.exe authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ=="
+   .\rclone.exe authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ"
    ```
    A browser opens: sign in with the Google account to use, and allow. The
    terminal then prints a token between `Paste the following into your
