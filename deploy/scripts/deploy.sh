@@ -46,4 +46,5 @@ echo "==> up"
 php artisan up
 trap - EXIT
 
+bash deploy/scripts/record-deploy.sh   # for rollback.sh
 echo "==> done: $(git rev-parse --short HEAD) on ${BRANCH}"

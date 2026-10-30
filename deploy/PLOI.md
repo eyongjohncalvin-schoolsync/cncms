@@ -87,6 +87,7 @@ directory `/public`.
   {SITE_PHP} artisan queue:restart
   PHP_BIN={SITE_PHP} bash deploy/scripts/publish-apk.sh --from-release-file   # new agent APK, if deploy/mobile-release.json names one
   {RELOAD_PHP_FPM}
+  bash deploy/scripts/record-deploy.sh   # notes this commit + its backup for rollback.sh (§6b)
   echo "Deployed $(git rev-parse --short HEAD)"
   ```
 
@@ -197,6 +198,34 @@ every cache call with the tenant on a store that supports tags (Redis does).
    swecom's dashboard.
 5. Build the mobile app against `https://YOUR_DOMAIN`
    ([`MOBILE-DISTRIBUTION.md`](./MOBILE-DISTRIBUTION.md)).
+
+## 6b. Rollback — back to the last working version
+
+Every deploy ends with `record-deploy.sh`, which notes the commit and the
+backup taken before it in `~/cncms-deploys.log` (outside the repo). To go
+back, SSH in as the site user and run:
+
+```bash
+PHP_BIN=php8.5 bash ~/cncms.tech/deploy/scripts/rollback.sh             # the previous deploy
+PHP_BIN=php8.5 bash ~/cncms.tech/deploy/scripts/rollback.sh 795c0154    # or a chosen commit
+```
+
+- **The release changed no migration** (most releases): it shows both
+  versions, asks, then puts the site in maintenance, checks out the old
+  commit, rebuilds and brings the site back (about 2 minutes). Nothing
+  anyone entered is lost. Then restart PHP-FPM in Ploi (server → PHP).
+- **It did change migrations:** it stops and prints the restore steps with
+  the right backup — restore into a new database, point `DB_DATABASE` at it,
+  then run the script again with `--database-restored`. Everything entered
+  since that backup is lost, so after staff have worked on the new version,
+  prefer fixing forward ([`BLUE-GREEN.md`](./BLUE-GREEN.md) §4).
+- **Afterwards:** Ploi's Deploy button pulls `main` again, the broken
+  version. Keep Quick deploy off until `main` is fixed (`git revert` on dev,
+  push, check on preview).
+
+Rolling back to a version from before this log existed works too: name the
+commit (`git log --oneline -10`); the backup to restore is then the newest
+file in `~/backups/cncms` from before the bad deploy.
 
 ## 7. Things that bite
 

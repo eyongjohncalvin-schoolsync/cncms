@@ -298,6 +298,10 @@ safer**. A `down()` removes columns. It doesn't reliably undo data
 backfills, and a backfill that failed halfway leaves a state `down()` was
 never tested against.
 
+`deploy/scripts/rollback.sh` ([`PLOI.md`](./PLOI.md) §6b) does the code
+part and tells you whether the database has to go back too, naming the
+backup. The steps below are what it prints.
+
 ### Full rollback (inside the window)
 1. Turn **Quick deploy OFF** on production. Don't press Deploy until `main` is fixed.
 2. Stop the production daemon.
