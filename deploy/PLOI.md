@@ -206,9 +206,19 @@ backup taken before it in `~/cncms-deploys.log` (outside the repo). To go
 back, SSH in as the site user and run:
 
 ```bash
-PHP_BIN=php8.5 bash ~/cncms.tech/deploy/scripts/rollback.sh             # the previous deploy
-PHP_BIN=php8.5 bash ~/cncms.tech/deploy/scripts/rollback.sh 795c0154    # or a chosen commit
+rollback              # the previous deploy
+rollback 795c0154     # or a chosen commit
 ```
+
+`rollback` is a shortcut. Set it up once, as the site user:
+
+```bash
+echo "alias rollback='bash ~/cncms.tech/deploy/scripts/rollback.sh'" >> ~/.bashrc && source ~/.bashrc
+```
+
+The script uses the newest PHP on the server (php8.5, then 8.4, 8.3). If
+the site ever runs an older one than what is installed, say so:
+`PHP_BIN=php8.4 rollback`.
 
 - **The release changed no migration** (most releases): it shows both
   versions, asks, then puts the site in maintenance, checks out the old

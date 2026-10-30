@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # CNCMS — put the last working version back. Run over SSH as the site user,
 # from anywhere:
-#   PHP_BIN=php8.5 bash ~/cncms.tech/deploy/scripts/rollback.sh             # back to the previous deploy
-#   PHP_BIN=php8.5 bash ~/cncms.tech/deploy/scripts/rollback.sh 795c0154    # back to a chosen commit
+#   rollback              (the shortcut, PLOI.md §6b) — back to the previous deploy
+#   rollback 795c0154     — back to a chosen commit
+#   (without the shortcut: bash ~/cncms.tech/deploy/scripts/rollback.sh …)
 #
 # Code only, when the release being undone changed no migration: the site
 # goes into maintenance, the old commit is checked out and rebuilt, and the
@@ -21,7 +22,14 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="${DEPLOY_LOG:-$HOME/cncms-deploys.log}"
-PHP_BIN="${PHP_BIN:-php}"
+# The site's PHP when the server has several: the newest one installed,
+# unless PHP_BIN says otherwise.
+if [[ -z "${PHP_BIN:-}" ]]; then
+  PHP_BIN=php
+  for version in 8.5 8.4 8.3; do
+    if command -v "php${version}" >/dev/null 2>&1; then PHP_BIN="php${version}"; break; fi
+  done
+fi
 COMPOSER_BIN="${COMPOSER_BIN:-$PHP_BIN $(command -v composer || echo composer)}"
 
 TARGET=""
@@ -103,7 +111,7 @@ before this deploy (everything entered since it is lost):
        gunzip -c <backup> | PGPASSWORD='<DB_PASSWORD>' psql -h 127.0.0.1 -U <DB_USERNAME> -d cncms_rollback_${STAMP} -q -v ON_ERROR_STOP=1
   3. Ploi -> site -> Environment: DB_DATABASE=cncms_rollback_${STAMP}, save.
   4. Run this again:
-       PHP_BIN=${PHP_BIN} bash $0 $(git rev-parse --short "$TARGET") --database-restored
+       rollback $(git rev-parse --short "$TARGET") --database-restored
   5. Start the daemon, check, end the maintenance window.
 
 Found after staff have been working on the new version? Prefer a fix
