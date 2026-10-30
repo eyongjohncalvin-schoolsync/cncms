@@ -184,7 +184,7 @@ Per-tenant isolation is automatic: App\Tenancy\CacheTenancyBootstrapper tags
 every cache call with the tenant on a store that supports tags (Redis does).
 **Undo:** `CACHE_STORE=database`, then step 5.
 
-## 5c. Off-server backups (Backblaze B2)
+## 5c. Off-server backups (Backblaze B2, Google Drive)
 
 The dumps above sit on the same VPS: lose the server and they go with it.
 `deploy/scripts/offsite-backup.sh` copies them every night to Backblaze B2,
@@ -232,8 +232,36 @@ check, period **1 day**, grace **2 hours**, your email. Put its ping URL in
 `HEALTHCHECK_URL`. A night that fails — or never runs — emails you.
 Each run is also logged in `~/cncms-offsite.log`.
 
+**A second copy on Google Drive (optional, free up to 15 GB, shared with
+Gmail).** The same script copies to every destination in the settings file,
+with the same passphrase. Drive has no lock and no lifecycle rule, so the
+script deletes dumps older than `GDRIVE_KEEP_DAYS` (default 60) there. It
+can only see the files it created, never the rest of the Drive.
+
+1. **On your own computer** (the server can't open a browser): download
+   rclone from rclone.org/downloads (Windows, Intel/AMD 64-bit), unzip it,
+   open PowerShell in that folder and run:
+   ```
+   .\rclone.exe authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ=="
+   ```
+   A browser opens: sign in with the Google account to use, and allow. The
+   terminal then prints a token between `Paste the following into your
+   remote machine --->` and `<---End paste`: copy the whole `{…}`.
+2. **On the server**, `nano ~/.cncms-offsite.env` and add, on one line, in
+   single quotes:
+   ```
+   GDRIVE_TOKEN='{"access_token":"…","token_type":"Bearer","refresh_token":"…","expiry":"…"}'
+   ```
+3. Run `bash ~/cncms.tech/deploy/scripts/offsite-backup.sh`: two lines now,
+   `ok  b2: …` and `ok  gdrive: …`. In Drive a `cncms-backups` folder appears
+   (file names scrambled — encrypted). `--list gdrive` shows it decrypted.
+
+If the Google access is ever withdrawn (password change, access removed in
+the Google account), the night fails and healthchecks.io emails you: redo
+steps 1–2.
+
 **Restore** (any machine with rclone, or the new server after `--install`, with
-the same `~/.cncms-offsite.env`):
+the same `~/.cncms-offsite.env`; add `gdrive` at the end to restore from Drive):
 
 ```bash
 bash offsite-backup.sh --list
