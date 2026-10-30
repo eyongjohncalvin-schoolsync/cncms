@@ -238,27 +238,44 @@ with the same passphrase. Drive has no lock and no lifecycle rule, so the
 script deletes dumps older than `GDRIVE_KEEP_DAYS` (default 60) there. It
 can only see the files it created, never the rest of the Drive.
 
-1. **On your own computer** (the server can't open a browser): download
+1. **Your own Google client (free, once).** rclone's shared one is being
+   retired during 2026, so make your own at console.cloud.google.com,
+   signed in with the Google account the backups go to:
+   - Top bar → project picker → **New project** → name `cncms-backups` → Create, and select it.
+   - **APIs & Services → Library** → search **Google Drive API** → **Enable**.
+   - **Google Auth Platform** (or "OAuth consent screen") → **Get started**:
+     app name `CNCMS backups`, your email, audience **External**, your
+     email again → Create.
+   - **Audience** → **Publish app** → confirm (status **In production**).
+     Left in "Testing", Google cuts the access after 7 days.
+   - **Clients** → **Create client** → type **Desktop app** → Create. Copy the
+     **Client ID** and **Client secret** (into your password manager too).
+2. **On your own computer** (the server can't open a browser): download
    rclone from rclone.org/downloads (Windows, Intel/AMD 64-bit), unzip it,
-   open PowerShell in that folder and run:
+   open PowerShell in that folder and run, with your ID and secret:
    ```
-   .\rclone.exe authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ"
+   $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"client_id":"YOUR_ID","client_secret":"YOUR_SECRET","scope":"drive.file"}')).TrimEnd('=').Replace('+','-').Replace('/','_')
+   .\rclone.exe authorize "drive" $b
    ```
-   A browser opens: sign in with the Google account to use, and allow. The
-   terminal then prints a token between `Paste the following into your
-   remote machine --->` and `<---End paste`: copy the whole `{…}`.
-2. **On the server**, `nano ~/.cncms-offsite.env` and add, on one line, in
-   single quotes:
+   A browser opens: sign in with the same Google account and allow (if
+   Google says the app isn't verified: **Advanced → Go to CNCMS backups** —
+   it is your own app). The terminal then prints a token between `Paste the
+   following into your remote machine --->` and `<---End paste`: copy all
+   of it (it starts `eyJ…`, or `{…}` on older rclone).
+3. **On the server**, `nano ~/.cncms-offsite.env` and add, each on one line:
    ```
-   GDRIVE_TOKEN='{"access_token":"…","token_type":"Bearer","refresh_token":"…","expiry":"…"}'
+   GDRIVE_CLIENT_ID='…apps.googleusercontent.com'
+   GDRIVE_CLIENT_SECRET='…'
+   GDRIVE_TOKEN='eyJ…'
    ```
-3. Run `bash ~/cncms.tech/deploy/scripts/offsite-backup.sh`: two lines now,
+   The token only works with the client it was made with: change one, redo both.
+4. Run `bash ~/cncms.tech/deploy/scripts/offsite-backup.sh`: two lines now,
    `ok  b2: …` and `ok  gdrive: …`. In Drive a `cncms-backups` folder appears
    (file names scrambled — encrypted). `--list gdrive` shows it decrypted.
 
 If the Google access is ever withdrawn (password change, access removed in
 the Google account), the night fails and healthchecks.io emails you: redo
-steps 1–2.
+steps 2–3.
 
 **Restore** (any machine with rclone, or the new server after `--install`, with
 the same `~/.cncms-offsite.env`; add `gdrive` at the end to restore from Drive):

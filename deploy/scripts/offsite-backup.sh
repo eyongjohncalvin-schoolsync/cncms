@@ -14,7 +14,8 @@
 # Settings live in ~/.cncms-offsite.env (chmod 600), never in the repo:
 #   BACKUP_PASSPHRASE=…                                   (always)
 #   B2_KEY_ID=…  B2_APP_KEY=…  B2_BUCKET=…                (Backblaze B2)
-#   GDRIVE_TOKEN='{"access_token":…}'                     (Google Drive — from `rclone authorize "drive"`)
+#   GDRIVE_TOKEN='eyJ…' or '{"access_token":…}'          (Google Drive — what `rclone authorize "drive"` printed)
+#   GDRIVE_CLIENT_ID=…  GDRIVE_CLIENT_SECRET=…            (Google Drive — your own Google client, PLOI.md §5c)
 #   GDRIVE_FOLDER=cncms-backups  GDRIVE_KEEP_DAYS=60      (optional)
 #   HEALTHCHECK_URL=https://hc-ping.com/…                 (optional: emails you when a night is missed)
 # Lose BACKUP_PASSPHRASE and the copies can't be opened — keep it in your
@@ -99,10 +100,30 @@ if [[ -n "${B2_KEY_ID:-}" || -n "${B2_APP_KEY:-}" || -n "${B2_BUCKET:-}" ]]; the
 fi
 
 if [[ -n "${GDRIVE_TOKEN:-}" ]]; then
+  # Newer rclone prints the token as a base64 blob (`eyJ…`) holding
+  # {"token":"{…}"}; older ones print the `{…}` itself. Accept both.
+  if [[ "$GDRIVE_TOKEN" != \{* ]]; then
+    PHP_BIN="${PHP_BIN:-$(command -v php8.5 || command -v php8.4 || command -v php8.3 || command -v php || echo php)}"
+    GDRIVE_TOKEN="$("$PHP_BIN" -r '
+      $blob = strtr(trim(getenv("GDRIVE_TOKEN")), "-_", "+/");
+      $data = json_decode((string) base64_decode($blob, true), true);
+      $token = is_array($data) ? ($data["token"] ?? (isset($data["access_token"]) ? $data : null)) : null;
+      echo is_array($token) ? json_encode($token) : (string) $token;
+    ')"
+    if [[ "$GDRIVE_TOKEN" != \{* ]]; then
+      echo "GDRIVE_TOKEN in ${SETTINGS} is not a token rclone printed — redo the Google Drive steps in deploy/PLOI.md §5c." >&2
+      exit 1
+    fi
+  fi
   export RCLONE_CONFIG_GDRIVE_TYPE=drive
   # Only the files rclone itself creates — never the rest of the Drive.
   export RCLONE_CONFIG_GDRIVE_SCOPE=drive.file
   export RCLONE_CONFIG_GDRIVE_TOKEN="$GDRIVE_TOKEN"
+  # Your own Google client (rclone's shared one is being retired in 2026).
+  if [[ -n "${GDRIVE_CLIENT_ID:-}" ]]; then
+    export RCLONE_CONFIG_GDRIVE_CLIENT_ID="$GDRIVE_CLIENT_ID"
+    export RCLONE_CONFIG_GDRIVE_CLIENT_SECRET="${GDRIVE_CLIENT_SECRET:-}"
+  fi
   encrypted gvault "gdrive:${GDRIVE_FOLDER:-cncms-backups}"
   DESTINATIONS+=(gdrive)
 fi
