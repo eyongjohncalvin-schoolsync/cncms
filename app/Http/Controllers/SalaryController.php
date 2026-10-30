@@ -91,9 +91,14 @@ class SalaryController extends Controller
     {
         Gate::authorize('salaries.setFor', $tenantUser);
 
-        $validated = $request->validate(['period' => ['required', 'date_format:Y-m']]);
+        $validated = $request->validate([
+            'period' => ['required', 'date_format:Y-m'],
+            // Empty = what is left of the month; less = a salary advance (owner, 2026-10-30).
+            'amount' => ['nullable', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
+        ]);
 
-        $voucher = app(VoucherService::class)->requestSalary($tenantUser->user, $validated['period'], $request->user());
+        $amount = isset($validated['amount']) ? number_format((float) $validated['amount'], 2, '.', '') : null;
+        $voucher = app(VoucherService::class)->requestSalary($tenantUser->user, $validated['period'], $request->user(), $amount);
 
         return redirect()->route('vouchers.show', $voucher)->with('success', "{$voucher->number}: salary bon for {$validated['period']} — waiting for approval.");
     }

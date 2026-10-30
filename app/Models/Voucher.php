@@ -26,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'paid_by', 'paid_at', 'paid_from_account_id', 'payment_method', 'payment_reference', 'received_by_name', 'signed_copy_path', 'expenditure_id',
     'settle_due_on', 'spent_amount', 'returned_amount', 'settled_by', 'settled_at', 'settlement_note',
     'from_collections', 'remittance_id', 'local_uuid', 'recorded_by_device', 'receipt_path', 'branch_id',
-    'origin', 'salary_user_id', 'salary_period',
+    'origin', 'salary_user_id', 'salary_period', 'payee_user_id',
 ])]
 #[RouteKey('uuid')]
 class Voucher extends Model
@@ -85,6 +85,18 @@ class Voucher extends Model
     public function salaryUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'salary_user_id');
+    }
+
+    /** The member of staff the bon pays, when chosen from the staff list (owner, 2026-10-30). Cross-schema. */
+    public function payee(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'payee_user_id');
+    }
+
+    /** Who owes an advance's money until it is accounted for: the staff payee, else the requester. */
+    public function advanceHolderId(): int
+    {
+        return (int) ($this->payee_user_id ?? $this->requested_by);
     }
 
     public function approvals(): HasMany

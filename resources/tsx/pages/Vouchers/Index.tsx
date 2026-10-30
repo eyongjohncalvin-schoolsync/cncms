@@ -43,6 +43,8 @@ interface Props {
     is_investor: boolean;
     spending: SpendingSummary;
     can_spend_from_collections: boolean;
+    /** Active staff — a bon can be paid to one of them, chosen from the list. */
+    staff: { uuid: string; name: string }[];
 }
 
 export function VoucherStatusBadge({ status }: { status: VoucherStatus }) {
@@ -63,7 +65,7 @@ const TABS = [
  * (docs/plans/cash-controls.md, wave 5). Investors see it in their own
  * layout: it is where they approve payouts above the company's limits.
  */
-export default function VouchersIndex({ vouchers, can_request, limits, categories, today, is_investor, spending, can_spend_from_collections }: Props) {
+export default function VouchersIndex({ vouchers, can_request, limits, categories, today, is_investor, spending, can_spend_from_collections, staff }: Props) {
     const [tab, setTab] = useState<(typeof TABS)[number]['key']>('mine');
     const [requestOpen, setRequestOpen] = useState(false);
 
@@ -177,6 +179,7 @@ export default function VouchersIndex({ vouchers, can_request, limits, categorie
                     limits={limits}
                     spending={spending}
                     canSpendFromCollections={can_spend_from_collections}
+                    staff={staff}
                 />
             )}
         </>
@@ -199,6 +202,7 @@ function RequestModal({
     limits,
     spending,
     canSpendFromCollections,
+    staff,
 }: {
     open: boolean;
     onClose: () => void;
@@ -207,9 +211,11 @@ function RequestModal({
     limits: Props['limits'];
     spending: SpendingSummary;
     canSpendFromCollections: boolean;
+    staff: Props['staff'];
 }) {
     const { data, setData, post, processing, errors, reset } = useForm<{
         kind: 'expense' | 'advance';
+        payee_user_uuid: string;
         payee_name: string;
         purpose: string;
         category_uuid: string;
@@ -217,7 +223,7 @@ function RequestModal({
         needed_on: string;
         attachment: File | null;
         from_collections: boolean;
-    }>({ kind: 'expense', payee_name: '', purpose: '', category_uuid: '', amount: '', needed_on: today, attachment: null, from_collections: false });
+    }>({ kind: 'expense', payee_user_uuid: '', payee_name: '', purpose: '', category_uuid: '', amount: '', needed_on: today, attachment: null, from_collections: false });
 
     const amount = Number(data.amount || 0);
     const aboveSingle = limits.single !== null && amount > Number(limits.single);
@@ -258,7 +264,27 @@ function RequestModal({
                 {data.kind === 'advance' && (
                     <p className="-mt-2 text-xs text-slate-500">Money given before it is spent. It must be justified with receipts — and any change returned — within the company&apos;s deadline.</p>
                 )}
-                <TextInput id="payee_name" label="Pay to" value={data.payee_name} onChange={(e) => setData('payee_name', e.target.value)} error={errors.payee_name} required />
+                {/* Staff from the list: they never approve or pay it, and an advance is theirs to account for. */}
+                <SelectInput
+                    id="payee_user_uuid"
+                    label="Pay to"
+                    value={data.payee_user_uuid}
+                    onChange={(e) => setData('payee_user_uuid', e.target.value)}
+                    error={errors.payee_user_uuid}
+                >
+                    <option value="">Someone outside the company…</option>
+                    {staff.map((person) => (
+                        <option key={person.uuid} value={person.uuid}>
+                            {person.name}
+                        </option>
+                    ))}
+                </SelectInput>
+                {data.payee_user_uuid === '' && (
+                    <TextInput id="payee_name" label="Their name" value={data.payee_name} onChange={(e) => setData('payee_name', e.target.value)} error={errors.payee_name} required />
+                )}
+                {data.kind === 'advance' && data.payee_user_uuid !== '' && (
+                    <p className="-mt-2 text-xs text-slate-500">They account for this advance — anything not justified in time becomes their shortage.</p>
+                )}
                 <TextInput id="purpose" label="What for" value={data.purpose} onChange={(e) => setData('purpose', e.target.value)} error={errors.purpose} required />
                 <SelectInput
                     label={data.kind === 'expense' ? 'Expense category' : 'Expense category (or when it is justified)'}

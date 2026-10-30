@@ -38,6 +38,8 @@ class UpdateCompanyRequest extends FormRequest
             'monthly_spending_cap' => ['nullable', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
             'remittance_deadline_hours' => ['sometimes', 'required', 'integer', 'min:1', 'max:720'],
             'advance_settlement_days' => ['sometimes', 'required', 'integer', 'min:1', 'max:365'],
+            // Wave 3 (owner, 2026-10-28): people who confirm a bank deposit, never the depositor.
+            'deposit_confirmations' => ['sometimes', 'required', 'integer', 'in:1,2'],
             'rccm_number' => ['nullable', 'string', 'max:40'],
             'niu' => ['nullable', 'string', 'max:20'],
             // Optional on every save — the same PATCH request that saves the

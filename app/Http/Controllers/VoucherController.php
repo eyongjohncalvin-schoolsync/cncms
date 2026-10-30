@@ -9,6 +9,7 @@ use App\Models\CashAccount;
 use App\Models\Company;
 use App\Models\ExpenseCategory;
 use App\Models\Scopes\BranchScope;
+use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\VoucherApproval;
@@ -21,6 +22,7 @@ use App\Support\TenantContext;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -82,7 +84,21 @@ class VoucherController extends Controller
             'categories' => ExpenseCategory::query()->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get(['uuid', 'name'])->toArray(),
             'today' => $this->cashBook->today(),
             'is_investor' => (bool) $context->tenantUser->is_investor,
+            'staff' => $this->staff()->map(fn (User $user): array => ['uuid' => $user->uuid, 'name' => $user->name])->values()->all(),
         ]);
+    }
+
+    /**
+     * Active staff of this workspace — who a bon can be paid to, chosen from
+     * a list (an advance is then theirs to account for).
+     *
+     * @return Collection<int, User>
+     */
+    private function staff(): Collection
+    {
+        $userIds = TenantUser::query()->where('tenant_id', (string) tenant()?->getTenantKey())->pluck('user_id');
+
+        return User::query()->whereIn('id', $userIds)->where('status', 'active')->orderBy('name')->get(['id', 'uuid', 'name']);
     }
 
     public function store(Request $request): RedirectResponse
@@ -91,7 +107,9 @@ class VoucherController extends Controller
 
         $validated = $request->validate([
             'kind' => ['required', Rule::in([Voucher::KIND_EXPENSE, Voucher::KIND_ADVANCE])],
-            'payee_name' => ['required', 'string', 'max:150'],
+            // A member of staff (owner, 2026-10-30), or someone outside by name.
+            'payee_user_uuid' => ['nullable', 'uuid'],
+            'payee_name' => ['required_without:payee_user_uuid', 'nullable', 'string', 'max:150'],
             'purpose' => ['required', 'string', 'max:500'],
             'category_uuid' => ['required_if:kind,expense', 'nullable', 'uuid', Rule::exists('expense_categories', 'uuid')],
             'amount' => ['required', 'numeric', 'gt:0', 'max:999999999.99', 'decimal:0,2'],
@@ -105,6 +123,19 @@ class VoucherController extends Controller
         }
 
         $validated['from_collections'] = (bool) ($validated['from_collections'] ?? false);
+
+        if (isset($validated['payee_user_uuid'])) {
+            $payee = $this->staff()->firstWhere('uuid', $validated['payee_user_uuid']);
+
+            if ($payee === null) {
+                return back()->withErrors(['payee_user_uuid' => 'Choose someone who works here, or type the name of someone outside.'])->withInput();
+            }
+
+            $validated['payee_user_id'] = $payee->id;
+            $validated['payee_name'] = mb_substr((string) $payee->name, 0, 150);
+        }
+
+        unset($validated['payee_user_uuid']);
 
         $voucher = $this->vouchers->request([
             ...$validated,

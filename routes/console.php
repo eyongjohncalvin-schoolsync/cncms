@@ -46,5 +46,9 @@ Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping()
 // Expenditure month close (docs/plans/expenditures-and-spending-controls.md,
 // E6): daily just after midnight Cameroon time; from the 5th it closes the
 // previous month once (App\Services\ExpenditureMonthService::closeDue()).
+// Before the 07:00 digest, so the day's alerts show the new shortages.
+Schedule::command('vouchers:advances-overdue')->dailyAt('00:45')->timezone('Africa/Lagos')->withoutOverlapping()
+    ->skip(fn () => MaintenanceMode::active() !== null);
+
 Schedule::command('expenditures:close-months')->dailyAt('00:30')->timezone('Africa/Lagos')->withoutOverlapping()
     ->skip(fn () => MaintenanceMode::active() !== null);

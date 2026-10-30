@@ -66,6 +66,7 @@ export default function UsersControlCenterUsers({
     const [createOpen, setCreateOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<TenantUserRow | null>(null);
     const [salaryUser, setSalaryUser] = useState<TenantUserRow | null>(null);
+    const [payingUser, setPayingUser] = useState<TenantUserRow | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [showDeactivated, setShowDeactivated] = useState(false);
     const { errors } = usePage<{ errors: Record<string, string> }>().props;
@@ -351,22 +352,14 @@ export default function UsersControlCenterUsers({
                                                 >
                                                     Set salary
                                                 </button>
-                                                {/* Wave 4: a month's salary is paid only through its own bon. */}
+                                                {/* Wave 4: a month's salary is paid only through its own bon — in parts when an advance is needed. */}
                                                 {tenantUser.salary?.current && (
                                                     <button
                                                         type="button"
-                                                        onClick={() => {
-                                                            const period = window.prompt(
-                                                                `Raise the salary bon for ${tenantUser.name} — which month? (YYYY-MM)`,
-                                                                new Date().toISOString().slice(0, 7),
-                                                            );
-                                                            if (period) {
-                                                                router.post(`/users/${tenantUser.id}/salary/pay`, { period });
-                                                            }
-                                                        }}
+                                                        onClick={() => setPayingUser(tenantUser)}
                                                         className="text-xs font-medium text-blue-600 hover:text-blue-700"
                                                     >
-                                                        Pay a month
+                                                        Pay salary
                                                     </button>
                                                 )}
                                             </div>
@@ -595,6 +588,58 @@ export default function UsersControlCenterUsers({
                                     <Button type="submit" disabled={processing}>
                                         {processing && <LoadingSpinner className="mr-1.5 text-white" />}
                                         {processing ? 'Saving…' : 'Save salary'}
+                                    </Button>
+                                </div>
+                            </>
+                        )}
+                    </Form>
+                )}
+            </Modal>
+
+            <Modal open={payingUser !== null} onClose={() => setPayingUser(null)} title="Pay salary">
+                {payingUser && (
+                    <Form
+                        key={payingUser.id}
+                        action={`/users/${payingUser.id}/salary/pay`}
+                        method="post"
+                        options={{ preserveScroll: true }}
+                        onSuccess={() => setPayingUser(null)}
+                        className="flex flex-col gap-4"
+                    >
+                        {({ errors, processing }) => (
+                            <>
+                                <p className="text-sm text-slate-600">
+                                    Raises a salary bon for <span className="font-medium text-slate-700">{payingUser.name}</span>
+                                    {payingUser.salary?.current && <> ({formatCurrency(payingUser.salary.current)} a month)</>}. Leave the amount empty to pay
+                                    what is left of the month; enter less for an advance — the rest is paid later on its own bon.
+                                </p>
+                                <TextInput
+                                    id="period"
+                                    name="period"
+                                    type="month"
+                                    label="Month"
+                                    defaultValue={new Date().toISOString().slice(0, 7)}
+                                    error={errors.period}
+                                    required
+                                />
+                                <TextInput
+                                    id="pay_amount"
+                                    name="amount"
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    inputMode="decimal"
+                                    label="Amount (FCFA, optional)"
+                                    placeholder="What is left of the month"
+                                    error={errors.amount}
+                                />
+                                <div className="flex justify-end gap-2">
+                                    <Button type="button" variant="secondary" onClick={() => setPayingUser(null)}>
+                                        Cancel
+                                    </Button>
+                                    <Button type="submit" disabled={processing}>
+                                        {processing && <LoadingSpinner className="mr-1.5 text-white" />}
+                                        {processing ? 'Raising…' : 'Raise the bon'}
                                     </Button>
                                 </div>
                             </>

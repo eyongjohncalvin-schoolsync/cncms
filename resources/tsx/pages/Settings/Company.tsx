@@ -18,6 +18,7 @@ import { SettingsTabs } from '@/components/settings/SettingsTabs';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { TextInput } from '@/components/ui/TextInput';
+import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { Company } from '@/types';
 import { useState } from 'react'; // Add this import
@@ -51,6 +52,7 @@ const EMPTY_COMPANY: Company = {
     monthly_spending_cap: null,
     remittance_deadline_hours: 24,
     advance_settlement_days: 7,
+    deposit_confirmations: 2,
     rccm_number: null,
     niu: null,
     logo_url: null,
@@ -475,6 +477,23 @@ export default function SettingsCompany({ company }: { company: Company | null }
                                                     />
                                                     <p className="mt-2 text-xs text-slate-500">
                                                         A cash advance must be justified with receipts (and any change returned) within this many days.
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <SelectInput
+                                                        id="deposit_confirmations"
+                                                        name="deposit_confirmations"
+                                                        label="People who confirm a bank deposit"
+                                                        defaultValue={values.deposit_confirmations}
+                                                        error={errors.deposit_confirmations}
+                                                        required
+                                                        className="rounded-xl px-4 py-3"
+                                                    >
+                                                        <option value={1}>1 person</option>
+                                                        <option value={2}>2 people</option>
+                                                    </SelectInput>
+                                                    <p className="mt-2 text-xs text-slate-500">
+                                                        A deposit credits the bank only once this many people other than the depositor have checked it against the bank. Deposits already sent keep the number they were sent with.
                                                     </p>
                                                 </div>
                                             </div>

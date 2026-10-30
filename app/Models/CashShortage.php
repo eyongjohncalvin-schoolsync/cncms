@@ -57,6 +57,13 @@ class CashShortage extends Model
 
     public const string STATUS_WRITTEN_OFF = 'written_off';
 
+    /**
+     * An overdue advance's shortage closed because its receipts came in late
+     * (VoucherService::settle()) — nothing was missing after all, or what
+     * still is was opened again as its own shortage.
+     */
+    public const string STATUS_JUSTIFIED = 'justified';
+
     protected function casts(): array
     {
         return [

@@ -933,6 +933,8 @@ export interface Company {
     remittance_deadline_hours: number;
     /** Days a cash advance may stay unjustified before it is flagged. */
     advance_settlement_days: number;
+    /** People (never the depositor) who must confirm a bank deposit before the bank is credited — 1 or 2. */
+    deposit_confirmations: number;
     /** RCCM — Registre du Commerce et du Crédit Mobilier (OHADA commercial registration number). */
     rccm_number: string | null;
     /** NIU — Numéro d'Identifiant Unique (Cameroon DGI taxpayer ID). */

@@ -391,7 +391,9 @@ class MoneyBalanceService
     {
         [$from, $to] = BusinessTimezone::periodBoundsUtc($period);
 
+        // An overdue advance justified late was never missing money.
         $owned = CashShortage::query()->whereBetween('created_at', [$from, $to])
+            ->where('status', '!=', CashShortage::STATUS_JUSTIFIED)
             ->selectRaw('kind, status, count(*) as shortages_count, sum(amount) as total')
             ->groupBy('kind', 'status')->get();
 

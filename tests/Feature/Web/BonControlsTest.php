@@ -172,6 +172,103 @@ class BonControlsTest extends TestCase
         $this->assertSame([$requester->id, '3000.00'], [$shortage->owner_user_id, (string) $shortage->amount]);
     }
 
+    /** An approved, paid cash advance requested by kelvin, paid by patience from her till. */
+    private function paidAdvance(string $amount = '10000', array $extra = []): Voucher
+    {
+        $this->as('kelvin@shalomtech.dev', 'agent');
+        $this->post('/vouchers', ['kind' => Voucher::KIND_ADVANCE, 'payee_name' => 'Kelvin', 'purpose' => 'Fuel', 'category_uuid' => $this->categoryUuid, 'amount' => $amount, ...$extra])
+            ->assertSessionHasNoErrors();
+        $voucher = Voucher::query()->latest('id')->firstOrFail();
+
+        $this->as('godlove@shalomtech.dev', 'manager');
+        $this->post("/vouchers/{$voucher->uuid}/approve")->assertSessionHasNoErrors();
+
+        $cashier = $this->as('patience@shalomtech.dev', 'cashier');
+        $till = $this->fundTill($cashier, $amount);
+        $this->post("/vouchers/{$voucher->uuid}/pay", ['account' => $till, 'method' => 'cash', 'received_by_name' => 'Kelvin'])->assertSessionHasNoErrors();
+
+        return $voucher->refresh();
+    }
+
+    public function test_an_advance_past_its_date_becomes_the_requesters_shortage_and_late_receipts_still_settle_it(): void
+    {
+        $this->travelTo(Carbon::parse('2026-11-02 09:00', 'Africa/Lagos'));
+        $voucher = $this->paidAdvance();
+
+        $this->travelTo(Carbon::parse($voucher->settle_due_on->toDateString().' 09:00', 'Africa/Lagos')->addDay());
+        $this->artisan('vouchers:advances-overdue', ['tenant' => 'swecom'])->assertSuccessful();
+        $this->artisan('vouchers:advances-overdue', ['tenant' => 'swecom'])->assertSuccessful();
+
+        $overdue = CashShortage::query()->where('source_id', $voucher->id)->where('kind', CashShortage::KIND_ADVANCE)->sole();
+        $this->assertSame([CashShortage::STATUS_OPEN, '10000.00', $this->user('kelvin@shalomtech.dev')->id], [$overdue->status, (string) $overdue->amount, $overdue->owner_user_id]);
+        $this->assertNotContains('advances_overdue', array_column(app(CashAlertService::class)->alerts(), 'key'));
+
+        // Receipts for 9 000, late: the overdue shortage gives way to the real 1 000 gap.
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 9000, 'returned_amount' => 0, 'receipt' => UploadedFile::fake()->image('receipts.jpg')])
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(CashShortage::STATUS_JUSTIFIED, $overdue->refresh()->status);
+        $this->assertSame('1000.00', (string) CashShortage::query()->open()->where('source_id', $voucher->id)->sole()->amount);
+        $this->assertSame('settled', $voucher->refresh()->status);
+    }
+
+    public function test_settling_an_overdue_advances_shortage_closes_the_advance(): void
+    {
+        $this->travelTo(Carbon::parse('2026-11-02 09:00', 'Africa/Lagos'));
+        $voucher = $this->paidAdvance();
+        $this->travelTo(Carbon::parse($voucher->settle_due_on->toDateString().' 09:00', 'Africa/Lagos')->addDay());
+        $this->artisan('vouchers:advances-overdue', ['tenant' => 'swecom'])->assertSuccessful();
+        $shortage = CashShortage::query()->open()->where('source_id', $voucher->id)->sole();
+
+        $this->as('terence@shalomtech.dev', 'manager');
+        $this->post("/cash/shortages/{$shortage->uuid}/settle", ['outcome' => 'written_off', 'note' => 'Lost the receipts'])->assertSessionHasNoErrors();
+
+        $voucher->refresh();
+        $this->assertSame('settled', $voucher->status);
+        $this->assertStringContainsString('written off: Lost the receipts', (string) $voucher->settlement_note);
+    }
+
+    public function test_a_bon_paid_to_staff_is_never_approved_by_them_and_their_advance_is_theirs(): void
+    {
+        $terence = $this->user('terence@shalomtech.dev');
+        $voucher = $this->paidAdvance('10000', ['payee_user_uuid' => $terence->uuid]);
+
+        $this->assertSame([$terence->id, $terence->name], [$voucher->payee_user_id, $voucher->payee_name]);
+
+        // The payee never approves a bon that pays them.
+        $this->as('kelvin@shalomtech.dev', 'agent');
+        $this->post('/vouchers', ['kind' => Voucher::KIND_EXPENSE, 'payee_user_uuid' => $terence->uuid, 'purpose' => 'Transport', 'category_uuid' => $this->categoryUuid, 'amount' => '2000'])->assertSessionHasNoErrors();
+        $second = Voucher::query()->latest('id')->firstOrFail();
+        $this->as('terence@shalomtech.dev', 'manager');
+        $this->post("/vouchers/{$second->uuid}/approve")->assertForbidden();
+
+        // The advance not accounted for is the payee's, not the requester's.
+        $this->as('patience@shalomtech.dev', 'cashier');
+        $this->post("/vouchers/{$voucher->uuid}/settle", ['spent_amount' => 0, 'returned_amount' => 4000])->assertSessionHasNoErrors();
+        $this->assertSame($terence->id, CashShortage::query()->open()->where('source_id', $voucher->id)->sole()->owner_user_id);
+
+        // Someone outside: a typed name is still needed.
+        $this->as('kelvin@shalomtech.dev', 'agent');
+        $this->post('/vouchers', ['kind' => Voucher::KIND_EXPENSE, 'purpose' => 'X', 'category_uuid' => $this->categoryUuid, 'amount' => '1000'])->assertSessionHasErrors('payee_name');
+    }
+
+    public function test_a_salary_can_be_paid_in_parts_never_above_the_approved_salary(): void
+    {
+        $this->travelTo(Carbon::parse('2026-11-15 09:00', 'Africa/Lagos'));
+        $admin = $this->as('kelvin@shalomtech.dev', 'admin');
+        $staff = $this->user('terence@shalomtech.dev');
+        app(SalaryService::class)->set($staff->id, null, '75000', null, null, $admin);
+        $tenantUser = TenantUser::query()->where('user_id', $staff->id)->sole();
+
+        $this->post("/users/{$tenantUser->id}/salary/pay", ['period' => '2026-11', 'amount' => 30000])->assertSessionHasNoErrors();
+        $this->post("/users/{$tenantUser->id}/salary/pay", ['period' => '2026-11', 'amount' => 50000])->assertSessionHasErrors('amount');
+        $this->post("/users/{$tenantUser->id}/salary/pay", ['period' => '2026-11'])->assertSessionHasNoErrors();
+        $this->post("/users/{$tenantUser->id}/salary/pay", ['period' => '2026-11', 'amount' => 1000])->assertSessionHasErrors('period');
+
+        $this->assertSame(['30000.00', '45000.00'], Voucher::query()->where('salary_user_id', $staff->id)->orderBy('id')->pluck('amount')->map(fn ($amount): string => (string) $amount)->all());
+        $this->assertStringStartsWith('Salary (part)', Voucher::query()->where('salary_user_id', $staff->id)->orderBy('id')->value('purpose'));
+    }
+
     public function test_a_salary_is_paid_once_per_month_at_the_approved_salary_never_by_the_person_paid(): void
     {
         $this->travelTo(Carbon::parse('2026-11-15 09:00', 'Africa/Lagos'));

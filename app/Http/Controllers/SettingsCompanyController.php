@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateCompanyRequest;
 use App\Models\Company;
+use App\Services\CashTransferService;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -42,6 +43,7 @@ class SettingsCompanyController extends Controller
                 'monthly_spending_cap' => $company->monthly_spending_cap !== null ? (string) $company->monthly_spending_cap : null,
                 'remittance_deadline_hours' => (int) $company->remittance_deadline_hours,
                 'advance_settlement_days' => (int) $company->advance_settlement_days,
+                'deposit_confirmations' => CashTransferService::confirmationsNeeded(),
                 'rccm_number' => $company->rccm_number,
                 'niu' => $company->niu,
                 'logo_url' => $company->logoUrl(),

@@ -142,14 +142,14 @@ class VoucherService
      *
      * @return array{ids: list<int>, mode: string}
      */
-    public function stakeholderApprovers(int $requesterId): array
+    public function stakeholderApprovers(?int ...$excludedUserIds): array
     {
         $tenantId = (string) tenant()?->getTenantKey();
 
         $investors = TenantUser::query()
             ->where('tenant_id', $tenantId)
             ->where('is_investor', true)
-            ->where('user_id', '!=', $requesterId)
+            ->whereNotIn('user_id', array_filter($excludedUserIds))
             ->pluck('user_id')
             ->map(fn ($id): int => (int) $id)
             ->values()
@@ -162,7 +162,7 @@ class VoucherService
         $superRoles = Role::query()->where('is_super', true)->pluck('name');
 
         return [
-            'ids' => TenantUser::query()->where('tenant_id', $tenantId)->whereIn('role', $superRoles)->where('user_id', '!=', $requesterId)->pluck('user_id')->map(fn ($id): int => (int) $id)->values()->all(),
+            'ids' => TenantUser::query()->where('tenant_id', $tenantId)->whereIn('role', $superRoles)->whereNotIn('user_id', array_filter($excludedUserIds))->pluck('user_id')->map(fn ($id): int => (int) $id)->values()->all(),
             'mode' => 'any',
         ];
     }
@@ -171,7 +171,7 @@ class VoucherService
      * Every bon carries a category (E1) so every franc out reaches the P&L:
      * an expense at request, an advance at the latest when it is settled.
      *
-     * @param  array{kind: string, payee_name: string, purpose: string, category_uuid?: ?string, amount: string, needed_on?: ?string, from_collections?: bool, local_uuid?: ?string, recorded_by_device?: ?string, origin?: ?string, salary_user_id?: ?int, salary_period?: ?string}  $data
+     * @param  array{kind: string, payee_name: string, purpose: string, category_uuid?: ?string, amount: string, needed_on?: ?string, from_collections?: bool, local_uuid?: ?string, recorded_by_device?: ?string, origin?: ?string, salary_user_id?: ?int, salary_period?: ?string, payee_user_id?: ?int}  $data
      * @param  ?int  $branchId  a bon the system raises for a customer (a refund) belongs to the customer's branch; otherwise the requester's (branches v2)
      */
     public function request(array $data, User $requester, ?UploadedFile $attachment = null, ?int $branchId = null): Voucher
@@ -189,7 +189,7 @@ class VoucherService
         }
 
         $tier = $this->tierFor($data['amount']);
-        $approvers = $tier['tier'] === Voucher::TIER_STAKEHOLDERS ? $this->stakeholderApprovers($requester->id) : ['ids' => [], 'mode' => 'any'];
+        $approvers = $tier['tier'] === Voucher::TIER_STAKEHOLDERS ? $this->stakeholderApprovers($requester->id, $data['payee_user_id'] ?? null, $data['salary_user_id'] ?? null) : ['ids' => [], 'mode' => 'any'];
 
         // Nobody approves their own bon, the owner included (wave 4): above
         // the limits someone else must exist to approve it.
@@ -219,6 +219,7 @@ class VoucherService
             'origin' => $data['origin'] ?? null,
             'salary_user_id' => $data['salary_user_id'] ?? null,
             'salary_period' => $data['salary_period'] ?? null,
+            'payee_user_id' => $data['payee_user_id'] ?? null,
         ]));
 
         $this->notifyApprovers($voucher);
@@ -306,12 +307,36 @@ class VoucherService
     }
 
     /**
-     * A month's salary for one person (owner, 2026-10-28, wave 4): the
-     * amount is their approved salary, never typed; one live bon per person
-     * and month; never for a future month or someone inactive. Approved and
-     * paid like any bon — never by the person being paid.
+     * A month's salary for one person (owner, 2026-10-28, wave 4): never for
+     * a future month or someone inactive; approved and paid like any bon —
+     * never by the person being paid.
+     *
+     * Salary advances (owner, 2026-10-30): the month may be paid in parts.
+     * $amount defaults to what is left of the approved salary; the month's
+     * live salary bons never add up to more than it. Checked under a lock on
+     * the person's salary row, so two requests can't both take the rest.
      */
-    public function requestSalary(User $payee, string $period, User $requester): Voucher
+    public function requestSalary(User $payee, string $period, User $requester, ?string $amount = null): Voucher
+    {
+        return DB::transaction(fn (): Voucher => $this->requestSalaryLocked($payee, $period, $requester, $amount));
+    }
+
+    /** What is left of $payee's approved salary for $period, after the month's live salary bons. */
+    public function salaryLeft(User $payee, string $period): ?string
+    {
+        $salary = StaffSalary::query()->where('user_id', $payee->id)->where('status', StaffSalary::STATUS_APPROVED)->latest('id')->first();
+
+        return $salary === null ? null : bcsub((string) $salary->amount, $this->salaryBonsTotal($payee, $period), 2);
+    }
+
+    private function salaryBonsTotal(User $payee, string $period): string
+    {
+        return number_format((float) Voucher::query()->withoutGlobalScope(BranchScope::class)
+            ->where('salary_user_id', $payee->id)->where('salary_period', $period)
+            ->whereNotIn('status', ['rejected', 'cancelled'])->sum('amount'), 2, '.', '');
+    }
+
+    private function requestSalaryLocked(User $payee, string $period, User $requester, ?string $amount): Voucher
     {
         if ($period > BusinessTimezone::now()->format('Y-m')) {
             throw ValidationException::withMessages(['period' => 'A salary is paid for this month or one already past, never ahead.']);
@@ -321,34 +346,43 @@ class VoucherService
             throw ValidationException::withMessages(['period' => "{$payee->name} is not active — no salary is paid."]);
         }
 
-        $salary = StaffSalary::query()->where('user_id', $payee->id)->where('status', StaffSalary::STATUS_APPROVED)->latest('id')->first();
+        $salary = StaffSalary::query()->where('user_id', $payee->id)->where('status', StaffSalary::STATUS_APPROVED)->latest('id')->lockForUpdate()->first();
 
         if ($salary === null) {
             throw ValidationException::withMessages(['period' => "{$payee->name} has no approved salary — set it first."]);
         }
 
-        if (Voucher::query()->withoutGlobalScope(BranchScope::class)->where('salary_user_id', $payee->id)->where('salary_period', $period)->whereNotIn('status', ['rejected', 'cancelled'])->exists()) {
-            throw ValidationException::withMessages(['period' => "{$payee->name}'s salary for {$period} already has a bon."]);
+        $left = bcsub((string) $salary->amount, $this->salaryBonsTotal($payee, $period), 2);
+
+        if (bccomp($left, '0', 2) <= 0) {
+            throw ValidationException::withMessages(['period' => "{$payee->name}'s salary for {$period} is already fully on bons."]);
+        }
+
+        $amount ??= $left;
+
+        if (bccomp($amount, '0', 2) <= 0 || bccomp($amount, $left, 2) > 0) {
+            throw ValidationException::withMessages(['amount' => 'At most '.number_format((float) $left, 0, '.', ' ')." FCFA of {$payee->name}'s salary for {$period} is left to pay."]);
         }
 
         $category = ExpenseCategory::query()->firstOrCreate(['name' => self::SALARY_CATEGORY], ['icon' => 'ti-users', 'is_active' => true]);
+        $isPart = bccomp($amount, (string) $salary->amount, 2) < 0;
 
         return $this->request([
             'kind' => Voucher::KIND_EXPENSE,
             'payee_name' => mb_substr((string) $payee->name, 0, 150),
-            'purpose' => "Salary — {$payee->name}, {$period}",
+            'purpose' => ($isPart ? 'Salary (part)' : 'Salary')." — {$payee->name}, {$period}",
             'category_uuid' => $category->uuid,
-            'amount' => (string) $salary->amount,
+            'amount' => $amount,
             'origin' => Voucher::ORIGIN_SALARY,
             'salary_user_id' => $payee->id,
             'salary_period' => $period,
         ], $requester, branchId: $salary->branch_id);
     }
 
-    /** The requester, or the person a salary bon pays. */
+    /** The requester, or the person the bon pays (a salary, or staff chosen as payee). */
     public function isOwn(Voucher $voucher, User $user): bool
     {
-        return $voucher->requested_by === $user->id || $voucher->salary_user_id === $user->id;
+        return in_array($user->id, [$voucher->requested_by, $voucher->salary_user_id, $voucher->payee_user_id], true);
     }
 
     /** Nobody decides, pays or settles their own bon — the owner included (owner, 2026-10-29). */
@@ -428,6 +462,36 @@ class VoucherService
     }
 
     /**
+     * Advances past their settle date with nothing accounted for (owner,
+     * 2026-10-30): the whole amount becomes the requester's shortage. The
+     * requester can still settle with late receipts (settle() then closes
+     * it); repaying or writing the shortage off closes the advance
+     * (ShortageService::settle()). Daily, vouchers:advances-overdue.
+     *
+     * @return int how many advances became shortages
+     */
+    public function openOverdueAdvanceShortages(): int
+    {
+        $overdue = Voucher::query()->withoutGlobalScope(BranchScope::class)
+            ->where('kind', Voucher::KIND_ADVANCE)->where('status', 'paid')
+            ->whereDate('settle_due_on', '<', BusinessTimezone::today())
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('cash_shortages')
+                ->whereColumn('cash_shortages.source_id', 'vouchers.id')
+                ->where('cash_shortages.source_type', (new Voucher)->getMorphClass())
+                ->where('cash_shortages.kind', CashShortage::KIND_ADVANCE))
+            ->get();
+
+        foreach ($overdue as $voucher) {
+            $recorder = User::query()->find($voucher->paid_by ?? $voucher->requested_by);
+
+            app(ShortageService::class)->open($voucher->advanceHolderId(), $voucher->branch_id, (string) $voucher->amount, CashShortage::KIND_ADVANCE, $voucher, $recorder,
+                "{$voucher->number}: not justified by ".$voucher->settle_due_on?->toDateString().' — the whole advance is owed until receipts or the cash come back');
+        }
+
+        return $overdue->count();
+    }
+
+    /**
      * Justifies a cash advance: what was spent (backed by a photo of its
      * receipts, becomes the Expenditure) plus the change returned. Whatever
      * neither covers is the requester's shortage (owner, 2026-10-29: whoever
@@ -452,6 +516,18 @@ class VoucherService
             if ($locked->kind !== Voucher::KIND_ADVANCE || $locked->status !== 'paid') {
                 throw ValidationException::withMessages(['spent_amount' => 'Only a paid cash advance can be settled.']);
             }
+
+            // Receipts brought after the deadline: the overdue shortage gives
+            // way to what this settlement finds missing (opened below).
+            CashShortage::query()->open()->where('kind', CashShortage::KIND_ADVANCE)
+                ->where('source_type', $locked->getMorphClass())->where('source_id', $locked->id)
+                ->lockForUpdate()->get()
+                ->each(fn (CashShortage $overdue) => $overdue->update([
+                    'status' => CashShortage::STATUS_JUSTIFIED,
+                    'settled_by' => $actor->id,
+                    'settled_at' => now(),
+                    'settled_note' => 'Receipts brought late — settled on '.BusinessTimezone::today(),
+                ]));
 
             if ($categoryUuid !== null) {
                 $locked->expense_category_id = ExpenseCategory::query()->where('uuid', $categoryUuid)->value('id');
@@ -488,7 +564,7 @@ class VoucherService
             $unaccounted = bcsub((string) $locked->amount, bcadd($spent, $returned, 2), 2);
 
             if (bccomp($unaccounted, '0', 2) > 0) {
-                app(ShortageService::class)->open($locked->requested_by, $locked->branch_id, $unaccounted, CashShortage::KIND_ADVANCE, $locked, $actor,
+                app(ShortageService::class)->open($locked->advanceHolderId(), $locked->branch_id, $unaccounted, CashShortage::KIND_ADVANCE, $locked, $actor,
                     "{$locked->number}: advance not accounted for by receipts or change".($note ? " — {$note}" : ''));
             }
 
@@ -671,7 +747,7 @@ class VoucherService
      */
     private function escalate(Voucher $locked, array $reasons): void
     {
-        $approvers = $this->stakeholderApprovers($locked->requested_by);
+        $approvers = $this->stakeholderApprovers($locked->requested_by, $locked->payee_user_id, $locked->salary_user_id);
 
         $locked->update([
             'approval_tier' => Voucher::TIER_STAKEHOLDERS,
@@ -697,7 +773,7 @@ class VoucherService
         }
 
         // Every stakeholder who is still an investor must have approved.
-        $stillRequired = array_values(array_intersect($required, $this->stakeholderApprovers($voucher->requested_by)['ids']));
+        $stillRequired = array_values(array_intersect($required, $this->stakeholderApprovers($voucher->requested_by, $voucher->payee_user_id, $voucher->salary_user_id)['ids']));
 
         return $stillRequired === [] || array_diff($stillRequired, $approvedBy) === [];
     }

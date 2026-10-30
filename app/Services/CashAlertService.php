@@ -507,6 +507,11 @@ class CashAlertService
                 ->where('kind', Voucher::KIND_ADVANCE)
                 ->where('status', 'paid')
                 ->whereDate('settle_due_on', '<', BusinessTimezone::today())
+                // Once the nightly sweep made it a shortage, it is listed with the owned shortages.
+                ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('cash_shortages')
+                    ->whereColumn('cash_shortages.source_id', 'vouchers.id')
+                    ->where('cash_shortages.source_type', (new Voucher)->getMorphClass())
+                    ->where('cash_shortages.kind', CashShortage::KIND_ADVANCE))
                 ->get()
                 ->map(fn (Voucher $voucher): array => $this->voucherItem($voucher, 'Due '.$voucher->settle_due_on?->toDateString()))
                 ->all());

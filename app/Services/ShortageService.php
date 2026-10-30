@@ -6,7 +6,9 @@ namespace App\Services;
 
 use App\Models\CashMovement;
 use App\Models\CashShortage;
+use App\Models\Scopes\BranchScope;
 use App\Models\User;
+use App\Models\Voucher;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -93,7 +95,34 @@ class ShortageService
                 'settled_note' => $note,
             ]);
 
+            $this->closeOverdueAdvance($locked, $outcome, $actor, $note);
+
             return $locked;
         });
+    }
+
+    /**
+     * An overdue advance (VoucherService::openOverdueAdvanceShortages()) is
+     * closed by its shortage: once the cash is repaid or the loss written
+     * off, nothing is left to justify.
+     */
+    private function closeOverdueAdvance(CashShortage $shortage, string $outcome, User $actor, ?string $note): void
+    {
+        if ($shortage->kind !== CashShortage::KIND_ADVANCE || $shortage->source_type !== (new Voucher)->getMorphClass()) {
+            return;
+        }
+
+        // A model update, not a query one: the audit log sees the advance close.
+        Voucher::query()->withoutGlobalScope(BranchScope::class)
+            ->whereKey($shortage->source_id)->where('kind', Voucher::KIND_ADVANCE)->where('status', 'paid')
+            ->first()?->update([
+                'status' => 'settled',
+                'spent_amount' => 0,
+                'returned_amount' => 0,
+                'settled_by' => $actor->id,
+                'settled_at' => now(),
+                'settlement_note' => ($outcome === CashShortage::STATUS_REPAID ? 'Not justified in time — the cash was repaid' : 'Not justified in time — written off')
+                    .($note ? ": {$note}" : ''),
+            ]);
     }
 }

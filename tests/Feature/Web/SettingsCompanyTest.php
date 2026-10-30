@@ -95,6 +95,17 @@ class SettingsCompanyTest extends TestCase
         $this->assertDatabaseHas('companies', ['tech_number' => '699445566']);
     }
 
+    public function test_the_people_who_confirm_a_deposit_are_set_to_one_or_two(): void
+    {
+        $this->actingAsRole('admin');
+
+        $this->patch('/settings/company', $this->fullPayload(['deposit_confirmations' => 1]))->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('companies', ['deposit_confirmations' => 1]);
+        $this->get('/settings/company')->assertInertia(fn ($page) => $page->where('company.deposit_confirmations', 1));
+
+        $this->patch('/settings/company', $this->fullPayload(['deposit_confirmations' => 3]))->assertSessionHasErrors('deposit_confirmations');
+    }
+
     public function test_admin_can_edit_and_clear_the_technical_support_number(): void
     {
         $this->actingAsRole('admin');
