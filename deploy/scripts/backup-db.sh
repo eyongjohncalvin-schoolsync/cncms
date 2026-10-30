@@ -4,9 +4,8 @@
 # $BACKUP_DIR (default ~/backups/cncms), keeps 14 days (never fewer than 3
 # files). The deploy script calls it too, before every deploy.
 #
-# THIS ONLY PROTECTS AGAINST DATA LOSS IF YOU COPY IT OFF THE SERVER.
-# e.g. from your own machine:
-#   rsync -az ploi@YOUR_DOMAIN:backups/cncms/ ~/cncms-backups/
+# THIS ONLY PROTECTS AGAINST DATA LOSS IF IT IS COPIED OFF THE SERVER —
+# offsite-backup.sh does that every night (deploy/PLOI.md §5c).
 set -euo pipefail
 
 DEST="${BACKUP_DIR:-$HOME/backups/cncms}"

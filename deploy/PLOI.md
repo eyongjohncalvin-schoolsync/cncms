@@ -145,9 +145,9 @@ It writes to `~/backups/cncms` and deletes backups older than 14 days
 morning after setting it up: before 2026-10-25 the script misread `.env`
 and failed every run without saying so. The deploy script above also takes
 one before every deploy. **Copy those off the
-server** (rsync from your own machine, or Ploi's backup feature if your
-plan includes it), along with `storage/` (logos and issued receipt PDFs
-can't be regenerated). A lost VPS without an off-server copy means lost data.
+server** — §5c does it every night, with `storage/` (logos and issued
+receipt PDFs can't be regenerated). A lost VPS without an off-server copy
+means lost data.
 
 ## 5b. Cache on Redis
 
@@ -183,6 +183,66 @@ off the database. Sessions and the queue stay on the database.
 Per-tenant isolation is automatic: App\Tenancy\CacheTenancyBootstrapper tags
 every cache call with the tenant on a store that supports tags (Redis does).
 **Undo:** `CACHE_STORE=database`, then step 5.
+
+## 5c. Off-server backups (Backblaze B2)
+
+The dumps above sit on the same VPS: lose the server and they go with it.
+`deploy/scripts/offsite-backup.sh` copies them every night to Backblaze B2,
+**encrypted on the server first**, with `storage/app` (issued receipt PDFs,
+logos, voucher photos — none can be regenerated). It only adds files;
+deleting on the server never deletes on B2.
+
+**1. Backblaze** (backblaze.com → B2 Cloud Storage, first 10 GB free):
+- **Buckets → Create a bucket:** a unique name (e.g. `cncms-backups-7k2q`),
+  **Private**, **Object Lock: Enable** with a default retention of **30 days**
+  (Governance). For 30 days nobody can delete a copy, not even someone who
+  breaks into the server.
+- **Lifecycle settings → custom rule:** prefix `cncms/db/`, hide files after
+  **90** days, delete hidden files after **1** day. Old dumps go after 90
+  days; `cncms/storage/` is kept.
+- **Application Keys → Add a New Application Key:** only that bucket,
+  **Read and Write**. Copy the **keyID** and **applicationKey** at once (the
+  key is shown only once).
+
+**2. On the server**, SSH in as the site user (`cncms-eyyyd`):
+
+```bash
+bash ~/cncms.tech/deploy/scripts/offsite-backup.sh --install   # rclone into ~/bin, no root
+cat > ~/.cncms-offsite.env <<'EOF'
+B2_KEY_ID=the keyID
+B2_APP_KEY=the applicationKey
+B2_BUCKET=cncms-backups-7k2q
+BACKUP_PASSPHRASE=a long passphrase only you know
+HEALTHCHECK_URL=
+EOF
+chmod 600 ~/.cncms-offsite.env
+bash ~/cncms.tech/deploy/scripts/offsite-backup.sh          # first copy; ends with "ok …"
+bash ~/cncms.tech/deploy/scripts/offsite-backup.sh --list   # what is on B2
+```
+
+**Keep `BACKUP_PASSPHRASE` and the app's `APP_KEY` in your password manager.**
+Without the passphrase the copies can't be opened; without `APP_KEY` the
+restored app can't read its own receipt codes.
+
+**3. Ploi → server → Cron jobs**, as the site user, after the nightly dump:
+`45 3 * * *` → `bash /home/cncms-eyyyd/cncms.tech/deploy/scripts/offsite-backup.sh`
+
+**4. Be told when a night fails (optional, free):** healthchecks.io → add a
+check, period **1 day**, grace **2 hours**, your email. Put its ping URL in
+`HEALTHCHECK_URL`. A night that fails — or never runs — emails you.
+Each run is also logged in `~/cncms-offsite.log`.
+
+**Restore** (any machine with rclone, or the new server after `--install`, with
+the same `~/.cncms-offsite.env`):
+
+```bash
+bash offsite-backup.sh --list
+bash offsite-backup.sh --fetch db/cncms-2026-10-30-0315.sql.gz ~/restore   # decrypted
+bash offsite-backup.sh --fetch storage ~/cncms.tech/storage/app            # the uploaded files
+```
+
+Then load the dump as in [`BLUE-GREEN.md`](./BLUE-GREEN.md) §4 (into a new
+database, point `DB_DATABASE` at it).
 
 ## 6. First deploy, then the data
 
