@@ -47,7 +47,7 @@ class ManagerInboxService
             ...$this->vouchersFor($user, $context),
             ...$this->complaintsFor($context),
             ...$this->arrearsFor($user),
-            ...$this->reversalsFor($user),
+            ...$this->reversalsFor($user, $context),
             ...$this->countsFor($context),
         ];
 
@@ -149,7 +149,7 @@ class ManagerInboxService
     /**
      * @return list<array<string, mixed>>
      */
-    private function reversalsFor(User $user): array
+    private function reversalsFor(User $user, TenantContext $context): array
     {
         return PaymentReversalRequest::query()
             ->where('status', PaymentReversalRequest::STATUS_PENDING)
@@ -157,7 +157,8 @@ class ManagerInboxService
             ->latest()
             ->limit(self::LIMIT)
             ->get()
-            ->filter(fn (PaymentReversalRequest $request) => $request->payment !== null && $user->can('declineReversal', $request->payment))
+            // Office work: not for a collector fenced to their own zones.
+            ->filter(fn (PaymentReversalRequest $request) => $request->payment !== null && $context->zoneIds === null && $user->can('declineReversal', $request->payment))
             ->map(fn (PaymentReversalRequest $request) => $this->item(
                 'reversal_request',
                 $request->uuid,

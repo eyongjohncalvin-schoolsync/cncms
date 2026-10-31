@@ -1,5 +1,6 @@
 import * as Device from 'expo-device';
 import { apiClient } from './client';
+import { getOrCreateDeviceId } from '../db/syncMeta';
 import type {
     LoginResponse,
     LoginResult,
@@ -86,8 +87,10 @@ export async function fetchMe(): Promise<MeResponse> {
     return data;
 }
 
+/** Also unregisters this phone from push, so a shared phone stops getting
+ * the signed-out person's alerts (manager inbox, wave 2). */
 export async function logout(): Promise<void> {
-    await apiClient.post('/auth/logout');
+    await apiClient.post('/auth/logout', { device_id: await getOrCreateDeviceId() });
 }
 
 /** PATCH /auth/profile — self-service name/username update. See

@@ -1,5 +1,12 @@
 import type { ExpoConfig, ConfigContext } from 'expo/config';
 
+// This file is evaluated by Node (Expo CLI / EAS) but type-checked with the
+// app's React Native types, which have no Node typings.
+declare const require: (id: string) => { existsSync: (path: string) => boolean };
+const { existsSync } = require('fs');
+
+const GOOGLE_SERVICES_FILE = './google-services.json';
+
 /**
  * Dynamic config (app.config.ts) instead of static app.json, so the API
  * base URL and other environment-dependent values can be read from process
@@ -49,6 +56,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
             monochromeImage: './assets/android-icon-monochrome.png',
         },
         predictiveBackGestureEnabled: false,
+        // Phone push needs Firebase on Android (deploy/MOBILE-DISTRIBUTION.md,
+        // "Phone alerts"): picked up when the file is present, so a build
+        // without it still works — just without push.
+        ...(existsSync(GOOGLE_SERVICES_FILE) ? { googleServicesFile: GOOGLE_SERVICES_FILE } : {}),
     },
     web: {
         favicon: './assets/favicon.png',

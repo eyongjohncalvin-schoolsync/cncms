@@ -9,6 +9,7 @@ import { MaintenanceBanner } from '../../src/components/ui/MaintenanceBanner';
 import { getNotificationsState, subscribeNotificationsState } from '../../src/notifications/notificationStore';
 import { getInboxState, refreshInbox, subscribeInboxState } from '../../src/inbox/inboxStore';
 import { useAuth } from '../../src/auth/AuthContext';
+import { usePushNotifications } from '../../src/notifications/usePushNotifications';
 import { colors } from '../../src/theme/colors';
 import { fontSize } from '../../src/theme/tokens';
 
@@ -82,6 +83,7 @@ export default function TabsLayout() {
     // items. Deciders refresh it every two minutes; everyone else checks
     // once, so an investor sent a voucher still sees the tab.
     const { can } = useAuth();
+    usePushNotifications();
     const inbox = useSyncExternalStore(subscribeInboxState, getInboxState);
     const decides = INBOX_PERMISSIONS.some((permission) => can(permission));
     const showInbox = decides || inbox.items.length > 0;

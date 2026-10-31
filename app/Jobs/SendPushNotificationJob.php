@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Models\DevicePushToken;
 use App\Models\Notification;
 use App\Models\PushTicket;
+use App\Models\User;
 use App\Repositories\Contracts\PushTokenRepositoryInterface;
 use App\Services\ExpoPushService;
 use App\Support\PushNotifications\PushTemplates;
@@ -15,6 +16,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Collection;
 use Throwable;
 
 /**
@@ -30,8 +32,10 @@ use Throwable;
  * unconditional dispatch — the job itself is the one place "should this
  * push at all" is decided):
  *
- *   1. severity — only 'urgent'/'emergency' ever push (info/warning never
- *      do, full stop — the core "don't flood agents" decision).
+ *   1. severity — 'urgent'/'emergency' push; a 'warning' addressed to one
+ *      person pushes silently (the manager inbox's "Today" alerts, wave 2
+ *      of docs/plans/mobile-manager-app.md); 'info' never does — the core
+ *      "don't flood people" decision.
  *   2. audience — even when the underlying notification's own audience is
  *      broader (e.g. a full-staff emergency broadcast), push only reaches
  *      the `agent` role subset; every other role already sees it via the
@@ -52,6 +56,14 @@ class SendPushNotificationJob implements ShouldQueue
     /** Expo's push send endpoint accepts at most 100 messages per request. */
     private const CHUNK_SIZE = 100;
 
+    /** Looks for a not-yet-committed notification this many times. */
+    private const int TRIES = 3;
+
+    public int $tries = self::TRIES;
+
+    /** @var list<int> recipients in their quiet hours, worked out once per send */
+    private array $quietUserIds = [];
+
     public function __construct(
         public readonly string $notificationUuid,
     ) {}
@@ -61,10 +73,21 @@ class SendPushNotificationJob implements ShouldQueue
         $notification = Notification::query()->where('uuid', $this->notificationUuid)->first();
 
         if (! $notification) {
+            // Created inside a transaction that hasn't committed yet: look
+            // again shortly. Still missing after that = rolled back, so no push.
+            if ($this->attempts() < self::TRIES) {
+                $this->release(10);
+            }
+
             return;
         }
 
-        if (! in_array($notification->severity, ['urgent', 'emergency'], true)) {
+        // urgent/emergency push; a `warning` addressed to one person pushes
+        // too, silently (the manager inbox's "Today" alerts). Info never does.
+        $pushes = in_array($notification->severity, ['urgent', 'emergency'], true)
+            || ($notification->severity === 'warning' && $notification->broadcast_scope === 'user');
+
+        if (! $pushes) {
             return;
         }
 
@@ -76,18 +99,24 @@ class SendPushNotificationJob implements ShouldQueue
 
         $template = PushTemplates::resolve($notification->type, $notification->severity);
 
+        // Recipients in their quiet hours get an urgent alert silently.
+        $this->quietUserIds = $notification->severity === 'urgent'
+            ? User::query()->whereIn('id', $tokens->pluck('user_id')->unique())->get(['id', 'alert_quiet_start', 'alert_quiet_end'])
+                ->filter(fn (User $user): bool => $user->inQuietHours())->pluck('id')->map(fn ($id): int => (int) $id)->all()
+            : [];
+
         foreach ($tokens->chunk(self::CHUNK_SIZE) as $chunk) {
             $this->sendChunk($notification, $chunk->values(), $template, $expo, $pushTokens);
         }
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, DevicePushToken>  $chunk
+     * @param  Collection<int, DevicePushToken>  $chunk
      * @param  array{title: string, body: string}  $template
      */
     private function sendChunk(
         Notification $notification,
-        \Illuminate\Support\Collection $chunk,
+        Collection $chunk,
         array $template,
         ExpoPushService $expo,
         PushTokenRepositoryInterface $pushTokens,
@@ -96,13 +125,7 @@ class SendPushNotificationJob implements ShouldQueue
             'to' => $token->expo_push_token,
             'title' => $template['title'],
             'body' => $template['body'],
-            'priority' => 'high',
-            'sound' => 'default',
-            // Matches the Android notification channel id created on the
-            // mobile client (src/notifications/registerPushToken.ts) —
-            // emergency gets the high-importance/heads-up channel, urgent
-            // the default-importance/tray-only channel.
-            'channelId' => $notification->severity,
+            ...$this->delivery($notification, $token),
             'data' => [
                 'notification_uuid' => $notification->uuid,
                 'link' => $notification->link,
@@ -141,6 +164,24 @@ class SendPushNotificationJob implements ShouldQueue
                 report($e);
             }
         }
+    }
+
+    /**
+     * How it arrives. The channel ids match the Android channels the app
+     * creates (mobile/src/notifications): `emergency` heads-up, `urgent`
+     * with sound, `quiet` without — used for a `warning` and for an urgent
+     * alert during the recipient's quiet hours. Emergencies always ring.
+     *
+     * @return array{priority: string, sound: string|null, channelId: string}
+     */
+    private function delivery(Notification $notification, DevicePushToken $token): array
+    {
+        $quiet = $notification->severity === 'warning'
+            || ($notification->severity === 'urgent' && in_array((int) $token->user_id, $this->quietUserIds, true));
+
+        return $quiet
+            ? ['priority' => 'normal', 'sound' => null, 'channelId' => 'quiet']
+            : ['priority' => 'high', 'sound' => 'default', 'channelId' => $notification->severity];
     }
 
     /**

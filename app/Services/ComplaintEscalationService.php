@@ -248,16 +248,40 @@ class ComplaintEscalationService
      * doc comment already reads "manager-only" as inclusive-of-tier
      * language elsewhere in this same feature.
      */
+    /**
+     * Someone was just given this complaint (ComplaintService::assign, web
+     * or phone): their phone rings now (manager inbox, wave 2). The first
+     * assignment is Level 0 itself, logged so the sweep doesn't repeat it;
+     * a reassignment alerts the new technician on top of it.
+     */
+    public function announceAssignment(Complaint $complaint): void
+    {
+        $complaint->unsetRelation('assignedTo');
+
+        if (! in_array(0, $this->firedLevels($complaint), true)) {
+            $this->fireLevel0($complaint);
+
+            return;
+        }
+
+        $assignee = User::query()->find($complaint->assigned_to);
+
+        if ($assignee !== null) {
+            $this->notifications->broadcastToUser($assignee, 'complaint.assigned', 'urgent', $this->title(0), $this->body($complaint, 0), $this->link($complaint), branchId: $complaint->branch_id);
+        }
+    }
+
     private function fireLevel0(Complaint $complaint): void
     {
         DB::transaction(function () use ($complaint): void {
             $assignee = $complaint->assignedTo ?? User::query()->find($complaint->assigned_to);
 
             if ($assignee !== null) {
+                // Rings on the technician's phone (PushTemplates 'complaint.assigned').
                 $this->notifications->broadcastToUser(
                     $assignee,
                     'complaint.assigned',
-                    'info',
+                    'urgent',
                     $this->title(0),
                     $this->body($complaint, 0),
                     $this->link($complaint),

@@ -53,6 +53,7 @@ class ArrearsAdjustmentService
         private readonly CustomerManuscriptRecalculationService $recalculator,
         private readonly NotificationService $notifications,
         private readonly ManuscriptRunLockService $runLock,
+        private readonly ActionAlertService $actionAlerts,
     ) {}
 
     /**
@@ -178,6 +179,19 @@ class ArrearsAdjustmentService
         // New pending request → pending_approval count moved.
         $this->bumpDashboardVersion();
 
+        // Whoever can approve it hears about it (manager inbox, wave 2).
+        $this->actionAlerts->alert(
+            $this->actionAlerts->deciders('arrears.approve', $adjustment->branch_id, $requestedByUserId),
+            'inbox.arrears',
+            'warning',
+            'Arrears adjustment to approve',
+            "{$customer->name}: {$adjustment->direction} of {$adjustment->amount} FCFA for {$adjustment->target_period}",
+            '/arrears-adjustments',
+            'arrears_adjustment',
+            $adjustment->uuid,
+            $adjustment->branch_id,
+        );
+
         return $adjustment->load(['customer.zone', 'requestedBy']);
     }
 
@@ -300,6 +314,21 @@ class ArrearsAdjustmentService
         // cheap to over-invalidate. Bumped outside the transaction so a
         // rolled-back approval never bumps.
         $this->bumpDashboardVersion();
+
+        // Now waiting for the second, senior approval: tell who can give it.
+        if ($result->status === 'pending_second_approval') {
+            $this->actionAlerts->alert(
+                $this->actionAlerts->withRoles(['super', 'admin'], [(int) $result->requested_by, $actor->id]),
+                'inbox.arrears',
+                'warning',
+                'Arrears adjustment needs a second approval',
+                "{$result->customer?->name}: {$result->amount} for {$result->target_period}, approved once by {$actor->name}",
+                '/arrears-adjustments',
+                'arrears_adjustment',
+                $result->uuid,
+                $result->branch_id,
+            );
+        }
 
         return $result;
     }

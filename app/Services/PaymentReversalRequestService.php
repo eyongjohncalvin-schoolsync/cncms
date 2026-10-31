@@ -21,7 +21,7 @@ class PaymentReversalRequestService
 {
     public function __construct(
         private readonly NotificationService $notifications,
-        private readonly CashNotificationService $cashNotifier,
+        private readonly ActionAlertService $actionAlerts,
     ) {}
 
     public function request(Payment $payment, User $requester, string $reason): PaymentReversalRequest
@@ -52,15 +52,17 @@ class PaymentReversalRequestService
         $payment->loadMissing('customer');
         $amount = number_format((float) $payment->amount, 0, '.', ' ');
 
-        $this->cashNotifier->toHoldersOf(
-            'payments.verify',
-            'payment.reversal_requested',
+        // Each office decider, to their phone (manager inbox, wave 2).
+        $this->actionAlerts->alert(
+            $this->actionAlerts->deciders('payments.verify', $payment->branch_id, $requester->id, officeOnly: true),
+            'inbox.reversal',
             'warning',
             'Reversal requested',
             "{$requester->name} asks to reverse {$payment->customer?->name}'s payment of {$amount} FCFA: {$request->reason}",
             "/payments/{$payment->uuid}",
             'payment',
             $payment->uuid,
+            $payment->branch_id,
         );
 
         return $request;

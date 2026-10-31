@@ -35,6 +35,7 @@ class ComplaintService
         private readonly ComplaintRepositoryInterface $complaints,
         private readonly CustomerRepositoryInterface $customers,
         private readonly ComplaintEscalationService $escalations,
+        private readonly ActionAlertService $actionAlerts,
     ) {}
 
     /**
@@ -88,6 +89,22 @@ class ComplaintService
             'customer_id' => $customerId,
             'zone_id' => $zoneId,
         ], (int) $branchId);
+
+        // Nobody on it yet: whoever assigns technicians hears about it at
+        // once (manager inbox, wave 2) — an urgent complaint rings.
+        if ($complaint->assigned_to === null) {
+            $this->actionAlerts->alert(
+                $this->actionAlerts->deciders('complaints.assign', $complaint->branch_id, $submittedByUserId),
+                'inbox.complaint',
+                $complaint->urgent ? 'urgent' : 'warning',
+                $complaint->urgent ? 'Urgent complaint to assign' : 'New complaint to assign',
+                $complaint->title,
+                "/complaints/{$complaint->uuid}",
+                'complaint',
+                $complaint->uuid,
+                $complaint->branch_id,
+            );
+        }
 
         return $complaint->load(['submittedBy', 'customer.zone', 'zone']);
     }
@@ -223,7 +240,12 @@ class ComplaintService
             throw ValidationException::withMessages(['assignee_uuid' => ["{$assignee->name} can't take complaints of this branch."]]);
         }
 
-        return $this->complaints->update($complaint, ['assigned_to' => $assignee->id]);
+        $complaint = $this->complaints->update($complaint, ['assigned_to' => $assignee->id]);
+
+        // The technician's phone rings now, not at the next escalation sweep.
+        $this->escalations->announceAssignment($complaint);
+
+        return $complaint;
     }
 
     /**

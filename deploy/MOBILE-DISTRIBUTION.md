@@ -192,6 +192,39 @@ added 2026-10-25 — builds before that have no updater and must install
 
 ---
 
+## Phone alerts (push) — one-time Firebase setup
+
+The server sends alerts (vouchers to approve, complaints to assign, a
+technician's new job, escalations) through Expo's push service, which on
+Android delivers through Google's Firebase Cloud Messaging. Until this is
+done the app works exactly as before — alerts show in its notification list
+on the next sync — but phones don't ring. Free.
+
+1. **Firebase project:** <https://console.firebase.google.com> → Add project
+   (any name, e.g. `cncms`; Google Analytics not needed).
+2. **Android app in it:** Add app → Android → package name
+   `com.shalomtech.cncms.mobile` (exactly, from `mobile/app.config.ts`) →
+   Register → **download `google-services.json`** → save it as
+   `mobile/google-services.json` and commit it (it is not a secret; it ships
+   inside every APK). `app.config.ts` picks it up automatically.
+3. **Key for Expo:** Firebase → Project settings → Service accounts →
+   **Generate new private key** (a JSON file — this one IS secret: never
+   commit or share it). Then in a terminal: `cd mobile && eas credentials`
+   → Android → production/preview → **Google Service Account → FCM V1** →
+   upload that JSON. Delete the file from your computer afterwards.
+4. **New build:** this adds native configuration, so it ships as a new APK
+   (bump `version`, `eas build`, release as in the table above) — an
+   over-the-air update can't carry it.
+5. **Check:** sign in on a phone with the new APK, allow notifications when
+   asked, then create a voucher from another account — the approver's phone
+   should ring within seconds.
+
+Alert sounds are per type: "Needs you now" rings, "Quiet updates" doesn't,
+"Emergencies" always ring — each person can set quiet hours in the app
+(More → Alerts).
+
+---
+
 ## iOS (deferred)
 
 `ios_url` stays null and the `/agent-app` page hides the iOS option. iOS

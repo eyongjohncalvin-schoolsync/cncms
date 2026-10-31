@@ -4,8 +4,9 @@
  * split as src/utils/emergencyState.ts) so this is unit-testable without
  * expo-notifications/expo-router.
  *
- * Both destinations already exist (app/emergency.tsx, app/notifications.tsx)
- * — there is no per-complaint detail screen on mobile (no
+ * The destinations are app/emergency.tsx, app/notifications.tsx and the
+ * manager inbox tab (app/(tabs)/inbox.tsx) — there is no per-complaint
+ * detail screen on mobile (no
  * `/complaints/[uuid]` route), so this deliberately never tries to route
  * anywhere more specific than that, regardless of what `link`/`source_type`
  * the push payload carries.
@@ -18,15 +19,28 @@
  * "acknowledged," even weaker than "read." This function only ever decides
  * WHERE to navigate, never calls any acknowledge/read state mutation.
  */
-export type PushTapTarget = '/emergency' | '/notifications';
+export type PushTapTarget = '/emergency' | '/notifications' | '/inbox';
 
 export interface PushTapData {
     /** The `data.severity` field App\Jobs\SendPushNotificationJob puts on
      * every Expo push payload — see that job's class doc. Untyped/optional
      * here since it arrives over the wire as arbitrary JSON. */
     severity?: string;
+    /** The notification `type` on the same payload, e.g. `inbox.voucher`. */
+    type?: string;
 }
 
+/** Alerts about something to decide (docs/plans/mobile-manager-app.md, wave 2). */
+const INBOX_TYPES = ['voucher.stakeholder_approval'];
+
 export function resolvePushTapTarget(data: PushTapData): PushTapTarget {
-    return data.severity === 'emergency' ? '/emergency' : '/notifications';
+    if (data.severity === 'emergency') {
+        return '/emergency';
+    }
+
+    if (typeof data.type === 'string' && (data.type.startsWith('inbox.') || INBOX_TYPES.includes(data.type))) {
+        return '/inbox';
+    }
+
+    return '/notifications';
 }

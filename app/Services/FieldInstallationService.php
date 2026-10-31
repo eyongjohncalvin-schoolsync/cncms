@@ -161,6 +161,19 @@ class FieldInstallationService
                 $payment->forceFill(['field_installation_id' => $fieldInstallation->id])->save();
             }
 
+            // Whoever activates new customers hears about it (manager inbox, wave 2).
+            app(ActionAlertService::class)->alert(
+                app(ActionAlertService::class)->deciders('installations.activate', $result['customer']->branch_id, $actor->id),
+                'inbox.activation',
+                'warning',
+                'New customer to activate',
+                "{$actor->name} registered {$result['customer']->name} in the field.",
+                '/customers?pending_activation=1',
+                'field_installation',
+                $fieldInstallation->uuid,
+                $result['customer']->branch_id,
+            );
+
             return ['installation' => $fieldInstallation->setRelation('customer', $result['customer']), 'replayed' => false];
         });
     }

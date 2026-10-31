@@ -230,6 +230,7 @@ function RootNavigation() {
                 options={{ presentation: 'modal', headerShown: true, title: 'Complaints' }}
             />
             <Stack.Screen name="inbox-item" options={{ headerShown: true, title: 'Decision' }} />
+            <Stack.Screen name="alert-settings" options={{ presentation: 'modal', headerShown: true, title: 'Alerts' }} />
             <Stack.Screen
                 name="manuscript"
                 options={{ presentation: 'modal', headerShown: true, title: 'Manuscript' }}

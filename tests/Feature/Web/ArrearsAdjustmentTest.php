@@ -118,7 +118,7 @@ class ArrearsAdjustmentTest extends TestCase
     {
         $this->actingAsRole('manager');
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500]);
-        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+        ManuscriptFactory::new()->forPeriod(now()->subMonthNoOverflow()->format('Y-m'))->create([
             'customer_id' => $customer->id,
             'bill' => 2500,
             'total_arrears' => 8000,
@@ -144,7 +144,7 @@ class ArrearsAdjustmentTest extends TestCase
     public function test_a_small_adjustment_is_approved_in_one_step_and_actually_reduces_the_customers_arrears(): void
     {
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
-        $previousPeriod = now()->subMonth()->format('Y-m');
+        $previousPeriod = now()->subMonthNoOverflow()->format('Y-m');
         $currentPeriod = now()->format('Y-m');
 
         ManuscriptFactory::new()->forPeriod($previousPeriod)->create([
@@ -190,7 +190,7 @@ class ArrearsAdjustmentTest extends TestCase
     public function test_a_large_adjustment_requires_a_second_approval_and_has_zero_ledger_effect_until_then(): void
     {
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
-        $previousPeriod = now()->subMonth()->format('Y-m');
+        $previousPeriod = now()->subMonthNoOverflow()->format('Y-m');
         $currentPeriod = now()->format('Y-m');
 
         ManuscriptFactory::new()->forPeriod($previousPeriod)->create([
@@ -259,7 +259,7 @@ class ArrearsAdjustmentTest extends TestCase
     public function test_a_super_can_approve_an_adjustment_they_requested_themselves_and_it_reaches_the_ledger(): void
     {
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
-        $previousPeriod = now()->subMonth()->format('Y-m');
+        $previousPeriod = now()->subMonthNoOverflow()->format('Y-m');
         $currentPeriod = now()->format('Y-m');
 
         ManuscriptFactory::new()->forPeriod($previousPeriod)->create([
@@ -331,7 +331,7 @@ class ArrearsAdjustmentTest extends TestCase
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
         $currentPeriod = now()->format('Y-m');
 
-        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+        ManuscriptFactory::new()->forPeriod(now()->subMonthNoOverflow()->format('Y-m'))->create([
             'customer_id' => $customer->id,
             'bill' => 2500,
             'total_arrears' => 10000,
@@ -368,7 +368,7 @@ class ArrearsAdjustmentTest extends TestCase
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
         $currentPeriod = now()->format('Y-m');
 
-        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+        ManuscriptFactory::new()->forPeriod(now()->subMonthNoOverflow()->format('Y-m'))->create([
             'customer_id' => $customer->id,
             'bill' => 2500,
             'total_arrears' => 30000,
@@ -462,7 +462,7 @@ class ArrearsAdjustmentTest extends TestCase
     public function test_a_repeat_adjustment_within_90_days_requires_a_second_approval_even_below_threshold(): void
     {
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
-        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+        ManuscriptFactory::new()->forPeriod(now()->subMonthNoOverflow()->format('Y-m'))->create([
             'customer_id' => $customer->id,
             'total_arrears' => 20000,
             'credit' => 0,
@@ -494,7 +494,7 @@ class ArrearsAdjustmentTest extends TestCase
     public function test_approval_is_blocked_when_the_customers_arrears_have_drifted_since_the_request(): void
     {
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
-        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+        ManuscriptFactory::new()->forPeriod(now()->subMonthNoOverflow()->format('Y-m'))->create([
             'customer_id' => $customer->id,
             'total_arrears' => 10000,
             'credit' => 0,
@@ -770,7 +770,7 @@ class ArrearsAdjustmentTest extends TestCase
     {
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
 
-        ManuscriptFactory::new()->forPeriod(now()->subMonth()->format('Y-m'))->create([
+        ManuscriptFactory::new()->forPeriod(now()->subMonthNoOverflow()->format('Y-m'))->create([
             'customer_id' => $customer->id,
             'bill' => 2500,
             'total_arrears' => $previousArrears,

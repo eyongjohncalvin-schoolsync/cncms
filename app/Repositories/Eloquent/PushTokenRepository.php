@@ -16,6 +16,10 @@ class PushTokenRepository implements PushTokenRepositoryInterface
 {
     public function register(int $userId, string $deviceId, string $expoPushToken, string $platform): DevicePushToken
     {
+        // The phone now belongs to this person: whoever used it before (and
+        // never signed out) stops getting alerts on it.
+        DevicePushToken::query()->where('expo_push_token', $expoPushToken)->where('user_id', '!=', $userId)->update(['is_valid' => false]);
+
         return DevicePushToken::query()->updateOrCreate(
             ['user_id' => $userId, 'device_id' => $deviceId],
             [
@@ -57,17 +61,12 @@ class PushTokenRepository implements PushTokenRepositoryInterface
     }
 
     /**
-     * Push-eligible recipients are always `role = 'agent'` AND NOT flagged
-     * `is_investor` (build spec: "even a full-staff emergency broadcast
-     * still only pushes to the agent subset"; "Investors never receive push
-     * at all — no mobile app presence"). The is_investor exclusion is
-     * applied unconditionally, across every broadcast_scope branch below —
-     * not just the 'role'='investor' case — since an investor genuinely has
-     * no mobile app installed regardless of how a given notification's
-     * audience happens to be addressed; a directly `user`-targeted or
-     * `role`='agent' notification must not push to them either, on the
-     * (currently hypothetical, but not assumed away) chance a tenant_users
-     * row is ever both role='agent' and is_investor=true.
+     * For broadcasts (`all` / `role`), push-eligible recipients are always
+     * `role = 'agent'` AND NOT flagged `is_investor` (build spec: "even a
+     * full-staff emergency broadcast still only pushes to the agent
+     * subset"). A `user`-addressed notification is the exception: it
+     * reaches that one person's phone whatever their role, investors
+     * included — they approve stakeholder vouchers from the app now.
      *
      * Beyond that fixed floor, this narrows further by $notification's own
      * audience shape, mirroring App\Models\Notification::matchesAudience()
@@ -75,9 +74,8 @@ class PushTokenRepository implements PushTokenRepositoryInterface
      *
      *   - broadcast_scope='all': every non-investor agent matches, no
      *     further filter.
-     *   - broadcast_scope='user': only the one targeted user_id, if they
-     *     happen to hold the agent role (a targeted non-agent user never
-     *     gets a push at all, by design).
+     *   - broadcast_scope='user': the one targeted user, ANY role (owner,
+     *     2026-10-31: managers act from the phone now) — see the method.
      *   - broadcast_scope='role': recipient_role='agent' matches every
      *     non-investor agent (already filtered); any other recipient_role
      *     value (including 'investor' — see rbac-permissions.md section 7)
@@ -87,6 +85,15 @@ class PushTokenRepository implements PushTokenRepositoryInterface
      */
     private function agentUserIdsInAudience(Notification $notification): Collection
     {
+        // A notification addressed to one person reaches that person's phone
+        // whatever their role — the manager inbox's alerts, a technician's
+        // assignment (docs/plans/mobile-manager-app.md, wave 2, superseding
+        // the agents-only rule above for `user` scope). Broadcasts to a
+        // role or to everyone keep reaching agents only.
+        if ($notification->broadcast_scope === 'user') {
+            return collect($notification->recipient_user_id !== null ? [(int) $notification->recipient_user_id] : []);
+        }
+
         $query = TenantUser::query()->where('role', 'agent')->where('is_investor', false);
 
         match ($notification->broadcast_scope) {

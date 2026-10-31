@@ -59,15 +59,46 @@ class PushNotificationDispatchTest extends TestCase
         ]);
     }
 
-    public function test_info_and_warning_severity_never_dispatch_a_push(): void
+    public function test_info_never_pushes_and_a_warning_only_when_addressed_to_one_person(): void
     {
         $this->registerToken($this->agent);
         Http::fake();
 
         app(NotificationService::class)->broadcastToUser($this->agent, 'test.info', 'info', 'T', 'B');
-        app(NotificationService::class)->broadcastToUser($this->agent, 'test.warning', 'warning', 'T', 'B');
+        app(NotificationService::class)->broadcastToRole('agent', 'test.warning', 'warning', 'T', 'B');
 
         Http::assertNothingSent();
+    }
+
+    public function test_a_warning_to_one_person_arrives_silently(): void
+    {
+        $this->registerToken($this->manager);
+        Http::fake(['https://exp.host/*' => Http::response(['data' => [['status' => 'ok', 'id' => 'ticket-quiet-1']]])]);
+
+        app(NotificationService::class)->broadcastToUser($this->manager, 'inbox.reversal', 'warning', 'T', 'B');
+
+        Http::assertSent(function (Request $request) {
+            $message = $request->data()[0];
+
+            return $message['channelId'] === 'quiet'
+                && $message['sound'] === null
+                && $message['priority'] === 'normal'
+                && $message['title'] === 'A collector asks to reverse a payment';
+        });
+    }
+
+    public function test_quiet_hours_silence_urgent_alerts_but_never_emergencies(): void
+    {
+        $this->travelTo('2026-11-02 22:30:00'); // 23:30 in Cameroon
+        $this->manager->forceFill(['alert_quiet_start' => '22:00', 'alert_quiet_end' => '06:00'])->save();
+        $this->registerToken($this->manager);
+        Http::fake(['https://exp.host/*' => Http::response(['data' => [['status' => 'ok', 'id' => 'ticket-night']]])]);
+
+        app(NotificationService::class)->broadcastToUser($this->manager, 'inbox.voucher', 'urgent', 'T', 'B');
+        app(NotificationService::class)->broadcastToUser($this->manager, 'complaint.escalated', 'emergency', 'T', 'B');
+
+        $channels = collect(Http::recorded())->map(fn (array $pair) => $pair[0]->data()[0]['channelId'])->all();
+        $this->assertSame(['quiet', 'emergency'], $channels);
     }
 
     public function test_urgent_and_emergency_dispatch_a_push_using_the_fixed_template_never_raw_title_or_body(): void
@@ -142,16 +173,29 @@ class PushNotificationDispatchTest extends TestCase
         });
     }
 
-    public function test_an_investor_flagged_agent_never_receives_a_push_even_when_targeted_directly(): void
+    public function test_an_investor_gets_pushes_addressed_to_them_but_never_broadcasts(): void
     {
         TenantUser::query()->where('user_id', $this->agent->id)->update(['is_investor' => true]);
         $this->registerToken($this->agent);
 
-        Http::fake();
+        Http::fake(['https://exp.host/*' => Http::response(['data' => [['status' => 'ok', 'id' => 'ticket-investor']]])]);
 
-        app(NotificationService::class)->broadcastToUser($this->agent, 'test.investor', 'emergency', 'T', 'B');
-
+        app(NotificationService::class)->broadcastToAll('test.staffwide', 'emergency', 'T', 'B');
         Http::assertNothingSent();
+
+        // Addressed to them, e.g. a stakeholder voucher to approve from the app.
+        app(NotificationService::class)->broadcastToUser($this->agent, 'voucher.stakeholder_approval', 'urgent', 'T', 'B');
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_manager_now_gets_pushes_addressed_to_them(): void
+    {
+        $this->registerToken($this->manager);
+        Http::fake(['https://exp.host/*' => Http::response(['data' => [['status' => 'ok', 'id' => 'ticket-manager']]])]);
+
+        app(NotificationService::class)->broadcastToUser($this->manager, 'inbox.voucher', 'urgent', 'T', 'B');
+
+        Http::assertSent(fn (Request $request) => $request->data()[0]['title'] === 'A voucher needs your approval' && $request->data()[0]['channelId'] === 'urgent');
     }
 
     public function test_a_devicenotregistered_ticket_error_immediately_invalidates_the_token(): void

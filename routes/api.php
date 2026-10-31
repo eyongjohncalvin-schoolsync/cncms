@@ -54,6 +54,9 @@ Route::prefix('v1')->group(function () {
             // as logout() above: both only ever touch the central `users`
             // table, never tenant-scoped data, so there's no tenant to resolve.
             Route::patch('auth/profile', [AuthController::class, 'updateProfile']);
+            // Quiet hours for phone alerts (docs/plans/mobile-manager-app.md, wave 2).
+            Route::get('auth/alerts', [AuthController::class, 'alertSettings']);
+            Route::put('auth/alerts', [AuthController::class, 'updateAlertSettings']);
             // Checks the current password, so as strict as a code check.
             Route::patch('auth/password', [AuthController::class, 'updatePassword'])->middleware('throttle:security-code-verify');
         });

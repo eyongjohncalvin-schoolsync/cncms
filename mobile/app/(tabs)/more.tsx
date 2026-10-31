@@ -104,6 +104,11 @@ export default function MoreScreen() {
                     href: '/notifications',
                 },
                 {
+                    title: 'Alerts',
+                    subtitle: 'Quiet hours: alerts without sound at night',
+                    href: '/alert-settings',
+                },
+                {
                     title: 'Sync Status',
                     subtitle: 'Pending uploads and last sync time',
                     href: '/sync-status',

@@ -21,6 +21,39 @@ final class PushTemplates
      * @return array{0: array<string, array{title: string, body: string}>, 1: array<string, array{title: string, body: string}>}
      */
     private const TABLE = [
+        // The manager inbox's alerts (App\Services\ActionAlertService).
+        'inbox.voucher' => [
+            'urgent' => ['title' => 'A voucher needs your approval', 'body' => 'Tap to decide in your inbox.'],
+        ],
+        'voucher.stakeholder_approval' => [
+            'urgent' => ['title' => 'A voucher needs your approval', 'body' => 'It is above the limits — every stakeholder must approve. Tap to decide.'],
+        ],
+        'inbox.arrears' => [
+            'warning' => ['title' => 'An arrears adjustment needs approval', 'body' => 'Tap to decide in your inbox.'],
+        ],
+        'inbox.reversal' => [
+            'warning' => ['title' => 'A collector asks to reverse a payment', 'body' => 'Tap to decide in your inbox.'],
+        ],
+        'inbox.complaint' => [
+            'urgent' => ['title' => 'An urgent complaint needs a technician', 'body' => 'Tap to assign someone.'],
+            'warning' => ['title' => 'A new complaint needs a technician', 'body' => 'Tap to assign someone.'],
+        ],
+        'inbox.activation' => [
+            'warning' => ['title' => 'A new customer waits for activation', 'body' => 'Registered in the field. Open the website to activate.'],
+        ],
+        'inbox.escalated' => [
+            'urgent' => ['title' => 'Waiting too long', 'body' => 'Something has waited hours for a decision. Tap to see it.'],
+        ],
+        'inbox.digest' => [
+            'warning' => ['title' => 'Your morning summary', 'body' => 'Tap to see what waits for you today.'],
+        ],
+        // Personal warnings that reach the phone silently since wave 2.
+        'voucher.rejected' => [
+            'warning' => ['title' => 'Your voucher was rejected', 'body' => 'Tap to see why.'],
+        ],
+        'remittance.received' => [
+            'warning' => ['title' => 'Your handover was short', 'body' => 'Tap to see the details.'],
+        ],
         'complaint.assigned' => [
             'urgent' => [
                 'title' => 'A complaint was assigned to you',
@@ -58,6 +91,10 @@ final class PushTemplates
      * this file for every new type.
      */
     private const FALLBACK = [
+        'warning' => [
+            'title' => 'New update',
+            'body' => 'Tap to view.',
+        ],
         'urgent' => [
             'title' => 'New alert',
             'body' => 'Tap to review.',

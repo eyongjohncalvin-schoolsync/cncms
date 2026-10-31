@@ -4,6 +4,8 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Models\Concerns\HasUuid;
+use App\Support\BusinessTimezone;
+use Carbon\CarbonInterface;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Connection;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -98,5 +100,22 @@ class User extends Authenticatable
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+
+    /**
+     * Inside this person's quiet hours for phone alerts (Cameroon time;
+     * the window may wrap past midnight, e.g. 22:00–06:00).
+     */
+    public function inQuietHours(?CarbonInterface $at = null): bool
+    {
+        if ($this->alert_quiet_start === null || $this->alert_quiet_end === null || $this->alert_quiet_start === $this->alert_quiet_end) {
+            return false;
+        }
+
+        $now = ($at ?? now())->copy()->setTimezone(BusinessTimezone::WAT)->format('H:i');
+
+        return $this->alert_quiet_start < $this->alert_quiet_end
+            ? $now >= $this->alert_quiet_start && $now < $this->alert_quiet_end
+            : $now >= $this->alert_quiet_start || $now < $this->alert_quiet_end;
     }
 }

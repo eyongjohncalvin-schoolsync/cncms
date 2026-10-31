@@ -51,6 +51,13 @@ Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping()
 Schedule::command('vouchers:advances-overdue')->dailyAt('00:45')->timezone('Africa/Lagos')->withoutOverlapping()
     ->skip(fn () => MaintenanceMode::active() !== null);
 
+// Manager alerts (docs/plans/mobile-manager-app.md, wave 2): ring the owner
+// about decisions left waiting too long, and a quiet morning summary.
+Schedule::command('alerts:escalate')->everyThirtyMinutes()->withoutOverlapping()
+    ->skip(fn () => MaintenanceMode::active() !== null);
+Schedule::command('alerts:digest')->dailyAt('07:00')->timezone('Africa/Lagos')->withoutOverlapping()
+    ->skip(fn () => MaintenanceMode::active() !== null);
+
 // Refused sign-ins are kept 90 days (App\Models\LoginFailure::prunable()).
 Schedule::command('model:prune', ['--model' => [LoginFailure::class]])->dailyAt('03:40')->timezone('Africa/Lagos')->withoutOverlapping();
 

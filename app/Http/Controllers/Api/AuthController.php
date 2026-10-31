@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdatePasswordRequest;
 use App\Http\Requests\UpdateProfileRequest;
 use App\Models\Company;
+use App\Models\DevicePushToken;
 use App\Models\LoginChallenge;
 use App\Models\LoginFailure;
 use App\Models\User;
@@ -97,11 +98,49 @@ class AuthController extends Controller
     }
 
     /**
+     * The signed-in person's quiet hours for phone alerts (Cameroon time):
+     * urgent alerts arrive silently in between; emergencies still ring.
+     */
+    public function alertSettings(Request $request): JsonResponse
+    {
+        return response()->json(['data' => $this->quietHours($request->user())]);
+    }
+
+    public function updateAlertSettings(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'quiet_start' => ['nullable', 'date_format:H:i', 'required_with:quiet_end', 'different:quiet_end'],
+            'quiet_end' => ['nullable', 'date_format:H:i', 'required_with:quiet_start'],
+        ]);
+
+        $request->user()->forceFill([
+            'alert_quiet_start' => $validated['quiet_start'] ?? null,
+            'alert_quiet_end' => $validated['quiet_end'] ?? null,
+        ])->save();
+
+        return response()->json(['data' => $this->quietHours($request->user())]);
+    }
+
+    /**
+     * @return array{quiet_start: string|null, quiet_end: string|null}
+     */
+    private function quietHours(User $user): array
+    {
+        return ['quiet_start' => $user->alert_quiet_start, 'quiet_end' => $user->alert_quiet_end];
+    }
+
+    /**
      * Revoke the token used to authenticate the current request.
      */
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();
+
+        // This phone stops getting the signed-out person's alerts (a shared
+        // phone must not ring for someone else). Other phones keep theirs.
+        if (is_string($request->input('device_id')) && $request->input('device_id') !== '') {
+            DevicePushToken::query()->where('user_id', $request->user()->id)->where('device_id', $request->input('device_id'))->update(['is_valid' => false]);
+        }
 
         return response()->json([
             'message' => 'Logged out',

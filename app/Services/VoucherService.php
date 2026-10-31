@@ -72,6 +72,7 @@ class VoucherService
         private readonly SpendingControlService $spending,
         private readonly NotificationService $notifications,
         private readonly CashNotificationService $cashNotifier,
+        private readonly ActionAlertService $actionAlerts,
     ) {}
 
     /**
@@ -813,14 +814,26 @@ class VoucherService
         $amount = number_format((float) $voucher->amount, 0, '.', ' ').' FCFA';
         $body = "{$voucher->requestedBy?->name} requests {$amount} for {$voucher->payee_name}: {$voucher->purpose}";
 
+        // Money waiting: an urgent alert to each person who can approve it
+        // (the manager inbox, docs/plans/mobile-manager-app.md wave 2).
         if (! $voucher->needsStakeholders()) {
-            $this->cashNotifier->toHoldersOf('vouchers.approve', 'voucher.requested', 'info', "Voucher {$voucher->number} to approve", $body, "/vouchers/{$voucher->uuid}", 'voucher', $voucher->uuid);
+            $this->actionAlerts->alert(
+                $this->actionAlerts->deciders('vouchers.approve', $voucher->branch_id, (int) $voucher->requested_by),
+                'inbox.voucher',
+                'urgent',
+                "Voucher {$voucher->number} to approve",
+                $body,
+                "/vouchers/{$voucher->uuid}",
+                'voucher',
+                $voucher->uuid,
+                $voucher->branch_id,
+            );
 
             return;
         }
 
         foreach (User::query()->whereIn('id', $voucher->requiredApproverIds())->get() as $approver) {
-            $this->notifications->broadcastToUser($approver, 'voucher.stakeholder_approval', 'warning', "Your approval is needed: {$voucher->number}", $body, "/vouchers/{$voucher->uuid}", 'voucher', $voucher->uuid);
+            $this->notifications->broadcastToUser($approver, 'voucher.stakeholder_approval', 'urgent', "Your approval is needed: {$voucher->number}", $body, "/vouchers/{$voucher->uuid}", 'voucher', $voucher->uuid);
 
             try {
                 Mail::to($approver->email)->queue(new VoucherApprovalMail($voucher, $approver->name));

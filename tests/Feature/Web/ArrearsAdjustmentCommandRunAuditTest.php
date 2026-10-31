@@ -110,7 +110,7 @@ class ArrearsAdjustmentCommandRunAuditTest extends TestCase
     public function test_approving_an_adjustment_logs_a_command_run_carrying_the_adjustment_id_and_approving_admins_id(): void
     {
         $customer = CustomerFactory::new()->active()->create(['bill' => 2500, 'others' => 0]);
-        $previousPeriod = now()->subMonth()->format('Y-m');
+        $previousPeriod = now()->subMonthNoOverflow()->format('Y-m');
         $currentPeriod = now()->format('Y-m');
 
         ManuscriptFactory::new()->forPeriod($previousPeriod)->create([
