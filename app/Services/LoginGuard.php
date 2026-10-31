@@ -8,6 +8,7 @@ use App\Mail\AccountBlockedMail;
 use App\Mail\LoginAttackAlertMail;
 use App\Models\LandlordActivity;
 use App\Models\LoginFailure;
+use App\Models\PlatformSetting;
 use App\Models\User;
 use App\Support\BusinessTimezone;
 use Illuminate\Database\Eloquent\Builder;
@@ -29,7 +30,7 @@ use Illuminate\Support\Facades\Mail;
  *   lock an owner out for good; email-code sign-in keeps working;
  * - too many from one IP address, whatever usernames were typed, block
  *   password sign-in from that address (the device block; trusted
- *   addresses excepted);
+ *   addresses excepted; a landlord can switch it off, e.g. at busy times);
  * - the account's owner is emailed when a block starts, and every
  *   landlord when a device is blocked or one IP fails on many accounts;
  * - a correct password, or a landlord's Unblock (Landlord → Security),
@@ -68,7 +69,7 @@ class LoginGuard
     {
         $config = config('rate-limits.login_block');
 
-        if ($ip === null || in_array($ip, $config['trusted_ips'], true)) {
+        if ($ip === null || in_array($ip, $config['trusted_ips'], true) || ! $this->deviceBlockEnabled()) {
             return null;
         }
 
@@ -171,6 +172,27 @@ class LoginGuard
     public function clearDevice(string $ip): int
     {
         return LoginFailure::query()->where('ip_address', $ip)->whereNull('ip_cleared_at')->update(['ip_cleared_at' => now()]);
+    }
+
+    /** The landlord's switch on Landlord → Security; on unless turned off. */
+    public function deviceBlockEnabled(): bool
+    {
+        return (bool) PlatformSetting::get(PlatformSetting::DEVICE_BLOCK, true);
+    }
+
+    /**
+     * Turns the device block on or off. Off releases every blocked address
+     * at once. Turning it back on starts every address from zero, so a busy
+     * shared network isn't blocked the moment it comes back on for failures
+     * made while it was off.
+     */
+    public function setDeviceBlock(bool $enabled, User $by): void
+    {
+        if ($enabled && ! $this->deviceBlockEnabled()) {
+            LoginFailure::query()->whereNull('ip_cleared_at')->update(['ip_cleared_at' => now()]);
+        }
+
+        PlatformSetting::put(PlatformSetting::DEVICE_BLOCK, $enabled, $by);
     }
 
     /**

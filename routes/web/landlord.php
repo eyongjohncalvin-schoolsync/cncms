@@ -70,6 +70,7 @@ Route::middleware(['auth', 'landlord', 'throttle:web'])->prefix('landlord')->nam
     Route::get('security', [SecurityController::class, 'index'])->name('security.index');
     Route::post('security/unblock', [SecurityController::class, 'unblock'])->name('security.unblock');
     Route::post('security/unblock-device', [SecurityController::class, 'unblockDevice'])->name('security.unblock-device');
+    Route::post('security/device-block', [SecurityController::class, 'deviceBlock'])->name('security.device-block');
 
     Route::get('backups', [BackupController::class, 'index'])->name('backups.index');
     Route::post('backups', [BackupController::class, 'store'])->middleware('throttle:exports')->name('backups.store');

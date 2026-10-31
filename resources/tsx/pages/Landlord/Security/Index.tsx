@@ -18,6 +18,7 @@ interface SecurityProps {
     blocked: (Person & { failures: number; until: string })[];
     blocked_devices: { ip_address: string; failures: number; accounts: number; until: string }[];
     your_ip: string | null;
+    device_block_enabled: boolean;
     ips: { ip_address: string; attempts: number; accounts: number; last_at: string }[];
     recent: (Person & { id: number; reason: 'password' | 'blocked'; channel: 'web' | 'mobile'; ip_address: string | null; user_agent: string | null; at: string; cleared: boolean })[];
     limits: { window_minutes: number; block_after: number; block_minutes: number; long_block_minutes: number; device_block_after: number; device_block_minutes: number; trusted_ips: string[]; ip_alert_accounts: number };
@@ -47,7 +48,17 @@ function Who({ person }: { person: Person }) {
  * Landlord → Security (Landlord\SecurityController, App\Services\LoginGuard):
  * refused password sign-ins, blocked accounts with Unblock, busiest IPs.
  */
-export default function LandlordSecurity({ summary, blocked, blocked_devices, ips, recent, limits, your_ip }: SecurityProps) {
+export default function LandlordSecurity({ summary, blocked, blocked_devices, ips, recent, limits, your_ip, device_block_enabled }: SecurityProps) {
+    function toggleDeviceBlock() {
+        const question = device_block_enabled
+            ? 'Turn the device block off? Blocked addresses are released at once. Account blocks keep working.'
+            : 'Turn the device block on? Every address starts from zero.';
+
+        if (confirm(question)) {
+            router.post('/landlord/security/device-block', { enabled: !device_block_enabled }, { preserveScroll: true });
+        }
+    }
+
     function unblock(person: Person) {
         if (confirm(`Unblock password sign-in for ${person.user ?? person.identifier}?`)) {
             router.post('/landlord/security/unblock', { user_uuid: person.user_uuid, identifier: person.identifier }, { preserveScroll: true });
@@ -100,6 +111,28 @@ export default function LandlordSecurity({ summary, blocked, blocked_devices, ip
                     </Card>
                 ))}
             </div>
+
+            <Card className="animate-fade-up mb-6">
+                <CardBody>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                                <IconWorld size={18} stroke={1.75} className="text-indigo-600" />
+                                <p className="font-medium text-slate-900">Device block</p>
+                                <Badge tone={device_block_enabled ? 'green' : 'slate'}>{device_block_enabled ? 'On' : 'Off'}</Badge>
+                            </div>
+                            <p className="mt-1 text-sm text-slate-500">
+                                {device_block_enabled
+                                    ? `Blocks an IP address for ${limits.device_block_minutes} minutes after ${limits.device_block_after} wrong passwords in an hour. Turn it off at busy times when many agents share one mobile network.`
+                                    : 'Off: no address is blocked, whatever happens. Each account still gets its own block, and you are still alerted when one device tries many accounts.'}
+                            </p>
+                        </div>
+                        <Button type="button" variant={device_block_enabled ? 'secondary' : 'primary'} onClick={toggleDeviceBlock} className="shrink-0">
+                            {device_block_enabled ? 'Turn off' : 'Turn on'}
+                        </Button>
+                    </div>
+                </CardBody>
+            </Card>
 
             <Card className="animate-fade-up mb-6">
                 <CardHeader>

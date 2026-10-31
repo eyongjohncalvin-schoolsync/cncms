@@ -213,6 +213,47 @@ class LoginGuardTest extends TestCase
         $this->webLogin('password')->assertSessionHasNoErrors();
     }
 
+    public function test_the_landlord_can_switch_the_device_block_off_and_on(): void
+    {
+        for ($i = 1; $i <= 30; $i++) {
+            $this->webLogin('wrong', "made-up-{$i}");
+        }
+
+        $landlord = User::factory()->create(['is_landlord' => true]);
+        $this->actingAs($landlord);
+
+        // Off: the blocked address is released at once…
+        $this->post('/landlord/security/device-block', ['enabled' => false])->assertSessionHas('success');
+        $this->get('/landlord/security')->assertInertia(fn (Assert $page) => $page
+            ->where('device_block_enabled', false)
+            ->where('blocked_devices', []));
+        $this->assertSame('security.device_block_off', LandlordActivity::query()->latest('id')->value('action'));
+
+        $this->post('/logout');
+        $this->webLogin('password')->assertSessionHasNoErrors();
+        $this->post('/logout');
+
+        // …and nothing blocks an address while it is off.
+        for ($i = 31; $i <= 40; $i++) {
+            $this->webLogin('wrong', "made-up-{$i}");
+        }
+        $this->webLogin('password')->assertSessionHasNoErrors();
+
+        // On again: every address starts from zero, so one more wrong password blocks nothing.
+        $this->actingAs($landlord)->post('/landlord/security/device-block', ['enabled' => true])->assertSessionHas('success');
+        $this->post('/logout');
+        $this->webLogin('wrong', 'made-up-41');
+        $this->webLogin('password')->assertSessionHasNoErrors();
+    }
+
+    public function test_only_landlords_switch_the_device_block(): void
+    {
+        $this->actingAs($this->user);
+
+        $this->post('/landlord/security/device-block', ['enabled' => false])->assertForbidden();
+        $this->assertTrue(app(LoginGuard::class)->deviceBlockEnabled());
+    }
+
     public function test_the_landlord_sees_blocked_accounts_and_can_unblock(): void
     {
         $this->wrongPasswords(10);

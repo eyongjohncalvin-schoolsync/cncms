@@ -83,6 +83,7 @@ class SecurityController extends Controller
                 'cleared' => $failure->cleared_at !== null,
             ]),
             'limits' => config('rate-limits.login_block'),
+            'device_block_enabled' => $this->guard->deviceBlockEnabled(),
             // So the landlord can check the app sees real addresses (not a
             // proxy's), and find their own to add to LOGIN_TRUSTED_IPS.
             'your_ip' => $request->ip(),
@@ -103,6 +104,26 @@ class SecurityController extends Controller
         LandlordActivity::record('security.unblocked', "Unblocked password sign-in for {$who}", $user ? 'user' : null, $user?->uuid, ['identifier' => $validated['identifier'], 'cleared' => $cleared]);
 
         return back()->with('success', "{$who} can sign in with a password again.");
+    }
+
+    /**
+     * Turns the device block on or off for the whole platform — off at busy
+     * times when many people share one network, on again afterwards.
+     */
+    public function deviceBlock(Request $request): RedirectResponse
+    {
+        $enabled = (bool) $request->validate(['enabled' => ['required', 'boolean']])['enabled'];
+
+        $this->guard->setDeviceBlock($enabled, $request->user());
+
+        LandlordActivity::record(
+            $enabled ? 'security.device_block_on' : 'security.device_block_off',
+            $enabled ? 'Turned the sign-in device block on' : 'Turned the sign-in device block off',
+        );
+
+        return back()->with('success', $enabled
+            ? 'Device block is on. Every address starts from zero.'
+            : 'Device block is off. Blocked addresses are released; account blocks still apply.');
     }
 
     public function unblockDevice(Request $request): RedirectResponse
