@@ -48,6 +48,8 @@
         "demo_ended_title": "Your free demo has ended — the system is read-only",
         "demo_ended_body": "Your data is safe and nothing has been deleted. You can view and export everything, but nothing new can be saved until your account is activated.",
         "demo_contact": "WhatsApp {{phone}}",
+        "contract_pending": "Please review and sign your service contract with OneTech (version {{version}}).",
+        "contract_sign_now": "Review and sign",
         "maintenance_scheduled_title": "Planned maintenance starts in {{countdown}}",
         "maintenance_scheduled_body": "The system will be unavailable from {{start}} until {{end}}. Save your work before then.",
         "maintenance_active_title": "Maintenance mode is on — tenant users are locked out",

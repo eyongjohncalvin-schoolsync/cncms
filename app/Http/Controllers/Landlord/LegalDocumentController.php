@@ -53,7 +53,7 @@ class LegalDocumentController extends Controller
                     'published_at' => $current?->published_at?->toIso8601String(),
                     'requires_acceptance' => (bool) $current?->requires_acceptance,
                     'has_draft' => $this->legal->draft($type) !== null,
-                    'accepted' => $current && $current->requires_acceptance ? $this->acceptedCompanyIds($current)->intersect($approvedCompanies->keys())->count() : null,
+                    'accepted' => $current && $this->tracksCompanies($current) ? $this->acceptedCompanyIds($current)->intersect($approvedCompanies->keys())->count() : null,
                     'companies' => $approvedCompanies->count(),
                 ];
             })->values(),
@@ -100,7 +100,7 @@ class LegalDocumentController extends Controller
                     'accepted_at' => $acceptance->accepted_at->toIso8601String(),
                     'ip_address' => $acceptance->ip_address,
                 ]) : [],
-            'waiting' => $current && $current->requires_acceptance
+            'waiting' => $current && $this->tracksCompanies($current)
                 ? $companies->reject(fn (string $name, string $id) => $accepted->contains($id))->values()
                 : [],
         ]);
@@ -204,6 +204,16 @@ class LegalDocumentController extends Controller
             ->get()
             ->filter(fn (Tenant $tenant) => $tenant->isApproved())
             ->mapWithKeys(fn (Tenant $tenant) => [$tenant->id => (string) $tenant->name]);
+    }
+
+    /**
+     * Whether every company is expected to accept this version: "must
+     * accept" Terms, and every contract (signed in Settings → Contract,
+     * App\Services\ContractService, which records the acceptance too).
+     */
+    private function tracksCompanies(LegalDocumentVersion $version): bool
+    {
+        return $version->requires_acceptance || $version->type === LegalDocumentVersion::CONTRACT;
     }
 
     /**

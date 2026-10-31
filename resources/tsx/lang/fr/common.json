@@ -48,6 +48,8 @@
         "demo_ended_title": "Votre démo gratuite est terminée — le système est en lecture seule",
         "demo_ended_body": "Vos données sont en sécurité et rien n'a été supprimé. Vous pouvez tout consulter et exporter, mais rien de nouveau ne peut être enregistré tant que votre compte n'est pas activé.",
         "demo_contact": "WhatsApp {{phone}}",
+        "contract_pending": "Veuillez lire et signer votre contrat de service avec OneTech (version {{version}}).",
+        "contract_sign_now": "Lire et signer",
         "maintenance_scheduled_title": "Maintenance planifiée dans {{countdown}}",
         "maintenance_scheduled_body": "Le système sera indisponible du {{start}} au {{end}}. Enregistrez votre travail avant.",
         "maintenance_active_title": "Mode maintenance activé — les utilisateurs des locataires sont bloqués",

@@ -125,7 +125,7 @@ class LegalDocumentsTest extends TestCase
         $this->saveDraft('terms');
         $this->delete('/landlord/legal/terms/draft')->assertSessionHas('success');
 
-        $this->assertFalse(LegalDocumentVersion::query()->where('status', 'draft')->exists());
+        $this->assertFalse(LegalDocumentVersion::query()->where('type', 'terms')->where('status', 'draft')->exists());
         $this->post('/landlord/legal/terms/publish')->assertSessionHas('error', 'There is no draft to publish.');
         $this->get('/terms')->assertSee('The free demo');
     }

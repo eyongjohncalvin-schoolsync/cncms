@@ -14,7 +14,8 @@ use Illuminate\Http\Request;
  * sign in, look at everything and export it, but saves nothing new until a
  * landlord activates it. Enforced by ResolveTenantWeb and ResolveTenant:
  * every request that is not a read is refused, except signing out, the
- * user's own account and security, accepting the Terms, and the few
+ * user's own account and security, accepting the Terms, signing the
+ * service contract (the step towards activation), and the few
  * session-only switches below. Nothing is ever deleted.
  *
  * The mobile app treats the refusal like any failed sync: queued work stays
@@ -29,6 +30,7 @@ class DemoReadOnly
         'logout',
         'account', 'account/*',
         'legal/accept',
+        'settings/contract/sign',
         'impersonation/stop',
         'branch-view',
         'settings/locale',

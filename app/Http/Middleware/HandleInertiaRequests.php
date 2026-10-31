@@ -7,6 +7,7 @@ namespace App\Http\Middleware;
 use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Tenant;
+use App\Services\ContractService;
 use App\Services\NotificationService;
 use App\Support\Impersonation;
 use App\Support\MaintenanceMode;
@@ -140,6 +141,12 @@ class HandleInertiaRequests extends Middleware
             // once it has ended, the read-only notice for everyone
             // (Tenant::isReadOnly, App\Support\DemoReadOnly).
             'demo' => $context ? fn (): ?array => $this->demoNotice($context) : null,
+            // The published service contract version the company has not
+            // signed yet (App\Services\ContractService) — super/admin only,
+            // drives the "please sign" strip linking to Settings → Contract.
+            'contractPending' => $context && ($context->isSuper() || $context->is('admin'))
+                ? fn (): ?int => app(ContractService::class)->awaitingSignature((string) tenant('id'))?->version
+                : null,
             // Set while a landlord is logged in as this user
             // (App\Support\Impersonation) — drives AppLayout's red banner.
             'impersonation' => fn () => Impersonation::active() && $user

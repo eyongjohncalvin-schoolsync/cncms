@@ -57,6 +57,7 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::post('tenants/{tenant}/reject', [TenantController::class, 'reject'])->name('tenants.reject');
     Route::patch('tenants/{tenant}/demo', [TenantController::class, 'updateDemo'])->name('tenants.demo');
     Route::post('tenants/{tenant}/activate', [TenantController::class, 'activate'])->name('tenants.activate');
+    Route::get('contracts/{signature}/pdf', [TenantController::class, 'contractPdf'])->whereNumber('signature')->name('contracts.pdf');
 
     Route::get('legal', [LegalDocumentController::class, 'index'])->name('legal.index');
     Route::get('legal/{type}', [LegalDocumentController::class, 'edit'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.edit');

@@ -128,6 +128,8 @@ export interface PageProps {
     impersonation: { impersonator: string | null; user: string } | null;
     /** Free demo countdown (admins, last 30 days) or the read-only notice once it ended. */
     demo: DemoNotice | null;
+    /** Service contract version the company still has to sign (super/admin only). */
+    contractPending: number | null;
     /**
      * Branch switcher (branches v2): set only for a user not fenced to a
      * branch, once the company has 2+ branches. `current` null = all branches.

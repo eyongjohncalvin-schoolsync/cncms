@@ -15,6 +15,7 @@ import { NotificationBell } from '@/components/shared/NotificationBell';
 import { EmergencyBanner } from '@/components/shared/EmergencyBanner';
 import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
 import { DemoBanner } from '@/components/shared/DemoBanner';
+import { ContractBanner } from '@/components/shared/ContractBanner';
 import { BranchSwitcher } from '@/components/shared/BranchSwitcher';
 import { ImpersonationBanner } from '@/components/shared/ImpersonationBanner';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
@@ -54,7 +55,7 @@ export function AppLayout({
      */
     breadcrumbs?: BreadcrumbItem[];
 }) {
-    const { auth, flash, notifications, company, maintenance, impersonation, branchView, demo } = usePage<PageProps>().props;
+    const { auth, flash, notifications, company, maintenance, impersonation, branchView, demo, contractPending } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
     const permissions = auth.user?.permissions ?? [];
     const { t } = useTranslation();
@@ -240,6 +241,7 @@ export function AppLayout({
                 <ImpersonationBanner impersonation={impersonation} />
                 <MaintenanceBanner notice={maintenance} />
                 <DemoBanner notice={demo} />
+                <ContractBanner version={contractPending} />
 
                 <EmergencyBanner notifications={notifications?.emergency ?? []} />
 

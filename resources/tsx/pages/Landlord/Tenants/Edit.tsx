@@ -9,6 +9,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResetTwoFactorModal, type ResetTwoFactorTarget } from '@/components/landlord/ResetTwoFactorModal';
 import { HomepageListingCard } from '@/components/landlord/HomepageListingCard';
 import { DemoCard } from '@/components/landlord/DemoCard';
+import { ContractCard, type LandlordContractSignature } from '@/components/landlord/ContractCard';
 import type { LandlordTenant } from '@/types';
 
 interface Member {
@@ -20,7 +21,17 @@ interface Member {
     can_reset_two_factor: boolean;
 }
 
-export default function LandlordTenantsEdit({ tenant, members }: { tenant: LandlordTenant; members: Member[] }) {
+export default function LandlordTenantsEdit({
+    tenant,
+    members,
+    contracts,
+    contract_version,
+}: {
+    tenant: LandlordTenant;
+    members: Member[];
+    contracts: LandlordContractSignature[];
+    contract_version: number | null;
+}) {
     const [resetTarget, setResetTarget] = useState<ResetTwoFactorTarget | null>(null);
 
     function impersonate(member: Member) {
@@ -95,6 +106,8 @@ export default function LandlordTenantsEdit({ tenant, members }: { tenant: Landl
             </Card>
 
             <DemoCard tenant={tenant} />
+
+            <ContractCard contracts={contracts} currentVersion={contract_version} />
 
             <HomepageListingCard tenant={tenant} />
 

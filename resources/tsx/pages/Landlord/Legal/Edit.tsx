@@ -36,7 +36,7 @@ interface AcceptanceRow {
     ip_address: string | null;
 }
 
-const CONTRACT_BLANKS = ['{company_name}', '{company_location}', '{owner_name}', '{demo_start}', '{demo_end}', '{today}'];
+const CONTRACT_BLANKS = ['{company_name}', '{company_location}', '{company_rccm}', '{company_niu}', '{owner_name}', '{demo_start}', '{demo_end}', '{today}'];
 
 function formatDate(iso: string | null): string {
     return iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
@@ -242,14 +242,14 @@ function LandlordLegalEdit({
                 </Card>
 
                 <div className="flex min-w-0 flex-col gap-6">
-                    {type === 'terms' && current?.requires_acceptance && (
+                    {current && (type === 'contract' || (type === 'terms' && current.requires_acceptance)) && (
                         <Card className="animate-fade-up">
                             <CardHeader>
-                                <p className="font-medium text-slate-900">Version {current.version}: still to accept</p>
+                                <p className="font-medium text-slate-900">Version {current.version}: still to {type === 'contract' ? 'sign' : 'accept'}</p>
                             </CardHeader>
                             <CardBody>
                                 {waiting.length === 0 ? (
-                                    <p className="text-sm text-green-700">Every approved company has accepted.</p>
+                                    <p className="text-sm text-green-700">Every approved company has {type === 'contract' ? 'signed' : 'accepted'}.</p>
                                 ) : (
                                     <ul className="flex flex-col gap-1 text-sm text-slate-700">
                                         {waiting.map((company) => (

@@ -7,10 +7,14 @@ namespace App\Http\Controllers\Landlord;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreTenantRequest;
 use App\Http\Requests\UpdateTenantRequest;
+use App\Models\ContractSignature;
 use App\Models\LandlordActivity;
+use App\Models\LegalDocumentVersion;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\ContractService;
 use App\Services\HomepageCompaniesService;
+use App\Services\LegalDocumentService;
 use App\Support\BusinessTimezone;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -18,6 +22,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 /**
@@ -127,7 +132,30 @@ class TenantController extends Controller
                 'can_impersonate' => $user->status === 'active' && ! $user->is_landlord,
                 'can_reset_two_factor' => $user->hasTwoFactorEnabled() && $user->id !== $request->user()->id,
             ])->values(),
+            // Its online signatures of the service contract (ContractService).
+            'contracts' => ContractSignature::query()
+                ->where('tenant_id', $tenant->id)
+                ->with('documentVersion:id,version')
+                ->latest('signed_at')
+                ->get()
+                ->map(fn (ContractSignature $signature) => [
+                    'id' => $signature->id,
+                    'version' => $signature->documentVersion->version,
+                    'signer_name' => $signature->signer_name,
+                    'signer_title' => $signature->signer_title,
+                    'signed_at' => $signature->signed_at->toIso8601String(),
+                    'ip_address' => $signature->ip_address,
+                ]),
+            'contract_version' => app(LegalDocumentService::class)->current(LegalDocumentVersion::CONTRACT)?->version,
         ]);
+    }
+
+    /**
+     * A company's signed contract PDF (App\Services\ContractService).
+     */
+    public function contractPdf(ContractSignature $signature): StreamedResponse
+    {
+        return Storage::disk(ContractService::DISK)->download($signature->pdf_path, $signature->tenant_id.'-'.basename($signature->pdf_path));
     }
 
     public function update(UpdateTenantRequest $request, Tenant $tenant): RedirectResponse
