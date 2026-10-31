@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
 
 /**
@@ -22,6 +23,9 @@ use Tests\TestCase;
  */
 class RateLimitTest extends TestCase
 {
+    // Refused sign-ins are recorded (App\Services\LoginGuard): roll them back.
+    use DatabaseTransactions;
+
     private function invalidLoginPayload(): array
     {
         return [

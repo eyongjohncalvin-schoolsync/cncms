@@ -30,7 +30,7 @@ use Illuminate\Support\Facades\Route;
 | `landlord` middleware alias (App\Http\Middleware\EnsureLandlord).
 |
 */
-Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->group(function () {
+Route::middleware(['auth', 'landlord', 'throttle:web'])->prefix('landlord')->name('landlord.')->group(function () {
     Route::get('/', DashboardController::class)->name('dashboard');
     Route::get('activity', [ActivityController::class, 'index'])->name('activity.index');
 

@@ -15,7 +15,10 @@ use Illuminate\Support\Facades\Route;
 // impersonating — they may look but never change the person's credentials.
 Route::middleware('not-impersonating')->group(function () {
     Route::patch('account/profile', [AccountController::class, 'updateProfile'])->name('account.profile.update');
-    Route::put('account/password', [AccountController::class, 'updatePassword'])->name('account.password.update');
+    // Checks the current password, so as strict as a code check.
+    Route::put('account/password', [AccountController::class, 'updatePassword'])
+        ->middleware('throttle:security-code-verify')
+        ->name('account.password.update');
 
     Route::post('account/email', [AccountController::class, 'requestEmailChange'])
         ->middleware('throttle:security-code-send')

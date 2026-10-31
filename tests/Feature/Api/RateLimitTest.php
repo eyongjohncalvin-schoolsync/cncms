@@ -4,15 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api;
 
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
 
 /**
  * Exercises the real `throttle:login` middleware (RateLimiter::for('login',
  * ...) registered in App\Providers\AppServiceProvider) rather than stubbing
  * it out with withoutMiddleware() — that would defeat the point of this
- * test. No DatabaseTransactions/tenant setup needed: invalid-credential
- * login attempts never reach the tenant lookup in
- * Api\AuthController::login().
+ * test. No tenant setup needed: invalid-credential login attempts never
+ * reach the tenant lookup in Api\AuthController::login(). They are recorded
+ * as refused sign-ins (App\Services\LoginGuard), hence the transaction.
  *
  * CACHE_STORE is "array" in testing (phpunit.xml), and Laravel boots a
  * fresh Application — and therefore a fresh, empty array cache/rate-limiter
@@ -21,6 +22,8 @@ use Tests\TestCase;
  */
 class RateLimitTest extends TestCase
 {
+    use DatabaseTransactions;
+
     public function test_login_is_rate_limited_after_5_attempts_per_minute(): void
     {
         $payload = [
