@@ -5,6 +5,7 @@ import { setUnauthorizedHandler } from '../api/client';
 import { getCurrentToken, setCurrentToken } from './tokenState';
 import { clearStoredToken, getStoredToken, setStoredToken } from './tokenStorage';
 import { isTwoFactorChallenge } from '../utils/twoFactor';
+import { clearInbox } from '../inbox/inboxStore';
 import type { LoginResponse, LoginResult, TenantRole, TwoFactorChallengeResponse, TwoFactorMethod } from '../types/api';
 
 export type SignInOutcome = { status: 'signed_in' } | { status: 'two_factor'; challenge: TwoFactorChallengeResponse };
@@ -130,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCurrentToken(null);
         void clearStoredToken();
         void clearCachedProfile();
+        clearInbox();
         setUser(null);
         setRole(null);
         setPermissions([]);
@@ -256,6 +258,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCurrentToken(null);
         await clearStoredToken();
         await clearCachedProfile();
+        clearInbox();
         setUser(null);
         setRole(null);
         setPermissions([]);

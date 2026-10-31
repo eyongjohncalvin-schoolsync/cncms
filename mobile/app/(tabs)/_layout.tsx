@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Tabs } from 'expo-router';
@@ -7,8 +7,13 @@ import { EmergencyBanner } from '../../src/components/ui/EmergencyBanner';
 import { AppUpdateBanner } from '../../src/components/ui/AppUpdateBanner';
 import { MaintenanceBanner } from '../../src/components/ui/MaintenanceBanner';
 import { getNotificationsState, subscribeNotificationsState } from '../../src/notifications/notificationStore';
+import { getInboxState, refreshInbox, subscribeInboxState } from '../../src/inbox/inboxStore';
+import { useAuth } from '../../src/auth/AuthContext';
 import { colors } from '../../src/theme/colors';
 import { fontSize } from '../../src/theme/tokens';
+
+/** Holding any of these makes someone an inbox user (ManagerInboxService). */
+const INBOX_PERMISSIONS = ['vouchers.approve', 'arrears.approve', 'complaints.assign', 'cash.view', 'installations.activate', 'opening_balances.approve'];
 
 function TabGlyph({
     letter,
@@ -72,6 +77,27 @@ export default function TabsLayout() {
     // rather than guessing a fixed value that's wrong on other phones.
     const insets = useSafeAreaInsets();
 
+    // The manager inbox (docs/plans/mobile-manager-app.md, wave 1): its tab
+    // shows for anyone who decides things, and its badge counts the "Now"
+    // items. Deciders refresh it every two minutes; everyone else checks
+    // once, so an investor sent a voucher still sees the tab.
+    const { can } = useAuth();
+    const inbox = useSyncExternalStore(subscribeInboxState, getInboxState);
+    const decides = INBOX_PERMISSIONS.some((permission) => can(permission));
+    const showInbox = decides || inbox.items.length > 0;
+
+    useEffect(() => {
+        void refreshInbox();
+
+        if (!decides) {
+            return;
+        }
+
+        const timer = setInterval(() => void refreshInbox(), 120_000);
+
+        return () => clearInterval(timer);
+    }, [decides]);
+
     return (
         <View style={styles.flex}>
             <SafeAreaView edges={['top']} style={styles.stripSafeArea}>
@@ -97,6 +123,17 @@ export default function TabsLayout() {
                         tabBarIcon: ({ focused }) => (
                             <TabGlyph letter="H" color={colors.accent.home} focused={focused} showAlertDot={hasUnacknowledgedEmergency} />
                         ),
+                    }}
+                />
+                <Tabs.Screen
+                    name="inbox"
+                    options={{
+                        title: 'Inbox',
+                        // Only for someone with something to decide (or who
+                        // has been sent an item, e.g. an investor's voucher).
+                        href: showInbox ? undefined : null,
+                        tabBarBadge: inbox.nowCount > 0 ? inbox.nowCount : undefined,
+                        tabBarIcon: ({ focused }) => <TabGlyph letter="✓" color={colors.accent.history} focused={focused} />,
                     }}
                 />
                 <Tabs.Screen

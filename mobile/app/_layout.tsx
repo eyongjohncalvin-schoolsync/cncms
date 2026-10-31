@@ -229,6 +229,7 @@ function RootNavigation() {
                 name="complaints"
                 options={{ presentation: 'modal', headerShown: true, title: 'Complaints' }}
             />
+            <Stack.Screen name="inbox-item" options={{ headerShown: true, title: 'Decision' }} />
             <Stack.Screen
                 name="manuscript"
                 options={{ presentation: 'modal', headerShown: true, title: 'Manuscript' }}
