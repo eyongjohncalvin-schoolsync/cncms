@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Models\Branch;
 use App\Models\CustomerCharge;
+use App\Models\LegalDocumentVersion;
 use App\Models\NotificationSetting;
 use App\Models\Payment;
 use App\Models\PaymentVerification;
@@ -62,6 +63,13 @@ class CacheSerializableClassesTest extends TestCase
         $restored = $this->assertSurvivesCacheRoundTrip(NotificationSetting::cached());
 
         $this->assertInstanceOf(NotificationSetting::class, $restored);
+    }
+
+    public function test_the_live_legal_documents_survive_a_cache_round_trip(): void
+    {
+        $terms = LegalDocumentVersion::query()->where('type', LegalDocumentVersion::TERMS)->where('status', LegalDocumentVersion::PUBLISHED)->firstOrFail();
+
+        $this->assertInstanceOf(LegalDocumentVersion::class, $this->assertSurvivesCacheRoundTrip($terms));
     }
 
     public function test_a_zone_with_its_branch_survives_a_cache_round_trip(): void

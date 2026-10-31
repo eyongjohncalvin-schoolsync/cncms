@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\CustomerCharge;
 use App\Models\Expenditure;
 use App\Models\ExpenseCategory;
+use App\Models\LegalDocumentVersion;
 use App\Models\Manuscript;
 use App\Models\NotificationSetting;
 use App\Models\Payment;
@@ -194,6 +195,8 @@ return [
         CustomerCharge::class,
         Expenditure::class,
         ExpenseCategory::class,
+        // LegalDocumentService::current() — the live Terms/Privacy/contract.
+        LegalDocumentVersion::class,
         Manuscript::class,
         NotificationSetting::class,
         Payment::class,
