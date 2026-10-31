@@ -252,11 +252,19 @@ can only see the files it created, never the rest of the Drive.
      **Client ID** and **Client secret** (into your password manager too).
 2. **On your own computer** (the server can't open a browser): download
    rclone from rclone.org/downloads (Windows, Intel/AMD 64-bit), unzip it,
-   open PowerShell in that folder and run, with your ID and secret:
+   open PowerShell in that folder and run, with your ID and secret
+   (`$id` must print one line ending `.apps.googleusercontent.com` — a wrong
+   ID is Google's "400. That's an error"):
    ```
-   $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"client_id":"YOUR_ID","client_secret":"YOUR_SECRET","scope":"drive.file"}')).TrimEnd('=').Replace('+','-').Replace('/','_')
+   $id = 'PASTE_CLIENT_ID_HERE'
+   $secret = 'PASTE_CLIENT_SECRET_HERE'
+   $id
+   $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((@{client_id=$id.Trim(); client_secret=$secret.Trim(); scope='drive.file'} | ConvertTo-Json -Compress))).TrimEnd('=').Replace('+','-').Replace('/','_')
    .\rclone.exe authorize "drive" $b
    ```
+   "bind: … forbidden by its access permissions" means port 53682 is taken:
+   `Get-Process rclone | Stop-Process -Force`, or in an Administrator
+   PowerShell `net stop winnat; net start winnat`, then run it again.
    A browser opens: sign in with the same Google account and allow (if
    Google says the app isn't verified: **Advanced → Go to CNCMS backups** —
    it is your own app). The terminal then prints a token between `Paste the
