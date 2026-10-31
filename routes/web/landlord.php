@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Landlord\ActivityController;
+use App\Http\Controllers\Landlord\BackupController;
 use App\Http\Controllers\Landlord\DashboardController;
 use App\Http\Controllers\Landlord\ImpersonationController;
 use App\Http\Controllers\Landlord\LandlordController;
@@ -52,6 +53,10 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::patch('tenants/{tenant}', [TenantController::class, 'update'])->name('tenants.update');
     Route::post('tenants/{tenant}/approve', [TenantController::class, 'approve'])->name('tenants.approve');
     Route::post('tenants/{tenant}/reject', [TenantController::class, 'reject'])->name('tenants.reject');
+
+    Route::get('backups', [BackupController::class, 'index'])->name('backups.index');
+    Route::post('backups', [BackupController::class, 'store'])->middleware('throttle:exports')->name('backups.store');
+    Route::post('backups/{backup}/download', [BackupController::class, 'download'])->middleware('throttle:exports')->name('backups.download');
 
     Route::get('maintenance', [MaintenanceWindowController::class, 'index'])->name('maintenance.index');
     Route::post('maintenance', [MaintenanceWindowController::class, 'store'])->name('maintenance.store');

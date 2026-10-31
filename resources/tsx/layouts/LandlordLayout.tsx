@@ -3,6 +3,7 @@ import { ReactNode } from 'react';
 import {
     IconBroadcast,
     IconBuildingSkyscraper,
+    IconDatabase,
     IconHistory,
     IconLayoutDashboard,
     IconLogout,
@@ -20,6 +21,7 @@ const navItems = [
     { href: '/landlord/tenants', label: 'Tenants', icon: IconBuildingSkyscraper },
     { href: '/landlord/users', label: 'Users', icon: IconUsers },
     { href: '/landlord/maintenance', label: 'Maintenance', icon: IconTool },
+    { href: '/landlord/backups', label: 'Backups', icon: IconDatabase },
     { href: '/landlord/landlords', label: 'Landlords', icon: IconShieldLock },
     { href: '/landlord/activity', label: 'Activity log', icon: IconHistory },
 ];

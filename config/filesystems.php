@@ -77,4 +77,17 @@ return [
         public_path('storage') => storage_path('app/public'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Database Backups
+    |--------------------------------------------------------------------------
+    |
+    | Where deploy/scripts/backup-db.sh writes its nightly dumps — the same
+    | BACKUP_DIR the script reads (default ~/backups/cncms). The landlord
+    | Backups page lists and serves the files from here.
+    |
+    */
+
+    'backups_path' => env('BACKUP_DIR', rtrim((string) (getenv('HOME') ?: ($_SERVER['HOME'] ?? '')), '/').'/backups/cncms'),
+
 ];
