@@ -132,7 +132,9 @@ return Application::configure(basePath: dirname(__DIR__))
             // 429 falls through to the friendly Error page below instead.
             if (! $isApiOrJson && $response->getStatusCode() === 429 && $request->header('X-Inertia')) {
                 return back()->with([
-                    'error' => 'Too many requests. Please wait a moment and try again.',
+                    'error' => $request->is('login')
+                        ? 'Too many sign-in attempts. Wait a minute, then try again.'
+                        : 'Too many requests. Please wait a moment and try again.',
                 ]);
             }
 

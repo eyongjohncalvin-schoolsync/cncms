@@ -53,6 +53,7 @@ class RateLimitTest extends TestCase
             ->post('/login', $this->invalidLoginPayload());
 
         $response->assertRedirect();
-        $response->assertSessionHas('error');
+        // Shown on the login page (Auth/Login.tsx renders flash.error).
+        $response->assertSessionHas('error', 'Too many sign-in attempts. Wait a minute, then try again.');
     }
 }

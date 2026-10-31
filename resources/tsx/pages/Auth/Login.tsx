@@ -32,6 +32,13 @@ export default function Login() {
                 <div className="mb-5 rounded-md border-l-4 border-green-500 bg-green-50 px-4 py-3 text-sm text-green-800">{flash.success}</div>
             )}
 
+            {/* E.g. the per-minute sign-in limit (bootstrap/app.php turns its 429 into this). */}
+            {flash.error && (
+                <div role="alert" className="mb-5 rounded-md border-l-4 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    {flash.error}
+                </div>
+            )}
+
             <a
                 href="/auth/google/redirect"
                 className="animate-fade-up inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
