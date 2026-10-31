@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Services\HomepageCompaniesService;
+use App\Support\BusinessTimezone;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDatabase;
@@ -20,6 +22,10 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property bool $show_on_homepage
  * @property string|null $homepage_caption
  * @property string|null $homepage_logo
+ * @property string|null $demo_starts_on
+ * @property string|null $demo_ends_on
+ * @property list<string>|null $demo_reminders_sent
+ * @property string|null $activated_at
  */
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
@@ -90,6 +96,52 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         return Attribute::make(
             get: fn (?bool $value) => $value ?? false,
         );
+    }
+
+    /**
+     * The free demo (config('site.demo_months')): started when a landlord
+     * approves a self-service sign-up. `demo_starts_on`/`demo_ends_on` are
+     * `Y-m-d` VirtualColumn attributes, the end date being the demo's last
+     * full day (Cameroon calendar). From the day after it the workspace is
+     * read-only until a landlord activates it (`activated_at`). A tenant
+     * with no `demo_ends_on` (swecom, landlord-created tenants) never had a
+     * demo and is a full account.
+     */
+    public function isOnDemo(): bool
+    {
+        return ! empty($this->demo_ends_on) && empty($this->activated_at);
+    }
+
+    /**
+     * Days from today to the demo's last day: 0 on the last day, negative
+     * once it has ended. Null when not on a demo.
+     */
+    public function demoDaysLeft(): ?int
+    {
+        if (! $this->isOnDemo()) {
+            return null;
+        }
+
+        return (int) CarbonImmutable::parse(BusinessTimezone::today())->diffInDays(CarbonImmutable::parse($this->demo_ends_on), false);
+    }
+
+    /** The demo has ended and nobody has activated the workspace yet. */
+    public function isReadOnly(): bool
+    {
+        return ($this->demoDaysLeft() ?? 0) < 0;
+    }
+
+    /**
+     * Starts the free demo today. Not saved.
+     */
+    public function startDemo(): void
+    {
+        $today = CarbonImmutable::parse(BusinessTimezone::today());
+
+        $this->demo_starts_on = $today->toDateString();
+        $this->demo_ends_on = $today->addMonthsNoOverflow((int) config('site.demo_months'))->subDay()->toDateString();
+        $this->demo_reminders_sent = [];
+        $this->activated_at = null;
     }
 
     protected static function booted(): void

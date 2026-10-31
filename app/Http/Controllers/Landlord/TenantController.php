@@ -11,6 +11,8 @@ use App\Models\LandlordActivity;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\HomepageCompaniesService;
+use App\Support\BusinessTimezone;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -217,11 +219,62 @@ class TenantController extends Controller
     {
         $tenant->registration_status = 'approved';
         $tenant->rejection_reason = null;
+
+        // A self-service sign-up starts its free demo the day it is approved
+        // (Tenant::startDemo); re-approving never restarts one.
+        $startsDemo = empty($tenant->demo_ends_on) && empty($tenant->activated_at);
+
+        if ($startsDemo) {
+            $tenant->startDemo();
+        }
+
         $tenant->save();
 
-        LandlordActivity::record('tenant.approved', "Approved workspace {$tenant->name}", 'tenant', $tenant->id);
+        LandlordActivity::record('tenant.approved', "Approved workspace {$tenant->name}", 'tenant', $tenant->id, $startsDemo ? ['demo_ends_on' => $tenant->demo_ends_on] : null);
 
-        return redirect()->route('landlord.tenants.index')->with('success', "Workspace \"{$tenant->name}\" approved.");
+        $suffix = $startsDemo ? ' Free demo until '.CarbonImmutable::parse($tenant->demo_ends_on)->format('j M Y').'.' : '';
+
+        return redirect()->route('landlord.tenants.index')->with('success', "Workspace \"{$tenant->name}\" approved.{$suffix}");
+    }
+
+    /**
+     * Moves the free demo's last day: extends it, shortens it, or (for a
+     * full account) puts the workspace on a demo. A date in the past makes
+     * the workspace read-only at once. Reminders start over for the new date.
+     */
+    public function updateDemo(Request $request, Tenant $tenant): RedirectResponse
+    {
+        $validated = $request->validate(['demo_ends_on' => ['required', 'date_format:Y-m-d']]);
+
+        $tenant->demo_starts_on ??= BusinessTimezone::today();
+        $tenant->demo_ends_on = $validated['demo_ends_on'];
+        $tenant->demo_reminders_sent = [];
+        $tenant->activated_at = null;
+        $tenant->save();
+
+        LandlordActivity::record('tenant.demo_changed', "Set {$tenant->name}'s free demo to end on {$tenant->demo_ends_on}", 'tenant', $tenant->id, ['demo_ends_on' => $tenant->demo_ends_on]);
+
+        return back()->with('success', $tenant->isReadOnly()
+            ? "The demo has ended, so {$tenant->name} is now read-only."
+            : "{$tenant->name}'s free demo now ends on ".CarbonImmutable::parse($tenant->demo_ends_on)->format('j M Y').'.');
+    }
+
+    /**
+     * Ends the demo for good: a full account, nothing read-only. Its demo
+     * dates are kept for the record (and the contract).
+     */
+    public function activate(Tenant $tenant): RedirectResponse
+    {
+        if (! $tenant->isOnDemo()) {
+            return back()->with('error', "{$tenant->name} is already a full account.");
+        }
+
+        $tenant->activated_at = now()->toIso8601String();
+        $tenant->save();
+
+        LandlordActivity::record('tenant.activated', "Activated {$tenant->name} as a full account", 'tenant', $tenant->id);
+
+        return back()->with('success', "{$tenant->name} is now a full account. Everyone can save again.");
     }
 
     /**
@@ -247,7 +300,7 @@ class TenantController extends Controller
     }
 
     /**
-     * @return array{id: string, name: string, slug: string, domain: string|null, is_active: bool, registration_status: string, rejection_reason: string|null, bulk_whatsapp_enabled: bool, show_on_homepage: bool, homepage_caption: string|null, homepage_logo_url: string|null, created_at: string|null}
+     * @return array{id: string, name: string, slug: string, domain: string|null, is_active: bool, registration_status: string, rejection_reason: string|null, bulk_whatsapp_enabled: bool, show_on_homepage: bool, homepage_caption: string|null, homepage_logo_url: string|null, created_at: string|null, demo_starts_on: string|null, demo_ends_on: string|null, demo_days_left: int|null, activated_at: string|null}
      */
     private function shape(Tenant $tenant): array
     {
@@ -264,6 +317,10 @@ class TenantController extends Controller
             'homepage_caption' => $tenant->homepage_caption ?? null,
             'homepage_logo_url' => $tenant->homepage_logo ? Storage::disk(HomepageCompaniesService::LOGO_DISK)->url($tenant->homepage_logo) : null,
             'created_at' => $tenant->created_at?->toIso8601String(),
+            'demo_starts_on' => $tenant->demo_starts_on ?? null,
+            'demo_ends_on' => $tenant->demo_ends_on ?? null,
+            'demo_days_left' => $tenant->demoDaysLeft(),
+            'activated_at' => $tenant->activated_at ?? null,
         ];
     }
 }

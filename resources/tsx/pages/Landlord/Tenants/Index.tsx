@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Modal } from '@/components/ui/Modal';
+import { demoStatus } from '@/components/landlord/DemoCard';
 import type { LandlordTenant, RegistrationStatus } from '@/types';
 
 const STATUS_TABS: { label: string; value: RegistrationStatus | null }[] = [
@@ -166,6 +167,11 @@ export default function LandlordTenantsIndex({
                                         <Badge tone={tenant.is_active ? 'green' : 'slate'}>
                                             {tenant.is_active ? 'Active' : 'Inactive'}
                                         </Badge>
+                                        {tenant.demo_days_left !== null && (
+                                            <div className="mt-1">
+                                                <Badge tone={demoStatus(tenant)?.tone}>{demoStatus(tenant)?.label}</Badge>
+                                            </div>
+                                        )}
                                     </Td>
                                     <Td>
                                         <Badge tone={STATUS_TONE[tenant.registration_status]}>

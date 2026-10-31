@@ -26,6 +26,9 @@ class ExpendituresCloseMonths extends Command
         $tenantId = $this->argument('tenant');
         $tenants = $tenantId !== null ? Tenant::query()->where('id', $tenantId)->get() : Tenant::all();
 
+        // A demo that ended is read-only (App\Support\DemoReadOnly): no automatic changes either.
+        $tenants = $tenants->reject(fn (Tenant $tenant) => $tenant->isReadOnly());
+
         tenancy()->runForMultiple($tenants, function (Tenant $tenant) use ($months): void {
             $closed = $months->closeDue();
 

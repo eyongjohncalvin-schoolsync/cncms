@@ -14,6 +14,7 @@ import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { NotificationBell } from '@/components/shared/NotificationBell';
 import { EmergencyBanner } from '@/components/shared/EmergencyBanner';
 import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
+import { DemoBanner } from '@/components/shared/DemoBanner';
 import { BranchSwitcher } from '@/components/shared/BranchSwitcher';
 import { ImpersonationBanner } from '@/components/shared/ImpersonationBanner';
 import { Breadcrumb } from '@/components/ui/Breadcrumb';
@@ -53,7 +54,7 @@ export function AppLayout({
      */
     breadcrumbs?: BreadcrumbItem[];
 }) {
-    const { auth, flash, notifications, company, maintenance, impersonation, branchView } = usePage<PageProps>().props;
+    const { auth, flash, notifications, company, maintenance, impersonation, branchView, demo } = usePage<PageProps>().props;
     const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
     const permissions = auth.user?.permissions ?? [];
     const { t } = useTranslation();
@@ -238,6 +239,7 @@ export function AppLayout({
 
                 <ImpersonationBanner impersonation={impersonation} />
                 <MaintenanceBanner notice={maintenance} />
+                <DemoBanner notice={demo} />
 
                 <EmergencyBanner notifications={notifications?.emergency ?? []} />
 

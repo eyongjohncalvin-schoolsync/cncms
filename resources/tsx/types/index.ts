@@ -126,6 +126,8 @@ export interface PageProps {
     maintenance: MaintenanceNotice | null;
     /** Set while a landlord is logged in as this user (App\Support\Impersonation). */
     impersonation: { impersonator: string | null; user: string } | null;
+    /** Free demo countdown (admins, last 30 days) or the read-only notice once it ended. */
+    demo: DemoNotice | null;
     /**
      * Branch switcher (branches v2): set only for a user not fenced to a
      * branch, once the company has 2+ branches. `current` null = all branches.
@@ -137,6 +139,15 @@ export interface PageProps {
 export interface BranchView {
     branches: { uuid: string; name: string; is_headquarters: boolean }[];
     current: string | null;
+}
+
+/** HandleInertiaRequests::demoNotice(). `ends_on` is the demo's last day (Y-m-d). */
+export interface DemoNotice {
+    ends_on: string;
+    days_left: number;
+    read_only: boolean;
+    phone: string;
+    whatsapp: string;
 }
 
 /** App\Models\MaintenanceWindow::toNotice(). Times are ISO-8601. */
@@ -1408,6 +1419,12 @@ export interface LandlordTenant {
     homepage_caption: string | null;
     homepage_logo_url: string | null;
     created_at: string | null;
+    /** Free demo (Tenant::isOnDemo): Y-m-d dates, null when never on a demo. */
+    demo_starts_on: string | null;
+    demo_ends_on: string | null;
+    /** 0 on the last day, negative once ended (read-only); null when not on a demo. */
+    demo_days_left: number | null;
+    activated_at: string | null;
 }
 
 export interface Agent {

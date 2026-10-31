@@ -9,6 +9,7 @@ use App\Models\Branch;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\TenantUserIndex;
+use App\Support\DemoReadOnly;
 use App\Support\Impersonation;
 use App\Support\MaintenanceMode;
 use App\Support\TenantContext;
@@ -66,6 +67,11 @@ class ResolveTenantWeb
         // that predates the flag is unaffected.
         if (! $tenant->isApproved() || ! $tenant->is_active) {
             return redirect()->route('workspace.pending');
+        }
+
+        // Free demo over and not yet activated: read-only (DemoReadOnly).
+        if (DemoReadOnly::blocks($request, $tenant)) {
+            return DemoReadOnly::webResponse($request);
         }
 
         tenancy()->initialize($tenant);

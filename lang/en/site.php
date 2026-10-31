@@ -215,4 +215,7 @@ return [
     ],
 
     'whatsapp_float' => 'Chat with us',
+
+    // App\Support\DemoReadOnly: a write refused after the free demo.
+    'demo_read_only' => 'Your free demo has ended, so nothing new can be saved. You can still view and export everything. Contact :company on WhatsApp :phone to activate your account.',
 ];

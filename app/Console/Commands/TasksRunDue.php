@@ -57,6 +57,12 @@ class TasksRunDue extends Command
      */
     private function runForTenant(Tenant $tenant, array $registry): void
     {
+        // A demo that ended is read-only (App\Support\DemoReadOnly): no
+        // manuscript runs either until a landlord activates it.
+        if ($tenant->isReadOnly()) {
+            return;
+        }
+
         $now = Carbon::now();
 
         ScheduledTask::query()->where('enabled', true)->get()->each(function (ScheduledTask $task) use ($registry, $now, $tenant): void {

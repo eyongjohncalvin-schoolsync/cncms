@@ -6,6 +6,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Branch;
 use App\Models\Company;
+use App\Models\Tenant;
 use App\Services\NotificationService;
 use App\Support\Impersonation;
 use App\Support\MaintenanceMode;
@@ -135,11 +136,43 @@ class HandleInertiaRequests extends Middleware
             // about it before they are locked out. Polled with
             // `notifications` by AppLayout.
             'maintenance' => fn () => MaintenanceMode::current()?->toNotice(),
+            // The free demo's countdown (last 30 days, super/admin only) and,
+            // once it has ended, the read-only notice for everyone
+            // (Tenant::isReadOnly, App\Support\DemoReadOnly).
+            'demo' => $context ? fn (): ?array => $this->demoNotice($context) : null,
             // Set while a landlord is logged in as this user
             // (App\Support\Impersonation) — drives AppLayout's red banner.
             'impersonation' => fn () => Impersonation::active() && $user
                 ? ['impersonator' => Impersonation::impersonator()?->name, 'user' => $user->name]
                 : null,
+        ];
+    }
+
+    /**
+     * @return array{ends_on: string, days_left: int, read_only: bool, phone: string, whatsapp: string}|null
+     */
+    private function demoNotice(TenantContext $context): ?array
+    {
+        $tenant = tenant();
+        $daysLeft = $tenant instanceof Tenant ? $tenant->demoDaysLeft() : null;
+
+        if ($daysLeft === null) {
+            return null;
+        }
+
+        $readOnly = $daysLeft < 0;
+        $isAdmin = $context->isSuper() || $context->is('admin');
+
+        if (! $readOnly && ($daysLeft > 30 || ! $isAdmin)) {
+            return null;
+        }
+
+        return [
+            'ends_on' => (string) $tenant->demo_ends_on,
+            'days_left' => $daysLeft,
+            'read_only' => $readOnly,
+            'phone' => (string) config('site.phone'),
+            'whatsapp' => (string) config('site.whatsapp'),
         ];
     }
 

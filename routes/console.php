@@ -50,5 +50,10 @@ Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping()
 Schedule::command('vouchers:advances-overdue')->dailyAt('00:45')->timezone('Africa/Lagos')->withoutOverlapping()
     ->skip(fn () => MaintenanceMode::active() !== null);
 
+// Free demo reminders (30/7/1 days, then "ended, read-only") to company
+// admins — App\Console\Commands\DemoReminders. Mail only, no tenant data
+// changes, so it may run during maintenance too.
+Schedule::command('demo:reminders')->dailyAt('08:00')->timezone('Africa/Lagos')->withoutOverlapping();
+
 Schedule::command('expenditures:close-months')->dailyAt('00:30')->timezone('Africa/Lagos')->withoutOverlapping()
     ->skip(fn () => MaintenanceMode::active() !== null);

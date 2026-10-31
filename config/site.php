@@ -22,6 +22,10 @@ return [
 
     'email' => env('SITE_EMAIL', 'onetechcncms@gmail.com'),
 
+    // Length of the free demo a self-service sign-up gets on approval. After
+    // it the workspace is read-only until a landlord activates it.
+    'demo_months' => 4,
+
     // Send a company's super/admin to accept Terms published as "must
     // accept" (EnsureLegalAccepted). Off only in the test suite, where the
     // seeded companies never signed up; the legal tests turn it back on.

@@ -55,6 +55,8 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::patch('tenants/{tenant}', [TenantController::class, 'update'])->name('tenants.update');
     Route::post('tenants/{tenant}/approve', [TenantController::class, 'approve'])->name('tenants.approve');
     Route::post('tenants/{tenant}/reject', [TenantController::class, 'reject'])->name('tenants.reject');
+    Route::patch('tenants/{tenant}/demo', [TenantController::class, 'updateDemo'])->name('tenants.demo');
+    Route::post('tenants/{tenant}/activate', [TenantController::class, 'activate'])->name('tenants.activate');
 
     Route::get('legal', [LegalDocumentController::class, 'index'])->name('legal.index');
     Route::get('legal/{type}', [LegalDocumentController::class, 'edit'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.edit');
