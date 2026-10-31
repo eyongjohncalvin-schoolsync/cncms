@@ -29,7 +29,8 @@ use Symfony\Component\HttpFoundation\Response;
  *      request (i.e. App\Http\Middleware\ResolveTenantWeb has run). Follows
  *      the same app()->bound()-based check HandleInertiaRequests already
  *      uses for TenantContext, rather than a parallel resolution mechanism.
- *   4. config('app.locale') — the hard 'en' fallback.
+ *   4. The browser's Accept-Language, for a guest only (en or fr).
+ *   5. config('app.locale') — the hard 'en' fallback.
  *
  * Registered in bootstrap/app.php immediately after ResolveTenantWeb in the
  * priority list, so tenancy (and therefore Company::cached()) is already
@@ -69,6 +70,16 @@ class ResolveLocale
 
             if ($company && is_string($company->default_locale) && in_array($company->default_locale, self::SUPPORTED, true)) {
                 return $company->default_locale;
+            }
+        }
+
+        // A first-time visitor (public site, login) who has not picked a
+        // language yet: follow the browser when it asks for one we have.
+        if (! $user && $request->headers->has('Accept-Language')) {
+            $preferred = $request->getPreferredLanguage(self::SUPPORTED);
+
+            if (is_string($preferred) && in_array($preferred, self::SUPPORTED, true)) {
+                return $preferred;
             }
         }
 

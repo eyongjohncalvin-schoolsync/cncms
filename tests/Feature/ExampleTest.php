@@ -8,13 +8,13 @@ use Tests\TestCase;
 class ExampleTest extends TestCase
 {
     /**
-     * `/` has no page of its own — it redirects to the login page (guests)
-     * or the dashboard (authenticated users), see routes/web.php.
+     * `/` is the public home page for guests (App\Http\Controllers\
+     * SiteController); signed-in users still go to their dashboard.
      */
-    public function test_the_application_redirects_guests_to_login(): void
+    public function test_the_application_shows_guests_the_home_page(): void
     {
         $response = $this->get('/');
 
-        $response->assertRedirect('/login');
+        $response->assertOk()->assertSee(route('login'), false);
     }
 }

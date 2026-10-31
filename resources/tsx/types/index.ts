@@ -1404,6 +1404,9 @@ export interface LandlordTenant {
     registration_status: RegistrationStatus;
     rejection_reason: string | null;
     bulk_whatsapp_enabled: boolean;
+    show_on_homepage: boolean;
+    homepage_caption: string | null;
+    homepage_logo_url: string | null;
     created_at: string | null;
 }
 

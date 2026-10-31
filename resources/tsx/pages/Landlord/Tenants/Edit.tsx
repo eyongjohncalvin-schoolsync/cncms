@@ -7,6 +7,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResetTwoFactorModal, type ResetTwoFactorTarget } from '@/components/landlord/ResetTwoFactorModal';
+import { HomepageListingCard } from '@/components/landlord/HomepageListingCard';
 import type { LandlordTenant } from '@/types';
 
 interface Member {
@@ -91,6 +92,8 @@ export default function LandlordTenantsEdit({ tenant, members }: { tenant: Landl
                     </Form>
                 </CardBody>
             </Card>
+
+            <HomepageListingCard tenant={tenant} />
 
             <Card className="animate-fade-up mt-6 max-w-md" style={{ animationDelay: '140ms' }}>
                 <CardHeader>

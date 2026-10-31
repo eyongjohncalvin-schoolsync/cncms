@@ -85,7 +85,8 @@ export function AuthLayout({ children }: { children: ReactNode }) {
                 </div>
 
                 <div className="relative z-10 mx-auto flex w-full max-w-md flex-1 flex-col">
-                    <div className="animate-fade-up flex items-center gap-2.5">
+                    {/* A plain <a>: the public site is Blade, not an Inertia page. */}
+                    <a href="/" className="animate-fade-up flex items-center gap-2.5">
                         <img
                             src="/onetech-icon.png"
                             alt=""
@@ -95,7 +96,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
                             <p className="font-display text-xl text-white">CNCMS</p>
                             <p className="text-[11px] font-medium tracking-wide text-blue-200/60">Cable Network Management</p>
                         </div>
-                    </div>
+                    </a>
 
                     <div className="mt-auto hidden lg:block">
                         <h2
@@ -142,6 +143,20 @@ export function AuthLayout({ children }: { children: ReactNode }) {
                     )}
                     {children}
                 </div>
+                <nav className="mx-auto mt-10 flex w-full max-w-[420px] flex-wrap gap-x-5 gap-y-2 text-xs text-slate-400">
+                    <a href="/" className="hover:text-slate-600">
+                        ← cncms.tech
+                    </a>
+                    <a href="/contact" className="hover:text-slate-600">
+                        Contact
+                    </a>
+                    <a href="/privacy" className="hover:text-slate-600">
+                        Privacy
+                    </a>
+                    <a href="/terms" className="hover:text-slate-600">
+                        Terms
+                    </a>
+                </nav>
             </main>
         </div>
     );

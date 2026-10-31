@@ -10,8 +10,10 @@ use App\Http\Requests\UpdateTenantRequest;
 use App\Models\LandlordActivity;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\HomepageCompaniesService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -145,6 +147,10 @@ class TenantController extends Controller
             $updates['bulk_whatsapp_enabled'] = $request->boolean('bulk_whatsapp_enabled');
         }
 
+        if ($request->has('show_on_homepage')) {
+            return $this->updateHomepageListing($request, $tenant);
+        }
+
         if ($updates !== []) {
             $tenant->update($updates);
 
@@ -153,6 +159,47 @@ class TenantController extends Controller
         }
 
         return redirect()->route('landlord.tenants.index')->with('success', 'Tenant updated.');
+    }
+
+    /**
+     * The tenant's place in the public home page's "Cable companies running
+     * on CNCMS" strip (App\Services\HomepageCompaniesService): shown or not,
+     * the line under its name, and its logo. Saving the tenant clears the
+     * strip's cache, so the home page changes at once.
+     */
+    private function updateHomepageListing(UpdateTenantRequest $request, Tenant $tenant): RedirectResponse
+    {
+        $disk = Storage::disk(HomepageCompaniesService::LOGO_DISK);
+        $oldLogo = $tenant->homepage_logo;
+
+        $tenant->show_on_homepage = $request->boolean('show_on_homepage');
+        $tenant->homepage_caption = trim((string) $request->validated('homepage_caption')) ?: null;
+
+        if ($request->hasFile('homepage_logo')) {
+            $tenant->homepage_logo = $request->file('homepage_logo')->storeAs(
+                'homepage-logos',
+                $tenant->id.'-'.now()->format('YmdHis').'.'.$request->file('homepage_logo')->extension(),
+                HomepageCompaniesService::LOGO_DISK,
+            );
+        } elseif ($request->boolean('remove_homepage_logo')) {
+            $tenant->homepage_logo = null;
+        }
+
+        $tenant->save();
+
+        if ($oldLogo && $oldLogo !== $tenant->homepage_logo) {
+            $disk->delete($oldLogo);
+        }
+
+        LandlordActivity::record(
+            'tenant.homepage',
+            ($tenant->show_on_homepage ? 'Listed ' : 'Unlisted ')."{$tenant->name} on the home page",
+            'tenant',
+            $tenant->id,
+            ['show_on_homepage' => $tenant->show_on_homepage, 'caption' => $tenant->homepage_caption, 'logo_changed' => $oldLogo !== $tenant->homepage_logo],
+        );
+
+        return back()->with('success', 'Home page listing saved.');
     }
 
     /**
@@ -200,7 +247,7 @@ class TenantController extends Controller
     }
 
     /**
-     * @return array{id: string, name: string, slug: string, domain: string|null, is_active: bool, registration_status: string, rejection_reason: string|null, bulk_whatsapp_enabled: bool, created_at: string|null}
+     * @return array{id: string, name: string, slug: string, domain: string|null, is_active: bool, registration_status: string, rejection_reason: string|null, bulk_whatsapp_enabled: bool, show_on_homepage: bool, homepage_caption: string|null, homepage_logo_url: string|null, created_at: string|null}
      */
     private function shape(Tenant $tenant): array
     {
@@ -213,6 +260,9 @@ class TenantController extends Controller
             'registration_status' => $tenant->registration_status,
             'rejection_reason' => $tenant->rejection_reason ?? null,
             'bulk_whatsapp_enabled' => (bool) $tenant->bulk_whatsapp_enabled,
+            'show_on_homepage' => (bool) $tenant->show_on_homepage,
+            'homepage_caption' => $tenant->homepage_caption ?? null,
+            'homepage_logo_url' => $tenant->homepage_logo ? Storage::disk(HomepageCompaniesService::LOGO_DISK)->url($tenant->homepage_logo) : null,
             'created_at' => $tenant->created_at?->toIso8601String(),
         ];
     }

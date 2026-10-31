@@ -53,6 +53,9 @@ class WorkspaceProvisioningService
             'name' => $data['company_name'],
             'slug' => $slug,
             'registration_status' => 'pending',
+            // The "show us on cncms.tech" tick box; shown only once approved.
+            'show_on_homepage' => filter_var($data['show_on_homepage'] ?? false, FILTER_VALIDATE_BOOLEAN),
+            'homepage_caption' => $data['company_location'],
             'pending_owner_id' => $owner->id,
             'pending_company' => [
                 'company_name' => $data['company_name'],

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Services\HomepageCompaniesService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDatabase;
@@ -16,6 +17,9 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property bool $is_active
  * @property string $registration_status
  * @property bool $bulk_whatsapp_enabled
+ * @property bool $show_on_homepage
+ * @property string|null $homepage_caption
+ * @property string|null $homepage_logo
  */
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
@@ -73,5 +77,24 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         return Attribute::make(
             get: fn (?bool $value) => $value ?? false,
         );
+    }
+
+    /**
+     * Listed in the public home page's "Cable companies running on CNCMS"
+     * strip (App\Services\HomepageCompaniesService). Opt-in: a missing key
+     * means not listed. `homepage_caption` and `homepage_logo` (a path on
+     * the public disk) are plain VirtualColumn attributes beside it.
+     */
+    protected function showOnHomepage(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?bool $value) => $value ?? false,
+        );
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(fn () => HomepageCompaniesService::forget());
+        static::deleted(fn () => HomepageCompaniesService::forget());
     }
 }

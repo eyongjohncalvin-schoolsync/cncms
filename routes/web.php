@@ -2,12 +2,10 @@
 
 declare(strict_types=1);
 
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return redirect()->route(Auth::check() ? 'dashboard' : 'login');
-});
+// Public website: home, about, contact, privacy, terms.
+require __DIR__.'/web/site.php';
 
 require __DIR__.'/web/auth.php';
 require __DIR__.'/web/register.php';

@@ -9,6 +9,7 @@ use App\Models\Company;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Services\HomepageCompaniesService;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -57,7 +58,7 @@ class RegisterTest extends TestCase
 
     public function test_submitting_registration_creates_a_pending_workspace_and_redirects_to_the_pending_page(): void
     {
-        $payload = $this->registrationPayload();
+        $payload = $this->registrationPayload(['show_on_homepage' => '1']);
         Mail::fake();
 
         $landlord = User::query()->where('email', 'kelvin@shalomtech.dev')->firstOrFail();
@@ -86,6 +87,10 @@ class RegisterTest extends TestCase
             $this->assertNotNull($tenant, 'Registering should have provisioned a Tenant.');
             $this->assertSame('pending', $tenant->registration_status);
             $this->assertFalse($tenant->isApproved());
+            // Agreed to be listed on cncms.tech, but not shown until approved.
+            $this->assertTrue($tenant->show_on_homepage);
+            $this->assertSame('Downtown', $tenant->homepage_caption);
+            $this->assertNotContains('Acme Cable Co', array_column(app(HomepageCompaniesService::class)->list(), 'name'));
 
             tenancy()->initialize($tenant);
             $tenantUser = TenantUser::query()->where('user_id', $user->id)->first();

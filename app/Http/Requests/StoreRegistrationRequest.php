@@ -41,6 +41,7 @@ class StoreRegistrationRequest extends FormRequest
             'company_phone' => ['required', 'string', 'max:30'],
             'momo_number' => ['nullable', 'string', 'max:30'],
             'momo_name' => ['nullable', 'string', 'max:50'],
+            'show_on_homepage' => ['sometimes', 'boolean'],
 
             // Becomes the tenant's `id` (its Postgres schema name is
             // derived from it — see config/tenancy.php's 'prefix'), same

@@ -34,6 +34,12 @@ class UpdateTenantRequest extends FormRequest
         return [
             'is_active' => ['sometimes', 'boolean'],
             'bulk_whatsapp_enabled' => ['sometimes', 'boolean'],
+            // The public home page listing. No SVG: opened directly, an SVG
+            // can run script on our own domain.
+            'show_on_homepage' => ['sometimes', 'boolean'],
+            'homepage_caption' => ['sometimes', 'nullable', 'string', 'max:80'],
+            'homepage_logo' => ['sometimes', 'nullable', 'image', 'mimes:png,jpg,jpeg,webp', 'max:1024'],
+            'remove_homepage_logo' => ['sometimes', 'boolean'],
         ];
     }
 }

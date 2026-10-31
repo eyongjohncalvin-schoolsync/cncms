@@ -36,6 +36,7 @@ class StoreWorkspaceRequest extends FormRequest
             'company_phone' => ['required', 'string', 'max:30'],
             'momo_number' => ['nullable', 'string', 'max:30'],
             'momo_name' => ['nullable', 'string', 'max:50'],
+            'show_on_homepage' => ['sometimes', 'boolean'],
             'workspace_slug' => ['required', 'string', 'max:63', 'alpha_dash', 'unique:tenants,id'],
         ];
     }

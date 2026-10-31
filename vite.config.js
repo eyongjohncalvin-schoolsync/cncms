@@ -8,7 +8,7 @@ import path from 'node:path';
 export default defineConfig({
     plugins: [
         laravel({
-            input: ['resources/css/app.css', 'resources/tsx/app.tsx'],
+            input: ['resources/css/app.css', 'resources/tsx/app.tsx', 'resources/css/site.css'],
             refresh: true,
             fonts: [
                 bunny('Instrument Sans', {

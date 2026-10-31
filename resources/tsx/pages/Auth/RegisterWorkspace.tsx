@@ -4,6 +4,7 @@ import { AuthLayout } from '@/layouts/AuthLayout';
 import { TextInput } from '@/components/ui/TextInput';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ShowOnHomepageCheckbox } from '@/components/auth/ShowOnHomepageCheckbox';
 
 /** lowercase, spaces -> hyphens, strip anything that isn't alphanumeric/hyphen */
 function slugify(value: string): string {
@@ -30,6 +31,7 @@ export default function RegisterWorkspace() {
         momo_number: '',
         momo_name: '',
         workspace_slug: '',
+        show_on_homepage: true,
     });
 
     function handleCompanyNameChange(e: ChangeEvent<HTMLInputElement>) {
@@ -117,6 +119,8 @@ export default function RegisterWorkspace() {
                     Used to identify your workspace. Lowercase letters, numbers, and hyphens only — auto-filled from
                     your company name, but you can change it.
                 </p>
+
+                <ShowOnHomepageCheckbox checked={data.show_on_homepage} onChange={(value) => setData('show_on_homepage', value)} />
 
                 <Button
                     type="submit"
