@@ -1,3 +1,4 @@
+import { SetupGuide, type SetupGuideData } from '@/components/dashboard/SetupGuide';
 import { Head, Link } from '@inertiajs/react';
 import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -43,6 +44,8 @@ interface DashboardProps {
         worst: ZonePerformance[];
         dropped: ZonePerformance[];
     } | null;
+    /** New company's setup checklist (super/admin), null when done or hidden. */
+    setup_guide?: SetupGuideData | null;
     stats: {
         total_customers: number;
         active_customers: number;
@@ -60,7 +63,7 @@ interface DashboardProps {
     };
 }
 
-export default function Dashboard({ period, stats, cash_alerts, uncovered_zones, spending, zone_performance }: DashboardProps) {
+export default function Dashboard({ period, stats, cash_alerts, uncovered_zones, spending, zone_performance, setup_guide }: DashboardProps) {
     // Memoized so the derived hint string isn't recomputed on every render
     // (e.g. re-renders triggered by unrelated layout/navigation state) —
     // only when the stats payload itself changes.
@@ -87,6 +90,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
     return (
         <AppLayout title="Dashboard">
             <Head title="Dashboard" />
+            {setup_guide && <SetupGuide guide={setup_guide} />}
             {typeof cash_alerts === 'number' && cash_alerts > 0 && (
                 <Link
                     href="/cash/alerts"

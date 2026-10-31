@@ -113,5 +113,41 @@
         "mobile_app": "Application mobile",
         "no_sessions": "Aucune autre session.",
         "sign_out_others": "Déconnecter toutes les autres sessions et appareils"
+    },
+    "setup": {
+        "title": "Mettez {{company}} en route",
+        "progress": "{{done}} étape(s) sur {{total}} terminée(s)",
+        "hide": "Masquer ce guide",
+        "help": "Bloqué à une étape ? Notre équipe vous aide sur WhatsApp",
+        "open": "Ouvrir",
+        "download_app": "Lien de téléchargement de l'application",
+        "done": "Fait",
+        "steps": {
+            "zones": {
+                "title": "Ajoutez vos zones",
+                "body": "Sur la page Zones, téléchargez le modèle des zones, remplissez-le et importez-le. Vous pouvez aussi ajouter les zones une par une.",
+                "action": "Ouvrir Zones"
+            },
+            "customers": {
+                "title": "Ajoutez vos clients",
+                "body": "Sur la page Clients, téléchargez le modèle des clients, remplissez-le avec la zone de chaque client et importez-le.",
+                "action": "Ouvrir Clients"
+            },
+            "staff": {
+                "title": "Ajoutez votre personnel",
+                "body": "Créez un compte pour chaque agent, caissier et responsable, et choisissez ce que chaque rôle peut faire.",
+                "action": "Ouvrir Utilisateurs"
+            },
+            "agent_app": {
+                "title": "Mettez vos agents sur l'application mobile",
+                "body": "Montrez à chaque agent comment télécharger l'application CNCMS et se connecter avec son propre compte. Elle fonctionne même sans réseau.",
+                "action": "Ouvrir Utilisateurs"
+            },
+            "first_month": {
+                "title": "Lancez votre premier mois",
+                "body": "Générez le manuscrit et les factures du mois, vérifiez-les, puis publiez. Les agents encaissent ensuite sur l'application.",
+                "action": "Ouvrir les exécutions"
+            }
+        }
     }
 }

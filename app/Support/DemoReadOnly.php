@@ -31,6 +31,7 @@ class DemoReadOnly
         'account', 'account/*',
         'legal/accept',
         'settings/contract/sign',
+        'setup-guide/hide',
         'impersonation/stop',
         'branch-view',
         'settings/locale',

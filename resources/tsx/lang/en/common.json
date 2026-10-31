@@ -113,5 +113,41 @@
         "mobile_app": "Mobile app",
         "no_sessions": "No other sessions.",
         "sign_out_others": "Sign out of all other sessions and devices"
+    },
+    "setup": {
+        "title": "Get {{company}} up and running",
+        "progress": "{{done}} of {{total}} steps done",
+        "hide": "Hide this guide",
+        "help": "Stuck on a step? Our team helps on WhatsApp",
+        "open": "Open",
+        "download_app": "App download link",
+        "done": "Done",
+        "steps": {
+            "zones": {
+                "title": "Add your zones",
+                "body": "On the Zones page, download the zone template, fill in your zones and upload it. You can also add zones one by one.",
+                "action": "Open Zones"
+            },
+            "customers": {
+                "title": "Add your customers",
+                "body": "On the Customers page, download the customer template, fill in your customers with their zone, and upload it.",
+                "action": "Open Customers"
+            },
+            "staff": {
+                "title": "Add your staff",
+                "body": "Create an account for each agent, cashier and manager, and choose what each role may do.",
+                "action": "Open Users"
+            },
+            "agent_app": {
+                "title": "Put your agents on the mobile app",
+                "body": "Show each agent how to download the CNCMS app and sign in with their own account. It works even without network.",
+                "action": "Open Users"
+            },
+            "first_month": {
+                "title": "Run your first month",
+                "body": "Generate the month's manuscript and bills, check them, then publish. Agents then collect payments on the app.",
+                "action": "Open Command runs"
+            }
+        }
     }
 }
