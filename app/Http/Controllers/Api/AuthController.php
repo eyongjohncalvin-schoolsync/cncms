@@ -10,13 +10,16 @@ use App\Http\Requests\UpdatePasswordRequest;
 use App\Http\Requests\UpdateProfileRequest;
 use App\Models\Company;
 use App\Models\LoginChallenge;
+use App\Models\LoginFailure;
 use App\Models\User;
 use App\Services\AccountSecurityService;
+use App\Services\LoginGuard;
 use App\Support\TenantContext;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -35,7 +38,7 @@ class AuthController extends Controller
      * POST /auth/two-factor (Api\TwoFactorChallengeController). The
      * optional `device_name` names the token in "Signed-in devices".
      */
-    public function login(Request $request): JsonResponse
+    public function login(Request $request, LoginGuard $loginGuard): JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'email' => ['required_without:username', 'string'],
@@ -57,11 +60,35 @@ class AuthController extends Controller
 
         $user = User::query()->where($field, $identifier)->first();
 
+        // Repeated wrong passwords block the account for a while
+        // (App\Services\LoginGuard): 423 ACCOUNT_BLOCKED, whose message the
+        // app shows as is.
+        if ($blockedUntil = $loginGuard->blockedUntil($user, (string) $identifier)) {
+            $loginGuard->recordBlockedAttempt($user, (string) $identifier, LoginFailure::MOBILE, $request);
+
+            return $this->blockedResponse($loginGuard, $blockedUntil);
+        }
+
         if (! $user || ! Hash::check($request->input('password'), $user->password)) {
+            if ($blockedUntil = $loginGuard->recordFailure($user, (string) $identifier, LoginFailure::MOBILE, $request)) {
+                return $this->blockedResponse($loginGuard, $blockedUntil);
+            }
+
             throw new AuthenticationException('These credentials do not match our records.');
         }
 
+        $loginGuard->clear($user, (string) $identifier);
+
         return $this->respondAfterFirstFactor($user, LoginChallenge::FACTOR_PASSWORD, $request->input('device_name'));
+    }
+
+    private function blockedResponse(LoginGuard $loginGuard, Carbon $blockedUntil): JsonResponse
+    {
+        return response()->json([
+            'message' => $loginGuard->blockedMessage($blockedUntil),
+            'code' => 'ACCOUNT_BLOCKED',
+            'blocked_until' => $blockedUntil->toIso8601String(),
+        ], 423);
     }
 
     /**

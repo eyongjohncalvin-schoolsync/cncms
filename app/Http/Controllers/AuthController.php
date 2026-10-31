@@ -6,7 +6,9 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\LogsUsersIn;
 use App\Models\LoginChallenge;
+use App\Models\LoginFailure;
 use App\Models\User;
+use App\Services\LoginGuard;
 use App\Support\Impersonation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,6 +30,8 @@ class AuthController extends Controller
 {
     use LogsUsersIn;
 
+    public function __construct(private readonly LoginGuard $loginGuard) {}
+
     public function create(): Response
     {
         return Inertia::render('Auth/Login');
@@ -48,11 +52,24 @@ class AuthController extends Controller
 
         $user = User::findForLogin($credentials['username']);
 
+        // Repeated wrong passwords block the account for a while
+        // (App\Services\LoginGuard) — checked before the password, so a
+        // guesser learns nothing while it lasts.
+        if ($blockedUntil = $this->loginGuard->blockedUntil($user, $credentials['username'])) {
+            $this->loginGuard->recordBlockedAttempt($user, $credentials['username'], LoginFailure::WEB, $request);
+
+            throw ValidationException::withMessages(['username' => $this->loginGuard->blockedMessage($blockedUntil)]);
+        }
+
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            $blockedUntil = $this->loginGuard->recordFailure($user, $credentials['username'], LoginFailure::WEB, $request);
+
             throw ValidationException::withMessages([
-                'username' => 'These credentials do not match our records.',
+                'username' => $blockedUntil ? $this->loginGuard->blockedMessage($blockedUntil) : 'These credentials do not match our records.',
             ]);
         }
+
+        $this->loginGuard->clear($user, $credentials['username']);
 
         if (! $user->isActive()) {
             throw ValidationException::withMessages([

@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\LoginFailure;
 use App\Support\MaintenanceMode;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -49,6 +50,9 @@ Schedule::command('cash:alerts-digest')->dailyAt('07:00')->withoutOverlapping()
 // Before the 07:00 digest, so the day's alerts show the new shortages.
 Schedule::command('vouchers:advances-overdue')->dailyAt('00:45')->timezone('Africa/Lagos')->withoutOverlapping()
     ->skip(fn () => MaintenanceMode::active() !== null);
+
+// Refused sign-ins are kept 90 days (App\Models\LoginFailure::prunable()).
+Schedule::command('model:prune', ['--model' => [LoginFailure::class]])->dailyAt('03:40')->timezone('Africa/Lagos')->withoutOverlapping();
 
 // Free demo reminders (30/7/1 days, then "ended, read-only") to company
 // admins — App\Console\Commands\DemoReminders. Mail only, no tenant data

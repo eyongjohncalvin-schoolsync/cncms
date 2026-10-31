@@ -10,6 +10,7 @@ use App\Http\Controllers\Landlord\ImpersonationController;
 use App\Http\Controllers\Landlord\LandlordController;
 use App\Http\Controllers\Landlord\LegalDocumentController;
 use App\Http\Controllers\Landlord\MaintenanceWindowController;
+use App\Http\Controllers\Landlord\SecurityController;
 use App\Http\Controllers\Landlord\TenantController;
 use App\Http\Controllers\Landlord\UserController;
 use App\Models\LegalDocumentVersion;
@@ -65,6 +66,9 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::delete('legal/{type}/draft', [LegalDocumentController::class, 'discardDraft'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.draft.discard');
     Route::post('legal/{type}/publish', [LegalDocumentController::class, 'publish'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.publish');
     Route::get('legal/{type}/preview/{version}', [LegalDocumentController::class, 'preview'])->whereIn('type', LegalDocumentVersion::TYPES)->where('version', 'draft|[0-9]+')->name('legal.preview');
+
+    Route::get('security', [SecurityController::class, 'index'])->name('security.index');
+    Route::post('security/unblock', [SecurityController::class, 'unblock'])->name('security.unblock');
 
     Route::get('backups', [BackupController::class, 'index'])->name('backups.index');
     Route::post('backups', [BackupController::class, 'store'])->middleware('throttle:exports')->name('backups.store');

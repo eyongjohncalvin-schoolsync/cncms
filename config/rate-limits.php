@@ -32,6 +32,22 @@ return [
         'decay_minutes' => (int) env('RATE_LIMIT_LOGIN_DECAY_MINUTES', 1),
     ],
 
+    // Account blocks on top of the per-minute limit above
+    // (App\Services\LoginGuard): `block_after` wrong passwords for one
+    // account within `window_minutes` block its password sign-in from every
+    // device for `block_minutes`; another wrong password after that, still
+    // within the window, blocks it for `long_block_minutes`. Never
+    // permanent; email-code sign-in still works. `ip_alert_accounts`: one IP
+    // failing on this many different accounts in the window alerts the
+    // landlords.
+    'login_block' => [
+        'window_minutes' => 60,
+        'block_after' => 10,
+        'block_minutes' => 15,
+        'long_block_minutes' => 60,
+        'ip_alert_accounts' => 10,
+    ],
+
     // Self-service registration / workspace creation, keyed by IP. Stricter
     // and longer-windowed than login — provisioning a workspace creates a
     // real Postgres schema, so this must not be automatable.
