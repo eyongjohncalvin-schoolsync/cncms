@@ -45,6 +45,15 @@ return [
         'block_after' => 10,
         'block_minutes' => 15,
         'long_block_minutes' => 60,
+        // Device block: `device_block_after` wrong passwords from one IP
+        // address within the window, whatever usernames were typed, block
+        // password sign-in from that address for `device_block_minutes`.
+        // High on purpose: agents on mobile data share carrier addresses.
+        // LOGIN_TRUSTED_IPS (comma-separated, e.g. the office) are never
+        // device-blocked.
+        'device_block_after' => (int) env('LOGIN_DEVICE_BLOCK_AFTER', 30),
+        'device_block_minutes' => (int) env('LOGIN_DEVICE_BLOCK_MINUTES', 60),
+        'trusted_ips' => array_values(array_filter(array_map('trim', explode(',', (string) env('LOGIN_TRUSTED_IPS', ''))))),
         'ip_alert_accounts' => 10,
     ],
 

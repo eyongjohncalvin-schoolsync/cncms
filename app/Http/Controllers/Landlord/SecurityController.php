@@ -29,7 +29,7 @@ class SecurityController extends Controller
 {
     public function __construct(private readonly LoginGuard $guard) {}
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $since = now()->subDay();
         $recent = LoginFailure::query()->with('user:id,uuid,name,username')->latest('id')->limit(150)->get();
@@ -50,6 +50,10 @@ class SecurityController extends Controller
                 'ips' => LoginFailure::query()->where('created_at', '>=', $since)->distinct()->count('ip_address'),
                 'blocked_now' => count($blocked),
             ],
+            'blocked_devices' => collect($this->guard->blockedDevices())->map(fn (array $row) => [
+                ...$row,
+                'until' => $row['until']->toIso8601String(),
+            ])->values(),
             'blocked' => collect($blocked)->map(fn (array $row) => [
                 ...$person($row['user'], $row['identifier']),
                 'failures' => $row['failures'],
@@ -79,6 +83,9 @@ class SecurityController extends Controller
                 'cleared' => $failure->cleared_at !== null,
             ]),
             'limits' => config('rate-limits.login_block'),
+            // So the landlord can check the app sees real addresses (not a
+            // proxy's), and find their own to add to LOGIN_TRUSTED_IPS.
+            'your_ip' => $request->ip(),
         ]);
     }
 
@@ -96,6 +103,16 @@ class SecurityController extends Controller
         LandlordActivity::record('security.unblocked', "Unblocked password sign-in for {$who}", $user ? 'user' : null, $user?->uuid, ['identifier' => $validated['identifier'], 'cleared' => $cleared]);
 
         return back()->with('success', "{$who} can sign in with a password again.");
+    }
+
+    public function unblockDevice(Request $request): RedirectResponse
+    {
+        $ip = $request->validate(['ip_address' => ['required', 'ip']])['ip_address'];
+        $cleared = $this->guard->clearDevice($ip);
+
+        LandlordActivity::record('security.device_unblocked', "Unblocked password sign-in from {$ip}", null, null, ['ip_address' => $ip, 'cleared' => $cleared]);
+
+        return back()->with('success', "Sign-in from {$ip} is allowed again.");
     }
 
     /**

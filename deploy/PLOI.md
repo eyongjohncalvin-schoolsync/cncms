@@ -372,3 +372,12 @@ file in `~/backups/cncms` from before the bad deploy.
   production.
 - **Timezones:** the app and the database session run in UTC on purpose
   (`config/database.php`). Leave the server timezone alone.
+- **Sign-in device block:** 30 wrong passwords from one IP address in an
+  hour block password sign-in from that address for an hour (Landlord →
+  Security, "Unblock device"). The app must see real visitor addresses:
+  Landlord → Security shows "Your address as the system sees it" — it must
+  match what <https://whatismyipaddress.com> shows you. If the site is ever
+  put behind a proxy (e.g. Cloudflare), every visitor would share the
+  proxy's address; configure trusted proxies first. Addresses that must
+  never be blocked (e.g. the office): `LOGIN_TRUSTED_IPS=1.2.3.4,5.6.7.8`
+  in `.env`, then `php artisan optimize`.

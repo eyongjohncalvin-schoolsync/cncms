@@ -138,6 +138,81 @@ class LoginGuardTest extends TestCase
         $this->assertSame(1, Mail::queued(LoginAttackAlertMail::class, fn (LoginAttackAlertMail $mail) => $mail->hasTo($landlord->email))->count());
     }
 
+    public function test_thirty_wrong_passwords_from_one_device_block_it_whatever_usernames_are_typed(): void
+    {
+        $landlord = User::factory()->create(['is_landlord' => true]);
+
+        for ($i = 1; $i < 30; $i++) {
+            $this->webLogin('wrong', "made-up-{$i}");
+        }
+
+        $this->webLogin('wrong', 'made-up-30')->assertSessionHasErrors('username');
+        $this->assertStringContainsString('from this network', session('errors')->first('username'));
+
+        // Every account is refused from that address, even with the right password…
+        $this->webLogin('password')->assertSessionHasErrors('username');
+        $this->postJson('/api/v1/auth/login', ['username' => $this->user->username, 'password' => 'password'])
+            ->assertStatus(423)
+            ->assertJsonPath('code', 'DEVICE_BLOCKED');
+        $this->assertGuest();
+
+        // …but not from anywhere else.
+        $this->withServerVariables(['REMOTE_ADDR' => '102.244.7.7'])->webLogin('password')->assertSessionHasNoErrors();
+        $this->assertAuthenticatedAs($this->user);
+
+        Mail::assertQueued(LoginAttackAlertMail::class, fn (LoginAttackAlertMail $mail) => $mail->hasTo($landlord->email) && $mail->blockedUntil !== null);
+        $this->assertTrue(LandlordActivity::query()->where('action', 'security.device_blocked')->exists());
+    }
+
+    public function test_the_device_block_lifts_after_an_hour_and_a_correct_password_does_not_reset_it(): void
+    {
+        for ($i = 1; $i <= 29; $i++) {
+            $this->webLogin('wrong', "made-up-{$i}");
+        }
+
+        // A colleague signing in correctly on the same network clears only their own account.
+        $this->webLogin('password')->assertSessionHasNoErrors();
+        $this->post('/logout');
+        $this->webLogin('wrong', 'made-up-30');
+
+        $this->webLogin('password')->assertSessionHasErrors('username');
+
+        $this->travel(61)->minutes();
+        $this->webLogin('password')->assertSessionHasNoErrors();
+    }
+
+    public function test_trusted_addresses_are_never_device_blocked(): void
+    {
+        config(['rate-limits.login_block.trusted_ips' => ['127.0.0.1']]);
+
+        for ($i = 1; $i <= 31; $i++) {
+            $this->webLogin('wrong', "made-up-{$i}");
+        }
+
+        $this->webLogin('password')->assertSessionHasNoErrors();
+    }
+
+    public function test_the_landlord_sees_a_blocked_device_and_can_unblock_it(): void
+    {
+        for ($i = 1; $i <= 30; $i++) {
+            $this->webLogin('wrong', "made-up-{$i}");
+        }
+
+        $this->actingAs(User::factory()->create(['is_landlord' => true]));
+
+        $this->get('/landlord/security')->assertInertia(fn (Assert $page) => $page
+            ->where('blocked_devices.0.ip_address', '127.0.0.1')
+            ->where('blocked_devices.0.accounts', 30)
+            ->where('your_ip', '127.0.0.1'));
+
+        $this->post('/landlord/security/unblock-device', ['ip_address' => '127.0.0.1'])->assertSessionHas('success');
+        $this->assertSame('security.device_unblocked', LandlordActivity::query()->latest('id')->value('action'));
+        $this->post('/landlord/security/unblock-device', ['ip_address' => 'not-an-ip'])->assertSessionHasErrors('ip_address');
+
+        $this->post('/logout');
+        $this->webLogin('password')->assertSessionHasNoErrors();
+    }
+
     public function test_the_landlord_sees_blocked_accounts_and_can_unblock(): void
     {
         $this->wrongPasswords(10);

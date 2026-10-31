@@ -15,10 +15,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * One refused password sign-in (central schema) — written only by
  * App\Services\LoginGuard. `reason` is `password` (wrong password or
  * unknown account; these count towards a block) or `blocked` (tried while
- * blocked; never counted). Pruned after 90 days.
+ * blocked; never counted). `cleared_at` stops a failure counting against
+ * the account, `ip_cleared_at` against the device. Pruned after 90 days.
  */
 #[Connection('pgsql')]
-#[Fillable(['user_id', 'identifier', 'reason', 'channel', 'ip_address', 'user_agent', 'created_at', 'cleared_at'])]
+#[Fillable(['user_id', 'identifier', 'reason', 'channel', 'ip_address', 'user_agent', 'created_at', 'cleared_at', 'ip_cleared_at'])]
 class LoginFailure extends Model
 {
     use Prunable;
@@ -38,6 +39,7 @@ class LoginFailure extends Model
         return [
             'created_at' => 'datetime',
             'cleared_at' => 'datetime',
+            'ip_cleared_at' => 'datetime',
         ];
     }
 

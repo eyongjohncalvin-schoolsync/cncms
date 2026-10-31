@@ -52,20 +52,20 @@ class AuthController extends Controller
 
         $user = User::findForLogin($credentials['username']);
 
-        // Repeated wrong passwords block the account for a while
-        // (App\Services\LoginGuard) — checked before the password, so a
-        // guesser learns nothing while it lasts.
-        if ($blockedUntil = $this->loginGuard->blockedUntil($user, $credentials['username'])) {
+        // Repeated wrong passwords block the account, or the device, for a
+        // while (App\Services\LoginGuard) — checked before the password, so
+        // a guesser learns nothing while it lasts.
+        if ($refusal = $this->loginGuard->refusal($user, $credentials['username'], $request)) {
             $this->loginGuard->recordBlockedAttempt($user, $credentials['username'], LoginFailure::WEB, $request);
 
-            throw ValidationException::withMessages(['username' => $this->loginGuard->blockedMessage($blockedUntil)]);
+            throw ValidationException::withMessages(['username' => $refusal['message']]);
         }
 
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
-            $blockedUntil = $this->loginGuard->recordFailure($user, $credentials['username'], LoginFailure::WEB, $request);
+            $this->loginGuard->recordFailure($user, $credentials['username'], LoginFailure::WEB, $request);
 
             throw ValidationException::withMessages([
-                'username' => $blockedUntil ? $this->loginGuard->blockedMessage($blockedUntil) : 'These credentials do not match our records.',
+                'username' => $this->loginGuard->refusal($user, $credentials['username'], $request)['message'] ?? 'These credentials do not match our records.',
             ]);
         }
 

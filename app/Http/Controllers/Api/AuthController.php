@@ -60,18 +60,20 @@ class AuthController extends Controller
 
         $user = User::query()->where($field, $identifier)->first();
 
-        // Repeated wrong passwords block the account for a while
-        // (App\Services\LoginGuard): 423 ACCOUNT_BLOCKED, whose message the
-        // app shows as is.
-        if ($blockedUntil = $loginGuard->blockedUntil($user, (string) $identifier)) {
+        // Repeated wrong passwords block the account, or the device, for a
+        // while (App\Services\LoginGuard): 423 ACCOUNT_BLOCKED or
+        // DEVICE_BLOCKED, whose message the app shows as is.
+        if ($refusal = $loginGuard->refusal($user, (string) $identifier, $request)) {
             $loginGuard->recordBlockedAttempt($user, (string) $identifier, LoginFailure::MOBILE, $request);
 
-            return $this->blockedResponse($loginGuard, $blockedUntil);
+            return $this->blockedResponse($refusal);
         }
 
         if (! $user || ! Hash::check($request->input('password'), $user->password)) {
-            if ($blockedUntil = $loginGuard->recordFailure($user, (string) $identifier, LoginFailure::MOBILE, $request)) {
-                return $this->blockedResponse($loginGuard, $blockedUntil);
+            $loginGuard->recordFailure($user, (string) $identifier, LoginFailure::MOBILE, $request);
+
+            if ($refusal = $loginGuard->refusal($user, (string) $identifier, $request)) {
+                return $this->blockedResponse($refusal);
             }
 
             throw new AuthenticationException('These credentials do not match our records.');
@@ -82,12 +84,15 @@ class AuthController extends Controller
         return $this->respondAfterFirstFactor($user, LoginChallenge::FACTOR_PASSWORD, $request->input('device_name'));
     }
 
-    private function blockedResponse(LoginGuard $loginGuard, Carbon $blockedUntil): JsonResponse
+    /**
+     * @param  array{code: string, until: Carbon, message: string}  $refusal  LoginGuard::refusal()
+     */
+    private function blockedResponse(array $refusal): JsonResponse
     {
         return response()->json([
-            'message' => $loginGuard->blockedMessage($blockedUntil),
-            'code' => 'ACCOUNT_BLOCKED',
-            'blocked_until' => $blockedUntil->toIso8601String(),
+            'message' => $refusal['message'],
+            'code' => $refusal['code'],
+            'blocked_until' => $refusal['until']->toIso8601String(),
         ], 423);
     }
 

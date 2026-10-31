@@ -11,7 +11,8 @@ use Illuminate\Mail\Mailables\Envelope;
 
 /**
  * "One device tried wrong passwords on many different accounts" — to every
- * landlord, at most once an hour per IP (App\Services\LoginGuard).
+ * landlord, at most once an hour per IP — or, with $blockedUntil, "and
+ * sign-in from it is now blocked" (the device block). App\Services\LoginGuard.
  */
 class LoginAttackAlertMail extends Mailable
 {
@@ -21,11 +22,14 @@ class LoginAttackAlertMail extends Mailable
         public readonly string $recipientName,
         public readonly string $ipAddress,
         public readonly int $accounts,
+        public readonly ?string $blockedUntil = null,
     ) {}
 
     public function envelope(): Envelope
     {
-        return new Envelope(subject: "Security alert: one device tried {$this->accounts} different CNCMS accounts");
+        return new Envelope(subject: $this->blockedUntil !== null
+            ? "Security alert: sign-in blocked from {$this->ipAddress}"
+            : "Security alert: one device tried {$this->accounts} different CNCMS accounts");
     }
 
     public function content(): Content

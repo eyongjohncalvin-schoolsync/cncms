@@ -16,9 +16,11 @@ interface Person {
 interface SecurityProps {
     summary: { failures: number; refused_while_blocked: number; ips: number; blocked_now: number };
     blocked: (Person & { failures: number; until: string })[];
+    blocked_devices: { ip_address: string; failures: number; accounts: number; until: string }[];
+    your_ip: string | null;
     ips: { ip_address: string; attempts: number; accounts: number; last_at: string }[];
     recent: (Person & { id: number; reason: 'password' | 'blocked'; channel: 'web' | 'mobile'; ip_address: string | null; user_agent: string | null; at: string; cleared: boolean })[];
-    limits: { window_minutes: number; block_after: number; block_minutes: number; long_block_minutes: number; ip_alert_accounts: number };
+    limits: { window_minutes: number; block_after: number; block_minutes: number; long_block_minutes: number; device_block_after: number; device_block_minutes: number; trusted_ips: string[]; ip_alert_accounts: number };
 }
 
 function formatTime(iso: string): string {
@@ -45,10 +47,16 @@ function Who({ person }: { person: Person }) {
  * Landlord → Security (Landlord\SecurityController, App\Services\LoginGuard):
  * refused password sign-ins, blocked accounts with Unblock, busiest IPs.
  */
-export default function LandlordSecurity({ summary, blocked, ips, recent, limits }: SecurityProps) {
+export default function LandlordSecurity({ summary, blocked, blocked_devices, ips, recent, limits, your_ip }: SecurityProps) {
     function unblock(person: Person) {
         if (confirm(`Unblock password sign-in for ${person.user ?? person.identifier}?`)) {
             router.post('/landlord/security/unblock', { user_uuid: person.user_uuid, identifier: person.identifier }, { preserveScroll: true });
+        }
+    }
+
+    function unblockDevice(ip: string) {
+        if (confirm(`Allow password sign-in from ${ip} again?`)) {
+            router.post('/landlord/security/unblock-device', { ip_address: ip }, { preserveScroll: true });
         }
     }
 
@@ -71,8 +79,13 @@ export default function LandlordSecurity({ summary, blocked, ips, recent, limits
                     <h1 className="font-display text-2xl font-semibold text-slate-900">Security</h1>
                     <p className="text-sm text-slate-500">
                         {limits.block_after} wrong passwords within {limits.window_minutes} minutes block an account's password sign-in for {limits.block_minutes} minutes;
-                        another wrong password after that blocks it for {limits.long_block_minutes} minutes. Email-code sign-in keeps working. The owner is emailed; you
-                        are emailed when one device fails on {limits.ip_alert_accounts}+ accounts.
+                        another wrong password after that blocks it for {limits.long_block_minutes} minutes. {limits.device_block_after} wrong passwords from one IP address,
+                        whatever usernames are typed, block sign-in from that address for {limits.device_block_minutes} minutes. Email-code sign-in keeps working. The
+                        owner is emailed; you are emailed when a device is blocked or fails on {limits.ip_alert_accounts}+ accounts.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                        Your address as the system sees it: <span className="font-medium text-slate-600">{your_ip ?? 'unknown'}</span>
+                        {limits.trusted_ips.length > 0 && <> · never blocked: {limits.trusted_ips.join(', ')}</>}
                     </p>
                 </div>
             </div>
@@ -117,6 +130,32 @@ export default function LandlordSecurity({ summary, blocked, ips, recent, limits
                     </ul>
                 )}
             </Card>
+
+            {blocked_devices.length > 0 && (
+                <Card className="animate-fade-up mb-6">
+                    <CardHeader>
+                        <div className="flex items-center gap-2">
+                            <IconWorld size={18} stroke={1.75} className="text-red-600" />
+                            <p className="font-medium text-slate-900">Blocked devices</p>
+                        </div>
+                    </CardHeader>
+                    <ul className="divide-y divide-slate-100">
+                        {blocked_devices.map((device) => (
+                            <li key={device.ip_address} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                                <div className="min-w-0">
+                                    <p className="font-medium text-slate-900">{device.ip_address}</p>
+                                    <p className="text-xs text-red-700">
+                                        {device.failures} wrong passwords on {device.accounts} account{device.accounts === 1 ? '' : 's'} · blocked until {formatTime(device.until)}
+                                    </p>
+                                </div>
+                                <Button type="button" variant="secondary" onClick={() => unblockDevice(device.ip_address)}>
+                                    Unblock device
+                                </Button>
+                            </li>
+                        ))}
+                    </ul>
+                </Card>
+            )}
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
                 <Card className="animate-fade-up min-w-0">
