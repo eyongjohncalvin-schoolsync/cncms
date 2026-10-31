@@ -42,6 +42,19 @@ Then, on the server in Ploi:
   password for `.env`. **Never put the `postgres` superuser in production
   `.env`:** a superuser bypasses every database permission (and any future
   row-level security), so a single app bug could reach everything.
+- **Let that user create tables and company schemas.** PostgreSQL 15+ no
+  longer lets an ordinary user create tables in `public`, and the app also
+  creates one schema per company. As **root** (Hostinger's browser terminal
+  works; the site user has no sudo), with `cncms` replaced by the
+  `DB_USERNAME` from `.env`:
+
+  ```bash
+  sudo -u postgres psql -d cncms -c "GRANT USAGE, CREATE ON SCHEMA public TO cncms;"
+  sudo -u postgres psql -d cncms -c "GRANT CREATE ON DATABASE cncms TO cncms;"
+  ```
+
+  Missing this shows up as `permission denied for schema public` on the
+  first deploy that adds a table.
 - **PHP settings:** `memory_limit` at least 512M,
   `upload_max_filesize`/`post_max_size` at least 30M (customer imports).
 
