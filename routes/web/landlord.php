@@ -8,9 +8,11 @@ use App\Http\Controllers\Landlord\BackupController;
 use App\Http\Controllers\Landlord\DashboardController;
 use App\Http\Controllers\Landlord\ImpersonationController;
 use App\Http\Controllers\Landlord\LandlordController;
+use App\Http\Controllers\Landlord\LegalDocumentController;
 use App\Http\Controllers\Landlord\MaintenanceWindowController;
 use App\Http\Controllers\Landlord\TenantController;
 use App\Http\Controllers\Landlord\UserController;
+use App\Models\LegalDocumentVersion;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -53,6 +55,13 @@ Route::middleware(['auth', 'landlord'])->prefix('landlord')->name('landlord.')->
     Route::patch('tenants/{tenant}', [TenantController::class, 'update'])->name('tenants.update');
     Route::post('tenants/{tenant}/approve', [TenantController::class, 'approve'])->name('tenants.approve');
     Route::post('tenants/{tenant}/reject', [TenantController::class, 'reject'])->name('tenants.reject');
+
+    Route::get('legal', [LegalDocumentController::class, 'index'])->name('legal.index');
+    Route::get('legal/{type}', [LegalDocumentController::class, 'edit'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.edit');
+    Route::put('legal/{type}/draft', [LegalDocumentController::class, 'saveDraft'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.draft.save');
+    Route::delete('legal/{type}/draft', [LegalDocumentController::class, 'discardDraft'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.draft.discard');
+    Route::post('legal/{type}/publish', [LegalDocumentController::class, 'publish'])->whereIn('type', LegalDocumentVersion::TYPES)->name('legal.publish');
+    Route::get('legal/{type}/preview/{version}', [LegalDocumentController::class, 'preview'])->whereIn('type', LegalDocumentVersion::TYPES)->where('version', 'draft|[0-9]+')->name('legal.preview');
 
     Route::get('backups', [BackupController::class, 'index'])->name('backups.index');
     Route::post('backups', [BackupController::class, 'store'])->middleware('throttle:exports')->name('backups.store');

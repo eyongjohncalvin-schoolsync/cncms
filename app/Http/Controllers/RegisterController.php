@@ -6,7 +6,9 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreRegistrationRequest;
 use App\Http\Requests\StoreWorkspaceRequest;
+use App\Models\LegalDocumentVersion;
 use App\Models\User;
+use App\Services\LegalDocumentService;
 use App\Services\WorkspaceProvisioningService;
 use App\Support\GeneratesUsername;
 use Illuminate\Http\RedirectResponse;
@@ -29,6 +31,7 @@ class RegisterController extends Controller
 
     public function __construct(
         private readonly WorkspaceProvisioningService $provisioning,
+        private readonly LegalDocumentService $legal,
     ) {}
 
     public function create(): Response
@@ -56,7 +59,9 @@ class RegisterController extends Controller
             'status' => 'active',
         ]);
 
-        $this->provisioning->provision($user, $data);
+        $tenant = $this->provisioning->provision($user, $data);
+        // The sign-up tick box is the company's first acceptance.
+        $this->legal->recordAcceptance($user, $tenant->id, [LegalDocumentVersion::TERMS, LegalDocumentVersion::PRIVACY], $request);
 
         Auth::login($user);
 
@@ -76,7 +81,8 @@ class RegisterController extends Controller
 
     public function storeWorkspace(StoreWorkspaceRequest $request): RedirectResponse
     {
-        $this->provisioning->provision($request->user(), $request->validated());
+        $tenant = $this->provisioning->provision($request->user(), $request->validated());
+        $this->legal->recordAcceptance($request->user(), $tenant->id, [LegalDocumentVersion::TERMS, LegalDocumentVersion::PRIVACY], $request);
 
         return redirect()->route('workspace.pending');
     }

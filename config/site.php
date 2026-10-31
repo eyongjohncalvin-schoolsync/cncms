@@ -22,7 +22,14 @@ return [
 
     'email' => env('SITE_EMAIL', 'onetechcncms@gmail.com'),
 
-    // Version 1 of Privacy and Terms (resources/legal/{locale}/*.md).
+    // Send a company's super/admin to accept Terms published as "must
+    // accept" (EnsureLegalAccepted). Off only in the test suite, where the
+    // seeded companies never signed up; the legal tests turn it back on.
+    'enforce_legal_acceptance' => (bool) env('LEGAL_ENFORCE_ACCEPTANCE', true),
+
+    // Version 1 of Privacy and Terms (resources/legal/{locale}/*.md), shown
+    // only until the database holds a published version (it is copied in
+    // by the legal documents migration). Later versions: Landlord → Legal.
     'legal_version' => 1,
     'legal_effective' => '2026-11-01',
 ];

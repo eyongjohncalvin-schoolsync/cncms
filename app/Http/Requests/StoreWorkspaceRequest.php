@@ -37,7 +37,18 @@ class StoreWorkspaceRequest extends FormRequest
             'momo_number' => ['nullable', 'string', 'max:30'],
             'momo_name' => ['nullable', 'string', 'max:50'],
             'show_on_homepage' => ['sometimes', 'boolean'],
+            'accept_terms' => ['accepted'],
             'workspace_slug' => ['required', 'string', 'max:63', 'alpha_dash', 'unique:tenants,id'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'accept_terms.accepted' => 'Accept the Terms of service and the Privacy policy to register.',
         ];
     }
 }

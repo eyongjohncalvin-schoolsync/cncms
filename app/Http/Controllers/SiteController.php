@@ -6,11 +6,12 @@ namespace App\Http\Controllers;
 
 use App\Http\Middleware\ResolveLocale;
 use App\Services\HomepageCompaniesService;
+use App\Services\LegalDocumentService;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 /**
@@ -21,6 +22,8 @@ use Illuminate\View\View;
  */
 class SiteController extends Controller
 {
+    public function __construct(private readonly LegalDocumentService $legal) {}
+
     public function home(HomepageCompaniesService $companies): View|RedirectResponse
     {
         if (Auth::check()) {
@@ -69,17 +72,32 @@ class SiteController extends Controller
     private function legal(string $document): View
     {
         $locale = app()->getLocale();
+        $current = $this->legal->current($document);
+
+        if ($current !== null) {
+            return $this->legalView($document, $current->version, $current->published_at, $current->body($locale));
+        }
+
+        // Nothing published yet (a fresh database): version 1 from the files.
         $path = resource_path("legal/{$locale}/{$document}.md");
 
         if (! is_file($path)) {
             $path = resource_path("legal/en/{$document}.md");
         }
 
+        return $this->legalView($document, (int) config('site.legal_version'), CarbonImmutable::parse(config('site.legal_effective')), (string) file_get_contents($path));
+    }
+
+    /**
+     * Also used by the landlord's preview of a draft or an old version.
+     */
+    public function legalView(string $document, int $version, ?CarbonInterface $effective, string $markdown): View
+    {
         return view('site.legal', [
             'documentTitle' => __("site.legal.{$document}"),
-            'version' => config('site.legal_version'),
-            'effective' => CarbonImmutable::parse(config('site.legal_effective'))->locale($locale)->isoFormat('LL'),
-            'body' => Str::markdown((string) file_get_contents($path), ['html_input' => 'escape', 'allow_unsafe_links' => false]),
+            'version' => $version,
+            'effective' => ($effective ?? now())->locale(app()->getLocale())->isoFormat('LL'),
+            'body' => LegalDocumentService::toHtml($markdown),
         ]);
     }
 }

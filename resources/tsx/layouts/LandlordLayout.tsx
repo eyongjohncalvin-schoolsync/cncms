@@ -4,6 +4,7 @@ import {
     IconBroadcast,
     IconBuildingSkyscraper,
     IconDatabase,
+    IconFileCertificate,
     IconHistory,
     IconLayoutDashboard,
     IconLogout,
@@ -22,6 +23,7 @@ const navItems = [
     { href: '/landlord/users', label: 'Users', icon: IconUsers },
     { href: '/landlord/maintenance', label: 'Maintenance', icon: IconTool },
     { href: '/landlord/backups', label: 'Backups', icon: IconDatabase },
+    { href: '/landlord/legal', label: 'Legal documents', icon: IconFileCertificate },
     { href: '/landlord/landlords', label: 'Landlords', icon: IconShieldLock },
     { href: '/landlord/activity', label: 'Activity log', icon: IconHistory },
 ];

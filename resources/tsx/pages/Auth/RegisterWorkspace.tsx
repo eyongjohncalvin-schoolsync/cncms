@@ -5,6 +5,7 @@ import { TextInput } from '@/components/ui/TextInput';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ShowOnHomepageCheckbox } from '@/components/auth/ShowOnHomepageCheckbox';
+import { AcceptTermsCheckbox } from '@/components/auth/AcceptTermsCheckbox';
 
 /** lowercase, spaces -> hyphens, strip anything that isn't alphanumeric/hyphen */
 function slugify(value: string): string {
@@ -32,6 +33,7 @@ export default function RegisterWorkspace() {
         momo_name: '',
         workspace_slug: '',
         show_on_homepage: true,
+        accept_terms: false,
     });
 
     function handleCompanyNameChange(e: ChangeEvent<HTMLInputElement>) {
@@ -121,6 +123,7 @@ export default function RegisterWorkspace() {
                 </p>
 
                 <ShowOnHomepageCheckbox checked={data.show_on_homepage} onChange={(value) => setData('show_on_homepage', value)} />
+                <AcceptTermsCheckbox checked={data.accept_terms} onChange={(value) => setData('accept_terms', value)} error={errors.accept_terms} />
 
                 <Button
                     type="submit"

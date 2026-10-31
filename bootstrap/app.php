@@ -4,6 +4,7 @@ use App\Http\Middleware\AnswerLayoutPoll;
 use App\Http\Middleware\BlockDuringImpersonation;
 use App\Http\Middleware\EnsureAccountIsActive;
 use App\Http\Middleware\EnsureLandlord;
+use App\Http\Middleware\EnsureLegalAccepted;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RecordImpersonatedActions;
 use App\Http\Middleware\ResolveLocale;
@@ -50,6 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'tenant.web' => ResolveTenantWeb::class,
             'landlord' => EnsureLandlord::class,
             'not-impersonating' => BlockDuringImpersonation::class,
+            'legal.accepted' => EnsureLegalAccepted::class,
         ]);
 
         // Laravel's built-in middleware priority list runs

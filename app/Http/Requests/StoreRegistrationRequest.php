@@ -42,11 +42,22 @@ class StoreRegistrationRequest extends FormRequest
             'momo_number' => ['nullable', 'string', 'max:30'],
             'momo_name' => ['nullable', 'string', 'max:50'],
             'show_on_homepage' => ['sometimes', 'boolean'],
+            'accept_terms' => ['accepted'],
 
             // Becomes the tenant's `id` (its Postgres schema name is
             // derived from it — see config/tenancy.php's 'prefix'), same
             // rule shape as App\Http\Requests\StoreTenantRequest's 'slug'.
             'workspace_slug' => ['required', 'string', 'max:63', 'alpha_dash', 'unique:tenants,id'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'accept_terms.accepted' => 'Accept the Terms of service and the Privacy policy to register.',
         ];
     }
 }

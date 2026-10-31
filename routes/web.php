@@ -49,7 +49,8 @@ require __DIR__.'/web/payment-receipts-public.php';
 | their own route files — the tighter one always trips first.
 |
 */
-Route::middleware(['auth', 'tenant.web', 'throttle:web'])->group(function () {
+Route::middleware(['auth', 'tenant.web', 'legal.accepted', 'throttle:web'])->group(function () {
+    require __DIR__.'/web/legal.php';
     require __DIR__.'/web/dashboard.php';
     require __DIR__.'/web/company.php';
     require __DIR__.'/web/account.php';

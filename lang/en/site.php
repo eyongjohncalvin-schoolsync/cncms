@@ -203,6 +203,7 @@ return [
     'legal' => [
         'privacy' => 'Privacy policy',
         'terms' => 'Terms of service',
+        'contract' => 'Service contract',
         'version' => 'Version :version · in effect since :date',
         'questions' => 'Questions about this document? Write to :email.',
     ],

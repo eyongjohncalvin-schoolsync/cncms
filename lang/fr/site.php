@@ -203,6 +203,7 @@ return [
     'legal' => [
         'privacy' => 'Politique de confidentialité',
         'terms' => 'Conditions d\'utilisation',
+        'contract' => 'Contrat de service',
         'version' => 'Version :version · en vigueur depuis le :date',
         'questions' => 'Une question sur ce document ? Écrivez à :email.',
     ],

@@ -7,6 +7,7 @@ import { PasswordInput } from '@/components/ui/PasswordInput';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ShowOnHomepageCheckbox } from '@/components/auth/ShowOnHomepageCheckbox';
+import { AcceptTermsCheckbox } from '@/components/auth/AcceptTermsCheckbox';
 
 /** lowercase, spaces -> hyphens, strip anything that isn't alphanumeric/hyphen */
 function slugify(value: string): string {
@@ -40,6 +41,7 @@ export default function Register() {
         momo_name: '',
         workspace_slug: '',
         show_on_homepage: true,
+        accept_terms: false,
     });
 
     // A server-side validation error on an account field means the user
@@ -247,6 +249,7 @@ export default function Register() {
                     </div>
 
                     <ShowOnHomepageCheckbox checked={data.show_on_homepage} onChange={(value) => setData('show_on_homepage', value)} />
+                    <AcceptTermsCheckbox checked={data.accept_terms} onChange={(value) => setData('accept_terms', value)} error={errors.accept_terms} />
 
                     <Button
                         type="submit"

@@ -6,10 +6,12 @@ namespace Tests\Feature\Web;
 
 use App\Mail\NewWorkspaceRegisteredMail;
 use App\Models\Company;
+use App\Models\LegalAcceptance;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Services\HomepageCompaniesService;
+use App\Services\LegalDocumentService;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -46,6 +48,7 @@ class RegisterTest extends TestCase
             'momo_number' => '677000000',
             'momo_name' => 'Acme Owner',
             'workspace_slug' => $slug,
+            'accept_terms' => '1',
         ], $overrides);
     }
 
@@ -91,6 +94,12 @@ class RegisterTest extends TestCase
             $this->assertTrue($tenant->show_on_homepage);
             $this->assertSame('Downtown', $tenant->homepage_caption);
             $this->assertNotContains('Acme Cable Co', array_column(app(HomepageCompaniesService::class)->list(), 'name'));
+            // The sign-up tick box is the company's first acceptance of both documents.
+            $this->assertEqualsCanonicalizing(
+                ['terms', 'privacy'],
+                LegalAcceptance::query()->where('tenant_id', $tenant->id)->where('user_id', $user->id)->with('documentVersion')->get()->pluck('documentVersion.type')->all(),
+            );
+            $this->assertNull(app(LegalDocumentService::class)->termsAwaitingAcceptance($tenant->id));
 
             tenancy()->initialize($tenant);
             $tenantUser = TenantUser::query()->where('user_id', $user->id)->first();
@@ -112,6 +121,7 @@ class RegisterTest extends TestCase
             $this->get('/dashboard')->assertRedirect(route('workspace.pending'));
         } finally {
             $landlord->forceFill(['is_landlord' => $wasLandlord])->save();
+            LegalAcceptance::query()->where('tenant_id', $payload['workspace_slug'])->delete();
             Tenant::find($payload['workspace_slug'])?->delete();
             User::query()->where('email', $payload['email'])->delete();
         }
@@ -141,7 +151,7 @@ class RegisterTest extends TestCase
         $response->assertSessionHasErrors([
             'name', 'email', 'password',
             'company_name', 'company_location', 'company_phone',
-            'workspace_slug',
+            'workspace_slug', 'accept_terms',
         ]);
     }
 
