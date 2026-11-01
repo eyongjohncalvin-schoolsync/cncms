@@ -86,7 +86,7 @@ export default function LoginScreen() {
                             keyboardType="email-address"
                             value={identifier}
                             onChangeText={setIdentifier}
-                            placeholder="you@shalomtech.dev"
+                            placeholder="Your username or email"
                             returnKeyType="next"
                         />
                         <TextInput
