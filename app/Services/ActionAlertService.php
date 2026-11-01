@@ -55,6 +55,26 @@ class ActionAlertService
     }
 
     /**
+     * Everyone who works in $branchId: members fenced to it, and the
+     * company-wide ones (no fence). Active accounts only.
+     *
+     * @return Collection<int, User>
+     */
+    public function branchStaff(?int $branchId): Collection
+    {
+        $members = TenantUser::query()
+            ->where('tenant_id', (string) tenant()?->getTenantKey())
+            ->get()
+            ->filter(function (TenantUser $member) use ($branchId): bool {
+                $context = $this->contexts[$member->id] ??= TenantContext::resolve($member);
+
+                return $context->branchId === null || $branchId === null || $context->branchId === $branchId;
+            });
+
+        return User::query()->whereIn('id', $members->pluck('user_id'))->where('status', 'active')->get();
+    }
+
+    /**
      * Owners (super) — who an untouched item escalates to.
      *
      * @return Collection<int, User>

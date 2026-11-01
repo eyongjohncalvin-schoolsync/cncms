@@ -157,6 +157,7 @@ class DefaultRolesSeeder extends Seeder
             Permission::ComplaintsCreate->value,
             Permission::ComplaintsResolve->value,
             Permission::ComplaintsAssign->value,
+            Permission::ComplaintsReceiveAlerts->value,
 
             Permission::ArrearsView->value,
             Permission::ArrearsRequest->value,

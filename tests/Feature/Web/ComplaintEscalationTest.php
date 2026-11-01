@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Web;
 
+use App\Auth\Permission;
 use App\DataTransferObjects\ResolveComplaintData;
+use App\Models\Complaint;
 use App\Models\ComplaintEscalation;
 use App\Models\Notification;
 use App\Models\ScheduledTask;
 use App\Models\TenantUser;
 use App\Models\User;
+use App\Services\ActionAlertService;
 use App\Services\ComplaintService;
 use App\Support\ScheduledTasks\ComplaintEscalationCheckTaskType;
+use Database\Factories\BranchFactory;
 use Database\Factories\ComplaintFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
@@ -79,8 +84,13 @@ class ComplaintEscalationTest extends TestCase
         $this->runSweep();
 
         $this->assertSame(2, ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 0)->count());
-        $this->assertSame(1, Notification::query()->where('type', 'complaint.assigned')->where('broadcast_scope', 'user')->count());
-        $this->assertSame(1, Notification::query()->where('type', 'complaint.assigned')->where('broadcast_scope', 'role')->where('recipient_role', 'manager')->count());
+        // The technician's own alert rings; the complaint team hears quietly, each by name.
+        $this->assertSame(1, Notification::query()->where('type', 'complaint.assigned')->where('recipient_user_id', $manager->id)->where('severity', 'urgent')->count());
+        $this->assertSame(
+            $this->team($complaint)->pluck('id')->reject(fn (int $id): bool => $id === $manager->id)->sort()->values()->all(),
+            Notification::query()->where('type', 'complaint.assigned')->where('severity', 'info')->pluck('recipient_user_id')->sort()->values()->all(),
+        );
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.assigned')->where('broadcast_scope', '!=', 'user')->count());
 
         // Level 0 must never touch escalated_at — see
         // App\Services\ComplaintEscalationService::sweep()'s doc comment.
@@ -97,9 +107,12 @@ class ComplaintEscalationTest extends TestCase
         // A second tick within the same window must not re-notify.
         $this->runSweep();
 
-        $this->assertSame(3, ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 1)->count());
-        $this->assertSame(3, Notification::query()->where('type', 'complaint.escalated_level_1')->count());
-        $this->assertSame(['super', 'admin', 'manager'], ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 1)->orderBy('id')->pluck('notified_role')->all());
+        // 24 hours: the complaint team, each by name, so their phones ring.
+        $team = $this->team($complaint)->pluck('id')->sort()->values()->all();
+        $this->assertNotEmpty($team);
+        $this->assertSame(['team'], ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 1)->pluck('notified_scope')->all());
+        $this->assertSame($team, Notification::query()->where('type', 'complaint.escalated_level_1')->where('broadcast_scope', 'user')->where('severity', 'urgent')->pluck('recipient_user_id')->sort()->values()->all());
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.escalated_level_1')->where('broadcast_scope', '!=', 'user')->count());
 
         // Not yet 48h old — Level 2 must not have fired.
         $this->assertSame(0, ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 2)->count());
@@ -111,9 +124,14 @@ class ComplaintEscalationTest extends TestCase
         $this->runSweep();
         $this->runSweep();
 
-        $this->assertSame(3, ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 1)->count());
+        $this->assertSame(1, ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 1)->count());
         $this->assertSame(1, ComplaintEscalation::query()->where('complaint_id', $complaint->id)->where('level', 2)->count());
-        $this->assertSame(1, Notification::query()->where('type', 'complaint.escalated_level_2')->where('broadcast_scope', 'all')->count());
+        // 48 hours: everyone in the complaint's branch, never the whole company.
+        $this->assertSame(
+            app(ActionAlertService::class)->branchStaff($complaint->branch_id)->concat($this->team($complaint))->unique('id')->pluck('id')->sort()->values()->all(),
+            Notification::query()->where('type', 'complaint.escalated_level_2')->where('severity', 'emergency')->pluck('recipient_user_id')->sort()->values()->all(),
+        );
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.escalated_level_2')->where('broadcast_scope', '!=', 'user')->count());
         $this->assertNotNull($complaint->fresh()->escalated_at);
     }
 
@@ -204,6 +222,33 @@ class ComplaintEscalationTest extends TestCase
         $this->assertSame(0, Notification::query()->where('type', 'complaint.resolved')->count());
     }
 
+    public function test_a_role_without_receives_complaint_alerts_is_left_out_of_the_team(): void
+    {
+        $kelvin = $this->actingAsRole('manager');
+        DB::table('role_permissions')
+            ->whereIn('role_id', DB::table('roles')->where('name', 'manager')->pluck('id'))
+            ->where('permission', Permission::ComplaintsReceiveAlerts->value)
+            ->delete();
+
+        $complaint = ComplaintFactory::new()->submittedBy($this->anotherUserId())->create(['created_at' => now()->subHours(30)]);
+        $this->runSweep();
+
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.escalated_level_1')->where('recipient_user_id', $kelvin->id)->count());
+    }
+
+    public function test_at_48_hours_staff_of_another_branch_are_not_told(): void
+    {
+        $complaint = ComplaintFactory::new()->submittedBy($this->anotherUserId())->create(['created_at' => now()->subHours(50)]);
+        $elsewhere = BranchFactory::new()->create();
+        $divine = User::query()->findOrFail($this->anotherUserId());
+        TenantUser::query()->where('user_id', $divine->id)->update(['role' => 'cashier', 'branch_id' => $elsewhere->id]);
+
+        $this->runSweep();
+
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.escalated_level_2')->where('recipient_user_id', $divine->id)->count());
+        $this->assertGreaterThan(0, Notification::query()->where('type', 'complaint.escalated_level_2')->count());
+    }
+
     public function test_resolving_after_level_2_notifies_the_full_staff_list(): void
     {
         $complaint = ComplaintFactory::new()->submittedBy($this->anotherUserId())->create([
@@ -217,8 +262,20 @@ class ComplaintEscalationTest extends TestCase
         $this->post("/complaints/{$complaint->uuid}/resolve", ['resolution_notes' => 'Resolved after emergency escalation.'])
             ->assertRedirect();
 
-        $resolvedNotice = Notification::query()->where('type', 'complaint.resolved')->where('broadcast_scope', 'all')->first();
-        $this->assertNotNull($resolvedNotice, 'Expected one broadcast_scope=all "complaint.resolved" notice reaching the full staff list.');
+        // The same people the 48-hour emergency reached, each once.
+        $this->assertSame(
+            Notification::query()->where('type', 'complaint.escalated_level_2')->pluck('recipient_user_id')->sort()->values()->all(),
+            Notification::query()->where('type', 'complaint.resolved')->where('broadcast_scope', 'user')->pluck('recipient_user_id')->sort()->values()->all(),
+        );
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.resolved')->where('broadcast_scope', 'all')->count());
+    }
+
+    /**
+     * @return Collection<int, User>
+     */
+    private function team(Complaint $complaint): Collection
+    {
+        return app(ActionAlertService::class)->deciders(Permission::ComplaintsReceiveAlerts->value, $complaint->branch_id);
     }
 
     /**

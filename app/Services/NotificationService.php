@@ -25,9 +25,8 @@ use Illuminate\Support\Facades\Cache;
  * PHP, e.g.:
  *
  *   $notifications->broadcastToUser($assignee, 'complaint.assigned', 'info', ...);
- *   $notifications->broadcastToRole('manager', 'complaint.escalated', 'urgent', ...);
- *   $notifications->broadcastToRole('investor', 'complaint.escalated', 'emergency', ...);
- *   $notifications->broadcastToAll('complaint.critical', 'emergency', ...);
+ *   $notifications->broadcastToRole('investor', 'complaint.investor_notice', 'emergency', ...);
+ *   $notifications->broadcastToAll(...); // nothing uses it since 2026-11-01 — complaints go to the team and the branch
  *
  * None of those calls require the caller to know anything about the
  * notifications/notification_recipients schema, the lazy fan-out

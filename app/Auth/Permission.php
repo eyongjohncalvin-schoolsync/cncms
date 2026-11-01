@@ -152,6 +152,12 @@ enum Permission: string
     case ComplaintsResolve = 'complaints.resolve';
     case ComplaintsAssign = 'complaints.assign';
     case ComplaintsNotifyInvestors = 'complaints.notify_investors';
+    /**
+     * The complaint team (owner, 2026-11-01): told when a complaint is
+     * assigned, rung when it is still open after 24 hours, and part of the
+     * whole-branch alert at 48 hours (ComplaintEscalationService).
+     */
+    case ComplaintsReceiveAlerts = 'complaints.receive_alerts';
 
     // ---- Arrears adjustments ---------------------------------
     case ArrearsView = 'arrears.view';

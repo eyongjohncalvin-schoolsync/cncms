@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Auth\Permission;
 use App\Models\Complaint;
 use App\Models\ComplaintEscalation;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -25,10 +27,12 @@ use Illuminate\Validation\ValidationException;
  *   - App\Services\ComplaintService::resolve(), which calls
  *     sendResolutionNotice() after marking a complaint resolved.
  *
- * Escalation levels and their audiences are fixed in code, not
- * admin-configurable (references/complaint-desk.md section 3's explicit
- * "audience and level count are NOT admin-configurable" — matches this
- * app's "small fixed tiers, not open-ended configurability" ethos).
+ * Escalation levels are fixed in code. Who hears (owner, 2026-11-01): the
+ * complaint team — the roles holding `complaints.receive_alerts`, ticked in
+ * Roles & permissions — and, at 48 hours, everyone in the complaint's
+ * branch; never the whole company. Each person gets their own notification
+ * so it rings their phone whatever their role (SendPushNotificationJob
+ * pushes role broadcasts to agents only).
  */
 class ComplaintEscalationService
 {
@@ -51,7 +55,28 @@ class ComplaintEscalationService
 
     public function __construct(
         private readonly NotificationService $notifications,
+        private readonly ActionAlertService $actionAlerts,
     ) {}
+
+    /**
+     * The complaint team for this complaint's branch.
+     *
+     * @return Collection<int, User>
+     */
+    private function team(Complaint $complaint): Collection
+    {
+        return $this->actionAlerts->deciders(Permission::ComplaintsReceiveAlerts->value, $complaint->branch_id);
+    }
+
+    /**
+     * @param  iterable<User>  $users
+     */
+    private function tell(iterable $users, Complaint $complaint, string $type, string $severity, string $title, string $body): void
+    {
+        foreach ($users as $user) {
+            $this->notifications->broadcastToUser($user, $type, $severity, $title, $body, $this->link($complaint), 'complaint', $complaint->uuid, $complaint->branch_id);
+        }
+    }
 
     /**
      * Called once per open, non-duplicate complaint on every scheduler tick
@@ -199,19 +224,20 @@ class ComplaintEscalationService
             return;
         }
 
+        // Logged before the complaint team (2026-11-01): role-wide notices.
         $roles = $rows->where('notified_scope', 'role')->pluck('notified_role')->filter()->unique();
 
         foreach ($roles as $role) {
             $this->notifications->broadcastToRole($role, 'complaint.resolved', 'info', $title, $body, $link, branchId: $complaint->branch_id);
         }
 
-        $userIds = $rows->where('notified_scope', 'user')->pluck('notified_user_id')->filter()->unique();
+        // Each person once, however many levels reached them.
+        $people = User::query()->whereIn('id', $rows->where('notified_scope', 'user')->pluck('notified_user_id')->filter())->get()
+            ->concat($rows->contains('notified_scope', 'team') ? $this->team($complaint) : [])
+            ->concat($rows->contains('notified_scope', 'branch') ? $this->actionAlerts->branchStaff($complaint->branch_id) : [])
+            ->unique('id');
 
-        if ($userIds->isNotEmpty()) {
-            User::query()->whereIn('id', $userIds)->get()->each(
-                fn (User $user) => $this->notifications->broadcastToUser($user, 'complaint.resolved', 'info', $title, $body, $link, branchId: $complaint->branch_id)
-            );
-        }
+        $this->tell($people, $complaint, 'complaint.resolved', 'info', $title, $body);
     }
 
     /**
@@ -240,15 +266,6 @@ class ComplaintEscalationService
     }
 
     /**
-     * "assignee + their manager, if set" (complaint-desk.md section 3's
-     * table) — this app has no per-user "who is my manager" relationship
-     * (roles are flat per tenant_users.role, not hierarchical), so "their
-     * manager" is read as this codebase's usual shorthand for the `manager`
-     * role collectively, matching how ComplaintPolicy::linkDuplicate()'s own
-     * doc comment already reads "manager-only" as inclusive-of-tier
-     * language elsewhere in this same feature.
-     */
-    /**
      * Someone was just given this complaint (ComplaintService::assign, web
      * or phone): their phone rings now (manager inbox, wave 2). The first
      * assignment is Level 0 itself, logged so the sweep doesn't repeat it;
@@ -271,6 +288,7 @@ class ComplaintEscalationService
         }
     }
 
+    /** Assigned: the technician's phone rings; the complaint team is told quietly. */
     private function fireLevel0(Complaint $complaint): void
     {
         DB::transaction(function () use ($complaint): void {
@@ -300,49 +318,32 @@ class ComplaintEscalationService
                 ]);
             }
 
-            $this->notifications->broadcastToRole(
-                'manager',
-                'complaint.assigned',
-                'info',
-                $this->title(0),
-                $this->body($complaint, 0),
-                $this->link($complaint),
-                branchId: $complaint->branch_id,
-            );
+            // The team hears quietly (info never rings); the technician's own alert rang above.
+            $this->tell($this->team($complaint)->reject(fn (User $user): bool => $user->id === $assignee?->id), $complaint, 'complaint.assigned', 'info', $this->title(0), $this->body($complaint, 0));
 
-            ComplaintEscalation::query()->create([
-                'complaint_id' => $complaint->id,
-                'level' => 0,
-                'notified_scope' => 'role',
-                'notified_role' => 'manager',
-                'escalated_at' => now(),
-            ]);
+            $this->logLevel($complaint, 0, 'team');
         });
     }
 
+    /** Still open after 24 hours: the complaint team's phones ring. */
     private function fireLevel1(Complaint $complaint): void
     {
         DB::transaction(function () use ($complaint): void {
-            foreach (['super', 'admin', 'manager'] as $role) {
-                $this->notifications->broadcastToRole(
-                    $role,
-                    'complaint.escalated_level_1',
-                    'urgent',
-                    $this->title(1),
-                    $this->body($complaint, 1),
-                    $this->link($complaint),
-                    branchId: $complaint->branch_id,
-                );
+            $this->tell($this->team($complaint), $complaint, 'complaint.escalated_level_1', 'urgent', $this->title(1), $this->body($complaint, 1));
 
-                ComplaintEscalation::query()->create([
-                    'complaint_id' => $complaint->id,
-                    'level' => 1,
-                    'notified_scope' => 'role',
-                    'notified_role' => $role,
-                    'escalated_at' => now(),
-                ]);
-            }
+            $this->logLevel($complaint, 1, 'team');
         });
+    }
+
+    /** @param 'team'|'branch' $scope */
+    private function logLevel(Complaint $complaint, int $level, string $scope): void
+    {
+        ComplaintEscalation::query()->create([
+            'complaint_id' => $complaint->id,
+            'level' => $level,
+            'notified_scope' => $scope,
+            'escalated_at' => now(),
+        ]);
     }
 
     /**
@@ -352,25 +353,17 @@ class ComplaintEscalationService
      * threshold fires"). Deliberately guarded by `whereNull('escalated_at')`
      * at the query level (not just a PHP null-check) so a concurrent second
      * tick can never stomp an already-set value back to a later timestamp.
+     *
+     * Still open after 48 hours: an emergency for everyone in the
+     * complaint's branch (owner, 2026-11-01) — the team included, since
+     * company-wide staff count as every branch's.
      */
     private function fireLevel2(Complaint $complaint): void
     {
         DB::transaction(function () use ($complaint): void {
-            $this->notifications->broadcastToAll(
-                'complaint.escalated_level_2',
-                'emergency',
-                $this->title(2),
-                $this->body($complaint, 2),
-                $this->link($complaint),
-                branchId: $complaint->branch_id,
-            );
+            $this->tell($this->actionAlerts->branchStaff($complaint->branch_id)->concat($this->team($complaint))->unique('id'), $complaint, 'complaint.escalated_level_2', 'emergency', $this->title(2), $this->body($complaint, 2));
 
-            ComplaintEscalation::query()->create([
-                'complaint_id' => $complaint->id,
-                'level' => 2,
-                'notified_scope' => 'all',
-                'escalated_at' => now(),
-            ]);
+            $this->logLevel($complaint, 2, 'branch');
 
             Complaint::query()->whereKey($complaint->id)->whereNull('escalated_at')->update(['escalated_at' => now()]);
             $complaint->refresh();

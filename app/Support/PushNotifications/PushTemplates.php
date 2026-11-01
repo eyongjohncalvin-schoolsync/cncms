@@ -70,11 +70,14 @@ final class PushTemplates
                 'body' => 'Tap to review and take action.',
             ],
         ],
-        'complaint.escalated' => [
+        // The complaint team at 24 hours, the whole branch at 48 (ComplaintEscalationService).
+        'complaint.escalated_level_1' => [
             'urgent' => [
                 'title' => 'A complaint needs team attention',
-                'body' => 'This complaint has been open a while without action. Tap to review.',
+                'body' => 'Open 24 hours and not resolved. Tap to review.',
             ],
+        ],
+        'complaint.escalated_level_2' => [
             'emergency' => [
                 'title' => 'Urgent: a complaint needs your attention',
                 'body' => 'Open 48+ hours with no action taken. Tap to review and acknowledge.',

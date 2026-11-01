@@ -95,7 +95,7 @@ class PushNotificationDispatchTest extends TestCase
         Http::fake(['https://exp.host/*' => Http::response(['data' => [['status' => 'ok', 'id' => 'ticket-night']]])]);
 
         app(NotificationService::class)->broadcastToUser($this->manager, 'inbox.voucher', 'urgent', 'T', 'B');
-        app(NotificationService::class)->broadcastToUser($this->manager, 'complaint.escalated', 'emergency', 'T', 'B');
+        app(NotificationService::class)->broadcastToUser($this->manager, 'complaint.escalated_level_2', 'emergency', 'T', 'B');
 
         $channels = collect(Http::recorded())->map(fn (array $pair) => $pair[0]->data()[0]['channelId'])->all();
         $this->assertSame(['quiet', 'emergency'], $channels);
@@ -113,7 +113,7 @@ class PushNotificationDispatchTest extends TestCase
         $sensitiveBody = 'Customer Mrs Ngozi at Kumba 3 reported a serious issue involving her account.';
 
         $notification = app(NotificationService::class)->broadcastToUser(
-            $this->agent, 'complaint.escalated', 'emergency', $sensitiveTitle, $sensitiveBody
+            $this->agent, 'complaint.escalated_level_2', 'emergency', $sensitiveTitle, $sensitiveBody
         );
 
         Http::assertSent(function (Request $request) use ($notification, $sensitiveTitle, $sensitiveBody) {
