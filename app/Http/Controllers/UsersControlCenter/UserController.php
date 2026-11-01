@@ -9,18 +9,14 @@ use App\Http\Requests\StoreTenantUserRequest;
 use App\Http\Requests\UpdateTenantUserRequest;
 use App\Models\Agent;
 use App\Models\Branch;
-use App\Models\CashTransfer;
 use App\Models\Role;
 use App\Models\SalaryGrade;
 use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Repositories\Contracts\BranchRepositoryInterface;
-use App\Services\AccountSecurityService;
-use App\Services\CashBookService;
 use App\Services\SalaryService;
 use App\Services\StaffAccountService;
-use App\Services\StaffAssignmentService;
 use App\Services\StaffRemovalService;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
@@ -49,7 +45,6 @@ class UserController extends Controller
     public function __construct(
         private readonly TenantContext $context,
         private readonly BranchRepositoryInterface $branches,
-        private readonly StaffAssignmentService $assignments,
         private readonly SalaryService $salaries,
     ) {}
 
@@ -153,72 +148,21 @@ class UserController extends Controller
             : 'User created.');
     }
 
-    public function update(UpdateTenantUserRequest $request, TenantUser $tenantUser): RedirectResponse
+    /**
+     * The rules (branch moves, the worker flag, investor stamps, the agent
+     * record, the assignment history) live in StaffAccountService::update(),
+     * shared with the phone's staff screen.
+     */
+    public function update(UpdateTenantUserRequest $request, TenantUser $tenantUser, StaffAccountService $accounts): RedirectResponse
     {
         $data = $request->validated();
-
-        // Branches v2 (D7): only headquarters moves staff between branches or
-        // grants investor status — the request already refuses these from a
-        // fenced manager; this is the second lock.
-        if ($this->context->isFenced()) {
-            unset($data['branch_uuid'], $data['is_investor']);
-            // Pin whoever a fenced manager edits to that branch: an agent's fence
-            // comes from their zone (tenant_users.branch_id is often null), so a
-            // role change away from agent would otherwise leave them unfenced.
-            $data['branch_id'] = $this->context->branchId;
-        }
 
         if (array_key_exists('branch_uuid', $data)) {
             $data['branch_id'] = $this->resolveBranchId($data['branch_uuid']);
             unset($data['branch_uuid']);
-
-            // Branches v2: a cashier's till belongs to their branch — money in it
-            // must be handed over before they move to another branch.
-            $till = $data['branch_id'] !== $tenantUser->branch_id ? app(CashBookService::class)->activeTillOf($tenantUser->user) : null;
-
-            if ($till !== null && bccomp(app(CashBookService::class)->balance($till), '0', 2) !== 0) {
-                throw ValidationException::withMessages(['branch_uuid' => ['Their till still holds money — hand it over (and close the day) before moving them to another branch.']]);
-            }
-
-            // Wave 3: nor while money they sent or must accept is in transit.
-            if ($data['branch_id'] !== $tenantUser->branch_id && CashTransfer::query()->withoutGlobalScope(BranchScope::class)->inTransit()
-                ->where(fn ($query) => $query->where('sent_by', $tenantUser->user_id)->orWhere('to_user_id', $tenantUser->user_id))->exists()) {
-                throw ValidationException::withMessages(['branch_uuid' => ['Money they sent or must accept is still in transit — it is accepted, refused or recalled first.']]);
-            }
         }
 
-        // Defensive: a role change away from 'worker' also clears the
-        // payment-recording flag, so it can't silently reactivate later if
-        // this same person is ever demoted back to 'worker'. The flag is
-        // meaningless for every other role — see PaymentPolicy::create().
-        if (array_key_exists('role', $data) && $data['role'] !== 'worker') {
-            $data['can_record_payments'] = false;
-        }
-
-        // Investor grant/revoke audit trail — stamped from the CURRENT
-        // central user performing this request (already authorized as
-        // users.manage by UpdateTenantUserRequest::authorize()), not the
-        // target row.
-        if (array_key_exists('is_investor', $data)) {
-            $data['investor_granted_by'] = $data['is_investor'] ? $request->user()->id : null;
-            $data['investor_granted_at'] = $data['is_investor'] ? now() : null;
-        }
-
-        $tenantUser->update($data);
-
-        // Becoming a field agent creates (or revives) their agent record; leaving the role retires it.
-        if ($tenantUser->wasChanged('role')) {
-            app(StaffAccountService::class)->syncAgent($tenantUser->load('user'));
-        }
-
-        // Branches v2 (D7): a transfer or a new role opens the next assignment.
-        if ($tenantUser->wasChanged(['branch_id', 'role'])) {
-            $agentBranchId = $tenantUser->role === 'agent'
-                ? Agent::query()->withoutGlobalScope(BranchScope::class)->where('user_id', $tenantUser->user_id)->with(['zone' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)])->first()?->zone?->branch_id
-                : null;
-
-            $this->assignments->record($tenantUser->user_id, $agentBranchId ?? $tenantUser->branch_id, $tenantUser->role, $request->user());
-        }
+        $accounts->update($tenantUser, $data, $request->user());
 
         return redirect()->route('users.index')->with('success', 'Saved.');
     }
@@ -247,20 +191,11 @@ class UserController extends Controller
      * at once (AccountSecurityService::deactivate()), not just at their next
      * sign-in.
      */
-    public function deactivate(TenantUser $tenantUser, AccountSecurityService $account): RedirectResponse
+    public function deactivate(TenantUser $tenantUser, StaffAccountService $accounts): RedirectResponse
     {
         $this->authorize('deactivate', $tenantUser);
 
-        // Nobody leaves holding the company's money (owner, 2026-10-29).
-        $held = app(CashBookService::class)->moneyHeldBy($tenantUser->user);
-
-        if ($held !== []) {
-            return back()->withErrors(['user' => "{$tenantUser->user->name} cannot be deactivated yet: ".implode('; ', $held).'.']);
-        }
-
-        $account->deactivate($tenantUser->user);
-        // A field agent stops covering their zones.
-        app(StaffAccountService::class)->syncAgent($tenantUser->load('user'));
+        $accounts->deactivate($tenantUser);
 
         return redirect()->route('users.index')->with('success', 'User deactivated.');
     }
@@ -268,13 +203,11 @@ class UserController extends Controller
     /**
      * Lets a deactivated user sign in again (their old sessions stay ended).
      */
-    public function activate(TenantUser $tenantUser): RedirectResponse
+    public function activate(TenantUser $tenantUser, StaffAccountService $accounts): RedirectResponse
     {
         $this->authorize('activate', $tenantUser);
 
-        $tenantUser->user->update(['status' => 'active']);
-        // A field agent is active again — with no zones until given some on the Agents page.
-        app(StaffAccountService::class)->syncAgent($tenantUser->load('user'));
+        $accounts->activate($tenantUser);
 
         return redirect()->route('users.index')->with('success', 'User reactivated.');
     }

@@ -105,6 +105,7 @@ Route::prefix('v1')->group(function () {
             require __DIR__.'/api/remittances.php';
             require __DIR__.'/api/inbox.php';
             require __DIR__.'/api/cash.php';
+            require __DIR__.'/api/staff.php';
         });
     });
 });

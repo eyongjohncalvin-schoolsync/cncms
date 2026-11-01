@@ -234,6 +234,8 @@ function RootNavigation() {
             <Stack.Screen name="complaint/[uuid]" options={{ headerShown: true, title: 'Complaint' }} />
             <Stack.Screen name="cash" options={{ headerShown: true, title: 'Cash' }} />
             <Stack.Screen name="cash-receive/[uuid]" options={{ headerShown: true, title: 'Receive handover' }} />
+            <Stack.Screen name="today" options={{ headerShown: true, title: 'Today' }} />
+            <Stack.Screen name="staff" options={{ headerShown: true, title: 'Staff' }} />
             <Stack.Screen name="alert-settings" options={{ presentation: 'modal', headerShown: true, title: 'Alerts' }} />
             <Stack.Screen
                 name="manuscript"

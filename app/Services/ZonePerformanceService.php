@@ -81,6 +81,34 @@ class ZonePerformanceService
     }
 
     /**
+     * The running month's zone card (the dashboard, and the phone's Today
+     * screen): the three best and three worst by the share of billed
+     * customers who paid (one prepayment can't flatter it), and every zone
+     * well below its usual.
+     *
+     * @return array{period: string, judged: bool, zones_count: int, best: list<array<string, mixed>>, worst: list<array<string, mixed>>, dropped: list<array<string, mixed>>}
+     */
+    public function summary(): array
+    {
+        $period = BusinessTimezone::currentPeriod();
+        $ranked = collect($this->forPeriod($period))
+            ->filter(fn (array $zone): bool => $zone['paid_share'] !== null)
+            ->sortByDesc(fn (array $zone): float => $zone['paid_share'])
+            ->map(fn (array $zone): array => array_diff_key($zone, ['trend' => true]))
+            ->values();
+
+        return [
+            'period' => $period,
+            'judged' => BusinessTimezone::now()->day >= self::JUDGE_FROM_DAY,
+            'zones_count' => $ranked->count(),
+            'best' => $ranked->take(3)->values()->all(),
+            // Never the same zone in both lists.
+            'worst' => $ranked->slice(max(3, $ranked->count() - 3))->reverse()->values()->all(),
+            'dropped' => collect($this->dropped($period))->map(fn (array $zone): array => array_diff_key($zone, ['trend' => true]))->values()->all(),
+        ];
+    }
+
+    /**
      * The running month counts up to today; a finished month counts whole.
      */
     public function dayOf(string $period): int

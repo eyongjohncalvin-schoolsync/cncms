@@ -107,7 +107,7 @@ class DashboardController extends Controller
             // worst and any well below usual — for whoever sees the cash
             // book. Deferred and cached (App\Services\ZonePerformanceService).
             'zone_performance' => app(TenantContext::class)->can('cash.view')
-                ? Inertia::defer(fn (): array => $this->zoneSummary())
+                ? Inertia::defer(fn (): array => app(ZonePerformanceService::class)->summary())
                 : null,
             // Spending this month (docs/plans/expenditures-and-spending-controls.md,
             // items 5–6): deficit, cap use, budget warnings — for whoever sees
@@ -172,33 +172,5 @@ class DashboardController extends Controller
     {
         /** @var Tenant */
         return tenant();
-    }
-
-    /**
-     * The dashboard's zone card: the three best and three worst by the share
-     * of billed customers who paid (one prepayment can't flatter it), and
-     * every zone well below its usual.
-     *
-     * @return array{period: string, judged: bool, zones_count: int, best: list<array<string, mixed>>, worst: list<array<string, mixed>>, dropped: list<array<string, mixed>>}
-     */
-    private function zoneSummary(): array
-    {
-        $zonePerformance = app(ZonePerformanceService::class);
-        $period = BusinessTimezone::currentPeriod();
-        $ranked = collect($zonePerformance->forPeriod($period))
-            ->filter(fn (array $zone): bool => $zone['paid_share'] !== null)
-            ->sortByDesc(fn (array $zone): float => $zone['paid_share'])
-            ->map(fn (array $zone): array => array_diff_key($zone, ['trend' => true]))
-            ->values();
-
-        return [
-            'period' => $period,
-            'judged' => BusinessTimezone::now()->day >= ZonePerformanceService::JUDGE_FROM_DAY,
-            'zones_count' => $ranked->count(),
-            'best' => $ranked->take(3)->values()->all(),
-            // Never the same zone in both lists.
-            'worst' => $ranked->slice(max(3, $ranked->count() - 3))->reverse()->values()->all(),
-            'dropped' => collect($zonePerformance->dropped($period))->map(fn (array $zone): array => array_diff_key($zone, ['trend' => true]))->values()->all(),
-        ];
     }
 }

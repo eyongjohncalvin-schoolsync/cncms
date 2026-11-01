@@ -52,10 +52,17 @@ export default function MoreScreen() {
         ? [{ title: 'Cash', subtitle: 'Receive handovers, close the day, shortages and cash alerts', href: '/cash', accentColor: colors.accent.payment }]
         : [];
 
+    // Wave 5: the day at a glance, and the people.
+    const office: MoreLink[] = [
+        ...(can('cash.view') ? [{ title: 'Today', subtitle: 'Collections, the month so far, zones, and whether the money adds up', href: '/today', accentColor: colors.accent.history }] : []),
+        ...(can('users.view') ? [{ title: 'Staff', subtitle: 'Change a role, deactivate someone, lift a sign-in block', href: '/staff', accentColor: colors.accent.customers }] : []),
+    ];
+
     const sections: MoreSection[] = [
         {
             title: 'Field tools',
             links: [
+                ...office,
                 ...cash,
                 ...desk,
                 {
