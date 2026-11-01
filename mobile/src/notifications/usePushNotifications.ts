@@ -36,7 +36,9 @@ export function usePushNotifications(): void {
         void registerPushToken();
 
         const received = Notifications.addNotificationReceivedListener((notification) => {
-            if (resolvePushTapTarget(dataOf(notification)) === '/inbox') {
+            const target = resolvePushTapTarget(dataOf(notification));
+
+            if (target === '/inbox' || target === '/cash') {
                 void refreshInbox();
             }
         });

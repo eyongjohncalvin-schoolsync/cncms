@@ -47,6 +47,16 @@ final class PushTemplates
         'inbox.digest' => [
             'warning' => ['title' => 'Your morning summary', 'body' => 'Tap to see what waits for you today.'],
         ],
+        // Cash waiting for someone (mobile wave 4) — amounts stay off the lock screen.
+        'cash.handover' => [
+            'warning' => ['title' => 'Cash handover to receive', 'body' => 'A collector handed over their cash. Tap to count and receive it.'],
+        ],
+        'cash.transfer' => [
+            'warning' => ['title' => 'Cash handed to you', 'body' => 'Tap to count it and accept it.'],
+        ],
+        'cash.deposit' => [
+            'warning' => ['title' => 'Bank deposit to confirm', 'body' => 'Tap to check it against the bank.'],
+        ],
         // Personal warnings that reach the phone silently since wave 2.
         'voucher.rejected' => [
             'warning' => ['title' => 'Your voucher was rejected', 'body' => 'Tap to see why.'],

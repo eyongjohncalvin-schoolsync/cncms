@@ -47,3 +47,9 @@ test('a complaint alert that names no complaint falls back to the notifications 
     assert.equal(resolvePushTapTarget({ severity: 'urgent', type: 'complaint.assigned' }), '/notifications');
     assert.equal(resolvePushTapTarget({ severity: 'urgent', type: 'complaint.assigned', source_type: 'payment', source_uuid: 'x' }), '/notifications');
 });
+
+test('cash waiting for someone opens the Cash screen', () => {
+    assert.equal(resolvePushTapTarget({ severity: 'warning', type: 'cash.handover' }), '/cash');
+    assert.equal(resolvePushTapTarget({ severity: 'warning', type: 'cash.transfer' }), '/cash');
+    assert.equal(resolvePushTapTarget({ severity: 'warning', type: 'cash.deposit' }), '/cash');
+});

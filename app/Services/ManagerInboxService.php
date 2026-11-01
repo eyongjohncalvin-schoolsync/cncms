@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\ArrearsAdjustment;
+use App\Models\CashTransfer;
 use App\Models\Complaint;
 use App\Models\OpeningBalanceBatch;
 use App\Models\PaymentReversalRequest;
+use App\Models\Remittance;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Support\TenantContext;
@@ -39,7 +41,7 @@ class ManagerInboxService
     ) {}
 
     /**
-     * @return list<array{key: string, type: string, uuid: string|null, title: string, subtitle: string, amount: string|null, severity: 'now'|'today'|'fyi', created_at: string|null, actions: list<string>, web_path: string}>
+     * @return list<array{key: string, type: string, uuid: string|null, title: string, subtitle: string, amount: string|null, severity: 'now'|'today'|'fyi', created_at: string|null, actions: list<string>, web_path: string, app_path: string|null}>
      */
     public function items(User $user, TenantContext $context): array
     {
@@ -48,7 +50,7 @@ class ManagerInboxService
             ...$this->complaintsFor($context),
             ...$this->arrearsFor($user),
             ...$this->reversalsFor($user, $context),
-            ...$this->countsFor($context),
+            ...$this->countsFor($user, $context),
         ];
 
         $rank = ['now' => 0, 'today' => 1, 'fyi' => 2];
@@ -179,12 +181,26 @@ class ManagerInboxService
      *
      * @return list<array<string, mixed>>
      */
-    private function countsFor(TenantContext $context): array
+    private function countsFor(User $user, TenantContext $context): array
     {
         $counts = [];
 
+        // Cash waiting for this person (wave 4) — handled on the phone's Cash screen.
+        if ($context->can('cash.receive') && ($waiting = Remittance::query()->where('status', 'submitted')->where('collector_user_id', '!=', $user->id)->count()) > 0) {
+            $counts[] = $this->item('cash_handovers', null, "{$waiting} cash ".($waiting === 1 ? 'handover' : 'handovers').' to receive', 'Collectors waiting for you to count their cash', null, 'now', null, [], '/cash', '/cash');
+        }
+
+        if (($handed = CashTransfer::query()->inTransit()->where('kind', CashTransfer::KIND_HANDOVER)->where('to_user_id', $user->id)->count()) > 0) {
+            $counts[] = $this->item('cash_transfers', null, 'Cash handed to you', "{$handed} ".($handed === 1 ? 'handover' : 'handovers').' to count and accept', null, 'now', null, [], '/cash', '/cash');
+        }
+
+        if ($context->can('cash.view') && ($deposits = CashTransfer::query()->inTransit()->where('kind', CashTransfer::KIND_DEPOSIT)->where('sent_by', '!=', $user->id)
+            ->whereDoesntHave('confirmations', fn ($query) => $query->where('user_id', $user->id))->count()) > 0) {
+            $counts[] = $this->item('cash_deposits', null, "{$deposits} bank ".($deposits === 1 ? 'deposit' : 'deposits').' to confirm', 'Check each against the bank statement', null, 'today', null, [], '/cash', '/cash');
+        }
+
         if ($context->can('cash.view') && ($alerts = array_sum($this->cashAlerts->counts())) > 0) {
-            $counts[] = $this->item('cash_alerts', null, "{$alerts} cash ".($alerts === 1 ? 'alert' : 'alerts'), 'Cash not handed over, shortages, unsigned vouchers', null, 'now', null, [], '/cash/alerts');
+            $counts[] = $this->item('cash_alerts', null, "{$alerts} cash ".($alerts === 1 ? 'alert' : 'alerts'), 'Cash not handed over, shortages, unsigned vouchers', null, 'now', null, [], '/cash/alerts', '/cash');
         }
 
         if ($context->can('installations.activate') && ($pending = $this->fieldInstallations->pendingCount()) > 0) {
@@ -206,9 +222,10 @@ class ManagerInboxService
     /**
      * @param  'now'|'today'|'fyi'  $severity
      * @param  list<string>  $actions
-     * @return array{key: string, type: string, uuid: string|null, title: string, subtitle: string, amount: string|null, severity: 'now'|'today'|'fyi', created_at: string|null, actions: list<string>, web_path: string}
+     * @param  string|null  $appPath  A phone screen that handles it, opened instead of the website.
+     * @return array{key: string, type: string, uuid: string|null, title: string, subtitle: string, amount: string|null, severity: 'now'|'today'|'fyi', created_at: string|null, actions: list<string>, web_path: string, app_path: string|null}
      */
-    private function item(string $type, ?string $uuid, string $title, string $subtitle, ?string $amount, string $severity, ?Carbon $createdAt, array $actions, string $webPath): array
+    private function item(string $type, ?string $uuid, string $title, string $subtitle, ?string $amount, string $severity, ?Carbon $createdAt, array $actions, string $webPath, ?string $appPath = null): array
     {
         return [
             'key' => $type.':'.($uuid ?? 'count'),
@@ -221,6 +238,7 @@ class ManagerInboxService
             'created_at' => $createdAt?->toIso8601String(),
             'actions' => $actions,
             'web_path' => $webPath,
+            'app_path' => $appPath,
         ];
     }
 }

@@ -35,6 +35,8 @@ export interface InboxItem {
     /** Empty: decided on the website — open `web_path` there. */
     actions: InboxAction[];
     web_path: string;
+    /** A phone screen that handles it (e.g. `/cash`), opened instead of the website. */
+    app_path?: string | null;
 }
 
 export interface InboxResponse {

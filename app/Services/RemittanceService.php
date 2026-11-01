@@ -41,6 +41,7 @@ class RemittanceService
         private readonly NotificationService $notifications,
         private readonly CashNotificationService $cashNotifier,
         private readonly VoucherService $vouchers,
+        private readonly ActionAlertService $actionAlerts,
     ) {}
 
     /**
@@ -104,7 +105,7 @@ class RemittanceService
             throw ValidationException::withMessages(['declared_cash' => 'The notes and coins you counted don\'t add up to the cash you declared.']);
         }
 
-        return DB::transaction(function () use ($collector, $declaredCash, $denominations, $note): Remittance {
+        $remittance = DB::transaction(function () use ($collector, $declaredCash, $denominations, $note): Remittance {
             $payments = $this->outstandingQuery($collector)->lockForUpdate()->orderBy('created_at')->get();
 
             if ($payments->isEmpty()) {
@@ -150,6 +151,21 @@ class RemittanceService
 
             return $remittance;
         });
+
+        // The cashiers of the collector's branch hear about it (mobile wave 4).
+        $this->actionAlerts->alert(
+            $this->actionAlerts->deciders('cash.receive', $remittance->branch_id, $collector->id),
+            'cash.handover',
+            'warning',
+            'Cash handover to receive',
+            "{$collector->name} handed over {$remittance->number}: ".number_format((float) $remittance->cashToHandOver(), 0, '.', ' ').' FCFA cash.',
+            "/cash/remittances/{$remittance->uuid}",
+            'remittance',
+            $remittance->uuid,
+            $remittance->branch_id,
+        );
+
+        return $remittance;
     }
 
     /**

@@ -17,7 +17,10 @@
  * "acknowledged," even weaker than "read." This function only ever decides
  * WHERE to navigate, never calls any acknowledge/read state mutation.
  */
-export type PushTapTarget = '/emergency' | '/notifications' | '/inbox' | `/complaint/${string}`;
+export type PushTapTarget = '/emergency' | '/notifications' | '/inbox' | '/cash' | `/complaint/${string}`;
+
+/** Cash waiting for someone (wave 4): opened on the phone's Cash screen. */
+const CASH_TYPES = ['cash.handover', 'cash.transfer', 'cash.deposit'];
 
 export interface PushTapData {
     /** The `data.severity` field App\Jobs\SendPushNotificationJob puts on
@@ -41,6 +44,10 @@ export function resolvePushTapTarget(data: PushTapData): PushTapTarget {
 
     if (typeof data.type === 'string' && (data.type.startsWith('inbox.') || INBOX_TYPES.includes(data.type))) {
         return '/inbox';
+    }
+
+    if (typeof data.type === 'string' && CASH_TYPES.includes(data.type)) {
+        return '/cash';
     }
 
     // A technician's new job (or any other complaint alert naming one) opens that complaint.

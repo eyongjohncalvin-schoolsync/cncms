@@ -14,7 +14,7 @@ import { colors } from '../../src/theme/colors';
 import { fontSize } from '../../src/theme/tokens';
 
 /** Holding any of these makes someone an inbox user (ManagerInboxService). */
-const INBOX_PERMISSIONS = ['vouchers.approve', 'arrears.approve', 'complaints.assign', 'cash.view', 'installations.activate', 'opening_balances.approve'];
+const INBOX_PERMISSIONS = ['vouchers.approve', 'arrears.approve', 'complaints.assign', 'cash.view', 'cash.receive', 'installations.activate', 'opening_balances.approve'];
 
 function TabGlyph({
     letter,

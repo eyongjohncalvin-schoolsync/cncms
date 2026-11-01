@@ -49,6 +49,12 @@ export default function InboxScreen() {
     );
 
     function open(item: InboxItem) {
+        if (item.app_path) {
+            router.push(item.app_path as never);
+
+            return;
+        }
+
         if (item.actions.length === 0) {
             void Linking.openURL(webUrl(item.web_path));
 

@@ -41,6 +41,7 @@ class CashTransferService
         private readonly CashBookService $cashBook,
         private readonly DocumentNumberService $documentNumbers,
         private readonly ShortageService $shortages,
+        private readonly ActionAlertService $actionAlerts,
     ) {}
 
     public function sendHandover(CashAccount $from, CashAccount $to, string $amount, User $actor, ?string $note): CashTransfer
@@ -51,7 +52,7 @@ class CashTransferService
             throw ValidationException::withMessages(['to_account' => 'A handover goes into another person\'s till.']);
         }
 
-        return DB::transaction(function () use ($from, $to, $amount, $actor, $note): CashTransfer {
+        $transfer = DB::transaction(function () use ($from, $to, $amount, $actor, $note): CashTransfer {
             $this->cashBook->assertHolds($from, $amount);
 
             $transfer = CashTransfer::query()->create([
@@ -77,6 +78,21 @@ class CashTransferService
 
             return $transfer;
         });
+
+        // The person handed to counts and accepts it — from the phone too (mobile wave 4).
+        $this->actionAlerts->alert(
+            User::query()->whereKey($transfer->to_user_id)->get(),
+            'cash.transfer',
+            'warning',
+            'Cash handed to you',
+            "{$actor->name} handed you ".$this->fcfa((string) $transfer->amount)." ({$transfer->number}). Count it and accept it.",
+            '/cash',
+            'cash_transfer',
+            $transfer->uuid,
+            $transfer->branch_id,
+        );
+
+        return $transfer;
     }
 
     public function acceptHandover(CashTransfer $transfer, string $counted, User $actor, ?string $note): CashTransfer
@@ -161,7 +177,7 @@ class CashTransferService
             throw ValidationException::withMessages(['slip_photo' => 'This photo was already used for another deposit — take a photo of this deposit\'s slip.']);
         }
 
-        return DB::transaction(function () use ($from, $bank, $amount, $slipNumber, $slipPhoto, $hash, $actor, $note): CashTransfer {
+        $transfer = DB::transaction(function () use ($from, $bank, $amount, $slipNumber, $slipPhoto, $hash, $actor, $note): CashTransfer {
             $this->cashBook->assertHolds($from, $amount);
 
             $transfer = CashTransfer::query()->create([
@@ -191,6 +207,21 @@ class CashTransferService
 
             return $transfer;
         });
+
+        // Whoever checks deposits against the bank, never the depositor.
+        $this->actionAlerts->alert(
+            $this->actionAlerts->deciders('cash.view', $transfer->branch_id, $actor->id),
+            'cash.deposit',
+            'warning',
+            'Bank deposit to confirm',
+            "{$actor->name} deposited ".$this->fcfa((string) $transfer->amount)." in {$bank->name} (slip {$transfer->slip_number}). Check it against the bank.",
+            '/cash',
+            'cash_transfer',
+            $transfer->uuid,
+            $transfer->branch_id,
+        );
+
+        return $transfer;
     }
 
     public function confirmDeposit(CashTransfer $transfer, User $actor): CashTransfer
@@ -327,5 +358,10 @@ class CashTransferService
         }
 
         return $locked;
+    }
+
+    private function fcfa(string $amount): string
+    {
+        return number_format((float) $amount, 0, '.', ' ').' FCFA';
     }
 }

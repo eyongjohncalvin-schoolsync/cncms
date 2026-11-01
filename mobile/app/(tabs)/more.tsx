@@ -47,10 +47,16 @@ export default function MoreScreen() {
           ? [{ title: 'My jobs', subtitle: 'Complaints given to you to fix', href: '/complaint-desk', accentColor: colors.accent.complaint }]
           : [];
 
+    // Wave 4: the cashier's till and the manager's cash book.
+    const cash: MoreLink[] = can('cash.receive') || can('cash.view')
+        ? [{ title: 'Cash', subtitle: 'Receive handovers, close the day, shortages and cash alerts', href: '/cash', accentColor: colors.accent.payment }]
+        : [];
+
     const sections: MoreSection[] = [
         {
             title: 'Field tools',
             links: [
+                ...cash,
                 ...desk,
                 {
                     title: 'Hand over cash',
