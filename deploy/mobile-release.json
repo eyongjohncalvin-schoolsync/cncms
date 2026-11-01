@@ -1,6 +1,6 @@
 {
-    "version": "1.0.1",
-    "url": "https://expo.dev/artifacts/eas/rUssQy-NLZsdG5JWevOm0z1D-8pJRhKNy7urqsITKc8.apk",
-    "built_on": "2026-10-25",
-    "notes": "Over-the-air updates and the new-version banner. Agents on older builds install this one by hand once."
+    "version": "1.0.2",
+    "url": "https://expo.dev/artifacts/eas/o7urubxIiBbK5ymOA-sP3ogV9TPBoMglOl-ZouA9RHA.apk",
+    "built_on": "2026-11-01",
+    "notes": "Phone alerts that ring (Firebase), dark mode following the phone, press-and-hold for amounts from 100 000 FCFA, and the app lock (PIN or fingerprint). Installs over 1.0.1."
 }
