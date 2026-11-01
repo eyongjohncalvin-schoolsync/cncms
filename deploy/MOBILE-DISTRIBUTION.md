@@ -223,6 +223,23 @@ Alert sounds are per type: "Needs you now" rings, "Quiet updates" doesn't,
 "Emergencies" always ring — each person can set quiet hours in the app
 (More → Alerts).
 
+### Version 1.0.2 (branch `mobile-wave-6`)
+
+1.0.2 carries native changes — the app lock (`expo-local-authentication`),
+dark mode following the phone (`userInterfaceStyle: 'automatic'`) — so
+it ships as an APK, together with the Firebase file above. Order matters,
+because an over-the-air update only reaches builds with the same native
+code:
+
+1. From `main` (still 1.0.1 native code): deploy the server, then
+   `npm run publish:update -- "…"` — every 1.0.1 phone gets the JS changes.
+2. Do the Firebase steps above (`google-services.json` into `mobile/`).
+3. Merge `mobile-wave-6` into `main`, build (`eas build --platform android
+   --profile preview`), put 1.0.2 and its APK link in
+   `deploy/mobile-release.json`, commit, deploy — the banner offers it.
+4. From then on, `publish:update` reaches 1.0.2 phones only; anyone still
+   on 1.0.1 installs 1.0.2 from the banner.
+
 ---
 
 ## iOS (deferred)

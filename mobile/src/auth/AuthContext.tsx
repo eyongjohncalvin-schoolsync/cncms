@@ -6,6 +6,7 @@ import { getCurrentToken, setCurrentToken } from './tokenState';
 import { clearStoredToken, getStoredToken, setStoredToken } from './tokenStorage';
 import { isTwoFactorChallenge } from '../utils/twoFactor';
 import { clearInbox } from '../inbox/inboxStore';
+import { clearAppLock } from '../lock/appLock';
 import type { LoginResponse, LoginResult, TenantRole, TwoFactorChallengeResponse, TwoFactorMethod } from '../types/api';
 
 export type SignInOutcome = { status: 'signed_in' } | { status: 'two_factor'; challenge: TwoFactorChallengeResponse };
@@ -132,6 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void clearStoredToken();
         void clearCachedProfile();
         clearInbox();
+        // The next person to sign in on this phone sets their own PIN.
+        void clearAppLock();
         setUser(null);
         setRole(null);
         setPermissions([]);
@@ -259,6 +262,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await clearStoredToken();
         await clearCachedProfile();
         clearInbox();
+        await clearAppLock();
         setUser(null);
         setRole(null);
         setPermissions([]);

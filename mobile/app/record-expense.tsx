@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
     },
     categoryRowSelected: {
         borderColor: colors.accent.expense,
-        backgroundColor: '#F5EBFC', // light tint of accent.expense (purple-700)
+        backgroundColor: colors.tint.expense,
     },
     categoryGlyph: {
         width: 40,
@@ -334,8 +334,8 @@ const styles = StyleSheet.create({
         // elsewhere on this same screen as a text/border color (e.g.
         // categoryRowSelected), where the contrast math is different and
         // already passes.
-        borderColor: '#6B21A8',
-        backgroundColor: '#6B21A8',
+        borderColor: colors.accent.expense,
+        backgroundColor: colors.accent.expense,
     },
     dateChipText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
     dateChipTextActive: { color: colors.textInverse },

@@ -1,8 +1,16 @@
+import { Appearance } from 'react-native';
+
 /**
  * Flat, AAA-contrast (7:1 minimum for body text) color tokens. No
- * gradients, no blur — see mobile-app-react-native.md §6. Dark mode is
- * deliberately deferred (§6): daytime outdoor legibility wants high
- * luminance, so there is only one palette for v1.
+ * gradients, no blur — see mobile-app-react-native.md §6.
+ *
+ * Two palettes of the same shape (docs/plans/mobile-manager-app.md,
+ * wave 6, the owner's chosen design): `light` (design A — off-white
+ * ground, white cards, deep green) and `dark` (design B — near-black
+ * ground, teal, amber). The phone's own light/dark setting picks one when
+ * the app opens; every screen's StyleSheet is built from `colors` at that
+ * moment, so a change of the phone's setting applies on the next open —
+ * never mid-way through a form.
  *
  * `accent` mirrors the web app's NAV_ACCENTS concept (one flat color per
  * feature area) without copying its literal Tailwind gradient classes —
@@ -33,8 +41,9 @@
  * render cost or the risk of it reading as decorative rather than
  * functional in direct sunlight — see tokens.ts's `shadow` doc comment.
  */
-export const colors = {
-    background: '#FFFFFF',
+const light = {
+    // Design A: an off-white ground so white cards stand out (2026-11, wave 6).
+    background: '#F6F7F5',
     surface: '#FFFFFF',
     surfaceMuted: '#F1F5F9', // slate-100
 
@@ -160,6 +169,82 @@ export const colors = {
     // action — it isn't one. Left untouched 2026-08-27: already AAA, and
     // not part of this app's own brand identity to begin with.
     whatsapp: '#075E54',
-} as const;
+
+    // Pale fills behind a feature area's notes (were hard-coded per screen).
+    tint: {
+        expense: '#F5EBFC',
+        complaint: '#FAE8FF',
+        arrears: '#F3E8FF',
+    },
+    // Text on the Home hero card's deep green.
+    heroText: '#ECFDF5',
+    // The Undo link on the inbox's dark countdown bar.
+    undo: '#FCD34D',
+    // The phone's status bar text over this palette.
+    statusBar: 'dark' as 'dark' | 'light',
+};
+
+type Palette = typeof light;
+
+/**
+ * Design B. Accents keep each feature area's hue, lifted so they read on a
+ * near-black ground; fills are bright, so `textInverse` (text on a fill)
+ * is dark. Every text pair is ≥7:1 like the light palette.
+ */
+const dark: Palette = {
+    background: '#0B1016',
+    surface: '#141B24',
+    surfaceMuted: '#1C2530',
+    border: '#2A3644',
+    textPrimary: '#E8EDF3',
+    textSecondary: '#9AA7B6',
+    textInverse: '#0B1016',
+    accent: {
+        home: '#93C5FD',
+        customers: '#A5B4FC',
+        payment: '#2DD4BF',
+        history: '#F5B544',
+        expense: '#D8B4FE',
+        complaint: '#F0ABFC',
+        arrears: '#C4B5FD',
+    },
+    status: {
+        offlineBg: '#3A2A0A',
+        offlineFg: '#F5B544',
+        offlineDot: '#D97706',
+        syncingBg: '#102A4C',
+        syncingFg: '#93C5FD',
+        syncingDot: '#3B82F6',
+        syncedBg: '#0E2E22',
+        syncedFg: '#6EE7B7',
+        syncedDot: '#22C55E',
+        errorBg: '#3B1416',
+        errorFg: '#FCA5A5',
+        errorDot: '#F87171',
+        pendingBg: '#1C2530',
+        pendingFg: '#CBD5E1',
+        verifiedBg: '#0E2E22',
+        verifiedFg: '#6EE7B7',
+        rejectedBg: '#3B1416',
+        rejectedFg: '#FCA5A5',
+    },
+    danger: '#F87171',
+    dangerBg: '#3B1416',
+    // WhatsApp's own bright green: dark text on it is ~10:1.
+    whatsapp: '#25D366',
+    tint: {
+        expense: '#2A1B3D',
+        complaint: '#3A1640',
+        arrears: '#251B45',
+    },
+    heroText: '#0B1016',
+    undo: '#B45309',
+    statusBar: 'light',
+};
+
+/** The phone's setting when the app opened: 'dark' or 'light'. */
+export const colorScheme: 'light' | 'dark' = Appearance.getColorScheme() === 'dark' ? 'dark' : 'light';
+
+export const colors: Palette = colorScheme === 'dark' ? dark : light;
 
 export type AccentKey = keyof typeof colors.accent;
