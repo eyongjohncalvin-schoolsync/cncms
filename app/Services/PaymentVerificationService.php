@@ -105,9 +105,10 @@ class PaymentVerificationService
      * What happens to the money ($money, owner 2026-10-26 / 2026-10-28) —
      * nothing leaves the books without a trace:
      *  - `none` — recorded by mistake, no money was taken. Not handed in
-     *    yet: it leaves the collector's handover. Already handed in: the
-     *    cash in the till is the collector's own, so a bon gives it back to
-     *    them;
+     *    yet: it leaves the collector's handover. Taken at the desk: it
+     *    leaves the till itself (RemittanceService::undoDeskPayment()).
+     *    Handed in by a collector: the cash in the till is the collector's
+     *    own, so a bon gives it back to them;
      *  - `correct` — $correction is recorded in its place, in the same
      *    transaction and in the collector's name. Its money is the old
      *    payment's: handed in, the correction takes the old payment's place
@@ -117,7 +118,7 @@ class PaymentVerificationService
      *  - `refund` — the customer gets it all back through a refund bon; the
      *    collector still hands it in if they haven't.
      *
-     * @return array{payment: Payment, adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher, was_pending: bool, to_collector: bool, off_handover: bool}
+     * @return array{payment: Payment, adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher, was_pending: bool, to_collector: bool, off_handover: bool, off_till: bool, desk_day_closed: bool}
      */
     public function reverse(Payment $payment, string $reason, User $actor, string $money = 'none', ?PaymentData $correction = null): array
     {
@@ -205,9 +206,18 @@ class PaymentVerificationService
                 }
             }
 
+            // Taken at the desk by mistake: no cash came in, so it leaves the
+            // till itself (owner, 2026-11-01) rather than through a bon.
+            $deskUndone = null;
+
+            if ($money === 'none' && $line !== null && $line->payment_id === $locked->id && $line->remittance?->at_desk) {
+                $deskUndone = app(RemittanceService::class)->undoDeskPayment($line, $actor, $reason);
+                $locked->update(['money_taken' => false]);
+            }
+
             $voucher = match (true) {
                 bccomp($refundAmount, '0', 2) > 0 => $this->refundBon($locked, $refundAmount, $reason, $actor),
-                $money === 'none' && $line !== null => $this->returnToCollectorBon($locked, $taken, $reason, $actor),
+                $money === 'none' && $line !== null && $deskUndone === null => $this->returnToCollectorBon($locked, $taken, $reason, $actor),
                 default => null,
             };
 
@@ -223,6 +233,8 @@ class PaymentVerificationService
                 'was_pending' => ! $wasVerified,
                 'to_collector' => $money === 'none' && $voucher !== null,
                 'off_handover' => $money === 'none' && $line === null,
+                'off_till' => $deskUndone === true,
+                'desk_day_closed' => $deskUndone === false,
             ];
         });
 

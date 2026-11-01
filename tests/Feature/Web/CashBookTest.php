@@ -363,6 +363,43 @@ class CashBookTest extends TestCase
         $this->get('/cash/hand-over')->assertInertia(fn (Assert $page) => $page->has('payments', 0));
     }
 
+    public function test_a_desk_payment_reversed_as_a_mistake_leaves_the_till_with_no_bon(): void
+    {
+        $cashier = $this->cashier();
+        $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 2500, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
+        $payment = Payment::query()->where('recorded_by', $cashier->id)->latest('id')->firstOrFail();
+        $till = app(CashBookService::class)->tillFor($cashier);
+
+        // Owner, 2026-11-01: no money was collected, so it is not in the till any more.
+        $this->collector();
+        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Saved for the wrong customer', 'money' => 'none'])->assertSessionHasNoErrors();
+
+        $this->assertSame('0.00', $this->balanceOf($till));
+        $this->assertNull($payment->refresh()->refund_voucher_id);
+        $this->assertFalse($payment->money_taken);
+        $this->assertSame('0.00', (string) Remittance::query()->where('collector_user_id', $cashier->id)->sole()->received_cash);
+        $this->assertNotNull(CashMovement::query()->where('cash_account_id', $till->id)->where('direction', 'out')->value('reversal_of_id'));
+    }
+
+    public function test_a_desk_payment_reversed_after_its_till_day_closed_moves_no_money(): void
+    {
+        $cashier = $this->cashier();
+        $this->post('/payments', ['customer_uuid' => $this->customer()->uuid, 'amount' => 2500, 'frequency' => 'monthly'])->assertSessionHasNoErrors();
+        $payment = Payment::query()->where('recorded_by', $cashier->id)->latest('id')->firstOrFail();
+        $till = app(CashBookService::class)->tillFor($cashier);
+
+        // The count found no cash: the close already took it out of the book.
+        $this->post("/cash/accounts/{$till->uuid}/close-day", ['counted' => '0'])->assertSessionHasNoErrors();
+
+        $this->collector();
+        $this->post("/payments/{$payment->uuid}/reverse", ['reason' => 'Saved for the wrong customer', 'money' => 'none'])
+            ->assertSessionHasNoErrors()
+            ->assertSessionHas('success', fn (string $message): bool => str_contains($message, 'already closed'));
+
+        $this->assertSame('0.00', $this->balanceOf($till));
+        $this->assertNull($payment->refresh()->refund_voucher_id);
+    }
+
     public function test_momo_taken_at_the_desk_still_goes_through_a_handover(): void
     {
         $cashier = $this->cashier();

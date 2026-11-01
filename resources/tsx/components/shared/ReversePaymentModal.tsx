@@ -13,6 +13,8 @@ interface ReversePaymentModalProps {
         customer_name: string;
         amount: string | number;
         handed_in?: boolean;
+        /** Taken at the desk: a mistake comes back out of the till itself. */
+        at_desk?: boolean;
         purpose?: string;
         verification_status?: string;
         recorded_by_name?: string | null;
@@ -34,8 +36,8 @@ type MoneyChoice = 'correct' | 'refund' | 'none';
  *  - record the correct payment — the payment form opens on it; the money
  *    taken stands for the correct one, in the collector's name;
  *  - recorded by mistake, no money was taken — off the collector's
- *    handover; if they already handed cash in for it, a bon gives it back
- *    to them;
+ *    handover; taken at the desk, out of the till; if a collector already
+ *    handed cash in for it, a bon gives it back to them;
  *  - give the money back — a refund bon for the customer, paid by the
  *    cashier once approved.
  */
@@ -89,9 +91,11 @@ export function ReversePaymentModal({ open, onClose, payment, freeMonths = null,
         {
             key: 'none',
             label: 'Recorded by mistake — no money was taken',
-            hint: handedIn
-                ? `${collector} handed in ${amount} for it: a bon gives that cash back to them once approved.`
-                : `It leaves ${collector}'s handover — they no longer owe it.`,
+            hint: payment.at_desk
+                ? `It was taken at the desk: the ${amount} comes back out of the till — no bon.`
+                : handedIn
+                  ? `${collector} handed in ${amount} for it: a bon gives that cash back to them once approved.`
+                  : `It leaves ${collector}'s handover — they no longer owe it.`,
         },
         {
             key: 'refund',

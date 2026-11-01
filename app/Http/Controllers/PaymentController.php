@@ -541,7 +541,7 @@ class PaymentController extends Controller
     }
 
     /**
-     * @param  array{payment: Payment, adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher, was_pending: bool, to_collector: bool, off_handover: bool}  $result
+     * @param  array{payment: Payment, adjustment_filed: bool, replacement: ?Payment, refund_voucher: ?Voucher, was_pending: bool, to_collector: bool, off_handover: bool, off_till: bool, desk_day_closed: bool}  $result
      */
     private function reversedMessage(array $result): string
     {
@@ -551,6 +551,8 @@ class PaymentController extends Controller
         return implode(' ', array_filter([
             $result['was_pending'] ? 'Payment rejected.' : 'Payment reversed and its receipt voided.',
             $result['off_handover'] ? 'No money was taken, so it leaves the collector\'s handover.' : null,
+            $result['off_till'] ? 'No money was taken, so its '.number_format((float) $result['payment']->amount, 0, '.', ',').' FCFA is taken back out of the till.' : null,
+            $result['desk_day_closed'] ? 'No money was taken, but the till day it went into is already closed: if that count came up short by '.number_format((float) $result['payment']->amount, 0, '.', ',').' FCFA, that shortage is this payment — write it off on Cash.' : null,
             $result['replacement'] !== null ? 'The correct payment is recorded in its place.' : null,
             $voucher !== null
                 ? ($toCollector ? 'Bon ' : 'Refund bon ').$voucher->number.' for '.number_format((float) $voucher->amount, 0, '.', ',').' FCFA waits for approval on Vouchers; the cashier pays '.($toCollector ? 'the collector back' : 'the customer').' from the till.'
@@ -632,6 +634,10 @@ class PaymentController extends Controller
             'can_clear_duplicate' => (bool) request()->user()?->can('clearDuplicate', $payment),
             // Its cash went into a daily handover: reversing it must correct or refund.
             'handed_in' => $payment->relationLoaded('remittanceLine') ? $payment->remittanceLine !== null : $payment->remittanceLine()->exists(),
+            // Taken at the desk: undone as a mistake, it leaves the till itself (no bon).
+            'at_desk' => $payment->relationLoaded('remittanceLine') && ($payment->remittanceLine === null || $payment->remittanceLine->relationLoaded('remittance'))
+                ? (bool) $payment->remittanceLine?->remittance?->at_desk
+                : $payment->remittanceLine()->whereHas('remittance', fn ($query) => $query->where('at_desk', true))->exists(),
             // A second payment for the customer that month (PaymentService::flagPossibleDuplicate()).
             'possible_duplicate' => $payment->isPossibleDuplicate(),
             'duplicate_reason' => $payment->duplicate_reason !== null ? (Payment::DUPLICATE_REASONS[$payment->duplicate_reason] ?? $payment->duplicate_reason) : null,

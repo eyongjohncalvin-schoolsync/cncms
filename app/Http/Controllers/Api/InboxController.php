@@ -110,7 +110,9 @@ class InboxController extends Controller
         $result = DB::transaction(fn () => $verifications->reverse($payment, $validated['reason'], $request->user(), $validated['money'] ?? 'none'));
 
         return $this->done($result['was_pending'] ? 'Payment rejected.' : 'Payment reversed and its receipt voided.'
-            .($result['refund_voucher'] !== null ? " Refund bon {$result['refund_voucher']->number} waits for approval." : ''));
+            .($result['refund_voucher'] !== null ? " Refund bon {$result['refund_voucher']->number} waits for approval." : '')
+            .($result['off_till'] ? ' No money was taken, so it is taken back out of the till.' : '')
+            .($result['desk_day_closed'] ? ' Its till day is already closed: write off that day\'s shortage for it on Cash.' : ''));
     }
 
     public function declineReversal(Request $request, PaymentReversalRequest $reversalRequest, PaymentReversalRequestService $requests): JsonResponse

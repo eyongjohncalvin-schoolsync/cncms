@@ -421,6 +421,51 @@ class RemittanceService
         });
     }
 
+    /**
+     * A desk payment recorded by mistake (owner, 2026-11-01): no money was
+     * taken, so it must not sit in the till. Its cash goes back out of the
+     * till on the day it went in, and the desk handover no longer counts it
+     * (so handovers still match the tills on the money-balance page) — no
+     * bon. True when done; false when that till day is already closed: the
+     * close counted the real cash, so the till is already right and any
+     * shortage the close opened for it is this payment's.
+     */
+    public function undoDeskPayment(RemittanceLine $line, User $actor, string $reason): bool
+    {
+        $remittance = Remittance::query()->whereKey($line->remittance_id)->lockForUpdate()->firstOrFail();
+        $till = CashAccount::query()->whereKey($remittance->till_account_id)->firstOrFail();
+        $businessDate = $remittance->business_date->toDateString();
+
+        if ($this->cashBook->isDayClosed($till, $businessDate)) {
+            return false;
+        }
+
+        $amount = (string) $line->amount;
+        $deposit = CashMovement::query()
+            ->where('cash_account_id', $till->id)
+            ->where('kind', CashMovement::KIND_DESK_PAYMENT)
+            ->where('direction', 'in')
+            ->where('source_type', $remittance->getMorphClass())
+            ->where('source_id', $remittance->id)
+            ->first();
+
+        $this->cashBook->record($till, 'out', $amount, CashMovement::KIND_DESK_PAYMENT, $actor, [
+            'document_number' => $remittance->number,
+            'source' => $remittance,
+            'reversal_of_id' => $deposit?->id,
+            'business_date' => $businessDate,
+            'note' => mb_substr("Desk payment reversed, no money taken: {$reason}", 0, 500),
+        ]);
+
+        $remittance->update([
+            'expected_cash' => bcsub((string) $remittance->expected_cash, $amount, 2),
+            'declared_cash' => bcsub((string) $remittance->declared_cash, $amount, 2),
+            'received_cash' => bcsub((string) $remittance->received_cash, $amount, 2),
+        ]);
+
+        return true;
+    }
+
     /** Books a non-cash line into the branch's wallet or bank account. */
     private function bookFound(Remittance $remittance, RemittanceLine $line, User $actor, ?string $bankAccountUuid, ?string $note): void
     {

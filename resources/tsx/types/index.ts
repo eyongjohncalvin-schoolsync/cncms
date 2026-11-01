@@ -482,6 +482,8 @@ export interface Payment {
     can_clear_duplicate?: boolean;
     /** Its cash was already handed in at a daily handover. */
     handed_in?: boolean;
+    /** Taken at the desk: reversed as a mistake, it leaves the till itself. */
+    at_desk?: boolean;
     duplicate_reason?: string | null;
     duplicate_note?: string | null;
     /** The earlier payment to compare it with (Show only). */
