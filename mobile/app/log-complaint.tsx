@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
     },
     categoryChipActive: {
         borderColor: colors.accent.complaint,
-        backgroundColor: '#FAE8FF', // light tint of accent.complaint (fuchsia-700)
+        backgroundColor: colors.tint.complaint,
     },
     categoryChipText: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
     categoryChipTextActive: { color: colors.accent.complaint },

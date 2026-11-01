@@ -133,6 +133,11 @@ export default function MoreScreen() {
                     href: '/alert-settings',
                 },
                 {
+                    title: 'App lock',
+                    subtitle: 'A PIN or your fingerprint to open the app',
+                    href: '/app-lock',
+                },
+                {
                     title: 'Sync Status',
                     subtitle: 'Pending uploads and last sync time',
                     href: '/sync-status',

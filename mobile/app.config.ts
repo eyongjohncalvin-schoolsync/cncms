@@ -22,7 +22,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     scheme: 'cncms',
     // Keep in step with AGENT_APP_VERSION on the server: a lower installed
     // version shows agents the "new version available" banner.
-    version: '1.0.1',
+    version: '1.0.2',
     // Over-the-air updates (expo-updates): a JS-only change published with
     // `eas update` reaches phones on their next app open. The fingerprint
     // policy means an update only ever lands on a build with the same native
@@ -37,7 +37,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     orientation: 'portrait',
     icon: './assets/icon.png',
-    userInterfaceStyle: 'light', // dark mode deliberately deferred — mobile-app-react-native.md §6
+    // Follows the phone's light/dark setting (wave 6 — src/theme/colors.ts).
+    userInterfaceStyle: 'automatic',
     ios: {
         supportsTablet: true,
         bundleIdentifier: 'com.shalomtech.cncms.mobile',
@@ -104,6 +105,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         // channels to exist before a token is meaningfully associated with
         // one on Android).
         'expo-notifications',
+        // App lock (wave 6): the fingerprint (or face) unlock; the PIN needs no permission.
+        [
+            'expo-local-authentication',
+            {
+                faceIDPermission: 'Allow $(PRODUCT_NAME) to use Face ID to unlock the app.',
+            },
+        ],
     ],
     extra: {
         apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? null,

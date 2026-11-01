@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
         // NOTE: this exact hex is only correct paired with accent.payment's
         // current emerald-800 — a future hero card using a different
         // fillColor needs its own verified pairing, not a copy of this one.
-        color: '#ECFDF5',
+        color: colors.heroText,
         letterSpacing: 0.6,
     },
     heroGlyphBadge: {
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
     // fontSize.display (40, tokens.ts) on pure white — verified ~7.68:1
     // against this card's emerald-800 fill, comfortably AAA.
     heroValue: { fontSize: fontSize.display, fontWeight: '800', color: colors.textInverse, marginTop: spacing.sm },
-    heroHint: { fontSize: fontSize.xs, color: '#ECFDF5', marginTop: spacing.xs },
+    heroHint: { fontSize: fontSize.xs, color: colors.heroText, marginTop: spacing.xs },
     totalLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
     totalValue: { fontSize: fontSize.display, fontWeight: '800', color: colors.accent.payment, marginTop: spacing.xs },
     // Overrides for the "Zone arrears outstanding" card, which reuses

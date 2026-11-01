@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Button } from '../src/components/ui/Button';
+import { HoldButton } from '../src/components/ui/HoldButton';
+import { needsHold } from '../src/utils/holdToConfirm';
 import { TextInput } from '../src/components/ui/TextInput';
 import { EmptyState } from '../src/components/ui/EmptyState';
 import { getInboxState, refreshInbox, removeInboxItem, subscribeInboxState } from '../src/inbox/inboxStore';
@@ -94,6 +96,8 @@ export default function InboxItemScreen() {
 
     const uuid = item.uuid;
     const amount = item.amount !== null ? Number(item.amount) : null;
+    // Wave 6: a big amount is held to confirm, never tapped.
+    const big = needsHold(amount);
     const needsText = (label: string) => setError(`Write ${label} first.`);
 
     function start(decision: PendingDecision) {
@@ -200,20 +204,32 @@ export default function InboxItemScreen() {
                     {item.type === 'voucher' ? (
                         <>
                             <Button title="Reject" variant="dangerOutline" fullWidth={false} style={styles.half} onPress={() => (reason ? start({ label: 'Rejecting', run: () => rejectVoucher(uuid, reason) }) : needsText('the reason'))} />
-                            <Button title="Approve" fullWidth={false} style={styles.half} onPress={() => start({ label: 'Approving', run: () => approveVoucher(uuid, reason || undefined) })} />
+                            {big ? (
+                                <HoldButton title={`Hold to approve · ${formatFcfa(Math.abs(amount!))}`} style={styles.full} onConfirm={() => start({ label: 'Approving', run: () => approveVoucher(uuid, reason || undefined) })} />
+                            ) : (
+                                <Button title="Approve" fullWidth={false} style={styles.half} onPress={() => start({ label: 'Approving', run: () => approveVoucher(uuid, reason || undefined) })} />
+                            )}
                         </>
                     ) : null}
                     {item.type === 'arrears_adjustment' ? (
                         <>
                             <Button title="Reject" variant="dangerOutline" fullWidth={false} style={styles.half} onPress={() => (reason ? start({ label: 'Rejecting', run: () => rejectArrearsAdjustment(uuid, reason) }) : needsText('the reason'))} />
-                            <Button title="Approve" fullWidth={false} style={styles.half} onPress={() => start({ label: 'Approving', run: () => approveArrearsAdjustment(uuid) })} />
+                            {big ? (
+                                <HoldButton title={`Hold to approve · ${formatFcfa(Math.abs(amount!))}`} style={styles.full} onConfirm={() => start({ label: 'Approving', run: () => approveArrearsAdjustment(uuid) })} />
+                            ) : (
+                                <Button title="Approve" fullWidth={false} style={styles.half} onPress={() => start({ label: 'Approving', run: () => approveArrearsAdjustment(uuid) })} />
+                            )}
                         </>
                     ) : null}
                     {item.type === 'reversal_request' ? (
                         <>
                             <Button title="Decline" variant="dangerOutline" fullWidth={false} style={styles.half} onPress={() => (reason.length >= 3 ? start({ label: 'Declining', run: () => declineReversal(uuid, reason) }) : needsText('a note for the collector'))} />
                             {item.actions.includes('reverse') ? (
-                                <Button title="Reverse payment" fullWidth={false} style={styles.half} onPress={() => (reason.length >= 3 ? start({ label: 'Reversing', run: () => reversePayment(uuid, reason, refund) }) : needsText('the reason'))} />
+                                big ? (
+                                    <HoldButton title={`Hold to reverse · ${formatFcfa(Math.abs(amount!))}`} variant="danger" style={styles.full} onConfirm={() => (reason.length >= 3 ? start({ label: 'Reversing', run: () => reversePayment(uuid, reason, refund) }) : needsText('the reason'))} />
+                                ) : (
+                                    <Button title="Reverse payment" fullWidth={false} style={styles.half} onPress={() => (reason.length >= 3 ? start({ label: 'Reversing', run: () => reversePayment(uuid, reason, refund) }) : needsText('the reason'))} />
+                                )
                             ) : null}
                         </>
                     ) : null}
@@ -250,8 +266,9 @@ const styles = StyleSheet.create({
     switchLabel: { flex: 1, fontSize: fontSize.sm, color: colors.textPrimary },
     actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
     half: { flex: 1, minWidth: 140 },
+    full: { flexBasis: '100%' },
     pending: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.textPrimary, borderRadius: radius.md, padding: spacing.md, minHeight: touchTarget.primary },
     pendingText: { color: colors.textInverse, fontSize: fontSize.md, fontWeight: '700' },
     undo: { minHeight: touchTarget.floor, minWidth: 72, alignItems: 'center', justifyContent: 'center' },
-    undoText: { color: '#FCD34D', fontSize: fontSize.md, fontWeight: '800' },
+    undoText: { color: colors.undo, fontSize: fontSize.md, fontWeight: '800' },
 });

@@ -543,7 +543,7 @@ const styles = StyleSheet.create({
     // Light violet tint scoped locally to this screen (matches
     // log-complaint.tsx's identical "local literal tint, not a shared
     // token" convention for its own categoryChipActive background).
-    noteCard: { backgroundColor: '#F3E8FF' },
+    noteCard: { backgroundColor: colors.tint.arrears },
     noteText: { fontSize: fontSize.sm, color: colors.textPrimary },
     noteTextStrong: { fontWeight: '700' },
     helperText: { fontSize: fontSize.xs, color: colors.textSecondary },
@@ -590,7 +590,7 @@ const styles = StyleSheet.create({
     targetChipFigure: { fontSize: fontSize.xs, color: colors.textSecondary },
     chipActive: {
         borderColor: colors.accent.arrears,
-        backgroundColor: '#F3E8FF',
+        backgroundColor: colors.tint.arrears,
     },
     // "Clear all arrears" / "Clear credit" quick-fill chip — same
     // border/tint pattern as chipActive above (violet accent), 48dp floor
@@ -604,7 +604,7 @@ const styles = StyleSheet.create({
         borderRadius: radius.pill,
         borderWidth: 1,
         borderColor: colors.accent.arrears,
-        backgroundColor: '#F3E8FF',
+        backgroundColor: colors.tint.arrears,
     },
     quickFillText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.accent.arrears },
     chipText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textPrimary },

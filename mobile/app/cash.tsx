@@ -2,6 +2,8 @@ import { useCallback, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { Button } from '../src/components/ui/Button';
+import { HoldButton } from '../src/components/ui/HoldButton';
+import { needsHold } from '../src/utils/holdToConfirm';
 import { Card } from '../src/components/ui/Card';
 import { EmptyState } from '../src/components/ui/EmptyState';
 import { TextInput } from '../src/components/ui/TextInput';
@@ -40,6 +42,8 @@ interface FormSpec {
     fields: Field[];
     submitLabel: string;
     danger?: boolean;
+    /** Wave 6: from 100 000 FCFA the submit button is held, not tapped. */
+    holdAmount?: string;
     /** What the count means before it is sent, e.g. "500 FCFA short". */
     hint?: (values: Record<string, string>) => string | null;
     run: (values: Record<string, string>) => Promise<string>;
@@ -175,10 +179,17 @@ export default function CashScreen() {
                     />
                 ))}
                 {hint ? <Text style={styles.hint}>{hint}</Text> : null}
-                <View style={styles.row}>
-                    <Button title="Cancel" variant="ghost" fullWidth={false} style={styles.half} onPress={() => setForm(null)} />
-                    <Button title={form.submitLabel} variant={form.danger ? 'danger' : 'primary'} fullWidth={false} style={styles.half} loading={busy} onPress={() => submitForm(form)} />
-                </View>
+                {needsHold(form.holdAmount) ? (
+                    <>
+                        <HoldButton title={`Hold to ${form.submitLabel.toLowerCase()} · ${fcfa(form.holdAmount!)}`} variant={form.danger ? 'danger' : 'primary'} disabled={busy} onConfirm={() => submitForm(form)} />
+                        <Button title="Cancel" variant="ghost" onPress={() => setForm(null)} />
+                    </>
+                ) : (
+                    <View style={styles.row}>
+                        <Button title="Cancel" variant="ghost" fullWidth={false} style={styles.half} onPress={() => setForm(null)} />
+                        <Button title={form.submitLabel} variant={form.danger ? 'danger' : 'primary'} fullWidth={false} style={styles.half} loading={busy} onPress={() => submitForm(form)} />
+                    </View>
+                )}
             </View>
         );
     }
@@ -421,6 +432,7 @@ export default function CashScreen() {
                                         fields: [{ key: 'note', label: 'Reason', required: true }],
                                         submitLabel: 'Write off',
                                         danger: true,
+                                        holdAmount: shortage.amount,
                                         run: (current) => settleShortage(shortage, 'written_off', current.note),
                                     })
                                 }

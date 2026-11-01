@@ -12,6 +12,7 @@ import { refreshNotificationsState } from '../src/notifications/notificationStor
 import { getEmergenciesNeedingInterrupt } from '../src/db/notifications';
 import { shouldTriggerEmergencyInterrupt } from '../src/utils/emergencyState';
 import { colors } from '../src/theme/colors';
+import { LockGate } from '../src/lock/LockGate';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -110,7 +111,16 @@ function RootNavigation() {
     }
 
     return (
-        <Stack screenOptions={{ headerShown: false }}>
+        <Stack
+            screenOptions={{
+                headerShown: false,
+                // Headers and screens follow the palette (light A / dark B — src/theme/colors.ts).
+                headerStyle: { backgroundColor: colors.surface },
+                headerTintColor: colors.textPrimary,
+                headerTitleStyle: { color: colors.textPrimary },
+                contentStyle: { backgroundColor: colors.background },
+            }}
+        >
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="hand-over" options={{ headerShown: true, title: "Hand over cash" }} />
@@ -236,6 +246,7 @@ function RootNavigation() {
             <Stack.Screen name="cash-receive/[uuid]" options={{ headerShown: true, title: 'Receive handover' }} />
             <Stack.Screen name="today" options={{ headerShown: true, title: 'Today' }} />
             <Stack.Screen name="staff" options={{ headerShown: true, title: 'Staff' }} />
+            <Stack.Screen name="app-lock" options={{ presentation: 'modal', headerShown: true, title: 'App lock' }} />
             <Stack.Screen name="alert-settings" options={{ presentation: 'modal', headerShown: true, title: 'Alerts' }} />
             <Stack.Screen
                 name="manuscript"
@@ -264,11 +275,13 @@ export default function RootLayout() {
                 <QueryClientProvider client={queryClient}>
                     <DatabaseProvider>
                         <AuthProvider>
-                            <RootNavigation />
+                            <LockGate>
+                                <RootNavigation />
+                            </LockGate>
                         </AuthProvider>
                     </DatabaseProvider>
                 </QueryClientProvider>
-                <StatusBar style="dark" />
+                <StatusBar style={colors.statusBar} />
             </SafeAreaProvider>
         </GestureHandlerRootView>
     );
