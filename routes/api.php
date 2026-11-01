@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AccountSecurityController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LoginCodeController;
 use App\Http\Controllers\Api\PasswordResetController;
+use App\Http\Controllers\Api\QuickSignInController;
 use App\Http\Controllers\Api\TwoFactorChallengeController;
 use App\Http\Middleware\ResolveTenant;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,9 @@ Route::prefix('v1')->group(function () {
     Route::post('auth/two-factor/email', [TwoFactorChallengeController::class, 'sendEmail'])->middleware('throttle:security-code-send');
     Route::post('auth/login-code', [LoginCodeController::class, 'send'])->middleware('throttle:security-code-send');
     Route::post('auth/login-code/verify', [LoginCodeController::class, 'verify'])->middleware('throttle:security-code-verify');
+
+    // Fingerprint sign-in: trades the phone's key for a token (QuickSignInService).
+    Route::post('auth/quick-login', [QuickSignInController::class, 'login'])->middleware('throttle:login');
 
     // "Forgot password?" with an emailed code (for a later mobile build).
     Route::post('auth/password/forgot', [PasswordResetController::class, 'forgot'])->middleware('throttle:security-code-send');
@@ -49,6 +53,8 @@ Route::prefix('v1')->group(function () {
             Route::post('auth/two-factor/recovery-codes', [AccountSecurityController::class, 'regenerateRecoveryCodes']);
             Route::get('auth/sessions', [AccountSecurityController::class, 'sessions']);
             Route::delete('auth/sessions', [AccountSecurityController::class, 'signOutOtherSessions']);
+            Route::post('auth/quick-sign-in', [QuickSignInController::class, 'store']);
+            Route::delete('auth/quick-sign-in/{id}', [QuickSignInController::class, 'destroy'])->whereNumber('id');
             // Self-service profile/password endpoints — gated by auth:sanctum
             // only (no ResolveTenant/tenant membership needed), same placement
             // as logout() above: both only ever touch the central `users`

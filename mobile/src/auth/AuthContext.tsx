@@ -1,13 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { useQueryClient } from '@tanstack/react-query';
-import { login as apiLogin, logout as apiLogout, fetchMe, verifyLoginCode, verifyTwoFactor } from '../api/auth';
+import { Alert } from 'react-native';
+import { login as apiLogin, logout as apiLogout, disableQuickSignIn, enableQuickSignIn, fetchMe, quickLogin, verifyLoginCode, verifyTwoFactor } from '../api/auth';
+import { clearQuickSignIn, confirmFingerprint, getQuickSignIn, markOffered, saveQuickSignIn, wasOffered } from './quickSignIn';
 import { setUnauthorizedHandler } from '../api/client';
 import { getCurrentToken, setCurrentToken } from './tokenState';
 import { clearStoredToken, getStoredToken, setStoredToken } from './tokenStorage';
 import { isTwoFactorChallenge } from '../utils/twoFactor';
 import { clearInbox } from '../inbox/inboxStore';
-import { clearAppLock } from '../lock/appLock';
+import { biometricAvailable, clearAppLock } from '../lock/appLock';
 import { countUnsent, getDataOwner, hasLocalData, setDataOwner, wipeLocalData } from '../db/localData';
 import { dataOwnerKey, decideOnSignIn } from '../utils/dataOwner';
 import { syncManager } from '../sync/SyncManager';
@@ -111,6 +113,12 @@ interface AuthContextValue {
     otherPersonsUnsent: number | null;
     /** Deletes the previous person's unsent records so someone else can sign in. */
     discardOtherData: () => Promise<void>;
+    /** Who can sign in on this phone with a fingerprint, if anyone (src/auth/quickSignIn.ts). */
+    fingerprintSignIn: { name: string; userUuid: string } | null;
+    /** Fingerprint, then signed in without the password; 'cancelled' when the prompt was dismissed. */
+    loginWithFingerprint: () => Promise<'signed_in' | 'cancelled'>;
+    /** Turns fingerprint sign-in on (asks for the fingerprint first) or off for the signed-in person. */
+    setFingerprintSignIn: (enabled: boolean) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -140,6 +148,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const queryClient = useQueryClient();
     const [otherPersonsUnsent, setOtherPersonsUnsent] = useState<number | null>(null);
+    const [fingerprintSignIn, setFingerprintSignInState] = useState<{ name: string; userUuid: string } | null>(null);
+
+    useEffect(() => {
+        void getQuickSignIn().then((stored) => setFingerprintSignInState(stored ? { name: stored.name, userUuid: stored.userUuid } : null));
+    }, []);
+
+    const turnOnFingerprint = useCallback(async (signedIn: AuthUser) => {
+        if (!(await confirmFingerprint('Confirm your fingerprint'))) {
+            return;
+        }
+
+        const { id, key } = await enableQuickSignIn();
+
+        await saveQuickSignIn({ id, key, userUuid: signedIn.uuid, name: signedIn.name });
+        setFingerprintSignInState({ name: signedIn.name, userUuid: signedIn.uuid });
+    }, []);
+
+    const turnOffFingerprint = useCallback(async () => {
+        const stored = await getQuickSignIn();
+
+        if (stored) {
+            try {
+                await disableQuickSignIn(stored.id);
+            } catch {
+                // Offline or already gone: the key leaves this phone either way.
+            }
+        }
+
+        await clearQuickSignIn();
+        setFingerprintSignInState(null);
+    }, []);
+
+    /**
+     * After a password (or code) sign-in: a fingerprint sign-in left by
+     * someone else stops working on this phone, and the person is offered
+     * their own — once; Settings has the switch after that.
+     */
+    const afterPasswordSignIn = useCallback(
+        async (signedIn: AuthUser) => {
+            const stored = await getQuickSignIn();
+
+            if (stored && stored.userUuid !== signedIn.uuid) {
+                await clearQuickSignIn();
+                setFingerprintSignInState(null);
+            }
+
+            if ((stored && stored.userUuid === signedIn.uuid) || !(await biometricAvailable()) || (await wasOffered(signedIn.uuid))) {
+                return;
+            }
+
+            await markOffered(signedIn.uuid);
+
+            Alert.alert('Sign in with your fingerprint next time?', "You won't need to type your password on this phone. You can turn it off in Settings.", [
+                { text: 'Not now', style: 'cancel' },
+                {
+                    text: 'Turn on',
+                    onPress: () => {
+                        void turnOnFingerprint(signedIn).catch(() => Alert.alert('Not turned on', 'Try again from Settings when you are online.'));
+                    },
+                },
+            ]);
+        },
+        [turnOnFingerprint],
+    );
 
     /** Empties the phone of the previous account's data, on disk and in memory. */
     const resetLocalData = useCallback(async () => {
@@ -268,7 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const finishLogin = useCallback(async (token: string) => {
+    const finishLogin = useCallback(async (token: string, via: 'password' | 'fingerprint' = 'password') => {
         // Nothing of a previous session may still be syncing once this
         // token is in use.
         await syncManager.stopAndSettle();
@@ -304,7 +376,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoleConfirmed(true);
         await writeCachedProfile({ user: me.user, role: me.role, permissions: me.permissions });
         setStatus('authenticated');
-    }, [claimLocalData]);
+
+        if (via === 'password') {
+            void afterPasswordSignIn(me.user);
+        }
+    }, [claimLocalData, afterPasswordSignIn]);
+
+    const loginWithFingerprint = useCallback(async (): Promise<'signed_in' | 'cancelled'> => {
+        const stored = await getQuickSignIn();
+
+        if (!stored) {
+            setFingerprintSignInState(null);
+            throw new Error('Fingerprint sign-in is not set up on this phone. Sign in with your password.');
+        }
+
+        if (!(await confirmFingerprint(`Sign in as ${stored.name}`))) {
+            return 'cancelled';
+        }
+
+        let response: LoginResponse;
+
+        try {
+            response = await quickLogin(stored.key);
+        } catch (error) {
+            // Turned off elsewhere, the password changed, or the account was
+            // deactivated: the key is dead, so it leaves this phone.
+            if ((error as { response?: { status?: number } }).response?.status === 401) {
+                await clearQuickSignIn();
+                setFingerprintSignInState(null);
+            }
+
+            throw error;
+        }
+
+        await finishLogin(response.token, 'fingerprint');
+
+        return 'signed_in';
+    }, [finishLogin]);
+
+    const setFingerprintSignIn = useCallback(
+        async (enabled: boolean) => {
+            if (!enabled) {
+                await turnOffFingerprint();
+
+                return;
+            }
+
+            if (user) {
+                await turnOnFingerprint(user);
+            }
+        },
+        [user, turnOnFingerprint, turnOffFingerprint],
+    );
 
     /** Signs in, or hands back the two-factor challenge still to pass. */
     const settle = useCallback(
@@ -390,8 +513,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     const value = useMemo<AuthContextValue>(
-        () => ({ status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser, otherPersonsUnsent, discardOtherData }),
-        [status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser, otherPersonsUnsent, discardOtherData],
+        () => ({ status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser, otherPersonsUnsent, discardOtherData, fingerprintSignIn, loginWithFingerprint, setFingerprintSignIn }),
+        [status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser, otherPersonsUnsent, discardOtherData, fingerprintSignIn, loginWithFingerprint, setFingerprintSignIn],
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

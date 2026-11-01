@@ -87,6 +87,25 @@ export async function fetchMe(): Promise<MeResponse> {
     return data;
 }
 
+/** POST /auth/quick-sign-in — turns fingerprint sign-in on for this phone (src/auth/quickSignIn.ts). */
+export async function enableQuickSignIn(): Promise<{ id: number; key: string }> {
+    const { data } = await apiClient.post<{ id: number; key: string }>('/auth/quick-sign-in', { device_name: deviceName() });
+
+    return data;
+}
+
+/** DELETE /auth/quick-sign-in/{id} — the phone's key stops working. */
+export async function disableQuickSignIn(id: number): Promise<void> {
+    await apiClient.delete(`/auth/quick-sign-in/${id}`);
+}
+
+/** POST /auth/quick-login — trades the key for a token, no password. */
+export async function quickLogin(key: string): Promise<LoginResponse> {
+    const { data } = await apiClient.post<LoginResponse>('/auth/quick-login', { key, device_name: deviceName() });
+
+    return data;
+}
+
 /** Also unregisters this phone from push, so a shared phone stops getting
  * the signed-out person's alerts (manager inbox, wave 2). */
 export async function logout(): Promise<void> {

@@ -101,6 +101,8 @@ export default function ChangePasswordScreen() {
                         setErrors((prev) => ({ ...prev, currentPassword: undefined }));
                     }}
                     secureTextEntry
+                    autoComplete="current-password"
+                    textContentType="password"
                     autoCapitalize="none"
                     autoCorrect={false}
                     error={errors.currentPassword}
@@ -114,6 +116,8 @@ export default function ChangePasswordScreen() {
                         setErrors((prev) => ({ ...prev, newPassword: undefined }));
                     }}
                     secureTextEntry
+                    autoComplete="new-password"
+                    textContentType="newPassword"
                     autoCapitalize="none"
                     autoCorrect={false}
                     error={errors.newPassword}
@@ -127,6 +131,8 @@ export default function ChangePasswordScreen() {
                         setErrors((prev) => ({ ...prev, confirmPassword: undefined }));
                     }}
                     secureTextEntry
+                    autoComplete="new-password"
+                    textContentType="newPassword"
                     autoCapitalize="none"
                     autoCorrect={false}
                     error={errors.confirmPassword}

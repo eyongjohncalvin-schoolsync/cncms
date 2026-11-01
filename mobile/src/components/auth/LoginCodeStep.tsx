@@ -97,6 +97,8 @@ export function LoginCodeStep({
                         label="Email or username"
                         autoCapitalize="none"
                         autoCorrect={false}
+                        autoComplete="username"
+                        textContentType="username"
                         keyboardType="email-address"
                         value={identifier}
                         onChangeText={setIdentifier}

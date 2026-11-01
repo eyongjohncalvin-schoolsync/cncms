@@ -16,6 +16,7 @@ use App\Policies\ReportPolicy;
 use App\Policies\RolePolicy;
 use App\Policies\SalaryPolicy;
 use App\Services\FreeMonthGrantService;
+use App\Services\QuickSignInService;
 use App\Support\BranchLookup;
 use App\Support\BranchPrices;
 use App\Support\CacheVersion;
@@ -59,8 +60,11 @@ class AppServiceProvider extends ServiceProvider
         // even one that survived the token purge in
         // AccountSecurityService::deactivate() — the API counterpart of the
         // web EnsureAccountIsActive middleware.
+        // A fingerprint sign-in key only buys a token (QuickSignInService);
+        // it never calls the API itself.
         Sanctum::authenticateAccessTokensUsing(
             static fn (PersonalAccessToken $token, bool $isValid): bool => $isValid
+                && ! QuickSignInService::isQuickSignInKey($token)
                 && (! $token->tokenable instanceof User || $token->tokenable->isActive()),
         );
 

@@ -1,5 +1,5 @@
-import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as Updates from 'expo-updates';
@@ -7,6 +7,7 @@ import { Card } from '../src/components/ui/Card';
 import { Button } from '../src/components/ui/Button';
 import { DetailRow } from '../src/components/ui/DetailRow';
 import { useAuth } from '../src/auth/AuthContext';
+import { biometricAvailable } from '../src/lock/appLock';
 import { getSyncState, subscribeSyncState } from '../src/sync/syncStore';
 import { extractErrorMessage } from '../src/api/client';
 import { colors } from '../src/theme/colors';
@@ -52,9 +53,31 @@ import { fontSize, spacing } from '../src/theme/tokens';
  */
 export default function SettingsScreen() {
     const router = useRouter();
-    const { user, role, logout } = useAuth();
+    const { user, role, logout, fingerprintSignIn, setFingerprintSignIn } = useAuth();
     const syncState = useSyncExternalStore(subscribeSyncState, getSyncState);
     const [loggingOut, setLoggingOut] = useState(false);
+    const [canUseFingerprint, setCanUseFingerprint] = useState(false);
+    const [fingerprintBusy, setFingerprintBusy] = useState(false);
+    const fingerprintOn = fingerprintSignIn !== null && fingerprintSignIn.userUuid === user?.uuid;
+
+    useEffect(() => {
+        void biometricAvailable().then(setCanUseFingerprint);
+    }, []);
+
+    const toggleFingerprint = useCallback(
+        async (enabled: boolean) => {
+            setFingerprintBusy(true);
+
+            try {
+                await setFingerprintSignIn(enabled);
+            } catch (error) {
+                Alert.alert('Could not change fingerprint sign-in', extractErrorMessage(error));
+            } finally {
+                setFingerprintBusy(false);
+            }
+        },
+        [setFingerprintSignIn],
+    );
 
     const performLogout = useCallback(async () => {
         setLoggingOut(true);
@@ -117,6 +140,15 @@ export default function SettingsScreen() {
                     <Button title="Change email" variant="secondary" onPress={() => router.push('/change-email')} />
                     <Button title="Signed-in devices" variant="secondary" onPress={() => router.push('/sessions')} />
                 </View>
+                {canUseFingerprint ? (
+                    <View style={styles.switchRow}>
+                        <View style={styles.flex1}>
+                            <Text style={styles.switchLabel}>Sign in with fingerprint</Text>
+                            <Text style={styles.sectionHint}>After you log out, sign back in on this phone without typing your password.</Text>
+                        </View>
+                        <Switch value={fingerprintOn} onValueChange={toggleFingerprint} disabled={fingerprintBusy} />
+                    </View>
+                ) : null}
             </Card>
 
             <Card>
@@ -168,5 +200,8 @@ const styles = StyleSheet.create({
     // confirmActions layout (two stacked full-width Buttons), the only
     // existing precedent in this app for "more than one Button together".
     profileActions: { gap: spacing.sm, marginTop: spacing.md },
+    switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.lg },
+    switchLabel: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
+    flex1: { flex: 1 },
     logoutButton: { marginTop: spacing.sm },
 });

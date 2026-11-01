@@ -20,7 +20,22 @@ import { fontSize, spacing } from '../../src/theme/tokens';
 import type { TwoFactorChallengeResponse } from '../../src/types/api';
 
 export default function LoginScreen() {
-    const { login, otherPersonsUnsent, discardOtherData } = useAuth();
+    const { login, otherPersonsUnsent, discardOtherData, fingerprintSignIn, loginWithFingerprint } = useAuth();
+    const [fingerprintBusy, setFingerprintBusy] = useState(false);
+
+    async function handleFingerprint() {
+        setFingerprintBusy(true);
+        setError(null);
+
+        try {
+            // Signed in: the redirect in app/_layout.tsx takes over, as with the password.
+            await loginWithFingerprint();
+        } catch (e) {
+            setError(e instanceof OtherPersonsDataError ? null : extractErrorMessage(e, 'Could not sign in with your fingerprint. Use your password.'));
+        } finally {
+            setFingerprintBusy(false);
+        }
+    }
     const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -112,10 +127,26 @@ export default function LoginScreen() {
                     <LoginCodeStep initialIdentifier={identifier.trim()} onTwoFactor={setChallenge} onCancel={() => restart()} />
                 ) : (
                     <View style={styles.form}>
+                        {fingerprintSignIn ? (
+                            <View style={styles.fingerprint}>
+                                <Button
+                                    title={`Sign in as ${fingerprintSignIn.name} with fingerprint`}
+                                    onPress={handleFingerprint}
+                                    loading={fingerprintBusy}
+                                    disabled={submitting}
+                                    size="large"
+                                />
+                                <Text style={styles.orPassword}>or sign in with a password</Text>
+                            </View>
+                        ) : null}
+                        {/* autoComplete / textContentType let the phone's password manager (Google Password Manager) offer to save and fill these. */}
                         <TextInput
                             label="Email or username"
                             autoCapitalize="none"
                             autoCorrect={false}
+                            autoComplete="username"
+                            textContentType="username"
+                            importantForAutofill="yes"
                             keyboardType="email-address"
                             value={identifier}
                             onChangeText={setIdentifier}
@@ -125,6 +156,9 @@ export default function LoginScreen() {
                         <TextInput
                             label="Password"
                             secureTextEntry
+                            autoComplete="current-password"
+                            textContentType="password"
+                            importantForAutofill="yes"
                             value={password}
                             onChangeText={setPassword}
                             placeholder="••••••••"
@@ -180,6 +214,8 @@ const styles = StyleSheet.create({
         color: colors.textSecondary,
     },
     form: { gap: spacing.lg },
+    fingerprint: { gap: spacing.sm },
+    orPassword: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
     error: {
         fontSize: fontSize.sm,
         color: colors.danger,
