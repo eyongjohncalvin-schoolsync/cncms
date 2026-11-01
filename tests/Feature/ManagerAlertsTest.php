@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Console\Commands\AlertsMorningDigest;
 use App\DataTransferObjects\ArrearsAdjustmentData;
 use App\DataTransferObjects\ComplaintData;
 use App\Models\Company;
@@ -26,6 +27,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
+use ReflectionMethod;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
 use Tests\TestCase;
 
@@ -203,6 +205,32 @@ class ManagerAlertsTest extends TestCase
         $this->assertContains($this->terence->id, $digests);
         $this->assertNotContains($this->divine->id, $digests);
         $this->assertSame('warning', Notification::query()->where('type', 'inbox.digest')->value('severity'));
+    }
+
+    public function test_the_morning_summary_links_the_bell_to_a_web_page_not_the_phone_only_inbox(): void
+    {
+        Notification::query()->where('type', 'inbox.digest')->delete();
+        $complaint = ComplaintFactory::new()->submittedBy($this->divine->id)->create(['assigned_to' => null]);
+
+        $this->artisan('alerts:digest', ['tenant' => 'swecom'])->assertSuccessful();
+
+        $links = Notification::query()->where('type', 'inbox.digest')->pluck('link', 'recipient_user_id');
+        $this->assertNotContains('/inbox', $links->all());
+        $this->assertContains($links[$this->terence->id], ['/dashboard', "/complaints/{$complaint->uuid}"]);
+    }
+
+    public function test_one_waiting_item_opens_its_own_page_and_several_open_the_dashboard(): void
+    {
+        $command = new AlertsMorningDigest;
+        $webLink = new ReflectionMethod($command, 'webLink');
+
+        $this->assertSame('/complaints/abc', $webLink->invoke($command, [['web_path' => '/complaints/abc']]));
+        $this->assertSame('/dashboard', $webLink->invoke($command, [['web_path' => '/complaints/abc'], ['web_path' => '/cash']]));
+    }
+
+    public function test_an_old_inbox_link_on_the_website_lands_on_the_dashboard(): void
+    {
+        $this->actingAs($this->terence)->get('/inbox')->assertRedirect('/dashboard');
     }
 
     public function test_a_shared_phone_only_rings_for_whoever_is_signed_in(): void

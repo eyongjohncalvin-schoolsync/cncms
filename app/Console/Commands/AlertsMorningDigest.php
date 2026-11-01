@@ -62,7 +62,7 @@ class AlertsMorningDigest extends Command
                         'warning',
                         'Good morning: '.$total.' '.($total === 1 ? 'thing waits' : 'things wait').' for you',
                         $urgent > 0 ? "{$urgent} of them urgent. Open your inbox to decide." : 'Open your inbox to decide.',
-                        '/inbox',
+                        $this->webLink($items),
                         branchId: null,
                     );
                     $sent++;
@@ -75,5 +75,18 @@ class AlertsMorningDigest extends Command
         });
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Where the summary opens on the website (the notification bell). The
+     * inbox is a phone screen with no web page — the phone routes the tap by
+     * type, not by this link — so one waiting item opens its own web page and
+     * several open the dashboard.
+     *
+     * @param  non-empty-list<array{web_path: string}>  $items
+     */
+    private function webLink(array $items): string
+    {
+        return count($items) === 1 ? $items[0]['web_path'] : '/dashboard';
     }
 }
