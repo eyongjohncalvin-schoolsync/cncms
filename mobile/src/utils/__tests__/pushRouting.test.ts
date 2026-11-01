@@ -35,3 +35,15 @@ test('a missing or malformed severity safely defaults to the non-blocking routin
     assert.equal(resolvePushTapTarget({ severity: undefined }), '/notifications');
     assert.equal(resolvePushTapTarget({ severity: 'garbage' }), '/notifications');
 });
+
+test('a technician’s new-job alert opens that complaint', () => {
+    assert.equal(
+        resolvePushTapTarget({ severity: 'urgent', type: 'complaint.assigned', source_type: 'complaint', source_uuid: 'abc-123' }),
+        '/complaint/abc-123',
+    );
+});
+
+test('a complaint alert that names no complaint falls back to the notifications list', () => {
+    assert.equal(resolvePushTapTarget({ severity: 'urgent', type: 'complaint.assigned' }), '/notifications');
+    assert.equal(resolvePushTapTarget({ severity: 'urgent', type: 'complaint.assigned', source_type: 'payment', source_uuid: 'x' }), '/notifications');
+});

@@ -166,6 +166,12 @@ class ComplaintService
         return $resolved;
     }
 
+    /** ComplaintPolicy::start() has checked it's the assignee's own open complaint. */
+    public function start(Complaint $complaint): Complaint
+    {
+        return $this->complaints->update($complaint, ['status' => 'in_progress']);
+    }
+
     /**
      * The Level 3 human gate's actual trigger (ComplaintPolicy::
      * notifyInvestors() — super/admin only, narrower than resolve()/

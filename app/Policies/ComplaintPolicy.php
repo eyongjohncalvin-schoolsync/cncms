@@ -63,6 +63,12 @@ class ComplaintPolicy
             && $this->context->can('complaints.resolve');
     }
 
+    /** Only the technician it's assigned to marks an open complaint as started. */
+    public function start(User $user, Complaint $complaint): bool
+    {
+        return (int) $complaint->assigned_to === (int) $user->id && $complaint->status === 'open';
+    }
+
     public function reopen(User $user, Complaint $complaint): bool
     {
         return $complaint->submitted_by !== $user->id

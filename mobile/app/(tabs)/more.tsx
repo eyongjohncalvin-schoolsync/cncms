@@ -1,5 +1,6 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useAuth } from '../../src/auth/AuthContext';
 import { Card } from '../../src/components/ui/Card';
 import { colors } from '../../src/theme/colors';
 import { fontSize, spacing } from '../../src/theme/tokens';
@@ -36,11 +37,21 @@ interface MoreSection {
  */
 export default function MoreScreen() {
     const router = useRouter();
+    const { can } = useAuth();
+
+    // Wave 3 (docs/plans/mobile-manager-app.md): whoever assigns gets the
+    // whole desk, a technician their own jobs.
+    const desk: MoreLink[] = can('complaints.assign')
+        ? [{ title: 'Complaint desk', subtitle: 'Assign technicians, follow every open complaint', href: '/complaint-desk', accentColor: colors.accent.complaint }]
+        : can('complaints.resolve')
+          ? [{ title: 'My jobs', subtitle: 'Complaints given to you to fix', href: '/complaint-desk', accentColor: colors.accent.complaint }]
+          : [];
 
     const sections: MoreSection[] = [
         {
             title: 'Field tools',
             links: [
+                ...desk,
                 {
                     title: 'Hand over cash',
                     subtitle: 'Today’s collections — count your cash and give it to the cashier',

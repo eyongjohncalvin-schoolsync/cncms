@@ -267,7 +267,7 @@ class ComplaintEscalationService
         $assignee = User::query()->find($complaint->assigned_to);
 
         if ($assignee !== null) {
-            $this->notifications->broadcastToUser($assignee, 'complaint.assigned', 'urgent', $this->title(0), $this->body($complaint, 0), $this->link($complaint), branchId: $complaint->branch_id);
+            $this->notifications->broadcastToUser($assignee, 'complaint.assigned', 'urgent', $this->title(0), $this->body($complaint, 0), $this->link($complaint), 'complaint', $complaint->uuid, $complaint->branch_id);
         }
     }
 
@@ -285,7 +285,10 @@ class ComplaintEscalationService
                     $this->title(0),
                     $this->body($complaint, 0),
                     $this->link($complaint),
-                    branchId: $complaint->branch_id,
+                    // The phone opens the job itself when the alert is tapped.
+                    'complaint',
+                    $complaint->uuid,
+                    $complaint->branch_id,
                 );
 
                 ComplaintEscalation::query()->create([

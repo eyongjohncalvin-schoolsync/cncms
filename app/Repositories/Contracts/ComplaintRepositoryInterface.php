@@ -13,6 +13,9 @@ interface ComplaintRepositoryInterface
     /**
      * @param  array<string, mixed>  $filters  Supported keys: 'status',
      *                                         'category', 'urgent' (bool),
+     *                                         'open' (bool: not resolved),
+     *                                         'assigned_to' (a user id),
+     *                                         'unassigned' (bool),
      *                                         'sort' ('created_at'|'title',
      *                                         default 'created_at'), 'direction'
      *                                         ('asc'|'desc', default 'desc').

@@ -128,6 +128,9 @@ class ComplaintRepository implements ComplaintRepositoryInterface
             ->where(fn (Builder $query) => $query->whereNull('customer_id')->orWhereHas('customer'))
             ->when($filters['status'] ?? null, fn (Builder $query, string $status) => $query->where('status', $status))
             ->when($filters['category'] ?? null, fn (Builder $query, string $category) => $query->where('category', $category))
+            ->when($filters['open'] ?? false, fn (Builder $query) => $query->where('status', '!=', 'resolved'))
+            ->when($filters['assigned_to'] ?? null, fn (Builder $query, int $userId) => $query->where('assigned_to', $userId))
+            ->when($filters['unassigned'] ?? false, fn (Builder $query) => $query->whereNull('assigned_to'))
             ->when(
                 array_key_exists('urgent', $filters) && $filters['urgent'] !== null,
                 fn (Builder $query) => $query->where('urgent', (bool) $filters['urgent'])

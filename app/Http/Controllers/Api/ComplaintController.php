@@ -39,6 +39,14 @@ class ComplaintController extends Controller
         $perPage = (int) $request->integer('per_page', 25);
         $filters = $request->only(['status', 'category', 'urgent', 'sort', 'direction']);
 
+        // The phone's complaint desk (docs/plans/mobile-manager-app.md, wave 3).
+        $filters += match ($request->query('view')) {
+            'open' => ['open' => true],
+            'unassigned' => ['open' => true, 'unassigned' => true],
+            'mine' => ['open' => true, 'assigned_to' => (int) $request->user()->id],
+            default => [],
+        };
+
         $complaints = $this->complaints->list($filters, $perPage);
 
         return ComplaintResource::collection($complaints)->response();
@@ -51,11 +59,29 @@ class ComplaintController extends Controller
         return (new ComplaintResource($complaint))->response()->setStatusCode(201);
     }
 
-    public function show(Complaint $complaint): JsonResponse
+    public function show(Request $request, Complaint $complaint): JsonResponse
     {
         $this->authorize('view', $complaint);
 
-        return (new ComplaintResource($this->complaints->findOrFail($complaint->uuid)))->response();
+        $user = $request->user();
+
+        return (new ComplaintResource($this->complaints->findOrFail($complaint->uuid)))
+            ->additional(['can' => [
+                'assign' => $user->can('assign', Complaint::class),
+                'start' => $user->can('start', $complaint),
+                'resolve' => $complaint->status !== 'resolved' && $user->can('resolve', $complaint),
+            ]])
+            ->response();
+    }
+
+    /** The technician says they're on it: open → in progress. */
+    public function start(Request $request, Complaint $complaint): JsonResponse
+    {
+        $this->authorize('start', $complaint);
+
+        $complaint = $this->complaints->start($complaint);
+
+        return (new ComplaintResource($complaint->load(['submittedBy', 'assignedTo'])))->response();
     }
 
     public function resolve(ResolveComplaintRequest $request, Complaint $complaint): JsonResponse

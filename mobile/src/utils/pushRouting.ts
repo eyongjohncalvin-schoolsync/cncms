@@ -5,11 +5,9 @@
  * expo-notifications/expo-router.
  *
  * The destinations are app/emergency.tsx, app/notifications.tsx and the
- * manager inbox tab (app/(tabs)/inbox.tsx) — there is no per-complaint
- * detail screen on mobile (no
- * `/complaints/[uuid]` route), so this deliberately never tries to route
- * anywhere more specific than that, regardless of what `link`/`source_type`
- * the push payload carries.
+ * manager inbox tab (app/(tabs)/inbox.tsx), and one complaint
+ * (app/complaint/[uuid].tsx) when a complaint alert names it by
+ * `source_type`/`source_uuid` — the technician's "new job" ring.
  *
  * Critically: resolving a tap target is NOT the same as acknowledging an
  * emergency. Landing on app/emergency.tsx via a tap still requires the
@@ -19,7 +17,7 @@
  * "acknowledged," even weaker than "read." This function only ever decides
  * WHERE to navigate, never calls any acknowledge/read state mutation.
  */
-export type PushTapTarget = '/emergency' | '/notifications' | '/inbox';
+export type PushTapTarget = '/emergency' | '/notifications' | '/inbox' | `/complaint/${string}`;
 
 export interface PushTapData {
     /** The `data.severity` field App\Jobs\SendPushNotificationJob puts on
@@ -28,6 +26,9 @@ export interface PushTapData {
     severity?: string;
     /** The notification `type` on the same payload, e.g. `inbox.voucher`. */
     type?: string;
+    /** What the alert is about, e.g. `complaint` + its uuid (wave 3). */
+    source_type?: string | null;
+    source_uuid?: string | null;
 }
 
 /** Alerts about something to decide (docs/plans/mobile-manager-app.md, wave 2). */
@@ -40,6 +41,11 @@ export function resolvePushTapTarget(data: PushTapData): PushTapTarget {
 
     if (typeof data.type === 'string' && (data.type.startsWith('inbox.') || INBOX_TYPES.includes(data.type))) {
         return '/inbox';
+    }
+
+    // A technician's new job (or any other complaint alert naming one) opens that complaint.
+    if (typeof data.type === 'string' && data.type.startsWith('complaint.') && data.source_type === 'complaint' && typeof data.source_uuid === 'string' && data.source_uuid !== '') {
+        return `/complaint/${data.source_uuid}`;
     }
 
     return '/notifications';
