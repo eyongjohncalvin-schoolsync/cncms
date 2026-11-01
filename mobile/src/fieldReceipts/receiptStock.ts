@@ -2,7 +2,7 @@ import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
 import { fetchReceiptStock, registerFieldDevice } from '../api/fieldReceipts';
-import { getCachedUserUuid } from '../auth/AuthContext';
+import { getCachedUserUuid } from '../auth/cachedUser';
 import { replaceUnusedNumbers, takeNextNumber } from '../db/receiptNumbers';
 import { canonicalReceipt, computeReceiptCode, unixSeconds } from '../utils/receiptCode';
 

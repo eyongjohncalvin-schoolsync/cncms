@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+    Alert,
     Image,
     KeyboardAvoidingView,
     Platform,
@@ -8,7 +9,7 @@ import {
     Text,
     View,
 } from 'react-native';
-import { useAuth } from '../../src/auth/AuthContext';
+import { OtherPersonsDataError, useAuth } from '../../src/auth/AuthContext';
 import { LoginCodeStep } from '../../src/components/auth/LoginCodeStep';
 import { LinkText, TwoFactorStep } from '../../src/components/auth/TwoFactorStep';
 import { Button } from '../../src/components/ui/Button';
@@ -19,7 +20,7 @@ import { fontSize, spacing } from '../../src/theme/tokens';
 import type { TwoFactorChallengeResponse } from '../../src/types/api';
 
 export default function LoginScreen() {
-    const { login } = useAuth();
+    const { login, otherPersonsUnsent, discardOtherData } = useAuth();
     const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -55,7 +56,8 @@ export default function LoginScreen() {
                 setChallenge(outcome.challenge);
             }
         } catch (e) {
-            setError(extractErrorMessage(e, 'Could not sign in. Check your credentials and try again.'));
+            // Refused for the previous person's unsent records: the notice above explains it.
+            setError(e instanceof OtherPersonsDataError ? null : extractErrorMessage(e, 'Could not sign in. Check your credentials and try again.'));
         } finally {
             setSubmitting(false);
         }
@@ -72,6 +74,37 @@ export default function LoginScreen() {
                     <Text style={styles.title}>CNCMS Field Agent</Text>
                     <Text style={styles.subtitle}>Sign in to record payments and expenses in the field.</Text>
                 </View>
+
+                {otherPersonsUnsent !== null ? (
+                    <View style={styles.otherData} accessibilityLiveRegion="polite">
+                        <Text style={styles.otherDataTitle}>
+                            The previous person left {otherPersonsUnsent} record{otherPersonsUnsent === 1 ? '' : 's'} on this phone not yet sent to the office.
+                        </Text>
+                        <Text style={styles.otherDataBody}>
+                            Records are never shown to, or sent under, someone else's account. Ask that person to sign in here so they are sent — or, if that can't happen, delete them.
+                        </Text>
+                        <Button
+                            title="Delete their records"
+                            variant="dangerOutline"
+                            onPress={() =>
+                                Alert.alert(
+                                    'Delete them?',
+                                    `${otherPersonsUnsent} record${otherPersonsUnsent === 1 ? '' : 's'} recorded on this phone will be deleted and never reach the office. This can't be undone.`,
+                                    [
+                                        { text: 'Cancel', style: 'cancel' },
+                                        {
+                                            text: 'Delete',
+                                            style: 'destructive',
+                                            onPress: () => {
+                                                void discardOtherData().then(() => setError('Deleted. Sign in again.'));
+                                            },
+                                        },
+                                    ],
+                                )
+                            }
+                        />
+                    </View>
+                ) : null}
 
                 {challenge ? (
                     <TwoFactorStep challenge={challenge} onRestart={restart} />
@@ -157,4 +190,7 @@ const styles = StyleSheet.create({
         color: colors.textSecondary,
         textAlign: 'center',
     },
+    otherData: { gap: spacing.sm, padding: spacing.md, borderRadius: 12, backgroundColor: colors.status.offlineBg },
+    otherDataTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.status.offlineFg },
+    otherDataBody: { fontSize: fontSize.sm, color: colors.status.offlineFg },
 });

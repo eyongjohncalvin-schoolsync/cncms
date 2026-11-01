@@ -231,4 +231,6 @@ export type SyncMetaKey =
     | 'cache_zones'
     | 'cache_service_catalogue'
     | 'cache_installation_options'
-    | 'cache_prepayment_offers';
+    | 'cache_prepayment_offers'
+    // Whose data the phone holds: '<company>:<person uuid>' (src/db/localData.ts).
+    | 'data_owner';

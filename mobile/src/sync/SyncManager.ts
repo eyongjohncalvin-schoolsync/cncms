@@ -148,6 +148,29 @@ class SyncManagerImpl {
     }
 
     /**
+     * Before the account on this phone changes (sign-out, or someone else
+     * signing in): no timer left, and no cycle or upload still running —
+     * one that finished after the switch would carry the previous person's
+     * records under the next person's sign-in. Waits for a running cycle
+     * rather than cutting it off mid-request.
+     */
+    async stopAndSettle(): Promise<void> {
+        this.stop();
+        this.pendingRerun = false;
+        this.retryAttempt = 0;
+
+        const deadline = Date.now() + 60_000;
+
+        while ((this.inFlight || this.uploadsInFlight) && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        // The next session fetches its own categories and form lists.
+        this.categoriesRefreshedThisSession = false;
+        this.formCacheRefreshedThisSession = false;
+    }
+
+    /**
      * expense_categories comes from the plain GET /resources/categories
      * REST endpoint, NOT from pull() — confirmed SyncService::pull() only
      * returns customers/payments. Refreshed opportunistically once per

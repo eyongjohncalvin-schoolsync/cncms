@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { useQueryClient } from '@tanstack/react-query';
 import { login as apiLogin, logout as apiLogout, fetchMe, verifyLoginCode, verifyTwoFactor } from '../api/auth';
 import { setUnauthorizedHandler } from '../api/client';
 import { getCurrentToken, setCurrentToken } from './tokenState';
@@ -7,7 +8,24 @@ import { clearStoredToken, getStoredToken, setStoredToken } from './tokenStorage
 import { isTwoFactorChallenge } from '../utils/twoFactor';
 import { clearInbox } from '../inbox/inboxStore';
 import { clearAppLock } from '../lock/appLock';
-import type { LoginResponse, LoginResult, TenantRole, TwoFactorChallengeResponse, TwoFactorMethod } from '../types/api';
+import { countUnsent, getDataOwner, hasLocalData, setDataOwner, wipeLocalData } from '../db/localData';
+import { dataOwnerKey, decideOnSignIn } from '../utils/dataOwner';
+import { syncManager } from '../sync/SyncManager';
+import { refreshNotificationsState } from '../notifications/notificationStore';
+import { PROFILE_KEY, PROFILE_STORE_OPTIONS } from './cachedUser';
+import type { LoginResponse, LoginResult, MeResponse, TenantRole, TwoFactorChallengeResponse, TwoFactorMethod } from '../types/api';
+
+/**
+ * Someone else's records are still waiting on this phone: signing in as
+ * another person would either show them or send them under the wrong
+ * account. The sign-in is given up; the sign-in screen offers to delete
+ * them (AuthContext's discardOtherData()).
+ */
+export class OtherPersonsDataError extends Error {
+    constructor(public readonly unsent: number) {
+        super(`This phone still has ${unsent} record${unsent === 1 ? '' : 's'} the previous person hasn't sent.`);
+    }
+}
 
 export type SignInOutcome = { status: 'signed_in' } | { status: 'two_factor'; challenge: TwoFactorChallengeResponse };
 
@@ -33,25 +51,10 @@ interface AuthProfile {
     permissions?: string[];
 }
 
-const PROFILE_KEY = 'cncms_auth_profile';
-const PROFILE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-};
-
 async function readCachedProfile(): Promise<AuthProfile | null> {
     const raw = await SecureStore.getItemAsync(PROFILE_KEY, PROFILE_STORE_OPTIONS);
 
     return raw ? (JSON.parse(raw) as AuthProfile) : null;
-}
-
-/**
- * The signed-in user's uuid from the cached session profile, for non-React
- * code (SyncManager, src/fieldReceipts) that must key per-user data — a
- * phone's receipt numbers belong to the collector they were issued to, not
- * to whoever signs in next. Null when nobody is signed in.
- */
-export async function getCachedUserUuid(): Promise<string | null> {
-    return (await readCachedProfile())?.user.uuid ?? null;
 }
 
 async function writeCachedProfile(profile: AuthProfile): Promise<void> {
@@ -101,6 +104,13 @@ interface AuthContextValue {
      * loaded (shouldn't happen — this is only ever called from an
      * already-authenticated screen). */
     updateCachedUser: (patch: Partial<AuthUser>) => Promise<void>;
+    /**
+     * Set when a sign-in was refused because the previous person's records
+     * are still unsent on this phone (OtherPersonsDataError): how many.
+     */
+    otherPersonsUnsent: number | null;
+    /** Deletes the previous person's unsent records so someone else can sign in. */
+    discardOtherData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -128,7 +138,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [permissions, setPermissions] = useState<string[]>([]);
     const [roleConfirmed, setRoleConfirmed] = useState(false);
 
+    const queryClient = useQueryClient();
+    const [otherPersonsUnsent, setOtherPersonsUnsent] = useState<number | null>(null);
+
+    /** Empties the phone of the previous account's data, on disk and in memory. */
+    const resetLocalData = useCallback(async () => {
+        await wipeLocalData();
+        queryClient.clear();
+        clearInbox();
+        await refreshNotificationsState();
+        await syncManager.refreshQueuedCounts();
+    }, [queryClient]);
+
+    /**
+     * The phone's data must be this account's: company + person. Someone
+     * else's is wiped first — or, when they left records unsent, the
+     * sign-in is refused (OtherPersonsDataError) so those are never shown
+     * to, or sent under, the wrong account.
+     */
+    const claimLocalData = useCallback(
+        async (me: MeResponse) => {
+            const owner = dataOwnerKey(me.workspace, me.user.uuid);
+            const unsent = await countUnsent();
+            const decision = decideOnSignIn(await getDataOwner(), owner, await hasLocalData(), unsent);
+
+            if (decision === 'refuse') {
+                setOtherPersonsUnsent(unsent);
+                throw new OtherPersonsDataError(unsent);
+            }
+
+            if (decision === 'wipe') {
+                await resetLocalData();
+            }
+
+            await setDataOwner(owner);
+            setOtherPersonsUnsent(null);
+        },
+        [resetLocalData],
+    );
+
+    const discardOtherData = useCallback(async () => {
+        await resetLocalData();
+        setOtherPersonsUnsent(null);
+    }, [resetLocalData]);
+
     const handleUnauthorized = useCallback(() => {
+        // The phone's data stays (the same person usually signs straight
+        // back in); the next sign-in checks whose it is.
+        void syncManager.stopAndSettle();
         setCurrentToken(null);
         void clearStoredToken();
         void clearCachedProfile();
@@ -176,6 +233,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setRoleConfirmed(true);
                 setStatus('authenticated');
                 await writeCachedProfile({ user: me.user, role: me.role, permissions: me.permissions });
+
+                // A phone from before data was keyed to its account (or
+                // somehow holding another's): stop syncing, start clean
+                // unless records are still waiting to go, then resume.
+                if ((await getDataOwner()) !== dataOwnerKey(me.workspace, me.user.uuid)) {
+                    await syncManager.stopAndSettle();
+
+                    if ((await countUnsent()) === 0) {
+                        await resetLocalData();
+                    }
+
+                    await setDataOwner(dataOwnerKey(me.workspace, me.user.uuid));
+                    syncManager.start();
+                }
             } catch {
                 // A genuine 401 is already fully handled by
                 // handleUnauthorized(), invoked synchronously by the
@@ -198,13 +269,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const finishLogin = useCallback(async (token: string) => {
+        // Nothing of a previous session may still be syncing once this
+        // token is in use.
+        await syncManager.stopAndSettle();
         setCurrentToken(token);
-        await setStoredToken(token);
 
         // The login response's `role` is display-only — always resolve the
         // authoritative role via /auth/me before treating the user as
         // fully authenticated for permission purposes.
-        const me = await fetchMe();
+        let me: MeResponse;
+
+        try {
+            me = await fetchMe();
+            await claimLocalData(me);
+        } catch (error) {
+            if (error instanceof OtherPersonsDataError) {
+                // Given up: this new sign-in ends on the server too.
+                try {
+                    await apiLogout();
+                } catch {
+                    // Best-effort, as in logout().
+                }
+            }
+
+            setCurrentToken(null);
+            throw error;
+        }
+
+        await setStoredToken(token);
 
         setUser(me.user);
         setRole(me.role);
@@ -212,7 +304,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoleConfirmed(true);
         await writeCachedProfile({ user: me.user, role: me.role, permissions: me.permissions });
         setStatus('authenticated');
-    }, []);
+    }, [claimLocalData]);
 
     /** Signs in, or hands back the two-factor challenge still to pass. */
     const settle = useCallback(
@@ -248,14 +340,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     const logout = useCallback(async () => {
+        // Stop syncing before the token goes, so nothing of this session
+        // runs on into the next one.
+        await syncManager.stopAndSettle();
+
         try {
             await apiLogout();
         } catch {
             // Best-effort — even if the network call fails, proceed to
-            // clear local session state. Local SQLite data is deliberately
-            // left untouched by this action; only an explicit, separate
-            // "switch agent" flow (not built in this phase) would ever
-            // clear it.
+            // clear local session state.
+        }
+
+        // The company's records leave the phone with the person — unless
+        // some are still unsent: those stay, for this same person to send
+        // when they sign in again (nobody else can sign in until then).
+        if ((await countUnsent()) === 0) {
+            await resetLocalData();
         }
 
         setCurrentToken(null);
@@ -268,7 +368,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setPermissions([]);
         setRoleConfirmed(false);
         setStatus('unauthenticated');
-    }, []);
+    }, [resetLocalData]);
 
     const updateCachedUser = useCallback(
         async (patch: Partial<AuthUser>) => {
@@ -290,8 +390,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     const value = useMemo<AuthContextValue>(
-        () => ({ status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser }),
-        [status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser],
+        () => ({ status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser, otherPersonsUnsent, discardOtherData }),
+        [status, user, role, permissions, can, roleConfirmed, login, loginWithCode, completeTwoFactor, logout, updateCachedUser, otherPersonsUnsent, discardOtherData],
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

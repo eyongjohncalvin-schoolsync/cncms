@@ -53,6 +53,8 @@ export interface MeResponse {
      * refreshed on every `/auth/me` (login + cold start).
      */
     permissions: string[];
+    /** The company of this session — the phone's local data is keyed to it (src/db/localData.ts). */
+    workspace?: string;
 }
 
 /** PATCH /auth/profile — App\Http\Requests\UpdateProfileRequest. Every field

@@ -137,7 +137,10 @@ class AuthTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('role', 'super')
-            ->assertJsonPath('user.uuid', $user->uuid);
+            ->assertJsonPath('user.uuid', $user->uuid)
+            // The phone keys its offline data to company + person, and
+            // wipes it when another company's account signs in.
+            ->assertJsonPath('workspace', 'swecom');
     }
 
     public function test_authenticated_user_without_tenant_membership_is_forbidden(): void

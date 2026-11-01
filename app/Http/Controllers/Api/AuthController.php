@@ -165,6 +165,10 @@ class AuthController extends Controller
                 'email' => $user->email,
             ],
             'role' => $context->role,
+            // Which company this session is in. The phone keys its local
+            // data to company + person, and wipes it when someone of
+            // another company signs in on the same phone.
+            'workspace' => (string) tenant()?->getTenantKey(),
             // RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): the
             // resolved permission list for this role, or ['*'] for a super
             // role. Mirrors HandleInertiaRequests::share()'s

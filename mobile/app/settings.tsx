@@ -36,7 +36,7 @@ import { fontSize, spacing } from '../src/theme/tokens';
  *     not yet implemented — build on explicit go-ahead only"; the
  *     `users.locale` column and any locale-setting endpoint it describes
  *     don't exist in the codebase yet, so there is nothing real to call.
- *   - Logout: reuses useAuth().logout(), which already leaves local SQLite
+ *   - Logout: reuses useAuth().logout(), which removes the company's records from the phone unless some are unsent (AuthContext; src/db/localData.ts) — the old note below predates that:
  *     (including any unsynced payments/expenditures) fully intact — see
  *     AuthContext.tsx's own doc comment. Still gated behind a native confirm
  *     (matches this app's existing point-of-no-return convention — see
@@ -72,8 +72,8 @@ export default function SettingsScreen() {
         const { queuedCount } = syncState;
         const message =
             queuedCount > 0
-                ? `${queuedCount} item${queuedCount === 1 ? '' : 's'} still waiting to sync will stay saved on this device and sync automatically once you log back in.`
-                : 'You can log back in at any time.';
+                ? `${queuedCount} item${queuedCount === 1 ? '' : 's'} not yet sent will stay on this phone and go to the office when you sign in again. Until then nobody else can sign in on this phone.`
+                : "The company's records are removed from this phone. Signing in again downloads them.";
 
         Alert.alert('Log out?', message, [
             { text: 'Cancel', style: 'cancel' },
