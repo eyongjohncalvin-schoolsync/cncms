@@ -6,6 +6,9 @@
  */
 export type Role = 'super' | 'admin' | 'manager' | 'agent' | 'worker';
 
+/** The website's light/dark choice; `system` follows the device. */
+export type ThemeChoice = 'light' | 'dark' | 'system';
+
 export interface AuthUser {
     uuid: string;
     name: string;
@@ -21,6 +24,8 @@ export interface AuthUser {
     role: string | null;
     /** Platform-wide flag, independent of role/tenant — see EnsureLandlord. */
     is_landlord: boolean;
+    /** Light / Dark / Match my device (wave 7) — the header switch. */
+    ui_theme: ThemeChoice;
     /** Fenced to one branch (branches v2) — not merely viewing one via the switcher. */
     branch_fenced: boolean;
     /**

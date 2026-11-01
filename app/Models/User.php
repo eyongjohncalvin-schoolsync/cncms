@@ -30,7 +30,7 @@ use Laravel\Sanctum\HasApiTokens;
 // The two_factor_* columns are likewise not fillable: only
 // App\Services\TwoFactorService writes them, via forceFill().
 #[Connection('pgsql')]
-#[Fillable(['name', 'username', 'email', 'status', 'password', 'locale'])]
+#[Fillable(['name', 'username', 'email', 'status', 'password', 'locale', 'ui_theme'])]
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 #[RouteKey('uuid')]
 class User extends Authenticatable

@@ -11,6 +11,7 @@ use App\Http\Controllers\SettingsLocaleController;
 use App\Http\Controllers\SettingsNotificationController;
 use App\Http\Controllers\SettingsPrepaymentOfferController;
 use App\Http\Controllers\SettingsServiceController;
+use App\Http\Controllers\SettingsThemeController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -61,6 +62,8 @@ Route::post('settings/command-runs/{run}/unpublish', [SettingsCommandRunControll
 // member regardless of role (unlike the routes above, which are
 // admin-only).
 Route::patch('settings/locale', [SettingsLocaleController::class, 'update'])->name('settings.locale.update');
+// Light / Dark / Match my device — the same self-service shape (wave 7).
+Route::patch('settings/theme', [SettingsThemeController::class, 'update'])->name('settings.theme.update');
 
 Route::get('settings/notifications', [SettingsNotificationController::class, 'edit'])->name('settings.notifications.edit');
 Route::patch('settings/notifications', [SettingsNotificationController::class, 'update'])->name('settings.notifications.update');

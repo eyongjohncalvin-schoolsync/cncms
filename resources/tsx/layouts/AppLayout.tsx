@@ -11,6 +11,7 @@ import { Dropdown, DropdownDivider, DropdownItem } from '@/components/ui/Dropdow
 import type { BreadcrumbItem, PageProps } from '@/types';
 import { RoleBadge } from '@/components/shared/StatusBadge';
 import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
+import { ThemeSwitcher } from '@/components/shared/ThemeSwitcher';
 import { NotificationBell } from '@/components/shared/NotificationBell';
 import { EmergencyBanner } from '@/components/shared/EmergencyBanner';
 import { MaintenanceBanner } from '@/components/shared/MaintenanceBanner';
@@ -184,6 +185,7 @@ export function AppLayout({
                                 <div className="flex items-center gap-0.5 text-slate-500 [&_button]:rounded-lg [&_button:hover]:bg-slate-100">
                                     <NotificationBell />
                                     <LanguageSwitcher />
+                                    <ThemeSwitcher />
                                 </div>
 
                                 <span aria-hidden="true" className="mx-1.5 hidden h-6 w-px bg-slate-200 sm:block" />

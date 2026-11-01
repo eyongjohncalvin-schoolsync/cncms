@@ -35,6 +35,7 @@ class DemoReadOnly
         'impersonation/stop',
         'branch-view',
         'settings/locale',
+        'settings/theme',
         'notifications/*',
         '*/preview', '*-preview',
         'api/v1/auth/*',

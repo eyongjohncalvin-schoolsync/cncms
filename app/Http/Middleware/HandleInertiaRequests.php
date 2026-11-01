@@ -66,6 +66,8 @@ class HandleInertiaRequests extends Middleware
                     // link; EnsureLandlord itself is the real server-side
                     // gate on the actual routes.
                     'is_landlord' => (bool) $user->is_landlord,
+                    // Light / Dark / Match my device (wave 7) — the header switch's current choice.
+                    'ui_theme' => $user->ui_theme ?? 'system',
                     // Branches v2: fenced to one branch (drives the "My branch" nav link).
                     'branch_fenced' => (bool) $context?->isFenced(),
                     // Tenant-scoped Investor tier flag (tenant_users.is_investor)

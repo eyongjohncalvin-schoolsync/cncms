@@ -58,7 +58,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             {/* -------------------------------------------------------------- */}
             {/* Brand panel — half the viewport on lg+, a strip below it       */}
             {/* -------------------------------------------------------------- */}
-            <aside className="relative flex flex-col overflow-hidden bg-slate-950 px-6 py-5 lg:px-12 lg:py-14 xl:px-16">
+            <aside className="keep-colors relative flex flex-col overflow-hidden bg-slate-950 px-6 py-5 lg:px-12 lg:py-14 xl:px-16">
                 <div aria-hidden="true" className="pointer-events-none absolute inset-0">
                     <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950" />
                     <div

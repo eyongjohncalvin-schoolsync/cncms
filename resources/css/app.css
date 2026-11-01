@@ -1,4 +1,9 @@
 @import 'tailwindcss';
+/* Dark mode, applied centrally while <html> has the class `dark` — see dark.generate.mjs. */
+@import './dark.css';
+
+/* A `dark:` class written in future follows the same switch, not the OS alone. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
