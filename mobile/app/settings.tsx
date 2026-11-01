@@ -2,6 +2,7 @@ import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
+import * as Updates from 'expo-updates';
 import { Card } from '../src/components/ui/Card';
 import { Button } from '../src/components/ui/Button';
 import { DetailRow } from '../src/components/ui/DetailRow';
@@ -9,6 +10,7 @@ import { useAuth } from '../src/auth/AuthContext';
 import { getSyncState, subscribeSyncState } from '../src/sync/syncStore';
 import { extractErrorMessage } from '../src/api/client';
 import { colors } from '../src/theme/colors';
+import { formatShortDate } from '../src/utils/format';
 import { fontSize, spacing } from '../src/theme/tokens';
 
 /**
@@ -44,7 +46,9 @@ import { fontSize, spacing } from '../src/theme/tokens';
  *     copy calls out any still-queued items so an agent isn't surprised that
  *     syncing pauses until they log back in.
  *   - App version: static, read from app.config.ts via expo-constants — no
- *     backend involved.
+ *     backend involved. "Update" says which over-the-air update is running
+ *     (its publish time and short id), so "is the fix on this phone?" has
+ *     an answer.
  */
 export default function SettingsScreen() {
     const router = useRouter();
@@ -118,7 +122,8 @@ export default function SettingsScreen() {
             <Card>
                 <Text style={styles.sectionTitle}>About</Text>
                 <View style={styles.fieldList}>
-                    <DetailRow label="App version" value={Constants.expoConfig?.version ?? '—'} last />
+                    <DetailRow label="App version" value={Constants.expoConfig?.version ?? '—'} />
+                    <DetailRow label="Update" value={installedUpdateLabel()} last />
                 </View>
             </Card>
 
@@ -132,6 +137,17 @@ export default function SettingsScreen() {
             />
         </ScrollView>
     );
+}
+
+/** The running over-the-air update: its publish date and short id, or "As installed". */
+function installedUpdateLabel(): string {
+    if (Updates.isEmbeddedLaunch || !Updates.updateId) {
+        return 'As installed';
+    }
+
+    const published = Updates.createdAt ? `${formatShortDate(Updates.createdAt.toISOString())} ` : '';
+
+    return `${published}(${Updates.updateId.slice(0, 8)})`;
 }
 
 /** No shared string-casing helper exists in src/utils/format.ts — this is a
