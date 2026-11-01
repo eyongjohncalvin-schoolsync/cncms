@@ -37,7 +37,7 @@ use Illuminate\Support\Carbon;
  * App\Services\CustomerService::archive()/restore() — deliberately NOT in
  * Fillable, so a customer edit form can never touch them.
  */
-#[Fillable(['zone_id', 'name', 'location', 'bill', 'others', 'phone', 'email', 'preferred_channel', 'description', 'level', 'status', 'status_reason', 'status_note', 'status_changed_at', 'prepaid_paused', 'connected_on', 'billing_starts_period'])]
+#[Fillable(['zone_id', 'name', 'location', 'bill', 'others', 'phone', 'email', 'preferred_channel', 'description', 'level', 'vip_billed', 'status', 'status_reason', 'status_note', 'status_changed_at', 'prepaid_paused', 'connected_on', 'billing_starts_period'])]
 #[RouteKey('uuid')]
 class Customer extends Model
 {
@@ -51,6 +51,8 @@ class Customer extends Model
 
     /** customers.activation_status of a field registration awaiting the office (phase 3). */
     public const string ACTIVATION_PENDING = 'pending';
+
+    public const string LEVEL_VIP = 'Vip';
 
     /**
      * Name and location are stored upper-case (see HasUpperCaseLabels). Never
@@ -69,6 +71,7 @@ class Customer extends Model
             'others' => 'decimal:2',
             'status_changed_at' => 'datetime',
             'prepaid_paused' => 'boolean',
+            'vip_billed' => 'boolean',
             'deleted_at' => 'datetime',
             'connected_on' => 'date:Y-m-d',
             'says_paid_settled_at' => 'datetime',
@@ -132,6 +135,30 @@ class Customer extends Model
     public function isPendingActivation(): bool
     {
         return $this->activation_status === self::ACTIVATION_PENDING;
+    }
+
+    /**
+     * A VIP is not billed unless "Bill this VIP" is ticked (owner,
+     * 2026-11-01): the monthly run freezes them like a passive customer —
+     * no new charge, old balance carried — and they get no bill slip,
+     * reminder, free-month compensation or disconnection flag.
+     */
+    public function isExcludedFromBilling(): bool
+    {
+        return $this->level === self::LEVEL_VIP && ! $this->vip_billed;
+    }
+
+    /**
+     * Everyone except VIPs whose "Bill this VIP" is unticked — the query
+     * twin of isExcludedFromBilling().
+     *
+     * @param  Builder<Customer>  $query
+     */
+    public function scopeBilled(Builder $query): void
+    {
+        $query->where(fn (Builder $inner) => $inner
+            ->where($query->qualifyColumn('level'), '!=', self::LEVEL_VIP)
+            ->orWhere($query->qualifyColumn('vip_billed'), true));
     }
 
     /**

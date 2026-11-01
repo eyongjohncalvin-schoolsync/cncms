@@ -182,6 +182,12 @@ class ManuscriptService
             ]);
         }
 
+        if ($customer->isExcludedFromBilling()) {
+            throw ValidationException::withMessages([
+                'customer' => ["{$customer->name} is a VIP who is not billed. Tick \"Bill this VIP\" on their record to bill them."],
+            ]);
+        }
+
         $manuscript = $this->resolveManuscript($customer, $period);
         // The billing branch's MoMo number and contacts (branches v2 D4) — the manuscript's, so a customer who moved mid-period still pays the branch that billed them (D11).
         $company = Company::forBranch($manuscript?->branch_id ?? $customer->branch_id);

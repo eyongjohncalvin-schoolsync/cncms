@@ -12,6 +12,7 @@ import { Card } from '../../src/components/ui/Card';
 import { Button } from '../../src/components/ui/Button';
 import { TextInput } from '../../src/components/ui/TextInput';
 import { EmptyState } from '../../src/components/ui/EmptyState';
+import { VipBillingSwitch } from '../../src/components/ui/VipBillingSwitch';
 import { ServicesPicker } from '../../src/components/customers/ServicesPicker';
 import { ReceiptDeliveryFields } from '../../src/components/customers/ReceiptDeliveryFields';
 import { colors } from '../../src/theme/colors';
@@ -135,6 +136,7 @@ export default function CustomerEditScreen() {
     const [email, setEmail] = useState('');
     const [preferredChannel, setPreferredChannel] = useState<PreferredChannel>('whatsapp');
     const [level, setLevel] = useState<'normal' | 'Vip' | 'Operator'>('normal');
+    const [vipBilled, setVipBilled] = useState(false);
     const [zoneUuid, setZoneUuid] = useState<string | null>(null);
     const [services, setServices] = useState<CustomerServiceSelection[]>([]);
     const [errors, setErrors] = useState<Record<string, string | undefined>>({});
@@ -165,6 +167,7 @@ export default function CustomerEditScreen() {
                 setEmail(customer.email ?? '');
                 setPreferredChannel(customer.preferred_channel ?? 'whatsapp');
                 setLevel((customer.level as 'normal' | 'Vip' | 'Operator' | null) ?? 'normal');
+                setVipBilled(customer.vip_billed ?? false);
                 setZoneUuid(customer.zone_uuid);
                 setServices(
                     customer.services.map((s) => ({
@@ -245,6 +248,7 @@ export default function CustomerEditScreen() {
                 email: email.trim() || null,
                 preferred_channel: preferredChannel,
                 level,
+                vip_billed: level === 'Vip' ? vipBilled : undefined,
                 services,
             });
 
@@ -412,6 +416,7 @@ export default function CustomerEditScreen() {
                         );
                     })}
                 </View>
+                {level === 'Vip' && <VipBillingSwitch billed={vipBilled} onChange={setVipBilled} />}
             </Card>
 
             <Card>

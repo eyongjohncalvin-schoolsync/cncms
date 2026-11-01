@@ -44,6 +44,7 @@ class UpdateCustomerRequest extends FormRequest
             'email' => ['sometimes', 'nullable', 'email:rfc', 'max:150'],
             'preferred_channel' => ['sometimes', 'nullable', 'string', Rule::in(Customer::PREFERRED_CHANNELS)],
             'level' => ['sometimes', 'nullable', 'string', 'in:normal,Vip,Operator'],
+            'vip_billed' => ['sometimes', 'boolean'],
             'status' => ['sometimes', 'nullable', 'string', 'in:active,passive,disconnected,suspended'],
             'services' => ['sometimes', 'array', 'min:1'],
             'services.*.service_uuid' => ['required_with:services', 'uuid', 'exists:services,uuid'],

@@ -33,6 +33,8 @@ final readonly class CustomerData
         public ?string $phone = null,
         public ?string $description = null,
         public ?string $level = null,
+        /** "Bill this VIP" — null = not sent, leave as is. */
+        public ?bool $vipBilled = null,
         public ?string $status = null,
         public ?array $services = null,
         public ?string $email = null,
@@ -52,6 +54,7 @@ final readonly class CustomerData
             phone: $data['phone'] ?? null,
             description: $data['description'] ?? null,
             level: $data['level'] ?? null,
+            vipBilled: isset($data['vip_billed']) ? (bool) $data['vip_billed'] : null,
             status: $data['status'] ?? null,
             services: array_key_exists('services', $data) && is_array($data['services'])
                 ? array_values(array_map(
@@ -82,6 +85,7 @@ final readonly class CustomerData
             'phone' => $this->phone,
             'description' => $this->description,
             'level' => $this->level,
+            'vip_billed' => $this->vipBilled,
             'status' => $this->status,
             'preferred_channel' => $this->preferredChannel,
         ], static fn (mixed $value): bool => $value !== null) + ($this->emailProvided ? ['email' => $this->email] : []);

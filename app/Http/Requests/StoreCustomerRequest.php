@@ -59,6 +59,7 @@ class StoreCustomerRequest extends FormRequest
             'email' => ['nullable', 'email:rfc', 'max:150'],
             'preferred_channel' => ['nullable', 'string', Rule::in(Customer::PREFERRED_CHANNELS)],
             'level' => ['nullable', 'string', 'in:normal,Vip,Operator'],
+            'vip_billed' => ['sometimes', 'boolean'],
             'status' => ['nullable', 'string', 'in:active,passive,disconnected,suspended'],
             'services' => ['required_without:bill', 'array', 'min:1'],
             'services.*.service_uuid' => ['required_with:services', 'uuid', 'exists:services,uuid'],

@@ -209,6 +209,7 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                                 <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-900">{customer.name}</h1>
                                 <StatusBadge status={customer.status} />
                                 <Badge tone="blue">{customer.level}</Badge>
+                                {customer.level === 'Vip' && !customer.vip_billed && <Badge tone="yellow">Not billed</Badge>}
                             </div>
                             {prepaidStatusNote && <p className="mt-1 text-xs text-slate-500">{prepaidStatusNote}</p>}
                             <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">

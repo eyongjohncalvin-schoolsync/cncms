@@ -125,6 +125,8 @@ class CustomerRepository implements CustomerRepositoryInterface
             // Field registrations awaiting activation are never billed,
             // so never at risk and never eligible (installation phase 3).
             ->activated()
+            // Unbilled VIPs owe nothing new: never flagged either way.
+            ->billed()
             // An empty list (an agent covering no zone) matches nothing, never everything.
             ->when($zoneIds !== null, fn ($query) => $query->whereIn('zone_id', (array) $zoneIds))
             ->orderBy('name')

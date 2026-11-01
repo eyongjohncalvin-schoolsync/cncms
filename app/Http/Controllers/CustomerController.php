@@ -647,6 +647,7 @@ class CustomerController extends Controller
             'bill' => $customer->bill,
             'others' => $customer->others,
             'level' => $customer->level,
+            'vip_billed' => (bool) $customer->vip_billed,
             'status' => $customer->status,
             // "pending" = registered in the field, awaiting the office (phase 3).
             'activation_status' => $customer->activation_status,

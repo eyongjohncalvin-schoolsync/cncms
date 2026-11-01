@@ -179,6 +179,7 @@ class CompensationService
             ->where('branch_id', $batch->branch_id)
             ->when($batch->zone_id !== null, fn ($query) => $query->where('zone_id', $batch->zone_id))
             ->whereIn('status', self::BILLABLE_STATUSES)
+            ->billed()
             ->where(fn ($query) => $query->whereNull('activation_status')->orWhere('activation_status', '!=', Customer::ACTIVATION_PENDING));
     }
 

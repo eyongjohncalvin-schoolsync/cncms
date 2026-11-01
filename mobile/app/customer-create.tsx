@@ -29,6 +29,7 @@ import { Card } from '../src/components/ui/Card';
 import { Button } from '../src/components/ui/Button';
 import { TextInput } from '../src/components/ui/TextInput';
 import { EmptyState } from '../src/components/ui/EmptyState';
+import { VipBillingSwitch } from '../src/components/ui/VipBillingSwitch';
 import { ServicesPicker } from '../src/components/customers/ServicesPicker';
 import { ReceiptDeliveryFields } from '../src/components/customers/ReceiptDeliveryFields';
 import { colors } from '../src/theme/colors';
@@ -124,6 +125,7 @@ export default function CustomerCreateScreen() {
     const [email, setEmail] = useState('');
     const [preferredChannel, setPreferredChannel] = useState<PreferredChannel>('whatsapp');
     const [level, setLevel] = useState<'normal' | 'Vip' | 'Operator'>('normal');
+    const [vipBilled, setVipBilled] = useState(false);
     const [zoneUuid, setZoneUuid] = useState<string | null>(null);
     const [services, setServices] = useState<CustomerServiceSelection[]>([]);
     const [errors, setErrors] = useState<Record<string, string | undefined>>({});
@@ -437,6 +439,7 @@ export default function CustomerCreateScreen() {
                 email: email.trim() || undefined,
                 preferred_channel: preferredChannel,
                 level,
+                vip_billed: level === 'Vip' ? vipBilled : undefined,
                 services,
             });
 
@@ -657,6 +660,7 @@ export default function CustomerCreateScreen() {
                         );
                     })}
                 </View>
+                {level === 'Vip' && <VipBillingSwitch billed={vipBilled} onChange={setVipBilled} />}
             </Card>
 
             <Card>

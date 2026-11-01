@@ -256,6 +256,8 @@ export interface Customer {
     bill: string;
     others: string;
     level: CustomerLevel;
+    /** "Bill this VIP" — a VIP is not billed unless ticked (owner, 2026-11-01). */
+    vip_billed?: boolean;
     status: CustomerStatus;
     /** 'pending' = registered in the field, awaiting the office (installation phase 3). */
     activation_status?: 'pending' | null;

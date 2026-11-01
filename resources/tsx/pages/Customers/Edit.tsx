@@ -19,6 +19,7 @@ import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ServicesPicker } from '@/components/customers/ServicesPicker';
 import { ReceiptDeliveryFields } from '@/components/customers/ReceiptDeliveryFields';
+import { VipBillingField } from '@/components/customers/VipBillingField';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import type { Customer, CustomerLevel, CustomerServiceSelectionForm, CustomerStatus, ServiceCatalogueEntry, Zone, PreferredChannel } from '@/types';
 
@@ -40,6 +41,7 @@ export default function CustomersEdit({ customer, zones, service_catalogue }: Cu
         preferred_channel: PreferredChannel;
         location: string;
         level: CustomerLevel;
+        vip_billed: boolean;
         status: CustomerStatus;
         services: CustomerServiceSelectionForm[];
     }>({
@@ -50,6 +52,7 @@ export default function CustomersEdit({ customer, zones, service_catalogue }: Cu
         preferred_channel: customer.preferred_channel ?? 'whatsapp',
         location: customer.location ?? '',
         level: customer.level,
+        vip_billed: customer.vip_billed ?? false,
         status: customer.status,
         services: (customer.services ?? []).map((s) => ({
             service_uuid: s.service_uuid,
@@ -232,6 +235,13 @@ export default function CustomersEdit({ customer, zones, service_catalogue }: Cu
                                         Vip / Operator accounts get priority handling
                                     </p>
                                 </div>
+                                {data.level === 'Vip' && (
+                                    <VipBillingField
+                                        billed={data.vip_billed}
+                                        error={errors.vip_billed}
+                                        onChange={(billed) => setData('vip_billed', billed)}
+                                    />
+                                )}
                             </div>
                         </CardBody>
                     </Card>

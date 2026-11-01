@@ -215,7 +215,11 @@ final class ManuscriptCalculator
         // frozen month, payments wait for the first real run.
         $notStarted = $freeMonths->beforeBillingStarts($period);
 
-        if ($notStarted || in_array($customer->status, ['disconnected', 'passive', 'suspended'], true)) {
+        // A VIP without "Bill this VIP" ticked is frozen the same way
+        // (owner, 2026-11-01).
+        $notBilled = $customer->isExcludedFromBilling();
+
+        if ($notStarted || $notBilled || in_array($customer->status, ['disconnected', 'passive', 'suspended'], true)) {
             [$totalArrears, $credit] = $this->splitNet($this->add($this->sub($previousArrears, $previousCredit), $adjustmentNet));
 
             return new ManuscriptCalculationResult(
@@ -228,7 +232,7 @@ final class ManuscriptCalculator
                 adjustmentNet: $adjustmentNet,
                 isFirstRun: $isFirstRun,
                 isFrozen: true,
-                frozenReason: $notStarted ? 'not_started' : $customer->status,
+                frozenReason: $notStarted ? 'not_started' : ($notBilled ? 'not_billed' : $customer->status),
                 processedPayments: new Collection,
                 processedAdjustments: $processedAdjustments,
                 // PD-8: a frozen customer does NOT consume prepaid months —

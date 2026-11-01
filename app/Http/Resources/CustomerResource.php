@@ -32,6 +32,7 @@ class CustomerResource extends JsonResource
             'bill' => $this->bill,
             'others' => $this->others,
             'level' => $this->level,
+            'vip_billed' => (bool) $this->vip_billed,
             'status' => $this->status,
             'status_reason' => $this->status_reason,
             'status_note' => $this->status_note,

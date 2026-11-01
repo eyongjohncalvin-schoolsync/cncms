@@ -9,6 +9,7 @@ import { SelectInput } from '@/components/ui/SelectInput';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ServicesPicker } from '@/components/customers/ServicesPicker';
 import { ReceiptDeliveryFields } from '@/components/customers/ReceiptDeliveryFields';
+import { VipBillingField } from '@/components/customers/VipBillingField';
 import {
     InstallationSection,
     initialInstallationValues,
@@ -39,6 +40,7 @@ export default function CustomersCreate({ zones, service_catalogue, installation
             preferred_channel: PreferredChannel;
             location: string;
             level: CustomerLevel;
+            vip_billed: boolean;
             description: string;
             services: CustomerServiceSelectionForm[];
         } & InstallationFormValues
@@ -51,6 +53,7 @@ export default function CustomersCreate({ zones, service_catalogue, installation
         preferred_channel: 'whatsapp',
         location: '',
         level: 'normal',
+        vip_billed: false,
         description: '',
         // TV (or whatever the operator marked as default) starts pre-ticked
         // — services.md's explicit ask.
@@ -226,6 +229,13 @@ export default function CustomersCreate({ zones, service_catalogue, installation
                                         Vip / Operator accounts get priority handling
                                     </p>
                                 </div>
+                                {data.level === 'Vip' && (
+                                    <VipBillingField
+                                        billed={data.vip_billed}
+                                        error={errors.vip_billed}
+                                        onChange={(billed) => setData('vip_billed', billed)}
+                                    />
+                                )}
                                 <div className="sm:col-span-2">
                                     <TextInput
                                         id="description"

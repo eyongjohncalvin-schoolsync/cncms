@@ -328,6 +328,22 @@ class CustomerTest extends TestCase
         $this->assertDatabaseHas('customers', ['id' => $customer->id, 'status' => 'disconnected']);
     }
 
+    public function test_bill_this_vip_is_saved_from_the_edit_form_and_shown_on_it(): void
+    {
+        $this->actingAsRole('manager');
+
+        $customer = CustomerFactory::new()->unbilledVip()->create(['zone_id' => ZoneFactory::new()->create()->id, 'status' => 'active']);
+
+        $this->get("/customers/{$customer->uuid}/edit")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->where('customer.vip_billed', false));
+
+        $this->patch("/customers/{$customer->uuid}", ['vip_billed' => true])->assertSessionHasNoErrors();
+        $this->assertTrue($customer->fresh()->vip_billed);
+
+        $this->patch("/customers/{$customer->uuid}", ['vip_billed' => 'maybe'])->assertSessionHasErrors('vip_billed');
+    }
+
     public function test_super_can_delete_a_customer(): void
     {
         $this->actingAsRole('super');

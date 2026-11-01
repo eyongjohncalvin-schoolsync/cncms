@@ -513,6 +513,8 @@ export interface CustomerDetailApi {
     bill: string;
     others: string;
     level: string | null;
+    /** "Bill this VIP". Absent from older servers. */
+    vip_billed?: boolean;
     status: string;
     status_reason: string | null;
     status_note: string | null;
@@ -580,6 +582,8 @@ export interface CreateCustomerRequestBody extends Partial<InstallationRequestFi
     email?: string | null;
     preferred_channel?: PreferredChannel;
     level?: 'normal' | 'Vip' | 'Operator';
+    /** "Bill this VIP" — a VIP is not billed unless true (owner, 2026-11-01). */
+    vip_billed?: boolean;
     description?: string;
     services: CustomerServiceSelection[];
 }

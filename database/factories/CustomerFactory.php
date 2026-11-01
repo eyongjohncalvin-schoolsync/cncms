@@ -36,8 +36,21 @@ class CustomerFactory extends Factory
             'phone' => fake()->boolean(22) ? '6'.fake()->numerify('########') : null,
             'description' => null,
             'level' => fake()->randomElement(['normal', 'normal', 'normal', 'normal', 'Vip', 'Operator']),
+            // A random VIP is billed like anyone else; unbilledVip() is the exception.
+            'vip_billed' => true,
             'status' => fake()->randomElement(['active', 'active', 'active', 'active', 'disconnected']),
         ];
+    }
+
+    /**
+     * A VIP with "Bill this VIP" unticked — the default for real VIPs.
+     */
+    public function unbilledVip(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'level' => 'Vip',
+            'vip_billed' => false,
+        ]);
     }
 
     public function disconnected(): static
