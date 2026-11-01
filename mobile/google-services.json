@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "334808047203",
+    "project_id": "cncms-519dd",
+    "storage_bucket": "cncms-519dd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:334808047203:android:6c372176dd59ceb3e2e256",
+        "android_client_info": {
+          "package_name": "com.shalomtech.cncms.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB4j0QFYHybYrsGh24QPdOjUVApHADSx1w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
