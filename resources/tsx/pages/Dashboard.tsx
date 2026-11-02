@@ -16,6 +16,7 @@ import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { formatCurrency } from '@/lib/formatCurrency';
+import { useCan } from '@/lib/permissions';
 import { Rate, type ZonePerformance } from '@/components/cash/ZonePerformance';
 
 interface DashboardProps {
@@ -64,6 +65,9 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ period, stats, cash_alerts, uncovered_zones, spending, zone_performance, setup_guide }: DashboardProps) {
+    // Each figure only for a role allowed to see it (owner, 2026-11-02) — the server sends zeros otherwise.
+    const can = useCan();
+    const seeMoney = can('dashboard.money');
     // Memoized so the derived hint string isn't recomputed on every render
     // (e.g. re-renders triggered by unrelated layout/navigation state) —
     // only when the stats payload itself changes.
@@ -142,7 +146,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                <div className="animate-fade-up" style={{ animationDelay: '60ms' }}>
+                <div className="animate-fade-up" style={{ animationDelay: '60ms' }} hidden={!can('customers.view')}>
                     <StatCard
                         label="Total Customers"
                         value={stats.total_customers.toLocaleString()}
@@ -150,7 +154,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                         tone="blue"
                     />
                 </div>
-                <div className="animate-fade-up" style={{ animationDelay: '110ms' }}>
+                <div className="animate-fade-up" style={{ animationDelay: '110ms' }} hidden={!can('customers.view')}>
                     <StatCard
                         label="Active Customers"
                         value={stats.active_customers.toLocaleString()}
@@ -159,7 +163,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                         tone="green"
                     />
                 </div>
-                <div className="animate-fade-up" style={{ animationDelay: '160ms' }}>
+                <div className="animate-fade-up" style={{ animationDelay: '160ms' }} hidden={!can('payments.verify')}>
                     <StatCard
                         label="Pending Verification"
                         value={stats.pending_verifications.toLocaleString()}
@@ -169,7 +173,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                     />
                 </div>
                 {/* Bill money and one-off fees are kept apart — never one total (consistency and auditing). */}
-                <div className="animate-fade-up" style={{ animationDelay: '210ms' }}>
+                <div className="animate-fade-up" style={{ animationDelay: '210ms' }} hidden={!seeMoney}>
                     <StatCard
                         label="Bill money (monthly)"
                         value={formatCurrency(stats.income_by_purpose?.subscription ?? stats.monthly_income)}
@@ -178,7 +182,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                         tone="green"
                     />
                 </div>
-                <div className="animate-fade-up" style={{ animationDelay: '235ms' }}>
+                <div className="animate-fade-up" style={{ animationDelay: '235ms' }} hidden={!seeMoney}>
                     <StatCard
                         label="Installation money"
                         value={formatCurrency(stats.income_by_purpose?.installation ?? stats.installation_income ?? '0')}
@@ -191,7 +195,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                         tone="blue"
                     />
                 </div>
-                <div className="animate-fade-up" style={{ animationDelay: '260ms' }}>
+                <div className="animate-fade-up" style={{ animationDelay: '260ms' }} hidden={!seeMoney}>
                     <StatCard
                         label="Total Arrears"
                         value={formatCurrency(stats.total_arrears)}
@@ -199,7 +203,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                         tone="red"
                     />
                 </div>
-                <div className="animate-fade-up" style={{ animationDelay: '310ms' }}>
+                <div className="animate-fade-up" style={{ animationDelay: '310ms' }} hidden={!seeMoney}>
                     <StatCard
                         label="Collection Rate"
                         value={`${stats.collection_rate}%`}
@@ -220,6 +224,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                     href="/arrears-adjustments?status=awaiting_approval"
                     className="animate-fade-up rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600"
                     style={{ animationDelay: '360ms' }}
+                    hidden={!can('arrears.approve')}
                 >
                     <StatCard
                         label="Pending Arrears Adjustments"
@@ -232,7 +237,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
 
                 {/* Customers registered by field agents awaiting the office
                     (installation phase 3) — the activation queue. */}
-                {(stats.pending_activations ?? 0) > 0 && (
+                {(stats.pending_activations ?? 0) > 0 && can('installations.activate') && (
                     <Link
                         href="/customers?pending_activation=1"
                         className="animate-fade-up rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
@@ -249,7 +254,7 @@ export default function Dashboard({ period, stats, cash_alerts, uncovered_zones,
                 )}
             </div>
 
-            <Card className="mt-4 animate-fade-up p-0" style={{ animationDelay: '380ms' }}>
+            <Card className="mt-4 animate-fade-up p-0" style={{ animationDelay: '380ms' }} hidden={!seeMoney}>
                 <CardHeader>
                     <h2 className="text-sm font-semibold text-slate-900">Income vs. Arrears — {period}</h2>
                 </CardHeader>

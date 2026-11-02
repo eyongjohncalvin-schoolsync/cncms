@@ -44,27 +44,30 @@ class DashboardController extends Controller
         $summary = $this->manuscripts->summary(['period' => $period] + ($zoneIds !== null ? ['zone_id' => $zoneIds] : []));
         $area = app(AreaSummaryService::class)->forViewer($period);
         $counts = ['total_customers' => $area['total_customers'], 'active_customers' => $area['active_customers']];
+        // Each figure only for a role allowed to see it (owner, 2026-11-02).
+        $see = fn (string $permission): bool => app(TenantContext::class)->can($permission);
+        $money = $see('dashboard.money');
 
         return Inertia::render('Dashboard', [
             'period' => $period,
             'stats' => [
-                'total_customers' => $counts['total_customers'],
-                'active_customers' => $counts['active_customers'],
+                'total_customers' => $see('customers.view') ? $counts['total_customers'] : 0,
+                'active_customers' => $see('customers.view') ? $counts['active_customers'] : 0,
                 // Cached separately (short 15s TTL) via PaymentService since
                 // this figure changes far more often than the customer
                 // counts above (new payments, verify/reject actions).
-                'pending_verifications' => $this->payments->pendingVerificationCount(),
+                'pending_verifications' => $see('payments.verify') ? $this->payments->pendingVerificationCount() : 0,
                 // Subscription money only (collection rate's numerator);
                 // installation fees are income too but shown separately
                 // (docs/plans/installation-and-promotions.md). Technician
                 // fees are never income.
-                'monthly_income' => $summary['total_collected'],
-                'installation_income' => app(ResourcesDashboardService::class)->installationIncome($period),
+                'monthly_income' => $money ? $summary['total_collected'] : '0',
+                'installation_income' => $money ? app(ResourcesDashboardService::class)->installationIncome($period) : '0',
                 // Kept apart for consistency and auditing (owner, 2026-10-26):
                 // every verified bill payment this month, and the one-off fees.
-                'income_by_purpose' => app(ResourcesDashboardService::class)->incomeByPurpose($period),
-                'total_arrears' => $summary['total_arrears'],
-                'collection_rate' => $summary['collection_rate'],
+                'income_by_purpose' => $money ? app(ResourcesDashboardService::class)->incomeByPurpose($period) : [],
+                'total_arrears' => $money ? $summary['total_arrears'] : '0',
+                'collection_rate' => $money ? $summary['collection_rate'] : 0,
                 // Same "maker-checker pending count" idea as
                 // pending_verifications above, for the Arrears Adjustment
                 // feature (App\Services\ArrearsAdjustmentService::dashboard()
@@ -72,13 +75,11 @@ class DashboardController extends Controller
                 // anywhere outside the Audit Log page's "Arrears
                 // Adjustments" sub-tab, which meant there was no top-level
                 // signal pointing anyone toward that review queue at all).
-                // Not role-gated, matching pending_verifications' existing
-                // convention of showing the same raw count to every
-                // dashboard viewer regardless of who can actually act on it.
-                'pending_arrears_adjustments' => $this->arrearsAdjustments->dashboard()['pending_approval'],
+                // Only for those who approve (2026-11-02).
+                'pending_arrears_adjustments' => $see('arrears.approve') ? $this->arrearsAdjustments->dashboard()['pending_approval'] : 0,
                 // Customers registered in the field awaiting the office
                 // (installation phase 3) — links to the activation queue.
-                'pending_activations' => app(FieldInstallationService::class)->pendingCount(),
+                'pending_activations' => $see('installations.activate') ? app(FieldInstallationService::class)->pendingCount() : 0,
             ],
             // Cash controls (docs/plans/cash-controls.md): how many things
             // need a look on the Cash alerts page — only for those who can

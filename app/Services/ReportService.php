@@ -1097,7 +1097,7 @@ class ReportService
      */
     private function agentZoneIds(): ?array
     {
-        return $this->context->role === 'agent' ? ($this->context->zoneIds ?? []) : null;
+        return $this->context->zoneIds;
     }
 
     private function branchLabel(?int $branchId, ?array $zoneIds): string

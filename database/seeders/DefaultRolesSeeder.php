@@ -8,6 +8,7 @@ use App\Auth\Permission;
 use App\Auth\PermissionSplits;
 use App\Models\Role;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Seeds the 5 RBAC v2 system roles into the CURRENT tenant schema with
@@ -40,6 +41,10 @@ class DefaultRolesSeeder extends Seeder
                     'description' => $definition['description'],
                     'is_system' => true,
                     'is_super' => $definition['is_super'] ?? false,
+                    // Only once the column exists: a new company's schema runs
+                    // this seeder from an earlier migration than the one adding
+                    // it (which then marks the agent role itself).
+                    ...(Schema::hasColumn('roles', 'zone_limited') ? ['zone_limited' => $definition['zone_limited'] ?? false] : []),
                 ],
             );
 
@@ -53,7 +58,7 @@ class DefaultRolesSeeder extends Seeder
     }
 
     /**
-     * @return array<string, array{label: string, description: string, is_super?: bool, permissions: list<string>}>
+     * @return array<string, array{label: string, description: string, is_super?: bool, zone_limited?: bool, permissions: list<string>}>
      */
     public static function definitions(): array
     {
@@ -78,6 +83,8 @@ class DefaultRolesSeeder extends Seeder
                 'label' => 'Field agent',
                 'description' => 'Field collections: record payments, view manuscripts and their own zone, submit complaints and arrears requests.',
                 'permissions' => PermissionSplits::derive(self::agentPermissions()),
+                // A field role: works only the zones each agent covers (a role setting since 2026-11-02).
+                'zone_limited' => true,
             ],
             'cashier' => [
                 'label' => 'Cashier',
@@ -201,6 +208,9 @@ class DefaultRolesSeeder extends Seeder
 
             Permission::PaymentsView->value,
             Permission::PaymentsCreate->value,
+            // Inside their own zones only (were the role named agent, 2026-11-02).
+            Permission::PaymentsVerifyZone->value,
+            Permission::CustomersDisconnectZone->value,
 
             Permission::ManuscriptsView->value,
             Permission::ManuscriptsSendBill->value,

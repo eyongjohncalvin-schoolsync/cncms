@@ -14,7 +14,7 @@ import { colors } from '../../src/theme/colors';
 import { fontSize } from '../../src/theme/tokens';
 
 /** Holding any of these makes someone an inbox user (ManagerInboxService). */
-const INBOX_PERMISSIONS = ['vouchers.approve', 'arrears.approve', 'complaints.assign', 'cash.view', 'cash.receive', 'installations.activate', 'opening_balances.approve'];
+const INBOX_PERMISSIONS = ['payments.verify', 'vouchers.approve', 'arrears.approve', 'complaints.assign', 'cash.view', 'cash.receive', 'installations.activate', 'opening_balances.approve'];
 
 function TabGlyph({
     letter,
@@ -142,6 +142,7 @@ export default function TabsLayout() {
                     name="customers"
                     options={{
                         title: 'Customers',
+                        href: can('customers.view') ? undefined : null,
                         tabBarIcon: ({ focused }) => (
                             <TabGlyph letter="C" color={colors.accent.customers} focused={focused} />
                         ),
@@ -151,6 +152,7 @@ export default function TabsLayout() {
                     name="record-payment"
                     options={{
                         title: 'Record Payment',
+                        href: can('payments.create') ? undefined : null,
                         tabBarIcon: ({ focused }) => (
                             <TabGlyph letter="₣" color={colors.accent.payment} focused={focused} />
                         ),
@@ -160,6 +162,7 @@ export default function TabsLayout() {
                     name="history"
                     options={{
                         title: 'History',
+                        href: can('payments.create') ? undefined : null,
                         tabBarIcon: ({ focused }) => (
                             <TabGlyph letter="T" color={colors.accent.history} focused={focused} />
                         ),

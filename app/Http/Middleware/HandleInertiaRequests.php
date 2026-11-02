@@ -70,6 +70,10 @@ class HandleInertiaRequests extends Middleware
                     'ui_theme' => $user->ui_theme ?? 'system',
                     // Branches v2: fenced to one branch (drives the "My branch" nav link).
                     'branch_fenced' => (bool) $context?->isFenced(),
+                    // Their role is "limited to their own zones" (a role setting, 2026-11-02).
+                    'zone_limited' => (bool) $context?->isZoneLimited(),
+                    // The per-person grant to record payments though their role can't.
+                    'can_record_payments' => (bool) $context?->tenantUser->can_record_payments,
                     // Tenant-scoped Investor tier flag (tenant_users.is_investor)
                     // — see App\Policies\ReportPolicy::view()'s docblock and
                     // references/rbac-permissions.md section 7. Display hint

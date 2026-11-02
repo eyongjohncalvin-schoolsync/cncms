@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Agent;
 use App\Models\Branch;
 use App\Models\CashTransfer;
+use App\Models\Role;
 use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Models\User;
@@ -137,7 +138,7 @@ class StaffAccountService
 
         // Branches v2 (D7): a transfer or a new role opens the next assignment.
         if ($tenantUser->wasChanged(['branch_id', 'role'])) {
-            $agentBranchId = $tenantUser->role === 'agent'
+            $agentBranchId = Role::isZoneLimited($tenantUser->role)
                 ? Agent::query()->withoutGlobalScope(BranchScope::class)->where('user_id', $tenantUser->user_id)->with(['zone' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)])->first()?->zone?->branch_id
                 : null;
 
@@ -183,7 +184,7 @@ class StaffAccountService
     {
         $user = $tenantUser->user;
         $agent = Agent::query()->withoutGlobalScope(BranchScope::class)->where('user_id', $user->id)->first();
-        $isFieldAgent = $tenantUser->role === 'agent' && $user->status === 'active';
+        $isFieldAgent = Role::isZoneLimited($tenantUser->role) && $user->status === 'active';
 
         if ($isFieldAgent) {
             if ($agent === null) {

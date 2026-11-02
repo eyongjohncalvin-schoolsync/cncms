@@ -28,6 +28,10 @@ export interface AuthUser {
     ui_theme: ThemeChoice;
     /** Fenced to one branch (branches v2) — not merely viewing one via the switcher. */
     branch_fenced: boolean;
+    /** Their role is limited to their own zones (a role setting). */
+    zone_limited?: boolean;
+    /** May record payments though their role can't (per-person grant). */
+    can_record_payments?: boolean;
     /**
      * Tenant-scoped Investor tier flag (tenant_users.is_investor) — see
      * App\Policies\ReportPolicy::view()'s docblock. Display hint only:
@@ -994,6 +998,8 @@ export interface RoleMatrixRow {
     is_system: boolean;
     /** The Gate::before bypass role — matrix all-on and read-only. */
     is_super: boolean;
+    /** "Limited to their own zones" — a field role (2026-11-02). */
+    zone_limited?: boolean;
     /** Permission strings this role currently grants (empty for is_super). */
     permissions: string[];
     /** How many tenant_users rows currently hold this role (blocks delete). */
@@ -1053,6 +1059,10 @@ export interface TenantUserRow {
      * rows.
      */
     can_record_payments: boolean;
+    /** Their role already records payments, so the per-person grant isn't needed. */
+    role_records_payments?: boolean;
+    /** Their role is limited to their own zones (a role setting). */
+    zone_limited?: boolean;
     /**
      * Investor tier grant (app/Policies/ReportPolicy.php's view() doc
      * comment) — a pure additive OR with no role restriction implied

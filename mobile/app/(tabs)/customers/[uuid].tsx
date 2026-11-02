@@ -115,7 +115,8 @@ export default function CustomerDetailScreen() {
     // disconnect(), zone-scoped for agent); this button just avoids
     // offering an action that's obviously irrelevant once already
     // disconnected/suspended.
-    const canDisconnect = customer.status === 'active' || customer.status === 'passive';
+    // Disconnect: anyone (change_status) or inside one's own zones (disconnect_zone — the server checks the zone).
+    const canDisconnect = (customer.status === 'active' || customer.status === 'passive') && (can('customers.change_status') || can('customers.disconnect_zone'));
 
     function handleCall() {
         if (customer?.phone) {
@@ -309,12 +310,15 @@ export default function CustomerDetailScreen() {
 
             {uuid && can('customers.view') ? <BillHistoryCard customerUuid={uuid} /> : null}
 
-            <Button
-                title={needsReconnect ? 'Reconnect & Pay' : 'Record Payment'}
-                size="large"
-                onPress={handlePrimaryAction}
-                variant={needsReconnect ? 'secondary' : 'primary'}
-            />
+            {/* Recording needs "Record payments"; reconnecting also needs "Change status" (owner, 2026-11-02). */}
+            {can('payments.create') && (!needsReconnect || can('customers.change_status')) ? (
+                <Button
+                    title={needsReconnect ? 'Reconnect & Pay' : 'Record Payment'}
+                    size="large"
+                    onPress={handlePrimaryAction}
+                    variant={needsReconnect ? 'secondary' : 'primary'}
+                />
+            ) : null}
 
             {/*
               2026-08-27: Disconnect and Send-Bill regrouped under a labeled
@@ -336,19 +340,13 @@ export default function CustomerDetailScreen() {
 
               2026-08-28: "Adjust Arrears" added to this same cluster — the
               mobile REQUEST side of the maker-checker write-off workflow
-              (arrears-adjustment.md). Unlike Disconnect/WhatsApp above, it
-              is never conditionally hidden: ArrearsAdjustmentPolicy::create()
-              is ungated for every role and every customer status (a
-              disconnected customer's frozen, wrong arrears figure is
-              exactly this feature's central use case — see that doc's
-              section 4), so there's no "canAdjustArrears" gate to mirror
-              here, matching how the web modal renders unconditionally on
-              Customers/Show.tsx too.
+              (arrears-adjustment.md), for any customer status, shown to a
+              role holding "Request arrears adjustment" (2026-11-02).
             */}
             <View style={styles.secondaryActions}>
                 <Text style={styles.secondaryActionsLabel}>Other actions</Text>
 
-                {customer.phone ? (
+                {customer.phone && can('customers.print_bill') ? (
                     <Button
                         title={sendingWhatsapp ? 'Preparing…' : 'Send Bill via WhatsApp'}
                         loading={sendingWhatsapp}
@@ -358,12 +356,14 @@ export default function CustomerDetailScreen() {
                     />
                 ) : null}
 
-                <Button
-                    title="Adjust Arrears / Credit"
-                    variant="secondary"
-                    onPress={() => router.push(`/adjust-arrears/${uuid}`)}
-                    style={styles.arrearsButton}
-                />
+                {can('arrears.request') ? (
+                    <Button
+                        title="Adjust Arrears / Credit"
+                        variant="secondary"
+                        onPress={() => router.push(`/adjust-arrears/${uuid}`)}
+                        style={styles.arrearsButton}
+                    />
+                ) : null}
 
                 {canDisconnect ? (
                     <Button

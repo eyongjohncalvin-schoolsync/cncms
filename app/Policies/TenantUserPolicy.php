@@ -90,6 +90,6 @@ class TenantUserPolicy
         }
 
         return $tenantUser->branch_id === $this->context->branchId
-            || ($tenantUser->role === 'agent' && Agent::query()->where('user_id', $tenantUser->user_id)->exists());
+            || (Role::isZoneLimited($tenantUser->role) && Agent::query()->where('user_id', $tenantUser->user_id)->exists());
     }
 }

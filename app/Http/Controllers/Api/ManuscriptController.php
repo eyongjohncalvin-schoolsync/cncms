@@ -45,7 +45,7 @@ class ManuscriptController extends Controller
         $perPage = min(max(1, $request->integer('per_page', 25)), 500);
         $filters = $request->only(['period', 'zone_uuid', 'status']);
 
-        if ($this->context->is('agent')) {
+        if ($this->context->isZoneLimited()) {
             unset($filters['zone_uuid']);
             $filters['zone_id'] = $this->context->zoneIds ?? [];
         }

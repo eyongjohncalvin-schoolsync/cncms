@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Attributes\RouteKey;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
@@ -28,7 +29,7 @@ use Illuminate\Support\Str;
  * runs one lean join in App\Support\TenantContext::resolve(). This model is
  * for the management UI, the seeder, and tests.
  */
-#[Fillable(['name', 'label', 'description', 'is_system', 'is_super'])]
+#[Fillable(['name', 'label', 'description', 'is_system', 'is_super', 'zone_limited'])]
 #[RouteKey('uuid')]
 class Role extends Model
 {
@@ -41,6 +42,9 @@ class Role extends Model
      * @var list<string>
      */
     public const RESERVED_NAMES = ['super', 'admin', 'manager', 'agent', 'cashier', 'worker'];
+
+    /** @var array<string, bool> per tenant: whether `roles.zone_limited` exists yet */
+    private static array $hasZoneLimited = [];
 
     /** Length of the `roles.name` column. */
     public const NAME_MAX_LENGTH = 50;
@@ -88,7 +92,33 @@ class Role extends Model
         return [
             'is_system' => 'boolean',
             'is_super' => 'boolean',
+            'zone_limited' => 'boolean',
         ];
+    }
+
+    /**
+     * Whether people in this role work only their own zones (owner,
+     * 2026-11-02: a role setting, no longer "the role named agent"). Before
+     * a schema's roles are seeded, the agent role keeps its old behaviour.
+     */
+    public static function isZoneLimited(string $name): bool
+    {
+        // A schema still migrating (before the column exists) keeps the old rule.
+        // Only "it exists" is remembered: a schema migrated later in the same
+        // process is seen at once.
+        $tenant = (string) tenant()?->getTenantKey();
+
+        if (! (self::$hasZoneLimited[$tenant] ?? false)) {
+            if (! Schema::hasColumn('roles', 'zone_limited')) {
+                return $name === 'agent';
+            }
+
+            self::$hasZoneLimited[$tenant] = true;
+        }
+
+        $flag = static::query()->where('name', $name)->value('zone_limited');
+
+        return $flag === null ? $name === 'agent' : (bool) $flag;
     }
 
     protected static function booted(): void

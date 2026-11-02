@@ -36,6 +36,8 @@ class UpdateRoleRequest extends FormRequest
         return [
             'label' => ['sometimes', 'required', 'string', 'max:100'],
             'description' => ['sometimes', 'nullable', 'string', 'max:255'],
+            // "Limited to their own zones" (2026-11-02): the role works only the zones each person covers.
+            'zone_limited' => ['sometimes', 'boolean'],
             'permissions' => ['sometimes', 'array'],
             'permissions.*' => [Rule::in(Permission::values())],
         ];

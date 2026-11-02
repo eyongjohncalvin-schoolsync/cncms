@@ -1,3 +1,6 @@
+import { usePage } from '@inertiajs/react';
+import type { PageProps } from '@/types';
+
 /**
  * RBAC v2 (docs/plans/rbac-v2-configurable-roles.md): client-side permission
  * check against the resolved per-role matrix shared on
@@ -13,4 +16,15 @@ export function hasPermission(permissions: string[] | null | undefined, permissi
     }
 
     return permissions.includes('*') || permissions.includes(permission);
+}
+
+/**
+ * `const can = useCan(); can('customers.create')` — the signed-in person's
+ * permissions from the shared props, so a page shows only what its role may
+ * use (owner, 2026-11-02: nothing shown that the role wasn't given).
+ */
+export function useCan(): (permission: string) => boolean {
+    const permissions = usePage<PageProps>().props.auth.user?.permissions;
+
+    return (permission: string) => hasPermission(permissions, permission);
 }

@@ -1,50 +1,40 @@
 import { Link } from '@inertiajs/react';
 import { IconBuildingStore, IconTerminal2, IconBellRinging, IconPrinter, IconBroadcast, IconGift, IconCash, IconCalendarDollar, IconSignature } from '@tabler/icons-react';
+import { useCan } from '@/lib/permissions';
 
 // "Users & Roles" moved out of Settings entirely in RBAC v2 Wave 3 — it's
 // now the top-level "Users Control Center" nav item (/users), gated by the
 // `users.view` permission rather than sharing the Settings admin gate.
-const tabs = [
-    { href: '/settings/company', label: 'Company Info', icon: IconBuildingStore },
-    { href: '/settings/command-runs', label: 'Command Runs', icon: IconTerminal2 },
-    { href: '/settings/notifications', label: 'Notifications', icon: IconBellRinging },
-    { href: '/settings/bill-printing', label: 'Bill Printing', icon: IconPrinter },
-    // services.manage-gated (ServicePolicy) — a role with only company.update/
-    // command_runs.view would still see this tab render server-side (this
-    // component doesn't re-check permissions), but SettingsServiceController
-    // enforces the real gate; showing a tab that then 403s is the same
-    // tradeoff every other tab here already accepts.
-    { href: '/settings/services', label: 'Services', icon: IconBroadcast },
-    // installations.offers-gated (InstallationOfferPolicy) — same "tab may
-    // render, controller enforces" tradeoff as Services above.
-    { href: '/settings/installation-offers', label: 'Promotions', icon: IconGift },
-    // payments.offers-gated (PrepaymentOfferPolicy) — same tradeoff.
-    { href: '/settings/prepayment-offers', label: 'Prepayment offers', icon: IconCalendarDollar },
-    // salaries.manage + headquarters (SalaryPolicy::manageScale) — same tradeoff.
-    { href: '/settings/salaries', label: 'Salaries', icon: IconCash },
-    // super/admin only (ContractController) — same tradeoff.
-    { href: '/settings/contract', label: 'Contract', icon: IconSignature },
-];
+//
+// Each tab shows only to a role holding its controller's permission (owner,
+// 2026-11-02: nothing shown that the role wasn't given).
+export const SETTINGS_TABS = [
+    { href: '/settings/company', label: 'Company Info', icon: IconBuildingStore, permission: 'company.view' },
+    { href: '/settings/command-runs', label: 'Command Runs', icon: IconTerminal2, permission: 'command_runs.view' },
+    { href: '/settings/notifications', label: 'Notifications', icon: IconBellRinging, permission: 'company.view' },
+    { href: '/settings/bill-printing', label: 'Bill Printing', icon: IconPrinter, permission: 'company.view' },
+    { href: '/settings/services', label: 'Services', icon: IconBroadcast, permission: 'services.manage' },
+    { href: '/settings/installation-offers', label: 'Promotions', icon: IconGift, permission: 'installations.offers' },
+    { href: '/settings/prepayment-offers', label: 'Prepayment offers', icon: IconCalendarDollar, permission: 'payments.offers' },
+    // Grades also need headquarters (SalaryPolicy::manageScale) — the page says so.
+    { href: '/settings/salaries', label: 'Salaries', icon: IconCash, permission: 'salaries.manage' },
+    { href: '/settings/contract', label: 'Contract', icon: IconSignature, permission: 'company.sign_contract' },
+] as const;
 
 /**
- * Shared sub-navigation across the Settings pages (Company/CommandRuns/
- * Notifications/BillPrinting) — all gated to the same roles as the
- * sidebar's single "Settings" nav item (App\Policies\CompanyPolicy::
- * view(), CommandRunPolicy::viewAny(), NotificationSettingPolicy::view()).
- * Bill Printing reuses CompanyPolicy
- * (App\Http\Controllers\SettingsBillPrintingController), same as Company
- * Info. The sidebar only links to /settings/company, so without this a
- * user landing there had no way to reach the other tabs short of typing
- * the URL.
+ * Shared sub-navigation across the Settings pages — only the tabs this
+ * person's role may open.
  */
 export function SettingsTabs({
     active,
 }: {
     active: 'company' | 'command-runs' | 'notifications' | 'bill-printing' | 'services' | 'installation-offers' | 'prepayment-offers' | 'salaries' | 'contract';
 }) {
+    const can = useCan();
+
     return (
         <div className="mb-6 inline-flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 animate-fade-up">
-            {tabs.map((tab) => {
+            {SETTINGS_TABS.filter((tab) => can(tab.permission)).map((tab) => {
                 const Icon = tab.icon;
                 const isActive = tab.href === `/settings/${active}`;
 

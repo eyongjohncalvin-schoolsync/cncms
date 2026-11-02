@@ -14,6 +14,7 @@ import { CoverageNote } from '@/components/shared/CoverageNote';
 import { CompensationModal } from '@/components/customers/FreeMonthsCard';
 import { formatCurrency } from '@/lib/formatCurrency';
 import { paymentMethodLabel } from '@/components/shared/PaymentMethodFields';
+import { useCan } from '@/lib/permissions';
 import type { CustomerCoverage, CustomerFreeMonths, PageProps, Payment, PaymentReceipt } from '@/types';
 
 function formatRelative(iso: string): string {
@@ -67,6 +68,7 @@ export default function PaymentsShow({
     free_months,
 }: PaymentsShowProps) {
     const [givingFreeMonths, setGivingFreeMonths] = useState(false);
+    const can = useCan();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [reversing, setReversing] = useState(false);
     const [fileName, setFileName] = useState<string | null>(null);
@@ -210,12 +212,9 @@ export default function PaymentsShow({
                         <h2 className="font-display text-2xl text-slate-900">Payment Detail</h2>
                         <p className="mt-1 text-sm text-slate-500">{payment.customer_name}</p>
                     </div>
-                    {/* Adjust Arrears is ungated (ArrearsAdjustmentPolicy::create() —
-                        any authenticated tenant user, same as ComplaintPolicy::
-                        create()), so it renders unconditionally here, unlike
-                        Edit/Delete Payment which stay behind can_manage/can_delete. */}
+                    {/* Adjust Arrears: "Request arrears adjustment" (ArrearsAdjustmentPolicy::create()). */}
                     <div className="flex flex-wrap items-center gap-2">
-                        <ArrearsAdjustmentModal customer={arrearsCustomer} />
+                        {can('arrears.request') && <ArrearsAdjustmentModal customer={arrearsCustomer} />}
                         {free_months?.can_request && (
                             <Button type="button" variant="secondary" onClick={() => setGivingFreeMonths(true)} className="rounded-lg px-4 py-2 text-sm font-semibold">
                                 Give free months

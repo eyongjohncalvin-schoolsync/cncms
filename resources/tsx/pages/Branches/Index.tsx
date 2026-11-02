@@ -25,6 +25,7 @@ export default function BranchesIndex({ branches, can_manage }: BranchesIndexPro
                 </div>
                 <Link
                     href="/branches/create"
+                    hidden={!can_manage}
                     className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                 >
                     <IconPlus size={18} stroke={2} />

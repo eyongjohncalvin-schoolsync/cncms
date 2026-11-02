@@ -10,6 +10,8 @@ interface MoreLink {
     subtitle: string;
     href: string;
     accentColor?: string;
+    /** Shown only to a role holding it (owner, 2026-11-02). */
+    permission?: string;
 }
 
 interface MoreSection {
@@ -43,7 +45,7 @@ export default function MoreScreen() {
     // whole desk, a technician their own jobs.
     const desk: MoreLink[] = can('complaints.assign')
         ? [{ title: 'Complaint desk', subtitle: 'Assign technicians, follow every open complaint', href: '/complaint-desk', accentColor: colors.accent.complaint }]
-        : can('complaints.resolve')
+        : can('complaints.take_jobs')
           ? [{ title: 'My jobs', subtitle: 'Complaints given to you to fix', href: '/complaint-desk', accentColor: colors.accent.complaint }]
           : [];
 
@@ -69,42 +71,49 @@ export default function MoreScreen() {
                     title: 'Hand over cash',
                     subtitle: 'Today’s collections — count your cash and give it to the cashier',
                     href: '/hand-over',
+                    permission: 'cash.remit',
                     accentColor: colors.accent.payment,
                 },
                 {
                     title: 'Disconnections',
                     subtitle: 'Customers flagged for non-payment in your zone',
                     href: '/disconnections',
+                    permission: 'customers.eligibility_board',
                     accentColor: colors.danger,
                 },
                 {
                     title: 'Manuscript',
                     subtitle: 'Your zone’s billing register for the current period',
                     href: '/manuscript',
+                    permission: 'manuscripts.view',
                     accentColor: colors.accent.payment,
                 },
                 {
                     title: 'Zones',
                     subtitle: 'Your zone, and a lookup of every other zone',
                     href: '/zones',
+                    permission: 'zones.view',
                     accentColor: colors.accent.customers,
                 },
                 {
                     title: 'Complaints',
                     subtitle: 'Complaints you’ve submitted and their status',
                     href: '/complaints',
+                    permission: 'complaints.view',
                     accentColor: colors.accent.complaint,
                 },
                 {
                     title: 'Resources',
                     subtitle: 'Your bon requests',
                     href: '/resources',
+                    permission: 'vouchers.request',
                     accentColor: colors.accent.expense,
                 },
                 {
                     title: 'Reports',
                     subtitle: 'Your collection totals and zone snapshot',
                     href: '/reports',
+                    permission: 'reports.view',
                     accentColor: colors.accent.history,
                 },
             ],
@@ -153,7 +162,7 @@ export default function MoreScreen() {
             {sections.map((section) => (
                 <View key={section.title} style={styles.section}>
                     <Text style={styles.sectionTitle}>{section.title}</Text>
-                    {section.links.map((link) => (
+                    {section.links.filter((link) => !link.permission || can(link.permission)).map((link) => (
                         <Card key={link.href} onPress={() => router.push(link.href as never)} accentColor={link.accentColor}>
                             <Text style={styles.linkTitle}>{link.title}</Text>
                             <Text style={styles.linkSubtitle}>{link.subtitle}</Text>

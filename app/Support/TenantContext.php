@@ -6,6 +6,7 @@ namespace App\Support;
 
 use App\Models\Agent;
 use App\Models\Branch;
+use App\Models\Role;
 use App\Models\Scopes\BranchScope;
 use App\Models\TenantUser;
 use App\Models\ZoneAgent;
@@ -201,7 +202,7 @@ final class TenantContext
         // hardcoded checks granted) rather than failing closed: an unseeded
         // schema must NOT brick the app, and must never lock out `super`.
         if (! Schema::hasTable('roles')) {
-            return $this->roleState = $this->defaultRoleState();
+            return $this->roleState = $this->withPersonalGrants($this->defaultRoleState());
         }
 
         $rows = DB::table('roles')
@@ -215,13 +216,30 @@ final class TenantContext
         // known system-role name resolves to its default set; a genuinely
         // unknown custom name that was never created still fails closed.
         if ($rows->isEmpty()) {
-            return $this->roleState = $this->defaultRoleState();
+            return $this->roleState = $this->withPersonalGrants($this->defaultRoleState());
         }
 
-        return $this->roleState = [
+        return $this->roleState = $this->withPersonalGrants([
             'is_super' => (bool) $rows->first()->is_super,
             'permissions' => $rows->pluck('permission')->filter()->values()->all(),
-        ];
+        ]);
+    }
+
+    /**
+     * Grants given to one person on top of their role: "can record payments"
+     * (tenant_users.can_record_payments, any role since 2026-11-02) is
+     * `payments.create` for them — so the web, the phone and sync all see it.
+     *
+     * @param  array{is_super: bool, permissions: list<string>}  $state
+     * @return array{is_super: bool, permissions: list<string>}
+     */
+    private function withPersonalGrants(array $state): array
+    {
+        if ($this->tenantUser->can_record_payments === true && ! in_array('payments.create', $state['permissions'], true)) {
+            $state['permissions'][] = 'payments.create';
+        }
+
+        return $state;
     }
 
     /**
@@ -297,10 +315,16 @@ final class TenantContext
         return $this->zoneIds === null || ($zoneId !== null && in_array($zoneId, $this->zoneIds, true));
     }
 
-    /** An agent covering this zone (the zone-scoped half of several office permissions). */
+    /** Someone limited to their own zones who covers this one (the zone-scoped half of several office permissions). */
     public function isAgentCovering(?int $zoneId): bool
     {
-        return $this->role === 'agent' && $this->zoneIds !== null && $zoneId !== null && in_array($zoneId, $this->zoneIds, true);
+        return $this->zoneIds !== null && $zoneId !== null && in_array($zoneId, $this->zoneIds, true);
+    }
+
+    /** Limited to their own zones (their role's setting). */
+    public function isZoneLimited(): bool
+    {
+        return $this->zoneIds !== null;
     }
 
     /**
@@ -348,21 +372,25 @@ final class TenantContext
      */
     public static function resolve(TenantUser $tenantUser): self
     {
+        // Any role "limited to their own zones" (Role::isZoneLimited — a role
+        // setting since 2026-11-02, before that only the role named agent).
+        $zoneLimited = Role::isZoneLimited($tenantUser->role);
+
         // Resolved once and reused for both branchId and zoneIds below —
-        // an agent's own Agent row is the single source of truth for both
+        // the person's own Agent row is the single source of truth for both
         // fences (branch transitively via zone->branch, zone directly).
-        $agent = $tenantUser->role === 'agent'
+        $agent = $zoneLimited
             ? Agent::query()->withoutGlobalScope(BranchScope::class)->with(['zone' => fn ($query) => $query->withoutGlobalScope(BranchScope::class)])->where('user_id', $tenantUser->user_id)->first()
             : null;
 
-        $branchId = $tenantUser->role === 'agent'
+        $branchId = $zoneLimited
             ? ($agent?->zone?->branch_id ?? $tenantUser->branch_id)
             : $tenantUser->branch_id;
 
-        // The zones the agent covers (App\Models\ZoneAgent), one query. An
-        // agent with no Agent row or no zones gets an empty list: zone-scoped
-        // to nothing, never unrestricted. No other role is zone-scoped.
-        $zoneIds = $tenantUser->role === 'agent'
+        // The zones they cover (App\Models\ZoneAgent), one query. Someone
+        // with no Agent row or no zones gets an empty list: zone-scoped to
+        // nothing, never unrestricted. No other role is zone-scoped.
+        $zoneIds = $zoneLimited
             ? ($agent === null ? [] : ZoneAgent::query()->withoutGlobalScope(BranchScope::class)
                 ->where('agent_id', $agent->id)->orderBy('zone_id')->pluck('zone_id')->map(fn ($id): int => (int) $id)->all())
             : null;

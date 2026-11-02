@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react';
 import { useTranslation } from 'react-i18next';
+import { SETTINGS_TABS } from '@/components/settings/SettingsTabs';
 import {
     IconLayoutDashboard,
     IconUsers,
@@ -230,7 +231,10 @@ export function buildVisibleNavItems(permissions: string[] = [], branchFenced = 
         ...(can('branches.manage') ? [branchesNavItem] : []),
         ...(!can('branches.manage') && branchFenced && can('branches.settings') ? [myBranchNavItem] : []),
         ...(can('users.view') ? [usersControlCenterNavItem] : []),
-        ...(canAny('company.update', 'command_runs.view', 'services.manage', 'salaries.manage') ? [settingsNavItem] : []),
+        // Settings: when any of its tabs is this role's to manage — opening the first tab it may see (2026-11-02).
+        ...(canAny('company.update', 'command_runs.view', 'services.manage', 'salaries.manage', 'installations.offers', 'payments.offers', 'company.sign_contract')
+            ? [{ ...settingsNavItem, href: SETTINGS_TABS.find((tab) => can(tab.permission))?.href ?? settingsNavItem.href }]
+            : []),
     ];
 }
 
@@ -300,7 +304,7 @@ export function AppNav({
                     // against the path portion so the "Flagged Customers" entry
                     // still highlights correctly.
                     const itemPath = item.href.split('?')[0];
-                    const active = item.href === settingsNavItem.href
+                    const active = item.labelKey === settingsNavItem.labelKey
                         ? currentPath.startsWith('/settings')
                         : currentPath.startsWith(itemPath);
                     const accent = NAV_ACCENTS[item.accent];

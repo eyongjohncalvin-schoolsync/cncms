@@ -44,7 +44,7 @@ import { FreeMonthsCard } from '@/components/customers/FreeMonthsCard';
 import { FieldInstallationCard } from '@/components/customers/FieldInstallationCard';
 import { paymentPurposeLabel } from '@/lib/paymentPurpose';
 import { formatCurrency } from '@/lib/formatCurrency';
-import { hasPermission } from '@/lib/permissions';
+import { hasPermission, useCan } from '@/lib/permissions';
 import { prepaidCoverageLabel } from '@/lib/prepaidCoverageLabel';
 import type { CustomerDetail, PageProps } from '@/types';
 
@@ -85,6 +85,7 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
     // RBAC v2 Wave 4: CustomerPolicy::archive/restore/delete → `customers.archive`.
     const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
     const canPrintBill = hasPermission(auth.user?.permissions, 'customers.print_bill');
+    const can = useCan();
     // "Export full record" — a full unredacted data dump gated
     // `customers.export_record` (super/admin only). Prefer the shared
     // permissions list; the `can_export_record` prop resolves the same
@@ -231,15 +232,15 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                     {!isArchived && (
                         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                             {exportRecordMenu}
-                            <CustomerStatusActions customer={customer} />
-                            <ArrearsAdjustmentModal customer={customer} />
+                            {(can('customers.change_status') || can('customers.disconnect_zone')) && <CustomerStatusActions customer={customer} />}
+                            {can('arrears.request') && <ArrearsAdjustmentModal customer={customer} />}
                             {/* Bills only ever print for an active customer — a
                                 disconnected/suspended/passive customer is frozen
                                 with a 0 total_bill (owner decision, 2026-08). The
                                 server (CustomerController::printBill) is the real
                                 guard; this just hides a button that would only
                                 bounce back with an error. */}
-                            {customer.status === 'active' && (
+                            {customer.status === 'active' && canPrintBill && (
                                 <a
                                     href={`/customers/${customer.uuid}/bill/print`}
                                     target="_blank"
@@ -251,13 +252,15 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                                     Print Bill
                                 </a>
                             )}
-                            <Link
-                                href={`/customers/${customer.uuid}/edit`}
-                                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
-                            >
-                                <IconEdit size={16} stroke={1.75} />
-                                Edit
-                            </Link>
+                            {can('customers.update') && (
+                                <Link
+                                    href={`/customers/${customer.uuid}/edit`}
+                                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
+                                >
+                                    <IconEdit size={16} stroke={1.75} />
+                                    Edit
+                                </Link>
+                            )}
                             {canArchive && (
                                 <Button
                                     type="button"
@@ -547,7 +550,8 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
                 </div>
             )}
 
-            <div className="animate-fade-up mt-6" style={{ animationDelay: '0.15s' }}>
+            {/* Only for a role that may see payments (the server sends none otherwise). */}
+            <div className="animate-fade-up mt-6" style={{ animationDelay: '0.15s' }} hidden={!can('payments.view')}>
                 <Card className="p-0">
                     <CardHeader className="border-b border-slate-100">
                         <div className="flex items-center gap-3">
@@ -594,8 +598,9 @@ export default function CustomersShow({ customer, bills = [] }: { customer: Cust
             </div>
 
             {/* Arrears Adjustments — a separate block from Recent Payments above,
-                never interleaved rows, per this feature's design doc. */}
-            <div className="animate-fade-up mt-6" style={{ animationDelay: '0.2s' }}>
+                never interleaved rows, per this feature's design doc. Only for
+                a role that may see arrears adjustments. */}
+            <div className="animate-fade-up mt-6" style={{ animationDelay: '0.2s' }} hidden={!can('arrears.view')}>
                 <Card className="p-0">
                     <CardHeader className="border-b border-slate-100">
                         <div className="flex items-center gap-3">

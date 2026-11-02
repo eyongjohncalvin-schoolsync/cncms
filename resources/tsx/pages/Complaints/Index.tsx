@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ComplaintStatusBadge } from '@/components/shared/StatusBadge';
+import { useCan } from '@/lib/permissions';
 import type { Complaint, ComplaintDashboardStats, ComplaintStatus, PaginatedResponse } from '@/types';
 
 interface ComplaintsIndexProps {
@@ -34,6 +35,7 @@ interface ComplaintsIndexProps {
 }
 
 export default function ComplaintsIndex({ view, complaints, filters, stats }: ComplaintsIndexProps) {
+    const canLog = useCan()('complaints.create');
     const [isFiltering, setIsFiltering] = useState(false);
 
     function updateQuery(next: {
@@ -83,20 +85,22 @@ export default function ComplaintsIndex({ view, complaints, filters, stats }: Co
                             : 'Report an internal issue, or relay one on a customer’s behalf.'}
                     </p>
                 </div>
-                <Link
-                    href="/complaints/create"
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-fuchsia-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-fuchsia-600/20 transition-colors hover:bg-fuchsia-700"
-                >
-                    <IconPlus size={18} stroke={2} />
-                    Log a Complaint
-                </Link>
+                {canLog && (
+                    <Link
+                        href="/complaints/create"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-fuchsia-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-fuchsia-600/20 transition-colors hover:bg-fuchsia-700"
+                    >
+                        <IconPlus size={18} stroke={2} />
+                        Log a Complaint
+                    </Link>
+                )}
             </div>
 
             {/* Submission-first view leads with a CTA card rather than the
                 counts row — references/complaint-desk.md section 6: agents/
                 workers get a submission-first layout, managers/admins get
                 the dashboard. Same route, same list underneath either way. */}
-            {view === 'submission' && (
+            {view === 'submission' && canLog && (
                 <Card
                     className="mb-6 flex flex-col items-start gap-3 border-fuchsia-200 bg-fuchsia-50 p-5 animate-fade-up sm:flex-row sm:items-center sm:justify-between"
                     style={{ animationDelay: '50ms' }}

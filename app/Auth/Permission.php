@@ -42,6 +42,8 @@ enum Permission: string
     case CustomersPrintBill = 'customers.print_bill';
     /** disconnect / suspend / reconnect, single + bulk (agent zone-scoped disconnect stays an OR-branch). */
     case CustomersChangeStatus = 'customers.change_status';
+    /** Disconnect customers inside one's own zones only (was the role named agent, 2026-11-02). */
+    case CustomersDisconnectZone = 'customers.disconnect_zone';
     /** The /disconnections status workboard (CustomerPolicy::viewStatusBoard). */
     case CustomersStatusBoard = 'customers.status_board';
     /** The arrears "flagged for non-payment" list — broader than the status board: agents see their own zone (CustomerPolicy::viewEligibilityBoard). */
@@ -75,6 +77,11 @@ enum Permission: string
     case PaymentsDelete = 'payments.delete';
     /** verify + bulkVerify class gate (agent zone fence stays an OR-branch + per-item recheck). */
     case PaymentsVerify = 'payments.verify';
+    /**
+     * Verify payments inside one's own zones only — for a role "limited to
+     * their own zones" (was the role named agent, 2026-11-02).
+     */
+    case PaymentsVerifyZone = 'payments.verify_zone';
     /**
      * The manual "Issue / re-issue receipt" action on the payment detail
      * page (Wave 2 of docs/plans/payment-receipts-and-whatsapp.md). Auto-
@@ -286,6 +293,10 @@ enum Permission: string
     /** Sign the contract, accept new terms, see the demo / contract notices — was super/admin by role name (2026-11-02). */
     case CompanySignContract = 'company.sign_contract';
 
+    // ---- Dashboard --------------------------------------------
+    /** The dashboard's money figures: income, arrears, collection rate (2026-11-02; every role saw them). */
+    case DashboardMoney = 'dashboard.money';
+
     // ---- Phone app --------------------------------------------
     /** Sign in to the phone app and sync — was manuscripts.view (2026-11-02). */
     case MobileUseApp = 'mobile.use_app';
@@ -360,6 +371,7 @@ enum Permission: string
             'installations' => 'Installations',
             'compensation' => 'Compensation & free months',
             'mobile' => 'Phone app',
+            'dashboard' => 'Dashboard',
             'opening_balances' => 'Opening balances',
             'receipts', 'cash' => 'Cash & receipts',
             'vouchers' => 'Vouchers',

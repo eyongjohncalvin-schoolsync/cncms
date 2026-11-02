@@ -34,6 +34,8 @@ final class PermissionSplits
         'cash.pay_technician_fees' => ['cash.receive'],
         'mobile.use_app' => ['manuscripts.view'],
         'complaints.take_jobs' => ['complaints.resolve'],
+        // Every role saw the dashboard's money; it starts with those who see the bills behind it.
+        'dashboard.money' => ['manuscripts.view'],
     ];
 
     /**

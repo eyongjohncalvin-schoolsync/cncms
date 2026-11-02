@@ -103,7 +103,7 @@ class CustomerController extends Controller
         return Inertia::render('Customers/Index', [
             'archived_view' => $archived,
             'pending_activation_view' => $pendingActivation,
-            'pending_activation_count' => fn (): int => app(FieldInstallationService::class)->pendingCount(),
+            'pending_activation_count' => fn (): int => $this->context->can('installations.activate') ? app(FieldInstallationService::class)->pendingCount() : 0,
             'customers' => function () use ($filters, $archived, $pendingActivation): array {
                 $paginator = $this->customers->list([...$filters, 'archived' => $archived, 'pending_activation' => $pendingActivation], 15);
 
@@ -332,7 +332,7 @@ class CustomerController extends Controller
         return Inertia::render('Customers/Show', [
             'customer' => $this->shapeCustomerDetail($customer),
             // Monthly bills (invoices) with their paid status — newest first.
-            'bills' => app(InvoiceService::class)->billsFor($customer, 12),
+            'bills' => $this->context->can('manuscripts.view') ? app(InvoiceService::class)->billsFor($customer, 12) : [],
         ]);
     }
 
@@ -792,8 +792,9 @@ class CustomerController extends Controller
                 'free_value' => (string) $customer->latestManuscript->free_value,
                 'period' => $customer->latestManuscript->period,
             ] : null,
-            'recent_payments' => $customer->payments->map(fn (Payment $payment) => $this->shapePayment($payment))->all(),
-            'arrears_adjustments' => $this->shapeArrearsAdjustments($customer),
+            // Each block only for a role allowed to see it (owner, 2026-11-02).
+            'recent_payments' => $this->context->can('payments.view') ? $customer->payments->map(fn (Payment $payment) => $this->shapePayment($payment))->all() : [],
+            'arrears_adjustments' => $this->context->can('arrears.view') ? $this->shapeArrearsAdjustments($customer) : [],
             // Installation fees (docs/plans/installation-and-promotions.md):
             // a separate balance, never part of the bill's total or arrears.
             'installation' => $this->shapeInstallation($customer),

@@ -91,6 +91,7 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
     const canExport = hasPermission(auth.user?.permissions, 'manuscripts.export');
     const canCalculate = hasPermission(auth.user?.permissions, 'manuscripts.calculate');
     const canSendBill = hasPermission(auth.user?.permissions, 'manuscripts.send_bill');
+    const canRequestArrears = hasPermission(auth.user?.permissions, 'arrears.request');
 
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [isFiltering, setIsFiltering] = useState(false);
@@ -636,15 +637,17 @@ export default function ManuscriptsIndex({ period, filters, manuscripts, summary
                                                 pre-existing Send Bill action alongside the new Adjust Arrears
                                                 entry, one dropdown per row, distinctly labeled. */}
                                             <Dropdown label={`Actions for ${manuscript.customer_name}`}>
-                                                <DropdownItem
-                                                    onClick={() => setAdjustCustomer(arrearsCustomer)}
-                                                    icon={<IconScale size={16} stroke={1.75} />}
-                                                >
-                                                    Adjust Arrears
-                                                </DropdownItem>
+                                                {canRequestArrears && (
+                                                    <DropdownItem
+                                                        onClick={() => setAdjustCustomer(arrearsCustomer)}
+                                                        icon={<IconScale size={16} stroke={1.75} />}
+                                                    >
+                                                        Adjust Arrears
+                                                    </DropdownItem>
+                                                )}
                                                 {canSendBill && (
                                                     <>
-                                                        <DropdownDivider />
+                                                        {canRequestArrears && <DropdownDivider />}
                                                         {manuscript.wa_link ? (
                                                             // DropdownItem's `href` branch always renders through
                                                             // Inertia's <Link> (router.visit()), which would wrongly

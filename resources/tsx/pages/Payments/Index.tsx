@@ -439,13 +439,15 @@ export default function PaymentsIndex({ payments, filters, statusCounts, reversa
                         Reversal requests ({reversal_requests_count})
                     </Link>
                 )}
-                <Link
-                    href="/payments/create"
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700"
-                >
-                    <IconPlus size={18} stroke={2} />
-                    Record Payment
-                </Link>
+                {(hasPermission(auth.user?.permissions, 'payments.create') || auth.user?.can_record_payments) && (
+                    <Link
+                        href="/payments/create"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700"
+                    >
+                        <IconPlus size={18} stroke={2} />
+                        Record Payment
+                    </Link>
+                )}
                 </div>
             </div>
 
@@ -697,7 +699,7 @@ export default function PaymentsIndex({ payments, filters, statusCounts, reversa
                                     <Td>
                                         <Dropdown label={`Actions for ${payment.customer_name}'s payment`}>
                                             <DropdownItem href={`/payments/${payment.uuid}`}>View</DropdownItem>
-                                            {canVerify && <DropdownItem href={`/payments/${payment.uuid}/edit`}>Edit</DropdownItem>}
+                                            {hasPermission(auth.user?.permissions, 'payments.update') && <DropdownItem href={`/payments/${payment.uuid}/edit`}>Edit</DropdownItem>}
                                             {payment.verification_status === 'pending' && canVerify && (
                                                 <DropdownItem onClick={() => setReviewing(payment)}>Review</DropdownItem>
                                             )}

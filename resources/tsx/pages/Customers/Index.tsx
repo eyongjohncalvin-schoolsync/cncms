@@ -19,7 +19,7 @@ import type { BulkBillTarget } from '@/components/customers/BulkUpdateBillModal'
 import { ArchiveCustomerModal } from '@/components/customers/ArchiveCustomerModal';
 import { Dropdown, DropdownItem, DropdownDivider } from '@/components/ui/Dropdown';
 import { formatCurrency } from '@/lib/formatCurrency';
-import { hasPermission } from '@/lib/permissions';
+import { hasPermission, useCan } from '@/lib/permissions';
 import { useDebounce } from '@/hooks/useDebounce';
 import type { Customer, CustomerLevel, CustomerStatus, ImportReport, PageProps, PaginatedResponse, Zone } from '@/types';
 
@@ -83,7 +83,10 @@ export default function CustomersIndex({
     // → `customers.archive`.
     const canArchive = hasPermission(auth.user?.permissions, 'customers.archive');
     // The late registrations report — LateRegistrationController::index (audit.view or arrears.approve).
-    const canSeeLate = hasPermission(auth.user?.permissions, 'audit.view') || hasPermission(auth.user?.permissions, 'arrears.approve');
+    const canSeeLate = hasPermission(auth.user?.permissions, 'arrears.view');
+    const can = useCan();
+    // Office status changes, or disconnecting inside one's own zones (the server checks the zone).
+    const canChangeStatus = can('customers.change_status') || can('customers.disconnect_zone');
 
     const [search, setSearch] = useState(filters.search ?? '');
     const [loading, setLoading] = useState(false);
@@ -210,7 +213,7 @@ export default function CustomersIndex({
                         </Link>
                     ) : (
                         <>
-                            {pendingCount > 0 && (
+                            {pendingCount > 0 && can('installations.activate') && (
                                 <Link
                                     href="/customers?pending_activation=1"
                                     className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 ring-1 ring-inset ring-amber-300 transition-colors hover:bg-amber-100"
@@ -237,17 +240,21 @@ export default function CustomersIndex({
                                     Registered late
                                 </Link>
                             )}
-                            <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
-                                <IconUpload size={18} stroke={2} />
-                                Import
-                            </Button>
-                            <Link
-                                href="/customers/create"
-                                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-                            >
-                                <IconPlus size={18} stroke={2} />
-                                Add Customer
-                            </Link>
+                            {can('customers.create') && (
+                                <>
+                                    <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
+                                        <IconUpload size={18} stroke={2} />
+                                        Import
+                                    </Button>
+                                    <Link
+                                        href="/customers/create"
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                                    >
+                                        <IconPlus size={18} stroke={2} />
+                                        Add Customer
+                                    </Link>
+                                </>
+                            )}
                         </>
                     )}
                 </div>
@@ -464,10 +471,15 @@ export default function CustomersIndex({
                                                 )
                                             ) : (
                                                 <>
-                                                    <DropdownItem href={`/customers/${customer.uuid}/edit`}>Edit</DropdownItem>
-                                                    <DropdownDivider />
-                                                    <CustomerStatusActions customer={customer} variant="menu" />
-                                                    {canArchive && (
+                                                    {can('customers.update') && (
+                                                        <>
+                                                            <DropdownItem href={`/customers/${customer.uuid}/edit`}>Edit</DropdownItem>
+                                                            <DropdownDivider />
+                                                        </>
+                                                    )}
+                                                    {canChangeStatus && <CustomerStatusActions customer={customer} variant="menu" />}
+                                                    {/* No history: deleted (customers.delete); otherwise archived (customers.archive). */}
+                                                    {(customer.has_billing_history === false ? can('customers.delete') : canArchive) && (
                                                         <>
                                                             <DropdownDivider />
                                                             {customer.has_billing_history === false ? (

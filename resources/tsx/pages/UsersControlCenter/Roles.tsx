@@ -338,10 +338,12 @@ function EditRoleModal({
     onClose: () => void;
 }) {
     const [selected, setSelected] = useState<string[]>([]);
+    const [zoneLimited, setZoneLimited] = useState(false);
 
     // Re-seed the checklist each time a different role's modal opens.
     useEffect(() => {
         setSelected(role?.permissions ?? []);
+        setZoneLimited(role?.zone_limited ?? false);
     }, [role]);
 
     if (!role) {
@@ -358,7 +360,7 @@ function EditRoleModal({
                 key={role.uuid}
                 action={`/users/roles/${role.uuid}`}
                 method="patch"
-                transform={(data) => ({ ...data, permissions: selected })}
+                transform={(data) => ({ ...data, permissions: selected, zone_limited: zoneLimited })}
                 onSuccess={onClose}
                 className="flex flex-col gap-4"
             >
@@ -386,6 +388,23 @@ function EditRoleModal({
                             error={errors.description}
                             className="rounded-lg px-3.5 py-2.5"
                         />
+
+                        {!role.is_super && (
+                            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={zoneLimited}
+                                    onChange={(e) => setZoneLimited(e.target.checked)}
+                                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span>
+                                    <span className="font-medium text-slate-900">Limited to their own zones</span>
+                                    <span className="mt-0.5 block text-xs text-slate-500">
+                                        A field role: each person sees and works only the zones given to them on the Agents page.
+                                    </span>
+                                </span>
+                            </label>
+                        )}
 
                         {errors.permissions && <p className="text-xs text-red-600">{errors.permissions}</p>}
 

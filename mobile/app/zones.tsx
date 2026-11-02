@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
-import { useAuth } from '../src/auth/AuthContext';
 import { fetchZonePerformance, fetchZones, type ZoneApi, type ZonePerformanceApi } from '../src/api/zones';
 import { formatFcfa } from '../src/utils/format';
 import { getMyZoneUuids } from '../src/db/zones';
@@ -36,8 +35,6 @@ type Phase = 'loading' | 'offline' | 'error' | 'ready';
  * fetchCustomerDetail()'s reasoning in src/api/customers.ts.
  */
 export default function ZonesScreen() {
-    const { role } = useAuth();
-
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [zones, setZones] = useState<ZoneApi[]>([]);
@@ -143,7 +140,7 @@ export default function ZonesScreen() {
 
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{myZones.length > 1 ? `My zones (${myZones.length})` : 'My zone'}</Text>
-                {role === 'agent' && myZones.length > 0 ? (
+                {myZones.length > 0 ? (
                     myZones.map((zone) => (
                         <Card key={zone.uuid} variant="filled">
                             <Text style={styles.heroEyebrow}>{myZones.length > 1 ? 'ONE OF YOUR ZONES' : 'YOUR ZONE'}</Text>
@@ -155,9 +152,7 @@ export default function ZonesScreen() {
                 ) : (
                     <Card style={styles.itemCard}>
                         <Text style={styles.emptyHint}>
-                            {role === 'agent'
-                                ? 'Your zones will show here once your customer list has synced.'
-                                : "Zone assignment is per-agent — this account isn't scoped to a single zone."}
+                            No zones of your own: this account isn&apos;t limited to particular zones, or yours haven&apos;t synced yet.
                         </Text>
                     </Card>
                 )}

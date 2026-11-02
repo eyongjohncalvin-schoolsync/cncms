@@ -68,28 +68,10 @@ class UpdateTenantUserRequest extends FormRequest
             // Branches v2 (D7): transfers between branches are headquarters' call.
             'branch_uuid' => ['sometimes', 'nullable', 'string', Rule::when(fn (): bool => app(TenantContext::class)->isFenced(), ['missing'])],
             // The narrow per-user payment-recording grant — see
-            // PaymentPolicy::create()'s doc comment and the
-            // add_can_record_payments_to_tenant_users_table migration.
-            // authorize() above already restricts this whole request to
-            // users.manage; this rule additionally rejects (not silently
-            // ignores) an attempt to set it on any row whose role isn't
-            // currently `worker` — the flag is meaningless for every other
-            // role, which already has payments.create via role. Checked
-            // against the route-bound TenantUser's CURRENT role: this
-            // checkbox is only ever submitted alone (the Users Control
-            // Center page patches one field per request, same
-            // convention as role/job_title/branch_uuid above), so there is
-            // no simultaneous role change to account for here.
-            'can_record_payments' => [
-                'sometimes', 'boolean',
-                function (string $attribute, mixed $value, Closure $fail): void {
-                    $tenantUser = $this->route('tenantUser');
-
-                    if ($tenantUser instanceof TenantUser && $tenantUser->role !== 'worker') {
-                        $fail('The payment-recording flag can only be set for a worker.');
-                    }
-                },
-            ],
+            // PaymentPolicy::create()'s doc comment. Any role since
+            // 2026-11-02 (it was the worker role only): one person may
+            // record payments though their role can't.
+            'can_record_payments' => ['sometimes', 'boolean'],
             // The Investor tier grant (references/rbac-permissions.md
             // section 7, App\Policies\ReportPolicy::view()'s doc comment) —
             // unlike can_record_payments above, this is deliberately NOT

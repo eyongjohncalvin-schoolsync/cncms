@@ -26,6 +26,7 @@ interface ZonesIndexProps {
 export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
     const { auth, flash } = usePage<PageProps>().props;
     // Same ability as the single-row Delete (ZonePolicy::delete → `zones.manage`).
+    // zones.manage: add, import and delete zones.
     const canDelete = hasPermission(auth.user?.permissions, 'zones.manage');
     const [search, setSearch] = useState(filters.search ?? '');
     const [loading, setLoading] = useState(false);
@@ -120,12 +121,15 @@ export default function ZonesIndex({ zones, filters }: ZonesIndexProps) {
                             Zone coverage
                         </Link>
                     )}
-                    <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
-                        <IconUpload size={18} stroke={2} />
-                        Import
-                    </Button>
+                    {canDelete && (
+                        <Button variant="secondary" onClick={() => setImportOpen(true)} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
+                            <IconUpload size={18} stroke={2} />
+                            Import
+                        </Button>
+                    )}
                     <Link
                         href="/zones/create"
+                        hidden={!canDelete}
                         className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                     >
                         <IconPlus size={18} stroke={2} />

@@ -172,7 +172,7 @@ class PaymentService
         // zone-scoped branch stays an additive OR (agent is NOT seeded
         // `payments.verify`).
         $canAutoVerify = $this->context->can('payments.verify')
-            || $this->context->isAgentCovering($customer->zone_id);
+            || ($this->context->can('payments.verify_zone') && $this->context->isAgentCovering($customer->zone_id));
 
         $heldReason = $this->holdReason($customer, $data);
 

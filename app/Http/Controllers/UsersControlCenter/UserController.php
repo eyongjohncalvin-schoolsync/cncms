@@ -74,6 +74,13 @@ class UserController extends Controller
         // Delete is offered only for accounts with no history — one query for the list.
         $withHistory = app(StaffRemovalService::class)->usersWithHistory($tenantUsers->pluck('user_id')->map(fn ($id): int => (int) $id)->all());
 
+        // Roles limited to their own zones (a role setting since 2026-11-02) — one query for the list.
+        $zoneLimitedRoles = Role::query()->where('zone_limited', true)->pluck('name')->all();
+        // Roles that record payments already — the per-person grant is offered to everyone else.
+        $recordingRoles = Role::query()->where('is_super', true)
+            ->orWhereHas('permissions', fn ($query) => $query->where('permission', 'payments.create'))
+            ->pluck('name')->all();
+
         return Inertia::render('UsersControlCenter/Users', [
             'can_set_salaries' => $canSetSalaries,
             'salary_grades' => $canSetSalaries
@@ -83,7 +90,7 @@ class UserController extends Controller
                 : [],
             'users' => $tenantUsers->map(fn (TenantUser $tenantUser): array => [
                 'salary' => $salaries[(int) $tenantUser->user_id] ?? null,
-                'agent_setup' => $tenantUser->role !== 'agent' ? null : match (true) {
+                'agent_setup' => ! in_array($tenantUser->role, $zoneLimitedRoles, true) ? null : match (true) {
                     // The agent record comes with the account (StaffAccountService); what can be missing is zones.
                     ! $agentProfiles->has($tenantUser->user_id), $agentProfiles[$tenantUser->user_id]->coverage_count === 0 => 'no_zones',
                     default => null,
@@ -104,6 +111,8 @@ class UserController extends Controller
                 // PaymentPolicy::create()'s doc comment. Always sent so the
                 // page can render a checkbox purely from this one field.
                 'can_record_payments' => $tenantUser->can_record_payments,
+                'role_records_payments' => in_array($tenantUser->role, $recordingRoles, true),
+                'zone_limited' => in_array($tenantUser->role, $zoneLimitedRoles, true),
                 // Investor tier grant — see ReportPolicy::view(). Meaningful
                 // on any role, so the page renders this checkbox unconditionally.
                 'is_investor' => $tenantUser->is_investor,

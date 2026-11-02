@@ -106,7 +106,7 @@ class DisconnectionsController extends Controller
     {
         $this->authorize('viewEligibilityBoard', Customer::class);
 
-        $isAgent = $this->context->is('agent');
+        $isAgent = $this->context->isZoneLimited();
         $zoneUuid = $request->string('zone_uuid')->toString() ?: null;
         $zoneId = null;
 

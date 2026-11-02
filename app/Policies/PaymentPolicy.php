@@ -57,7 +57,7 @@ class PaymentPolicy
         // additive OR (a per-user flag — worker's role is NOT seeded
         // `payments.create`; see this method's docblock and Wave 2 rules).
         return $this->context->can('payments.create')
-            || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
+            || $this->context->tenantUser->can_record_payments === true;
     }
 
     /**
@@ -68,7 +68,7 @@ class PaymentPolicy
     public function bulkCreate(User $user): bool
     {
         return $this->context->can('payments.create')
-            || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
+            || $this->context->tenantUser->can_record_payments === true;
     }
 
     public function update(User $user): bool
@@ -148,7 +148,7 @@ class PaymentPolicy
         }
 
         return $this->context->can('payments.verify')
-            || $this->context->isAgentCovering($payment->customer->zone_id);
+            || ($this->context->can('payments.verify_zone') && $this->context->isAgentCovering($payment->customer->zone_id));
     }
 
     /**
@@ -170,7 +170,7 @@ class PaymentPolicy
         // fence for an agent is re-checked per item in
         // App\Services\PaymentVerificationService::verifyMany() (untouched).
         return $this->context->can('payments.verify')
-            || $this->context->role === 'agent';
+            || ($this->context->can('payments.verify_zone') && $this->context->isZoneLimited());
     }
 
     /**
@@ -183,6 +183,6 @@ class PaymentPolicy
     public function attachReceipt(User $user): bool
     {
         return $this->context->can('payments.create')
-            || ($this->context->role === 'worker' && $this->context->tenantUser->can_record_payments === true);
+            || $this->context->tenantUser->can_record_payments === true;
     }
 }

@@ -449,7 +449,7 @@ class PaymentVerificationService
     {
         $verified = [];
         $skipped = [];
-        $isAgent = $this->context->role === 'agent';
+        $isAgent = ! $this->context->can('payments.verify'); // an in-zone verifier: each payment re-checked against their zones
 
         // One query for the whole selection (with everything verify() and
         // receipt issuing read) rather than a lookup per payment.

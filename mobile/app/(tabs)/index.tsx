@@ -18,7 +18,7 @@ import { fontSize, spacing } from '../../src/theme/tokens';
 import { formatFcfa, formatRelativeTime } from '../../src/utils/format';
 
 export default function HomeScreen() {
-    const { user, role, logout } = useAuth();
+    const { user, role, logout, can } = useAuth();
     const router = useRouter();
     const notificationsState = useSyncExternalStore(subscribeNotificationsState, getNotificationsState);
 
@@ -117,16 +117,18 @@ export default function HomeScreen() {
               treatment — see the "Zone arrears outstanding" card just below,
               which stays the outlined style on purpose (comment there).
             */}
-            <Card variant="filled">
-                <View style={styles.heroTopRow}>
-                    <Text style={styles.heroLabel}>TODAY'S COLLECTION</Text>
-                    <View style={styles.heroGlyphBadge}>
-                        <Text style={styles.heroGlyphText}>₣</Text>
+            {can('payments.create') ? (
+                <Card variant="filled">
+                    <View style={styles.heroTopRow}>
+                        <Text style={styles.heroLabel}>TODAY'S COLLECTION</Text>
+                        <View style={styles.heroGlyphBadge}>
+                            <Text style={styles.heroGlyphText}>₣</Text>
+                        </View>
                     </View>
-                </View>
-                <Text style={styles.heroValue}>{todayTotal === null ? '—' : formatFcfa(todayTotal)}</Text>
-                <Text style={styles.heroHint}>From this device — renders instantly, even offline.</Text>
-            </Card>
+                    <Text style={styles.heroValue}>{todayTotal === null ? '—' : formatFcfa(todayTotal)}</Text>
+                    <Text style={styles.heroHint}>From this device — renders instantly, even offline.</Text>
+                </Card>
+            ) : null}
 
             {/*
               Zone-arrears card — mobile-app-react-native.md §4 calls for a
@@ -166,6 +168,9 @@ export default function HomeScreen() {
               without escalating its visual weight into looking like
               something is wrong.
             */}
+            {/* The area's figures: for a role that sees customers (owner, 2026-11-02). */}
+            {can('customers.view') ? (
+                <>
             <Card
                 onPress={() => router.push('/(tabs)/customers?filter=owes-money')}
                 accentColor={zoneSnapshot && zoneSnapshot.arrearsTotal > 0 ? colors.danger : undefined}
@@ -209,27 +214,36 @@ export default function HomeScreen() {
                     tone="customers"
                 />
             </View>
+                </>
+            ) : null}
 
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Quick actions</Text>
-                <Button
-                    title="Record a payment"
-                    onPress={() => router.push('/(tabs)/record-payment')}
-                    size="large"
-                />
+                {/* Each only for a role holding it (owner, 2026-11-02). */}
+                {can('payments.create') ? (
+                    <Button
+                        title="Record a payment"
+                        onPress={() => router.push('/(tabs)/record-payment')}
+                        size="large"
+                    />
+                ) : null}
                 {/* Secondary CTAs, one tap deeper — not top-level tabs, per
                     mobile-app-react-native.md §4 / complaint-desk.md §7's
                     explicit "not a 5th tab" decision for Log a Complaint. */}
-                <Button
-                    title="Request a bon"
-                    variant="secondary"
-                    onPress={() => router.push('/record-expense')}
-                />
-                <Button
-                    title="Log a complaint"
-                    variant="secondary"
-                    onPress={() => router.push('/log-complaint')}
-                />
+                {can('vouchers.request') ? (
+                    <Button
+                        title="Request a bon"
+                        variant="secondary"
+                        onPress={() => router.push('/record-expense')}
+                    />
+                ) : null}
+                {can('complaints.create') ? (
+                    <Button
+                        title="Log a complaint"
+                        variant="secondary"
+                        onPress={() => router.push('/log-complaint')}
+                    />
+                ) : null}
             </View>
 
             <View style={styles.section}>
@@ -253,18 +267,24 @@ export default function HomeScreen() {
 
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Get around</Text>
-                <Card onPress={() => router.push('/(tabs)/customers?filter=owes-money')} accentColor={colors.accent.customers}>
-                    <Text style={styles.linkTitle}>Continue your route</Text>
-                    <Text style={styles.linkSubtitle}>Jump into customers who still owe money</Text>
-                </Card>
-                <Card onPress={() => router.push('/(tabs)/customers')}>
-                    <Text style={styles.linkTitle}>Customers</Text>
-                    <Text style={styles.linkSubtitle}>Browse your zone's customers</Text>
-                </Card>
-                <Card onPress={() => router.push('/(tabs)/history')}>
-                    <Text style={styles.linkTitle}>My recorded payments</Text>
-                    <Text style={styles.linkSubtitle}>See what you've submitted and its verification status</Text>
-                </Card>
+                {can('customers.view') ? (
+                    <>
+                        <Card onPress={() => router.push('/(tabs)/customers?filter=owes-money')} accentColor={colors.accent.customers}>
+                            <Text style={styles.linkTitle}>Continue your route</Text>
+                            <Text style={styles.linkSubtitle}>Jump into customers who still owe money</Text>
+                        </Card>
+                        <Card onPress={() => router.push('/(tabs)/customers')}>
+                            <Text style={styles.linkTitle}>Customers</Text>
+                            <Text style={styles.linkSubtitle}>Browse your zone's customers</Text>
+                        </Card>
+                    </>
+                ) : null}
+                {can('payments.create') ? (
+                    <Card onPress={() => router.push('/(tabs)/history')}>
+                        <Text style={styles.linkTitle}>My recorded payments</Text>
+                        <Text style={styles.linkSubtitle}>See what you've submitted and its verification status</Text>
+                    </Card>
+                ) : null}
             </View>
         </ScrollView>
     );

@@ -10,6 +10,7 @@ use App\Http\Requests\StoreRoleRequest;
 use App\Http\Requests\UpdateRoleRequest;
 use App\Models\Role;
 use App\Models\TenantUser;
+use App\Services\StaffAccountService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -61,6 +62,7 @@ class RoleController extends Controller
                 'description' => $role->description,
                 'is_system' => $role->is_system,
                 'is_super' => $role->is_super,
+                'zone_limited' => (bool) $role->zone_limited,
                 'permissions' => $role->permissions->pluck('permission')->values(),
                 'user_count' => (int) ($counts[$role->name] ?? 0),
             ])->values(),
@@ -102,8 +104,15 @@ class RoleController extends Controller
     {
         $this->authorize('update', $role);
 
-        $role->fill($request->safe()->only(['label', 'description']));
+        $role->fill($request->safe()->only(['label', 'description', 'zone_limited']));
         $role->save();
+
+        // Limited to their own zones, or no longer: each member's field
+        // record (which holds their zones) follows — created, or retired.
+        if ($role->wasChanged('zone_limited')) {
+            TenantUser::query()->where('tenant_id', (string) tenant()?->getTenantKey())->where('role', $role->name)->with('user')->get()
+                ->each(fn (TenantUser $member) => app(StaffAccountService::class)->syncAgent($member));
+        }
 
         // A custom or system role's matrix. `syncPermissions` intersects
         // against the catalog itself as a second layer of defence — the

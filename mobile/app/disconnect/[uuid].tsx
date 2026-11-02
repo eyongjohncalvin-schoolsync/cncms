@@ -58,7 +58,7 @@ type Phase = 'loading' | 'offline' | 'error' | 'ready' | 'submitting' | 'success
 export default function DisconnectScreen() {
     const { uuid } = useLocalSearchParams<{ uuid: string }>();
     const router = useRouter();
-    const { role, can } = useAuth();
+    const { can } = useAuth();
 
     const [phase, setPhase] = useState<Phase>('loading');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -197,13 +197,10 @@ export default function DisconnectScreen() {
         );
     }
 
-    // RBAC v2 Wave 4: `customers.change_status` is the matrix permission for
-    // disconnect/suspend/reconnect (CustomerPolicy). Agents are NOT seeded
-    // it — they get a zone-scoped disconnect via an OR-branch in
-    // CustomerPolicy::disconnect() that a flat permission list can't see —
-    // so `role === 'agent'` is allowed here too as a UI affordance, exactly
-    // mirroring that policy. The backend still enforces the zone match.
-    const authorized = can('customers.change_status') || role === 'agent';
+    // `customers.change_status` disconnects anyone; `customers.disconnect_zone`
+    // (2026-11-02, was the role named agent) only inside one's own zones —
+    // the server enforces the zone match (CustomerPolicy::disconnect()).
+    const authorized = can('customers.change_status') || can('customers.disconnect_zone');
     const submitting = phase === 'submitting';
     const alreadyDisconnected = customer.status === 'disconnected' || customer.status === 'suspended';
 

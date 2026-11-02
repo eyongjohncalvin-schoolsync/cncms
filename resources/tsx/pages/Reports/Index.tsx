@@ -36,7 +36,6 @@ interface ReportsIndexProps {
 }
 
 const TIER_LABELS: Record<ReportTier, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' };
-const AGENT_LAYOUT_ROLES = ['agent'];
 
 // -----------------------------------------------------------------
 // Pure date helpers — no date library in this project; only the small set
@@ -84,14 +83,14 @@ function deltaWithGood(delta: ReportDelta | null, goodDirection: 'up' | 'down', 
 
 export default function ReportsIndex({ tier, date, report, can_export: canExport }: ReportsIndexProps) {
     const { auth } = usePage<PageProps>().props;
-    const role = auth.user?.role ?? null;
-    const isAgentLayout = role !== null && AGENT_LAYOUT_ROLES.includes(role);
+    // A field role (limited to its own zones — a role setting, 2026-11-02) gets the agent layout.
+    const isAgentLayout = auth.user?.zone_limited ?? false;
     // Investor tier — same "one route, server picks payload/scope, frontend
     // picks layout per role" convention this file already uses for the
     // agent-vs-office split above; investor layout selection is decided
     // client-side off the shared `is_investor` flag (App\Http\Middleware\
-    // HandleInertiaRequests::share()), same as AGENT_LAYOUT_ROLES is
-    // decided off `auth.user.role`. See references/rbac-permissions.md
+    // HandleInertiaRequests::share()), as the agent layout is
+    // decided off `auth.user.zone_limited`. See references/rbac-permissions.md
     // section 7 and resources/tsx/layouts/InvestorLayout.tsx.
     const isInvestor = auth.user?.is_investor ?? false;
     const Layout = isInvestor ? InvestorLayout : AppLayout;
@@ -226,7 +225,7 @@ export default function ReportsIndex({ tier, date, report, can_export: canExport
             ) : tier === 'daily' ? (
                 <DailyView report={report as DailyReport} />
             ) : tier === 'weekly' ? (
-                <WeeklyView report={report as WeeklyReport} role={role} />
+                <WeeklyView report={report as WeeklyReport} branchFenced={auth.user?.branch_fenced ?? false} />
             ) : (
                 <MonthlyView report={report as MonthlyReport} />
             )}
@@ -443,7 +442,7 @@ function DailyView({ report }: { report: DailyReport }) {
 // Weekly — stat card row + exactly one 7-bar BarChart + a zone/branch
 // breakdown table.
 // -----------------------------------------------------------------
-function WeeklyView({ report, role }: { report: WeeklyReport; role: string | null }) {
+function WeeklyView({ report, branchFenced }: { report: WeeklyReport; branchFenced: boolean }) {
     const chartData = useMemo(
         () => report.daily_breakdown.map((point) => ({ date: point.date.slice(5), value: Number(point.verified) })),
         [report.daily_breakdown],
@@ -508,7 +507,7 @@ function WeeklyView({ report, role }: { report: WeeklyReport; role: string | nul
                 <Card className="p-0 animate-fade-up" style={{ animationDelay: '200ms' }}>
                     <CardHeader>
                         <h2 className="text-sm font-semibold text-slate-900">
-                            {role === 'manager' ? 'Zone League Table (Your Branch)' : 'Zone League Table'}
+                            {branchFenced ? 'Zone League Table (Your Branch)' : 'Zone League Table'}
                         </h2>
                     </CardHeader>
                     <Table>

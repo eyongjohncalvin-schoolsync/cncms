@@ -272,10 +272,10 @@ export default function UsersControlCenterUsers({
                                     </Td>
                                     {showBranchControls && (
                                         <Td>
-                                            {tenantUser.role === 'agent' ? (
+                                            {tenantUser.zone_limited ? (
                                                 <span
                                                     className="text-xs text-slate-400"
-                                                    title="Agents are scoped automatically by their assigned zone's branch, not this setting."
+                                                    title="Their role is limited to their own zones: the zones' branch decides, not this setting."
                                                 >
                                                     Via zone assignment
                                                 </span>
@@ -297,7 +297,7 @@ export default function UsersControlCenterUsers({
                                         </Td>
                                     )}
                                     <Td>
-                                        {tenantUser.role === 'worker' ? (
+                                        {!tenantUser.role_records_payments ? (
                                             <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                                                 <input
                                                     type="checkbox"
@@ -311,7 +311,7 @@ export default function UsersControlCenterUsers({
                                         ) : (
                                             <span
                                                 className="text-xs text-slate-400"
-                                                title="Only applicable to the Worker role — every other role already records payments via its permission role."
+                                                title="Their role already records payments."
                                             >
                                                 N/A
                                             </span>

@@ -99,10 +99,13 @@ class ReportController extends Controller
      */
     private function defaultTierForRole(): string
     {
-        return match ($this->context->role) {
-            'agent' => 'daily',
-            'manager' => 'weekly',
-            default => 'monthly',
+        // Field roles (limited to their own zones) land on the day, those who
+        // see the profit and loss on the month, everyone else on the week —
+        // by the role's settings and permissions, not its name (2026-11-02).
+        return match (true) {
+            $this->context->isZoneLimited() => 'daily',
+            $this->context->can('reports.profit_and_loss') => 'monthly',
+            default => 'weekly',
         };
     }
 }
