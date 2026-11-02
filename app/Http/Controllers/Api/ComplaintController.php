@@ -68,6 +68,7 @@ class ComplaintController extends Controller
         return (new ComplaintResource($this->complaints->findOrFail($complaint->uuid)))
             ->additional(['can' => [
                 'assign' => $user->can('assign', Complaint::class),
+                'take' => $user->can('take', $complaint),
                 'start' => $user->can('start', $complaint),
                 'resolve' => $complaint->status !== 'resolved' && $user->can('resolve', $complaint),
             ]])
@@ -80,6 +81,16 @@ class ComplaintController extends Controller
         $this->authorize('start', $complaint);
 
         $complaint = $this->complaints->start($complaint);
+
+        return (new ComplaintResource($complaint->load(['submittedBy', 'assignedTo'])))->response();
+    }
+
+    /** "I'll take it" — a technician claims an open complaint nobody is on yet. */
+    public function take(Request $request, Complaint $complaint): JsonResponse
+    {
+        $this->authorize('take', $complaint);
+
+        $complaint = $this->complaints->take($complaint, $request->user());
 
         return (new ComplaintResource($complaint->load(['submittedBy', 'assignedTo'])))->response();
     }

@@ -1,4 +1,5 @@
 import { Appearance } from 'react-native';
+import { getAppearanceChoice } from './appearance';
 
 /**
  * Flat, AAA-contrast (7:1 minimum for body text) color tokens. No
@@ -242,8 +243,16 @@ const dark: Palette = {
     statusBar: 'light',
 };
 
-/** The phone's setting when the app opened: 'dark' or 'light'. */
-export const colorScheme: 'light' | 'dark' = Appearance.getColorScheme() === 'dark' ? 'dark' : 'light';
+const appearanceChoice = getAppearanceChoice();
+
+// The choice also drives the phone's own pieces (alerts, keyboard, pickers);
+// 'unspecified' hands them back to the phone after "Match my phone".
+Appearance.setColorScheme(appearanceChoice === 'system' ? 'unspecified' : appearanceChoice);
+
+/** Settings → Appearance when the app opened, else the phone's setting: 'dark' or 'light'. */
+export const colorScheme: 'light' | 'dark' = appearanceChoice !== 'system'
+    ? appearanceChoice
+    : Appearance.getColorScheme() === 'dark' ? 'dark' : 'light';
 
 export const colors: Palette = colorScheme === 'dark' ? dark : light;
 

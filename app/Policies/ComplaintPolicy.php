@@ -6,6 +6,7 @@ namespace App\Policies;
 
 use App\Models\Complaint;
 use App\Models\User;
+use App\Services\TechnicianService;
 use App\Support\TenantContext;
 
 /**
@@ -67,6 +68,20 @@ class ComplaintPolicy
     public function start(User $user, Complaint $complaint): bool
     {
         return (int) $complaint->assigned_to === (int) $user->id && $complaint->status === 'open';
+    }
+
+    /**
+     * "I'll take it" (owner, 2026-11-02): a technician of the complaint's
+     * branch claims an open complaint nobody is on yet, so two don't go to
+     * the same house. Never their own complaint (they can't resolve it).
+     */
+    public function take(User $user, Complaint $complaint): bool
+    {
+        return $complaint->status === 'open'
+            && $complaint->assigned_to === null
+            && $complaint->submitted_by !== $user->id
+            && $this->context->can('complaints.resolve')
+            && app(TechnicianService::class)->canBeAssigned($user, $complaint->branch_id);
     }
 
     public function reopen(User $user, Complaint $complaint): bool

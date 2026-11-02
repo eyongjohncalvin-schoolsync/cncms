@@ -6,7 +6,7 @@ import { Button } from '../../src/components/ui/Button';
 import { DetailRow } from '../../src/components/ui/DetailRow';
 import { EmptyState } from '../../src/components/ui/EmptyState';
 import { TextInput } from '../../src/components/ui/TextInput';
-import { fetchDeskComplaint, resolveComplaint, startComplaint, type DeskComplaint, type DeskPermissions } from '../../src/api/complaintDesk';
+import { fetchDeskComplaint, resolveComplaint, startComplaint, takeComplaint, type DeskComplaint, type DeskPermissions } from '../../src/api/complaintDesk';
 import { assignComplaint, fetchTechnicians, type Technician } from '../../src/api/inbox';
 import { extractErrorMessage } from '../../src/api/client';
 import { refreshInbox } from '../../src/inbox/inboxStore';
@@ -141,7 +141,8 @@ export default function ComplaintScreen() {
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
-            {can?.start ? <Button title="Start this job" size="large" loading={busy} onPress={() => void act(() => startComplaint(uuid), 'Marked started — the office can see you’re on it.')} /> : null}
+            {can?.take ? <Button title="Take this job" size="large" loading={busy} onPress={() => void act(() => takeComplaint(uuid), 'It’s yours — the office can see you took it.')} /> : null}
+            {can?.start ?<Button title="Start this job" size="large" loading={busy} onPress={() => void act(() => startComplaint(uuid), 'Marked started — the office can see you’re on it.')} /> : null}
 
             {can?.resolve ? (
                 <View style={styles.block}>

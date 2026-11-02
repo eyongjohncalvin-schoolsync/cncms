@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as Updates from 'expo-updates';
@@ -8,6 +8,13 @@ import { Button } from '../src/components/ui/Button';
 import { DetailRow } from '../src/components/ui/DetailRow';
 import { useAuth } from '../src/auth/AuthContext';
 import { biometricAvailable } from '../src/lock/appLock';
+import { getAppearanceChoice, saveAppearanceChoice, type AppearanceChoice } from '../src/theme/appearance';
+
+const APPEARANCE_CHOICES: { key: AppearanceChoice; label: string }[] = [
+    { key: 'system', label: 'Match my phone' },
+    { key: 'light', label: 'Light' },
+    { key: 'dark', label: 'Dark' },
+];
 import { getSyncState, subscribeSyncState } from '../src/sync/syncStore';
 import { extractErrorMessage } from '../src/api/client';
 import { colors } from '../src/theme/colors';
@@ -59,6 +66,29 @@ export default function SettingsScreen() {
     const [canUseFingerprint, setCanUseFingerprint] = useState(false);
     const [fingerprintBusy, setFingerprintBusy] = useState(false);
     const fingerprintOn = fingerprintSignIn !== null && fingerprintSignIn.userUuid === user?.uuid;
+    const appearance = getAppearanceChoice();
+
+    const chooseAppearance = useCallback(
+        (choice: AppearanceChoice) => {
+            if (choice === appearance) {
+                return;
+            }
+
+            Alert.alert('Change the colours?', 'The app restarts to apply it. Nothing you recorded is lost.', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Restart',
+                    onPress: () => {
+                        saveAppearanceChoice(choice);
+                        void Updates.reloadAsync().catch(() =>
+                            Alert.alert('Saved', 'Close the app and open it again to see the new colours.'),
+                        );
+                    },
+                },
+            ]);
+        },
+        [appearance],
+    );
 
     useEffect(() => {
         void biometricAvailable().then(setCanUseFingerprint);
@@ -152,6 +182,28 @@ export default function SettingsScreen() {
             </Card>
 
             <Card>
+                <Text style={styles.sectionTitle}>Appearance</Text>
+                <Text style={styles.sectionHint}>For this phone only. The app restarts to change its colours.</Text>
+                <View style={styles.choiceRow}>
+                    {APPEARANCE_CHOICES.map(({ key, label }) => {
+                        const selected = key === appearance;
+
+                        return (
+                            <Pressable
+                                key={key}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected }}
+                                onPress={() => chooseAppearance(key)}
+                                style={[styles.choice, selected && styles.choiceSelected]}
+                            >
+                                <Text style={[styles.choiceLabel, selected && styles.choiceLabelSelected]}>{label}</Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
+            </Card>
+
+            <Card>
                 <Text style={styles.sectionTitle}>About</Text>
                 <View style={styles.fieldList}>
                     <DetailRow label="App version" value={Constants.expoConfig?.version ?? '—'} />
@@ -203,5 +255,10 @@ const styles = StyleSheet.create({
     switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.lg },
     switchLabel: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
     flex1: { flex: 1 },
+    choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
+    choice: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+    choiceSelected: { backgroundColor: colors.accent.customers, borderColor: colors.accent.customers },
+    choiceLabel: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+    choiceLabelSelected: { color: colors.textInverse },
     logoutButton: { marginTop: spacing.sm },
 });

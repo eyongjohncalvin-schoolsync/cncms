@@ -158,6 +158,12 @@ enum Permission: string
      * whole-branch alert at 48 hours (ComplaintEscalationService).
      */
     case ComplaintsReceiveAlerts = 'complaints.receive_alerts';
+    /**
+     * A complaint this person logs rings the branch's field technicians at
+     * once, so one takes it before anyone has to assign it (owner,
+     * 2026-11-02). Field agents hold it; assigning stays with the office.
+     */
+    case ComplaintsNotifyTechnicians = 'complaints.notify_technicians';
 
     // ---- Arrears adjustments ---------------------------------
     case ArrearsView = 'arrears.view';

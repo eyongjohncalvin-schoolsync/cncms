@@ -288,6 +288,32 @@ class ComplaintEscalationService
         }
     }
 
+    /**
+     * A technician took the complaint themselves (ComplaintService::take()):
+     * no ring for them — they just pressed it — but it counts as Level 0,
+     * and the complaint team is told quietly who is on it.
+     */
+    public function announceTaken(Complaint $complaint, User $technician): void
+    {
+        if (in_array(0, $this->firedLevels($complaint), true)) {
+            return;
+        }
+
+        DB::transaction(function () use ($complaint, $technician): void {
+            ComplaintEscalation::query()->create([
+                'complaint_id' => $complaint->id,
+                'level' => 0,
+                'notified_scope' => 'user',
+                'notified_user_id' => $technician->id,
+                'escalated_at' => now(),
+            ]);
+
+            $this->tell($this->team($complaint)->reject(fn (User $user): bool => $user->id === $technician->id), $complaint, 'complaint.assigned', 'info', "{$technician->name} took a complaint", $this->body($complaint, 0));
+
+            $this->logLevel($complaint, 0, 'team');
+        });
+    }
+
     /** Assigned: the technician's phone rings; the complaint team is told quietly. */
     private function fireLevel0(Complaint $complaint): void
     {

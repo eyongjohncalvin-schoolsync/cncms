@@ -14,6 +14,7 @@ use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Support\BranchLookup;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -92,6 +93,19 @@ class TechnicianService
             ->sort(fn (array $a, array $b): int => [$rank[$a['reason']], $a['open'], $a['name']] <=> [$rank[$b['reason']], $b['open'], $b['name']])
             ->values()
             ->all();
+    }
+
+    /**
+     * The technicians who may take this complaint (its branch's, or the
+     * head office's when it has none), as users.
+     *
+     * @return EloquentCollection<int, User>
+     */
+    public function usersFor(Complaint $complaint): EloquentCollection
+    {
+        $branch = Branch::allMemoized()->get($complaint->branch_id) ?? Branch::allMemoized()->get(Branch::headquartersId());
+
+        return User::query()->whereIn('id', $branch === null ? [] : $this->forBranch($branch)->pluck('user_id'))->get();
     }
 
     /** Whether this user may be given a complaint of this branch. */

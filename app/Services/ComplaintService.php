@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Auth\Permission;
 use App\DataTransferObjects\ComplaintData;
 use App\DataTransferObjects\ResolveComplaintData;
 use App\Models\Complaint;
 use App\Models\Customer;
+use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Zone;
 use App\Repositories\Contracts\ComplaintRepositoryInterface;
@@ -17,6 +19,7 @@ use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -90,15 +93,35 @@ class ComplaintService
             'zone_id' => $zoneId,
         ], (int) $branchId);
 
-        // Nobody on it yet: whoever assigns technicians hears about it at
-        // once (manager inbox, wave 2) — an urgent complaint rings. Field
-        // agents may assign too (owner, 2026-11-02), but only those covering
-        // the complaint's zone are alerted, not every agent of the branch.
+        // Nobody on it yet (owner, 2026-11-02): when whoever logged it holds
+        // "Notify technicians", the branch's field technicians are rung at
+        // once, so one of them takes it before anyone has to assign it; the
+        // office (whoever assigns) sees it in the inbox quietly and assigns
+        // only if it isn't moving — rung when it is urgent, or when no
+        // technician was.
         if ($complaint->assigned_to === null) {
+            $office = $this->actionAlerts->deciders('complaints.assign', $complaint->branch_id, $submittedByUserId);
+            $fieldTechnicians = $this->submitterNotifiesTechnicians($submittedByUserId)
+                ? app(TechnicianService::class)->usersFor($complaint)
+                    ->reject(fn (User $user): bool => $user->id === $submittedByUserId || $office->contains('id', $user->id))
+                : new Collection;
+
             $this->actionAlerts->alert(
-                $this->actionAlerts->deciders('complaints.assign', $complaint->branch_id, $submittedByUserId, zoneOnly: true, zoneId: $complaint->zone_id),
+                $fieldTechnicians,
+                'complaint.available',
+                'urgent',
+                'New complaint near you',
+                $complaint->title,
+                "/complaints/{$complaint->uuid}",
+                'complaint',
+                $complaint->uuid,
+                $complaint->branch_id,
+            );
+
+            $this->actionAlerts->alert(
+                $office,
                 'inbox.complaint',
-                $complaint->urgent ? 'urgent' : 'warning',
+                $complaint->urgent || $fieldTechnicians->isEmpty() ? 'urgent' : 'warning',
                 $complaint->urgent ? 'Urgent complaint to assign' : 'New complaint to assign',
                 $complaint->title,
                 "/complaints/{$complaint->uuid}",
@@ -172,6 +195,40 @@ class ComplaintService
     public function start(Complaint $complaint): Complaint
     {
         return $this->complaints->update($complaint, ['status' => 'in_progress']);
+    }
+
+    private function submitterNotifiesTechnicians(int $submittedByUserId): bool
+    {
+        $member = TenantUser::query()
+            ->where('tenant_id', (string) tenant()?->getTenantKey())
+            ->where('user_id', $submittedByUserId)
+            ->first();
+
+        return $member !== null && TenantContext::resolve($member)->can(Permission::ComplaintsNotifyTechnicians->value);
+    }
+
+    /**
+     * A technician claims an open complaint nobody is on yet (owner,
+     * 2026-11-02) — the first one wins; the office and the rest of the
+     * complaint team are told who took it.
+     */
+    public function take(Complaint $complaint, User $technician): Complaint
+    {
+        $taken = DB::transaction(function () use ($complaint, $technician): Complaint {
+            $locked = Complaint::query()->whereKey($complaint->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->assigned_to !== null) {
+                $holder = User::query()->find($locked->assigned_to)?->name ?? 'someone else';
+
+                throw ValidationException::withMessages(['complaint' => ["{$holder} already took this complaint."]]);
+            }
+
+            return $this->complaints->update($locked, ['assigned_to' => $technician->id]);
+        });
+
+        $this->escalations->announceTaken($taken, $technician);
+
+        return $taken;
     }
 
     /**

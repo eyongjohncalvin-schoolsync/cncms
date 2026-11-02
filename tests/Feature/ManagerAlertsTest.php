@@ -11,21 +11,19 @@ use App\Models\Company;
 use App\Models\ComplaintEscalation;
 use App\Models\DevicePushToken;
 use App\Models\Notification;
+use App\Models\Role;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
-use App\Models\Zone;
 use App\Services\ArrearsAdjustmentService;
 use App\Services\ComplaintEscalationService;
 use App\Services\ComplaintService;
 use App\Services\PaymentReversalRequestService;
-use Database\Factories\AgentFactory;
 use Database\Factories\ArrearsAdjustmentFactory;
 use Database\Factories\ComplaintFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ExpenseCategoryFactory;
 use Database\Factories\PaymentFactory;
-use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
@@ -160,25 +158,79 @@ class ManagerAlertsTest extends TestCase
         $this->assertSame('urgent', Notification::query()->where('type', 'inbox.complaint')->where('source_uuid', $complaint->uuid)->value('severity'));
     }
 
-    public function test_a_field_agent_is_alerted_to_assign_a_complaint_in_their_own_zone_only(): void
+    private function technician(): User
     {
-        $theirs = ZoneFactory::new()->create();
-        $other = ZoneFactory::new()->create();
-        AgentFactory::new()->create(['zone_id' => $theirs->id, 'user_id' => $this->divine->id]);
+        Role::query()->create(['name' => 'technician', 'label' => 'Technician', 'is_system' => false])
+            ->syncPermissions(['complaints.view', 'complaints.create', 'complaints.resolve']);
 
-        $complaintIn = fn (Zone $zone) => app(ComplaintService::class)->create(
-            ComplaintData::fromArray(['category' => 'customer', 'customer_uuid' => CustomerFactory::new()->create(['zone_id' => $zone->id])->uuid, 'title' => 'No signal', 'description' => 'Since morning']),
-            $this->kelvin->id,
+        return $this->withRole('patience@shalomtech.dev', 'technician');
+    }
+
+    public function test_a_new_complaint_rings_the_field_technicians_and_the_office_hears_quietly(): void
+    {
+        $technician = $this->technician();
+
+        // Owner, 2026-11-02: a field agent logs it, the technicians are rung at once.
+        $complaint = app(ComplaintService::class)->create(
+            ComplaintData::fromArray(['category' => 'operational', 'title' => 'No signal in Fiango', 'description' => 'Since morning']),
+            $this->divine->id,
         );
 
-        // Owner, 2026-11-02: field agents send technicians too — the agent of that zone hears at once.
-        $inTheirZone = $complaintIn($theirs);
-        $this->assertContains($this->divine->id, $this->alertedUserIds('inbox.complaint', $inTheirZone->uuid));
-        $this->assertContains($this->terence->id, $this->alertedUserIds('inbox.complaint', $inTheirZone->uuid));
+        $this->assertSame([$technician->id], $this->alertedUserIds('complaint.available', $complaint->uuid));
+        $this->assertSame('urgent', Notification::query()->where('type', 'complaint.available')->value('severity'));
+        $this->assertContains($this->terence->id, $this->alertedUserIds('inbox.complaint', $complaint->uuid));
+        $this->assertSame('warning', Notification::query()->where('type', 'inbox.complaint')->where('source_uuid', $complaint->uuid)->value('severity'));
+    }
 
-        $elsewhere = $complaintIn($other);
-        $this->assertNotContains($this->divine->id, $this->alertedUserIds('inbox.complaint', $elsewhere->uuid));
-        $this->assertContains($this->terence->id, $this->alertedUserIds('inbox.complaint', $elsewhere->uuid));
+    public function test_without_notify_technicians_the_technicians_are_not_rung(): void
+    {
+        $this->technician();
+        Role::query()->where('name', 'agent')->firstOrFail()->permissions()->where('permission', 'complaints.notify_technicians')->delete();
+
+        $complaint = app(ComplaintService::class)->create(
+            ComplaintData::fromArray(['category' => 'operational', 'title' => 'No signal', 'description' => 'Since morning']),
+            $this->divine->id,
+        );
+
+        $this->assertSame([], $this->alertedUserIds('complaint.available', $complaint->uuid));
+        $this->assertSame('urgent', Notification::query()->where('type', 'inbox.complaint')->where('source_uuid', $complaint->uuid)->value('severity'));
+    }
+
+    public function test_a_technician_takes_a_new_complaint_and_the_next_one_is_told_it_is_taken(): void
+    {
+        $technician = $this->technician();
+        $complaint = ComplaintFactory::new()->submittedBy($this->divine->id)->create(['assigned_to' => null, 'status' => 'open']);
+
+        Sanctum::actingAs($technician);
+        $this->getJson("/api/v1/complaints/{$complaint->uuid}")->assertJsonPath('can.take', true);
+        $this->postJson("/api/v1/complaints/{$complaint->uuid}/take")->assertOk()->assertJsonPath('data.assigned_to.uuid', $technician->uuid);
+
+        // Counts as Level 0: the sweep doesn't ring them for their own job; the office is told quietly.
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.assigned')->where('recipient_user_id', $technician->id)->count());
+        $this->assertContains($this->terence->id, Notification::query()->where('type', 'complaint.assigned')->where('severity', 'info')->pluck('recipient_user_id')->all());
+        app(ComplaintEscalationService::class)->sweep($complaint->fresh(), now());
+        $this->assertSame(0, Notification::query()->where('type', 'complaint.assigned')->where('recipient_user_id', $technician->id)->count());
+
+        // Too late for anyone else, and an agent can't take one at all.
+        $this->app->make('auth')->forgetGuards();
+        Sanctum::actingAs($this->terence);
+        $this->postJson("/api/v1/complaints/{$complaint->uuid}/take")->assertForbidden();
+
+        $fresh = ComplaintFactory::new()->submittedBy($this->kelvin->id)->create(['assigned_to' => null, 'status' => 'open']);
+        $this->app->make('auth')->forgetGuards();
+        Sanctum::actingAs($this->divine);
+        $this->postJson("/api/v1/complaints/{$fresh->uuid}/take")->assertForbidden();
+    }
+
+    public function test_with_no_field_technician_the_office_is_rung(): void
+    {
+        $complaint = app(ComplaintService::class)->create(
+            ComplaintData::fromArray(['category' => 'operational', 'title' => 'No signal', 'description' => 'Since morning']),
+            $this->divine->id,
+        );
+
+        $this->assertSame([], $this->alertedUserIds('complaint.available', $complaint->uuid));
+        $this->assertSame('urgent', Notification::query()->where('type', 'inbox.complaint')->where('source_uuid', $complaint->uuid)->value('severity'));
     }
 
     public function test_assigning_a_complaint_rings_the_technician_at_once_and_the_sweep_does_not_repeat_it(): void

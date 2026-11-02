@@ -20,6 +20,7 @@ Route::apiResource('complaints', ComplaintController::class)
     ->names('api.complaints');
 
 Route::post('complaints/{complaint}/start', [ComplaintController::class, 'start']);
+Route::post('complaints/{complaint}/take', [ComplaintController::class, 'take']);
 Route::post('complaints/{complaint}/resolve', [ComplaintController::class, 'resolve']);
 Route::post('complaints/{complaint}/reopen', [ComplaintController::class, 'reopen']);
 Route::post('complaints/{complaint}/link-duplicate', [ComplaintController::class, 'linkDuplicate']);

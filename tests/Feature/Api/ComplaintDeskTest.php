@@ -98,14 +98,13 @@ class ComplaintDeskTest extends TestCase
             ->assertJsonPath('can.start', true)
             ->assertJsonPath('can.resolve', true);
 
-        // The agent who logged it can neither start nor resolve it — but may
-        // send a technician (owner, 2026-11-02).
+        // The agent who logged it can neither start nor resolve it.
         Sanctum::actingAs($this->divine);
         $this->getJson("/api/v1/complaints/{$complaint->uuid}")
             ->assertOk()
             ->assertJsonPath('can.start', false)
             ->assertJsonPath('can.resolve', false)
-            ->assertJsonPath('can.assign', true);
+            ->assertJsonPath('can.assign', false);
     }
 
     public function test_the_technician_marks_their_own_job_started_and_nobody_else_can(): void

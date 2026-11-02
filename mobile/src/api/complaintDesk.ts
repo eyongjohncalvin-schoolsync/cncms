@@ -29,6 +29,8 @@ export interface DeskComplaint {
 /** What the signed-in person may do with one complaint — the server's own policy answers. */
 export interface DeskPermissions {
     assign: boolean;
+    /** A technician may claim it: open, nobody on it. Absent from older servers. */
+    take?: boolean;
     start: boolean;
     resolve: boolean;
 }
@@ -48,6 +50,13 @@ export async function fetchDeskComplaint(uuid: string): Promise<{ complaint: Des
     const { data } = await apiClient.get<{ data: DeskComplaint; can: DeskPermissions }>(`/complaints/${uuid}`);
 
     return { complaint: data.data, can: data.can };
+}
+
+/** "I'll take it" — the first technician to press it gets the job. */
+export async function takeComplaint(uuid: string): Promise<DeskComplaint> {
+    const { data } = await apiClient.post<{ data: DeskComplaint }>(`/complaints/${uuid}/take`);
+
+    return data.data;
 }
 
 export async function startComplaint(uuid: string): Promise<DeskComplaint> {

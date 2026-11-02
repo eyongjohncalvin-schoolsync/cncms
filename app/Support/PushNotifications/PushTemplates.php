@@ -64,6 +64,13 @@ final class PushTemplates
         'remittance.received' => [
             'warning' => ['title' => 'Your handover was short', 'body' => 'Tap to see the details.'],
         ],
+        // A new complaint for the branch's field technicians (ComplaintService::create()).
+        'complaint.available' => [
+            'urgent' => [
+                'title' => 'New complaint near you',
+                'body' => 'Tap to see it and take it.',
+            ],
+        ],
         'complaint.assigned' => [
             'urgent' => [
                 'title' => 'A complaint was assigned to you',

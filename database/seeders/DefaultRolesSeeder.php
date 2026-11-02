@@ -158,6 +158,7 @@ class DefaultRolesSeeder extends Seeder
             Permission::ComplaintsResolve->value,
             Permission::ComplaintsAssign->value,
             Permission::ComplaintsReceiveAlerts->value,
+            Permission::ComplaintsNotifyTechnicians->value,
 
             Permission::ArrearsView->value,
             Permission::ArrearsRequest->value,
@@ -213,8 +214,7 @@ class DefaultRolesSeeder extends Seeder
 
             Permission::ComplaintsView->value,
             Permission::ComplaintsCreate->value,
-            // Owner, 2026-11-02: field agents send technicians too, so a complaint isn't left waiting for the office.
-            Permission::ComplaintsAssign->value,
+            Permission::ComplaintsNotifyTechnicians->value,
 
             Permission::ArrearsView->value,
             Permission::ArrearsRequest->value,
