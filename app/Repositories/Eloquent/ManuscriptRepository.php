@@ -128,6 +128,29 @@ class ManuscriptRepository implements ManuscriptRepositoryInterface
     }
 
     /**
+     * Beside aggregates(): how many active customers owe money this period,
+     * and the frozen debt of disconnected / suspended / passive customers —
+     * real, but not collectible now, so shown on its own line (owner,
+     * 2026-11-02), never mixed into the active arrears.
+     *
+     * @param  array<string, mixed>  $filters  Same keys as paginate().
+     * @return array{owing_customers: int, frozen_arrears: string}
+     */
+    public function arrearsBreakdown(array $filters): array
+    {
+        $owing = $this->scoped($filters)
+            ->whereHas('customer', fn (Builder $inner) => $inner->where('status', 'active'))
+            ->where('total_arrears', '>', 0)
+            ->count();
+
+        $frozen = $this->scoped($filters)
+            ->whereHas('customer', fn (Builder $inner) => $inner->whereIn('status', ['disconnected', 'suspended', 'passive']))
+            ->sum('total_arrears');
+
+        return ['owing_customers' => $owing, 'frozen_arrears' => number_format((float) $frozen, 2, '.', '')];
+    }
+
+    /**
      * An archived customer is out of the register altogether — its rows,
      * count, totals, export and bills (owner, 2026-10-29). Their bills stay
      * in the database and come back with them if they are reinstated.

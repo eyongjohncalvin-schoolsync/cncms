@@ -225,6 +225,12 @@ class SyncService
                     // the next pull (their updated_at moves), so the two
                     // directions stay consistent.
                     'deleted' => $this->deletedCustomers($sinceAt),
+                    // Every customer in this person's area right now (owner,
+                    // 2026-11-02): the phone drops any it holds that aren't
+                    // here — moved to another zone, a zone taken off them, a
+                    // deleted row, a branch or role change. None of those
+                    // leave a tombstone.
+                    'in_scope' => $this->customersInScope(),
                 ],
                 'payments' => [
                     'verified' => $this->changedPayments('verified', $sinceAt),
@@ -250,7 +256,26 @@ class SyncService
                 // successful pull.
                 'notifications' => $this->notifications->feedForUser($actor, $this->context, 20),
             ],
+            // The Home screen's area figures, computed by the server the same
+            // way as the web dashboard (AreaSummaryService) — never summed
+            // from the phone's own copy.
+            'summary' => app(AreaSummaryService::class)->forViewer(),
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function customersInScope(): array
+    {
+        $zoneIds = TenantContext::currentZoneIds();
+        $branchId = TenantContext::currentBranchId();
+
+        return Customer::query()
+            ->when($zoneIds !== null, fn ($query) => $query->whereIn('zone_id', $zoneIds))
+            ->when($zoneIds === null && $branchId !== null, fn ($query) => $query->where('customers.branch_id', $branchId))
+            ->pluck('uuid')
+            ->all();
     }
 
     /**

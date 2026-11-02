@@ -233,4 +233,6 @@ export type SyncMetaKey =
     | 'cache_installation_options'
     | 'cache_prepayment_offers'
     // Whose data the phone holds: '<company>:<person uuid>' (src/db/localData.ts).
-    | 'data_owner';
+    | 'data_owner'
+    // The server's area figures for Home, from the last pull (src/db/areaSummary.ts).
+    | 'area_summary';

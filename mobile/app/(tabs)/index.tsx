@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../../src/auth/AuthContext';
 import { getQueuedPaymentsCount, getTodayCollectionTotal } from '../../src/db/payments';
 import { countCustomers, getZoneSnapshot, type ZoneSnapshot } from '../../src/db/customers';
+import { getAreaSummary, type StoredAreaSummary } from '../../src/db/areaSummary';
 import { getSyncState, subscribeSyncState } from '../../src/sync/syncStore';
 import { getQueuedExpendituresCount } from '../../src/db/expenditures';
 import { getNotificationsState, subscribeNotificationsState } from '../../src/notifications/notificationStore';
@@ -14,7 +15,7 @@ import { Badge } from '../../src/components/ui/Badge';
 import { CompanyLogo } from '../../src/components/ui/CompanyLogo';
 import { colors } from '../../src/theme/colors';
 import { fontSize, spacing } from '../../src/theme/tokens';
-import { formatFcfa } from '../../src/utils/format';
+import { formatFcfa, formatRelativeTime } from '../../src/utils/format';
 
 export default function HomeScreen() {
     const { user, role, logout } = useAuth();
@@ -24,11 +25,27 @@ export default function HomeScreen() {
     const [todayTotal, setTodayTotal] = useState<number | null>(null);
     const [customerCount, setCustomerCount] = useState<number | null>(null);
     const [zoneSnapshot, setZoneSnapshot] = useState<ZoneSnapshot | null>(null);
+    const [area, setArea] = useState<StoredAreaSummary | null>(null);
 
     const refresh = useCallback(() => {
         void getTodayCollectionTotal().then(setTodayTotal);
-        void countCustomers().then(setCustomerCount);
-        void getZoneSnapshot().then(setZoneSnapshot);
+
+        // The server's area figures from the last sync — the same numbers as
+        // the web dashboard (owner, 2026-11-02). The phone's own count is
+        // only a fallback until the first pull from an updated server.
+        void getAreaSummary().then(async (summary) => {
+            setArea(summary);
+
+            if (summary !== null) {
+                setZoneSnapshot({ owesMoneyCount: summary.owing_customers, arrearsTotal: Number(summary.arrears), disconnectedCount: summary.disconnected_customers });
+                setCustomerCount(summary.total_customers);
+
+                return;
+            }
+
+            setCustomerCount(await countCustomers());
+            setZoneSnapshot(await getZoneSnapshot());
+        });
     }, []);
 
     useFocusEffect(refresh);
@@ -153,7 +170,7 @@ export default function HomeScreen() {
                 onPress={() => router.push('/(tabs)/customers?filter=owes-money')}
                 accentColor={zoneSnapshot && zoneSnapshot.arrearsTotal > 0 ? colors.danger : undefined}
             >
-                <Text style={styles.totalLabel}>Zone arrears outstanding</Text>
+                <Text style={styles.totalLabel}>Arrears outstanding (active customers)</Text>
                 <Text
                     style={[
                         styles.totalValue,
@@ -168,9 +185,13 @@ export default function HomeScreen() {
                     {zoneSnapshot === null
                         ? 'Loading…'
                         : zoneSnapshot.owesMoneyCount === 0
-                          ? 'Every cached customer is paid up — tap to browse'
+                          ? 'Every active customer is paid up — tap to browse'
                           : `${zoneSnapshot.owesMoneyCount} customer${zoneSnapshot.owesMoneyCount === 1 ? '' : 's'} owe money — tap to view`}
                 </Text>
+                {area !== null && Number(area.frozen_arrears) > 0 ? (
+                    <Text style={styles.totalHint}>Plus {formatFcfa(Number(area.frozen_arrears))} frozen debt (disconnected / suspended)</Text>
+                ) : null}
+                {area !== null ? <Text style={styles.totalHint}>As of the last sync, {formatRelativeTime(area.as_of)}</Text> : null}
             </Card>
 
             <View style={styles.statRow}>
@@ -182,9 +203,9 @@ export default function HomeScreen() {
                     onPress={() => router.push('/(tabs)/customers?filter=disconnected')}
                 />
                 <StatCard
-                    label="Customers cached"
+                    label="Customers"
                     value={customerCount === null ? '—' : String(customerCount)}
-                    hint="In your zone, synced to this device"
+                    hint="In your area"
                     tone="customers"
                 />
             </View>

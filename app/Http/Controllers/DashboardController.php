@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Customer;
 use App\Models\Tenant;
+use App\Services\AreaSummaryService;
 use App\Services\ArrearsAdjustmentService;
 use App\Services\CashAlertService;
 use App\Services\FieldInstallationService;
@@ -17,11 +18,9 @@ use App\Services\SpendingControlService;
 use App\Services\ZoneCoverageService;
 use App\Services\ZonePerformanceService;
 use App\Support\BusinessTimezone;
-use App\Support\CacheVersion;
 use App\Support\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -39,23 +38,12 @@ class DashboardController extends Controller
     {
         $period = (string) $request->query('period', BusinessTimezone::currentPeriod());
 
-        $summary = $this->manuscripts->summary(['period' => $period]);
-
-        $branchId = TenantContext::currentBranchId();
-
-        $counts = Cache::remember(
-            'dashboard:counts:'.CacheVersion::of(CacheVersion::CUSTOMERS, CacheVersion::PAYMENTS).':'.($branchId ?? 'all'),
-            now()->addSeconds(60),
-            fn (): array => [
-                'total_customers' => Customer::query()
-                    ->when($branchId !== null, fn ($query) => $query->where('customers.branch_id', $branchId))
-                    ->count(),
-                'active_customers' => Customer::query()
-                    ->where('status', 'active')
-                    ->when($branchId !== null, fn ($query) => $query->where('customers.branch_id', $branchId))
-                    ->count(),
-            ],
-        );
+        // The viewer's area — an agent's own zones — exactly as the phone's
+        // Home shows it (AreaSummaryService, owner 2026-11-02).
+        $zoneIds = TenantContext::currentZoneIds();
+        $summary = $this->manuscripts->summary(['period' => $period] + ($zoneIds !== null ? ['zone_id' => $zoneIds] : []));
+        $area = app(AreaSummaryService::class)->forViewer($period);
+        $counts = ['total_customers' => $area['total_customers'], 'active_customers' => $area['active_customers']];
 
         return Inertia::render('Dashboard', [
             'period' => $period,

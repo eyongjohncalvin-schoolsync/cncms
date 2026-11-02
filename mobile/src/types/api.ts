@@ -421,6 +421,8 @@ export interface SyncPullResponse {
         customers: {
             upserted: SyncPullCustomer[];
             deleted: string[];
+            /** Every customer in this person's area now; any other cached one is dropped. Absent from older servers. */
+            in_scope?: string[];
         };
         payments: {
             verified: SyncPullChangedPayment[];
@@ -430,6 +432,21 @@ export interface SyncPullResponse {
         /** Absent on servers older than installation phase 3. */
         installations?: SyncPullInstallationDecision[];
     };
+    /** The Home screen's area figures, computed by the server like the web dashboard. Absent from older servers. */
+    summary?: AreaSummary;
+}
+
+/** App\Services\AreaSummaryService::forViewer() — money as numeric strings. */
+export interface AreaSummary {
+    period: string;
+    /** Active customers' arrears for the month. */
+    arrears: string;
+    owing_customers: number;
+    /** Debt of disconnected / suspended / passive customers, shown on its own line. */
+    frozen_arrears: string;
+    active_customers: number;
+    disconnected_customers: number;
+    total_customers: number;
 }
 
 export interface SyncStatusResponse {

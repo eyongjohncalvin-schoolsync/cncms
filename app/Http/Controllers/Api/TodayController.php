@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CashAccount;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\AreaSummaryService;
 use App\Services\ManuscriptService;
 use App\Services\MoneyBalanceService;
 use App\Services\ZonePerformanceService;
@@ -43,6 +44,8 @@ class TodayController extends Controller
                 'collected' => (string) $month['total_collected'],
                 'collection_rate' => $month['collection_rate'],
                 'arrears' => (string) $month['total_arrears'],
+                // The same area figures as Home and the web dashboard (AreaSummaryService).
+                'area' => app(AreaSummaryService::class)->forViewer($period),
             ],
             'zones' => $zones->summary(),
             'balance' => [

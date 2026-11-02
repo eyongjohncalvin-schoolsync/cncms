@@ -31,7 +31,8 @@ import {
     markComplaintFailed,
     markComplaintSynced,
 } from '../db/complaints';
-import { deleteCustomers, upsertCustomers } from '../db/customers';
+import { deleteCustomers, keepOnlyCustomers, upsertCustomers } from '../db/customers';
+import { saveAreaSummary } from '../db/areaSummary';
 import { getPendingAcknowledgements, markAckConfirmed, markAckPending, upsertNotifications } from '../db/notifications';
 import { refreshNotificationsState } from '../notifications/notificationStore';
 import { clearLastSyncAt, getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
@@ -528,6 +529,16 @@ class SyncManagerImpl {
 
         await upsertCustomers(response.changes.customers.upserted);
         await deleteCustomers(response.changes.customers.deleted);
+
+        // Customers who left this person's area, and the server's area
+        // figures for Home (owner, 2026-11-02 — absent from older servers).
+        if (response.changes.customers.in_scope !== undefined) {
+            await keepOnlyCustomers(response.changes.customers.in_scope);
+        }
+
+        if (response.summary !== undefined) {
+            await saveAreaSummary(response.summary, response.synced_at);
+        }
         await applyVerificationUpdates(response.changes.payments.verified, 'verified');
         await applyVerificationUpdates(response.changes.payments.rejected, 'rejected');
         // The office's decision on this user's field registrations (phase 3).

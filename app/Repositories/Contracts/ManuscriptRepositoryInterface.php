@@ -42,6 +42,15 @@ interface ManuscriptRepositoryInterface
     public function aggregates(array $filters): array;
 
     /**
+     * Active customers owing money, and the frozen debt of disconnected /
+     * suspended / passive customers, for the same scope as aggregates().
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{owing_customers: int, frozen_arrears: string}
+     */
+    public function arrearsBreakdown(array $filters): array;
+
+    /**
      * @return Collection<int, Manuscript>
      */
     public function historyForCustomer(int $customerId): Collection;

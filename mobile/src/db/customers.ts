@@ -131,6 +131,25 @@ export async function deleteCustomers(uuids: string[]): Promise<void> {
     await db.runAsync(`DELETE FROM customers WHERE uuid IN (${placeholders})`, uuids);
 }
 
+/**
+ * Keeps only the customers the server says are in this person's area now
+ * (owner, 2026-11-02): a customer moved to another zone, a zone taken off
+ * them, a deleted row or a branch change leave no tombstone, so they piled
+ * up here with their old debt. A customer with something recorded on this
+ * phone and not yet sent stays until it has gone.
+ */
+export async function keepOnlyCustomers(inScope: string[]): Promise<void> {
+    const db = await getDatabase();
+
+    await db.runAsync(
+        `DELETE FROM customers
+         WHERE uuid NOT IN (SELECT value FROM json_each(?))
+           AND uuid NOT IN (SELECT customer_uuid FROM payments WHERE sync_status IN ('queued', 'failed', 'syncing'))
+           AND uuid NOT IN (SELECT customer_uuid FROM complaints WHERE customer_uuid IS NOT NULL AND sync_status IN ('queued', 'failed', 'syncing'))`,
+        [JSON.stringify(inScope)],
+    );
+}
+
 export async function getAllCustomers(): Promise<LocalCustomer[]> {
     const db = await getDatabase();
 
@@ -176,9 +195,11 @@ export async function getZoneSnapshot(): Promise<ZoneSnapshot> {
         arrears_total: number;
         disconnected_count: number;
     }>(
+        // Active customers only, as the server counts them (AreaSummaryService) —
+        // only a fallback until the first pull brings the server's figures.
         `SELECT
-            COUNT(CASE WHEN total_arrears > 0 THEN 1 END) as owes_money_count,
-            COALESCE(SUM(CASE WHEN total_arrears > 0 THEN total_arrears ELSE 0 END), 0) as arrears_total,
+            COUNT(CASE WHEN status = 'active' AND total_arrears > 0 THEN 1 END) as owes_money_count,
+            COALESCE(SUM(CASE WHEN status = 'active' AND total_arrears > 0 THEN total_arrears ELSE 0 END), 0) as arrears_total,
             COUNT(CASE WHEN status = 'disconnected' THEN 1 END) as disconnected_count
          FROM customers`,
     );
