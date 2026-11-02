@@ -4,8 +4,9 @@ import { useFocusEffect } from 'expo-router';
 import { Card } from '../src/components/ui/Card';
 import { Badge, type BadgeTone } from '../src/components/ui/Badge';
 import { EmptyState } from '../src/components/ui/EmptyState';
-import { getRecentNotifications } from '../src/db/notifications';
-import { subscribeNotificationsState } from '../src/notifications/notificationStore';
+import { markNotificationsRead } from '../src/api/sync';
+import { getRecentNotifications, markReadConfirmed, markReadLocally } from '../src/db/notifications';
+import { refreshNotificationsState, subscribeNotificationsState } from '../src/notifications/notificationStore';
 import { formatRelativeTime } from '../src/utils/format';
 import { colors } from '../src/theme/colors';
 import { fontSize, spacing } from '../src/theme/tokens';
@@ -15,14 +16,13 @@ import type { LocalNotification, NotificationSeverity } from '../src/types/db';
  * "Notifications" — reached one tap from Home (in-app-notifications.md
  * section 6 / complaint-desk.md section 7's "keep it proportionate" note:
  * this app has no header bell like web, and doesn't need full dropdown
- * parity — a simple list is enough for v1). Display-only: reflects
- * whatever pull() last cached locally, with no local mark-read action (see
- * src/db/notifications.ts's class doc for why). The emergency tier gets
+ * parity — a simple list is enough for v1). Reflects whatever pull() last
+ * cached locally. The emergency tier gets
  * its own dedicated full-screen interrupt + persistent banner treatment
  * (app/emergency.tsx, src/components/ui/EmergencyBanner.tsx) — this screen
  * is for the routine feed only, so an emergency item shown here is purely
  * informational/historical, never the primary way an agent learns about
- * one.
+ * one. Opening it marks what it shows read (2026-11-02).
  */
 const SEVERITY_TONE: Record<NotificationSeverity, BadgeTone> = {
     info: 'neutral',
@@ -49,10 +49,34 @@ export default function NotificationsScreen() {
         });
     }, []);
 
+    // What was unread when the screen opened keeps its "New" badge for this
+    // visit; it is marked read at once so it doesn't come back (2026-11-02).
+    const [freshUuids, setFreshUuids] = useState<Set<string>>(new Set());
+
     useFocusEffect(
         useCallback(() => {
-            refresh();
-        }, [refresh]),
+            void getRecentNotifications().then(async (rows) => {
+                const unread = rows.filter((row) => !row.read_at).map((row) => row.uuid);
+
+                setItems(rows);
+                setLoaded(true);
+                setFreshUuids(new Set(unread));
+
+                if (unread.length === 0) {
+                    return;
+                }
+
+                await markReadLocally(unread);
+                await refreshNotificationsState();
+
+                try {
+                    await markNotificationsRead(unread);
+                    await markReadConfirmed(unread);
+                } catch {
+                    // Offline: the next sync tells the server.
+                }
+            });
+        }, []),
     );
 
     // Live-refresh whenever notificationStore republishes — SyncManager
@@ -79,7 +103,7 @@ export default function NotificationsScreen() {
                             <Text style={styles.itemTitle} numberOfLines={2}>
                                 {item.title}
                             </Text>
-                            {!item.read_at ? <Badge label="New" tone={SEVERITY_TONE[item.severity]} /> : null}
+                            {!item.read_at || freshUuids.has(item.uuid) ? <Badge label="New" tone={SEVERITY_TONE[item.severity]} /> : null}
                         </View>
                         <Text style={styles.itemBody}>{item.body}</Text>
                         <Text style={styles.itemMeta}>{formatRelativeTime(item.created_at)}</Text>

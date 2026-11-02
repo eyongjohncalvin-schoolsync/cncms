@@ -95,3 +95,8 @@ export async function acknowledgeNotification(uuid: string): Promise<Acknowledge
 
     return data;
 }
+
+/** POST /api/v1/notifications/read — those the Notifications screen showed. */
+export async function markNotificationsRead(uuids: string[]): Promise<void> {
+    await apiClient.post('/notifications/read', { uuids });
+}

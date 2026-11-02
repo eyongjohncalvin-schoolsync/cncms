@@ -18,7 +18,8 @@ use Illuminate\Http\Request;
  * Mirrors Api\ComplaintController's shape (App\Http\Controllers\
  * ComplaintController -> App\Http\Controllers\Api\ComplaintController).
  *
- * Only `acknowledge()` exists here for v1 — mobile-app-react-native.md's
+ * `markRead()` was added 2026-11-02: without it, what the phone showed
+ * came back unread on every sign-in. Otherwise — mobile-app-react-native.md's
  * "Log a Complaint" mobile counterpart (complaint-desk.md section 7) only
  * needs the emergency-broadcast acknowledge action to be a real online
  * action, since the routine bell/dropdown parity is deliberately NOT
@@ -33,6 +34,20 @@ class NotificationController extends Controller
     public function __construct(
         private readonly NotificationService $notifications,
     ) {}
+
+    /**
+     * POST /notifications/read — the notifications the phone just showed
+     * (owner, 2026-11-02: they kept coming back unread on every sign-in).
+     */
+    public function markRead(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'uuids' => ['required', 'array', 'max:100'],
+            'uuids.*' => ['string', 'uuid'],
+        ]);
+
+        return response()->json(['marked' => $this->notifications->markManyRead($validated['uuids'], $request->user())]);
+    }
 
     public function acknowledge(Request $request, Notification $notification): JsonResponse
     {

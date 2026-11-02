@@ -1,6 +1,6 @@
 import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
-import { acknowledgeNotification, fetchExpenseCategories, pullChanges, pushChanges, uploadReceipt } from '../api/sync';
+import { acknowledgeNotification, fetchExpenseCategories, markNotificationsRead, pullChanges, pushChanges, uploadReceipt } from '../api/sync';
 import { isNetworkError, isMaintenanceError, extractErrorMessage } from '../api/client';
 import { upsertExpenseCategories } from '../db/categories';
 import {
@@ -33,7 +33,14 @@ import {
 } from '../db/complaints';
 import { deleteCustomers, keepOnlyCustomers, upsertCustomers } from '../db/customers';
 import { saveAreaSummary } from '../db/areaSummary';
-import { getPendingAcknowledgements, markAckConfirmed, markAckPending, upsertNotifications } from '../db/notifications';
+import {
+    getPendingAcknowledgements,
+    getPendingReads,
+    markAckConfirmed,
+    markAckPending,
+    markReadConfirmed,
+    upsertNotifications,
+} from '../db/notifications';
 import { refreshNotificationsState } from '../notifications/notificationStore';
 import { clearLastSyncAt, getLastSyncAt, getOrCreateDeviceId, setLastSyncAt } from '../db/syncMeta';
 import { patchSyncState } from './syncStore';
@@ -261,6 +268,7 @@ class SyncManagerImpl {
 
         try {
             await this.push();
+            await this.flushPendingReads();
             await this.pull();
             await this.flushPendingAcknowledgements();
             this.startReceiptUploads();
@@ -559,6 +567,26 @@ class SyncManagerImpl {
 
         patchSyncState({ lastSyncAt: response.synced_at });
         await refreshNotificationsState();
+    }
+
+    /**
+     * Tells the server which notifications were read on this phone, so they
+     * stay read after signing in again or on the web (2026-11-02). Best
+     * effort: still pending, it is retried on the next sync.
+     */
+    private async flushPendingReads(): Promise<void> {
+        const pending = (await getPendingReads()).slice(0, 100);
+
+        if (pending.length === 0) {
+            return;
+        }
+
+        try {
+            await markNotificationsRead(pending);
+            await markReadConfirmed(pending);
+        } catch {
+            // Offline or a passing server error — retried next sync.
+        }
     }
 
     /**

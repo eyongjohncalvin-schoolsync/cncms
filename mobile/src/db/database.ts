@@ -246,6 +246,8 @@ const POST_INITIAL_COLUMNS: Array<{ table: string; ddl: string }> = [
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN cancel_synced INTEGER NOT NULL DEFAULT 0' },
     // When the agent asked the office to reverse it (owner, 2026-10-28).
     { table: 'payments', ddl: 'ALTER TABLE payments ADD COLUMN reversal_requested_at TEXT' },
+    // Read on this phone, server not told yet (2026-11-02).
+    { table: 'notifications', ddl: 'ALTER TABLE notifications ADD COLUMN read_pending INTEGER NOT NULL DEFAULT 0' },
 ];
 
 /**

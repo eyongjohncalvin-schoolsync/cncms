@@ -40,8 +40,9 @@ class NotificationRepository implements NotificationRepositoryInterface
 
     public function unreadCountForUser(int $userId, string $role, bool $isInvestor): int
     {
+        // Unread = no read stamp for this person (an acknowledge-only row is still unread).
         return $this->audienceScope(Notification::query(), $userId, $role, $isInvestor)
-            ->whereDoesntHave('recipients', fn (Builder $q) => $q->where('user_id', $userId))
+            ->whereDoesntHave('recipients', fn (Builder $q) => $q->where('user_id', $userId)->whereNotNull('read_at'))
             ->count();
     }
 
@@ -73,15 +74,22 @@ class NotificationRepository implements NotificationRepositoryInterface
 
     public function markAllReadForUser(int $userId, string $role, bool $isInvestor): int
     {
+        $now = now();
+
+        // Rows that exist without a read stamp (an acknowledge came first).
+        $stamped = NotificationRecipient::query()
+            ->where('user_id', $userId)
+            ->whereNull('read_at')
+            ->whereIn('notification_id', $this->audienceScope(Notification::query(), $userId, $role, $isInvestor)->select('id'))
+            ->update(['read_at' => $now, 'updated_at' => $now]);
+
         $unreadIds = $this->audienceScope(Notification::query(), $userId, $role, $isInvestor)
             ->whereDoesntHave('recipients', fn (Builder $q) => $q->where('user_id', $userId))
             ->pluck('id');
 
         if ($unreadIds->isEmpty()) {
-            return 0;
+            return $stamped;
         }
-
-        $now = now();
 
         NotificationRecipient::query()->insert(
             $unreadIds->map(fn (int $id): array => [
@@ -94,7 +102,7 @@ class NotificationRepository implements NotificationRepositoryInterface
             ])->all()
         );
 
-        return $unreadIds->count();
+        return $stamped + $unreadIds->count();
     }
 
     public function acknowledge(Notification $notification, int $userId): void
@@ -107,7 +115,6 @@ class NotificationRepository implements NotificationRepositoryInterface
         if ($recipient->acknowledged_at === null) {
             $recipient->acknowledged_at = now();
         }
-
         $recipient->save();
     }
 

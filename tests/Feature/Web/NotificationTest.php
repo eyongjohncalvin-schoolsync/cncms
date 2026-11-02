@@ -232,6 +232,23 @@ class NotificationTest extends TestCase
         $this->assertSame(0, $this->unreadCount());
     }
 
+    public function test_an_acknowledged_but_unread_emergency_counts_as_unread_until_mark_all_read(): void
+    {
+        $user = $this->actingAsRole('manager');
+        $baseline = $this->unreadCount();
+
+        $notification = app(NotificationService::class)->broadcastToUser($user, 'test.ack_then_read_all', 'emergency', 'Critical', 'Act now');
+        $this->post("/notifications/{$notification->uuid}/acknowledge")->assertRedirect();
+
+        // The list shows it unread, so the count does too (2026-11-02: they disagreed).
+        $this->assertSame($baseline + 1, $this->unreadCount());
+
+        $this->post('/notifications/read-all')->assertRedirect();
+
+        $this->assertSame(0, $this->unreadCount());
+        $this->assertNotNull(NotificationRecipient::query()->where('notification_id', $notification->id)->where('user_id', $user->id)->value('read_at'));
+    }
+
     public function test_acknowledging_an_emergency_notification_removes_it_from_the_banner(): void
     {
         $user = $this->actingAsRole('manager');

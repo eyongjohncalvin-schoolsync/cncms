@@ -172,9 +172,8 @@ export type NotificationSeverity = 'info' | 'warning' | 'urgent' | 'emergency';
  * connectivity returns, don't silently drop it") — cleared, and
  * `acknowledged_at` set from the server's own timestamp, only once
  * SyncManager's push cycle has confirmed the acknowledge round-tripped.
- * `read_at` is display-only on mobile (no local mark-read action — see
- * src/db/notifications.ts's doc comment); it only ever reflects state
- * synced down from the server (e.g. the same notification read on web).
+ * `read_at` is set locally when the Notifications screen shows the item,
+ * with `read_pending` = 1 until the server has been told (2026-11-02).
  */
 export interface LocalNotification {
     uuid: string;
@@ -191,6 +190,8 @@ export interface LocalNotification {
     /** 1 while an acknowledge action is queued locally, waiting for
      * connectivity — see LocalNotification's class doc above. */
     ack_pending: number;
+    /** 1 while a local "read" hasn't reached the server yet. */
+    read_pending: number;
     cached_at: string;
 }
 

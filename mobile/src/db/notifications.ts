@@ -11,12 +11,9 @@ import { nowIso } from '../utils/format';
  * mobile-only local mutation: queuing an Acknowledge action while offline
  * (markAckPending()/markAckConfirmed() below).
  *
- * Deliberately NO local "mark read" write here — complaint-desk.md
- * section 7's "keep it proportionate" note means the mobile Notifications
- * section is display-only for the routine feed; read_at only ever reflects
- * state synced down from the server (e.g. the same notification already
- * read on web). Acknowledge is the one action that must be a real online
- * round trip (see markAckPending()'s doc comment) — read is not.
+ * Opening the Notifications screen marks what it shows read here at once
+ * (markReadLocally()) and SyncManager tells the server (owner, 2026-11-02:
+ * without it everything came back unread on every sign-in).
  */
 
 /**
@@ -53,7 +50,14 @@ export async function upsertNotifications(items: SyncPullNotificationItem[]): Pr
                     source_type = excluded.source_type,
                     source_uuid = excluded.source_uuid,
                     created_at = excluded.created_at,
-                    read_at = excluded.read_at,
+                    read_at = CASE
+                        WHEN notifications.read_pending = 1 AND excluded.read_at IS NULL THEN notifications.read_at
+                        ELSE excluded.read_at
+                    END,
+                    read_pending = CASE
+                        WHEN excluded.read_at IS NOT NULL THEN 0
+                        ELSE notifications.read_pending
+                    END,
                     acknowledged_at = CASE
                         WHEN excluded.acknowledged_at IS NOT NULL THEN excluded.acknowledged_at
                         ELSE notifications.acknowledged_at
@@ -150,6 +154,37 @@ export async function markAckPending(uuid: string): Promise<void> {
     const db = await getDatabase();
 
     await db.runAsync(`UPDATE notifications SET ack_pending = 1 WHERE uuid = ?`, [uuid]);
+}
+
+/** Marks these read on this phone now; the server is told on the next sync. */
+export async function markReadLocally(uuids: string[]): Promise<void> {
+    if (uuids.length === 0) {
+        return;
+    }
+
+    const db = await getDatabase();
+
+    await db.runAsync(
+        `UPDATE notifications SET read_at = ?, read_pending = 1 WHERE read_at IS NULL AND uuid IN (${uuids.map(() => '?').join(', ')})`,
+        [nowIso(), ...uuids],
+    );
+}
+
+export async function getPendingReads(): Promise<string[]> {
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<{ uuid: string }>(`SELECT uuid FROM notifications WHERE read_pending = 1`);
+
+    return rows.map((row) => row.uuid);
+}
+
+export async function markReadConfirmed(uuids: string[]): Promise<void> {
+    if (uuids.length === 0) {
+        return;
+    }
+
+    const db = await getDatabase();
+
+    await db.runAsync(`UPDATE notifications SET read_pending = 0 WHERE uuid IN (${uuids.map(() => '?').join(', ')})`, uuids);
 }
 
 export async function markAckConfirmed(uuid: string, acknowledgedAt: string): Promise<void> {

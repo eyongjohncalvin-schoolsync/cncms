@@ -17,6 +17,7 @@ use App\Models\Voucher;
 use App\Repositories\Contracts\NotificationRepositoryInterface;
 use App\Support\TenantContext;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Public API for the in-app notification system (in-app-notifications.md).
@@ -229,6 +230,30 @@ class NotificationService
     {
         $this->notifications->markRead($notification, $user->id);
         $this->bumpFeedVersion();
+    }
+
+    /**
+     * The phone's "these were on screen" — marks each of $uuids read for
+     * $user, skipping any not addressed to them. Returns how many were.
+     *
+     * @param  list<string>  $uuids
+     */
+    public function markManyRead(array $uuids, User $user): int
+    {
+        $marked = 0;
+
+        foreach (Notification::query()->whereIn('uuid', $uuids)->get() as $notification) {
+            if (Gate::forUser($user)->allows('view', $notification)) {
+                $this->notifications->markRead($notification, $user->id);
+                $marked++;
+            }
+        }
+
+        if ($marked > 0) {
+            $this->bumpFeedVersion();
+        }
+
+        return $marked;
     }
 
     public function markAllRead(User $user, TenantContext $context): void
