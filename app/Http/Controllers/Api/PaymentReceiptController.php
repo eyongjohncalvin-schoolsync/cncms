@@ -65,6 +65,7 @@ class PaymentReceiptController extends Controller
     public function whatsappMessage(Request $request, Payment $payment): JsonResponse
     {
         $this->authorize('view', $payment);
+        $this->authorize('send', PaymentReceipt::class);
 
         $receipt = $payment->receipt;
 
@@ -102,6 +103,7 @@ class PaymentReceiptController extends Controller
     public function sendEmail(Request $request, Payment $payment): JsonResponse
     {
         $this->authorize('view', $payment);
+        $this->authorize('send', PaymentReceipt::class);
 
         $receipt = $payment->receipt;
 

@@ -77,7 +77,8 @@ class StaffRemovalTest extends TestCase
     {
         $membership = TenantUser::query()->where('user_id', $this->kelvin->id)->firstOrFail();
 
-        $this->actingAs($this->kelvin)->delete("/users/{$membership->id}")->assertSessionHasErrors('user');
+        // Refused by the policy itself since 2026-11-02 (never your own account).
+        $this->actingAs($this->kelvin)->delete("/users/{$membership->id}")->assertForbidden();
 
         $this->assertDatabaseHas('tenant_users', ['id' => $membership->id]);
     }

@@ -22,7 +22,7 @@ use Illuminate\Validation\ValidationException;
  *  - `repaid`      — the owner pays it in cash into the settler's till
  *                    (`cash.receive`);
  *  - `written_off` — a manager accepts the loss, with a reason
- *                    (`vouchers.approve`).
+ *                    (`cash.write_off`).
  *
  * Nobody settles their own shortage — the owner of the company included.
  */
@@ -56,7 +56,7 @@ class ShortageService
         }
 
         $context = app(TenantContext::class);
-        $allowed = $outcome === CashShortage::STATUS_REPAID ? $context->can('cash.receive') : $context->can('vouchers.approve');
+        $allowed = $outcome === CashShortage::STATUS_REPAID ? $context->can('cash.receive') : $context->can('cash.write_off');
 
         if (! $allowed) {
             throw ValidationException::withMessages(['outcome' => $outcome === CashShortage::STATUS_REPAID

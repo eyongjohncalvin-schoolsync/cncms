@@ -153,7 +153,7 @@ class DashboardController extends Controller
     {
         $context = app(TenantContext::class);
 
-        return $context->isSuper() || $context->is('admin');
+        return $context->can('company.update');
     }
 
     private function tenant(): Tenant

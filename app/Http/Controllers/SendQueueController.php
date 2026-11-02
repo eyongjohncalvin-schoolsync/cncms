@@ -19,7 +19,7 @@ use Inertia\Response;
 /**
  * The "To send" page — receipts and this month's bills still waiting to
  * reach the customer (App\Services\SendQueueService). Receipts need
- * `payments.view`, bills `manuscripts.send_bill`; each tab only shows when
+ * `payments.send_receipt`, bills `manuscripts.send_bill`; each tab only shows when
  * the user holds its permission.
  */
 class SendQueueController extends Controller
@@ -31,7 +31,7 @@ class SendQueueController extends Controller
 
     public function index(Request $request): Response
     {
-        $canReceipts = $request->user()->can('payments.view');
+        $canReceipts = $request->user()->can('payments.send_receipt');
         $canBills = $request->user()->can('manuscripts.send_bill');
         abort_unless($canReceipts || $canBills, 403);
 
@@ -78,7 +78,7 @@ class SendQueueController extends Controller
 
     public function skipReceipt(Request $request, PaymentReceipt $receipt): RedirectResponse
     {
-        abort_unless($request->user()->can('payments.view'), 403);
+        abort_unless($request->user()->can('payments.send_receipt'), 403);
 
         $this->queue->skipReceipt($receipt, $request->user());
 

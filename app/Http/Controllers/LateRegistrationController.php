@@ -37,7 +37,7 @@ class LateRegistrationController extends Controller
      */
     public function index(Request $request): Response
     {
-        abort_unless($this->context->canAny('audit.view', 'arrears.approve'), 403);
+        abort_unless($this->context->can('arrears.view'), 403);
 
         $months = (int) $request->integer('months', 12);
         $months = in_array($months, [3, 6, 12, 24], true) ? $months : 12;
@@ -112,10 +112,10 @@ class LateRegistrationController extends Controller
             .($validated['scope'] === 'all' ? '; the free months end when it is approved.' : '.'));
     }
 
-    /** A manager says what became of the money the customer says they paid someone (a loss decision: vouchers.approve). */
+    /** A manager says what became of the money the customer says they paid someone (a loss decision: cash.write_off). */
     public function settleSaysPaid(Request $request, Customer $customer): RedirectResponse
     {
-        abort_unless($this->context->can('vouchers.approve'), 403);
+        abort_unless($this->context->can('cash.write_off'), 403);
 
         $validated = $request->validate([
             'outcome' => ['required', 'in:'.implode(',', LateRegistrationService::SAYS_PAID_OUTCOMES)],

@@ -108,7 +108,7 @@ class ContractController extends Controller
     {
         $context = app(TenantContext::class);
 
-        abort_unless($context->isSuper() || $context->is('admin'), 403);
+        abort_unless($context->can('company.sign_contract'), 403);
     }
 
     private function tenant(): Tenant

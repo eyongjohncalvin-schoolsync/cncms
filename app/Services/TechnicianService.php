@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Technicians: whoever's role may resolve complaints (complaints.resolve —
+ * Technicians: whoever's role may take complaint jobs (complaints.take_jobs, its own switch since 2026-11-02 —
  * a "Fiber Technician" custom role as much as a manager), the owner aside.
  * Their usual zones (App\Models\TechnicianZone) are optional and only a
  * routing hint: none means "works anywhere"; any complaint can still go to
@@ -184,7 +184,7 @@ class TechnicianService
     private function technicianRoles(): array
     {
         $roles = Role::query()->where('is_super', false)
-            ->whereHas('permissions', fn ($query) => $query->where('permission', Permission::ComplaintsResolve->value))
+            ->whereHas('permissions', fn ($query) => $query->where('permission', Permission::ComplaintsTakeJobs->value))
             ->pluck('name')->all();
 
         return $roles !== [] || Role::query()->exists() ? $roles : ['admin', 'manager'];

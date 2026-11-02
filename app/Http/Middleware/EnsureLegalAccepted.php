@@ -32,7 +32,7 @@ class EnsureLegalAccepted
 
         $context = app()->bound(TenantContext::class) ? app(TenantContext::class) : null;
 
-        if ($context === null || ! ($context->isSuper() || $context->is('admin'))) {
+        if ($context === null || ! $context->can('company.sign_contract')) {
             return $next($request);
         }
 

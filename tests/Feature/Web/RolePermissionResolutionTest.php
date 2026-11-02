@@ -105,7 +105,8 @@ class RolePermissionResolutionTest extends TestCase
     {
         $context = $this->contextFor('admin');
 
-        $expected = array_values(array_diff(Permission::values(), [Permission::OpeningBalancesApprove->value]));
+        // Closing expenditure months stays the owner's until a role is given it (2026-11-02).
+        $expected = array_values(array_diff(Permission::values(), [Permission::OpeningBalancesApprove->value, Permission::ExpendituresCloseMonths->value]));
         $actual = $context->permissions();
         sort($expected);
         sort($actual);

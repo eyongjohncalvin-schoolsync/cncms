@@ -28,7 +28,7 @@ class TechnicianFeeController extends Controller
 
     public function index(Request $request): Response
     {
-        abort_unless($request->user()->can('cash.view') || $request->user()->can('cash.receive'), 403);
+        abort_unless($request->user()->can('cash.view') || $request->user()->can('cash.receive') || $request->user()->can('cash.pay_technician_fees'), 403);
 
         return Inertia::render('Cash/TechnicianFees', [
             'fees' => $this->fees->payable()->map(fn (Payment $fee): array => [
@@ -50,7 +50,7 @@ class TechnicianFeeController extends Controller
                     'paid_at' => $payout->paid_at?->toIso8601String(),
                     'note' => $payout->note,
                 ])->values()->all(),
-            'can_pay' => $request->user()->can('cash.receive'),
+            'can_pay' => $request->user()->can('cash.pay_technician_fees'),
         ]);
     }
 

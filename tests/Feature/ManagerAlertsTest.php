@@ -161,7 +161,7 @@ class ManagerAlertsTest extends TestCase
     private function technician(): User
     {
         Role::query()->create(['name' => 'technician', 'label' => 'Technician', 'is_system' => false])
-            ->syncPermissions(['complaints.view', 'complaints.create', 'complaints.resolve']);
+            ->syncPermissions(['complaints.view', 'complaints.create', 'complaints.resolve', 'complaints.take_jobs']);
 
         return $this->withRole('patience@shalomtech.dev', 'technician');
     }

@@ -45,7 +45,7 @@ class BillBatchController extends Controller
      */
     public function generate(Request $request): RedirectResponse
     {
-        $this->authorize('export', Manuscript::class);
+        $this->authorize('printBills', Manuscript::class);
 
         $filters = $request->only(['period', 'zone_uuid', 'status', 'search']);
         $period = (string) ($filters['period'] ?? now()->format('Y-m'));
@@ -72,7 +72,7 @@ class BillBatchController extends Controller
      */
     public function cancel(BillBatch $billBatch): RedirectResponse
     {
-        $this->authorize('export', Manuscript::class);
+        $this->authorize('printBills', Manuscript::class);
 
         $period = $billBatch->period;
         $this->batches->cancel($billBatch);
@@ -89,7 +89,7 @@ class BillBatchController extends Controller
      */
     public function destroy(BillBatch $billBatch): RedirectResponse
     {
-        $this->authorize('export', Manuscript::class);
+        $this->authorize('printBills', Manuscript::class);
 
         $period = $billBatch->period;
         $this->batches->delete($billBatch);
@@ -106,7 +106,7 @@ class BillBatchController extends Controller
      */
     public function download(BillBatch $billBatch, BillBatchFile $billBatchFile): StreamedResponse
     {
-        $this->authorize('export', Manuscript::class);
+        $this->authorize('printBills', Manuscript::class);
 
         abort_unless($billBatchFile->bill_batch_id === $billBatch->id, 404);
         abort_unless(Storage::disk($billBatchFile->disk)->exists($billBatchFile->path), 404);

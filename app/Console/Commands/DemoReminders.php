@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Auth\Permission;
 use App\Mail\DemoReminderMail;
 use App\Models\LandlordActivity;
+use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Models\User;
@@ -78,13 +80,19 @@ class DemoReminders extends Command
     }
 
     /**
-     * The company's active super/admin users with an email.
+     * The company's active users who sign its contract (the owner, and the
+     * roles holding `company.sign_contract` — was super/admin by name until
+     * 2026-11-02), with an email.
      *
      * @return Collection<int, User>
      */
     private function admins(Tenant $tenant): Collection
     {
-        $userIds = TenantUser::query()->where('tenant_id', $tenant->id)->whereIn('role', ['super', 'admin'])->pluck('user_id');
+        $roles = Role::query()
+            ->where('is_super', true)
+            ->orWhereHas('permissions', fn ($query) => $query->where('permission', Permission::CompanySignContract->value))
+            ->pluck('name');
+        $userIds = TenantUser::query()->where('tenant_id', $tenant->id)->whereIn('role', $roles)->pluck('user_id');
 
         return User::query()->whereIn('id', $userIds)->where('status', 'active')->whereNotNull('email')->where('email', '!=', '')->get(['id', 'name', 'email']);
     }

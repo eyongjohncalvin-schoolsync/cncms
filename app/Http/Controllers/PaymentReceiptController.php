@@ -101,7 +101,7 @@ class PaymentReceiptController extends Controller
 
         abort_if($receipt === null, 422, 'No receipt has been issued for this payment.');
 
-        $this->authorize('view', $receipt);
+        $this->authorize('send', PaymentReceipt::class);
 
         abort_if($receipt->isVoid(), 422, 'This receipt has been voided and cannot be sent.');
 
@@ -138,7 +138,7 @@ class PaymentReceiptController extends Controller
 
         abort_if($receipt === null, 422, 'No receipt has been issued for this payment.');
 
-        $this->authorize('view', $receipt);
+        $this->authorize('send', PaymentReceipt::class);
 
         $reason = $this->email->unavailableReason($receipt);
 

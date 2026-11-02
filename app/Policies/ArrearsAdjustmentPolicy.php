@@ -76,7 +76,8 @@ class ArrearsAdjustmentPolicy
      */
     public function review(User $user): bool
     {
-        return $this->context->canAny('arrears.approve', 'audit.view');
+        // Its own switch since 2026-11-02 (was arrears.approve or audit.view).
+        return $this->context->can('arrears.view');
     }
 
     public function create(User $user): bool
@@ -102,7 +103,8 @@ class ArrearsAdjustmentPolicy
         return match ($adjustment->status) {
             'pending' => $this->context->can('arrears.approve')
                 && ($user->id !== $adjustment->requested_by || $this->context->isSuper()),
-            'pending_second_approval' => $this->context->isAnyOf('super', 'admin')
+            // "Approve final" (2026-11-02) — was the super/admin roles by name.
+            'pending_second_approval' => $this->context->can('arrears.approve_final')
                 && ($this->context->isSuper()
                     || ($user->id !== $adjustment->requested_by
                         && $user->id !== $adjustment->approved_by)),

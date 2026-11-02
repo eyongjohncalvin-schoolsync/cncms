@@ -934,7 +934,7 @@ class CustomerController extends Controller
                     && $late['charge']['reversal_status'] === null && $this->context->can('arrears.request'),
                 // What became of the money the customer says they paid someone — a manager, not whoever connected them.
                 'can_settle_says_paid' => (float) ($late['says_paid_amount'] ?? 0) > 0 && $late['says_paid_settled'] === null
-                    && $this->context->can('vouchers.approve') && $customer->connected_by_user_id !== request()->user()->id,
+                    && $this->context->can('cash.write_off') && $customer->connected_by_user_id !== request()->user()->id,
             ],
         ];
     }

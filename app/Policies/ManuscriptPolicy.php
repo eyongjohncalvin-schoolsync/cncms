@@ -37,6 +37,12 @@ class ManuscriptPolicy
         return $this->context->can('manuscripts.export');
     }
 
+    /** Generate, download, cancel and delete the printed bills — its own switch since 2026-11-02 (was export). */
+    public function printBills(User $user): bool
+    {
+        return $this->context->can('manuscripts.print_bills');
+    }
+
     /**
      * Running manuscript:calculate from the web panel (web-admin-spec.md
      * section 3.8's "Run Manuscript Calculation" button) is restricted per

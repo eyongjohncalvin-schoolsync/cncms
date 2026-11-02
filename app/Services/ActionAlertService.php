@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Role;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Support\TenantContext;
@@ -83,7 +84,8 @@ class ActionAlertService
      */
     public function owners(): Collection
     {
-        return $this->withRoles(['super']);
+        // The owner flag, not the role's name (2026-11-02).
+        return $this->withRoles(Role::query()->where('is_super', true)->pluck('name')->all());
     }
 
     /**

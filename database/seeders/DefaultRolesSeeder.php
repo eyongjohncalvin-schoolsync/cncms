@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Seeders;
 
 use App\Auth\Permission;
+use App\Auth\PermissionSplits;
 use App\Models\Role;
 use Illuminate\Database\Seeder;
 
@@ -71,22 +72,22 @@ class DefaultRolesSeeder extends Seeder
             'manager' => [
                 'label' => 'Manager',
                 'description' => 'Day-to-day operations: customers, payments, zones, agents, complaints, arrears approval, reports, audit.',
-                'permissions' => self::managerPermissions(),
+                'permissions' => PermissionSplits::derive(self::managerPermissions()),
             ],
             'agent' => [
                 'label' => 'Field agent',
                 'description' => 'Field collections: record payments, view manuscripts and their own zone, submit complaints and arrears requests.',
-                'permissions' => self::agentPermissions(),
+                'permissions' => PermissionSplits::derive(self::agentPermissions()),
             ],
             'cashier' => [
                 'label' => 'Cashier',
                 'description' => 'Receives collectors\' daily remittances, records walk-in payments, pays out approved vouchers and closes the till each day.',
-                'permissions' => self::cashierPermissions(),
+                'permissions' => PermissionSplits::derive(self::cashierPermissions()),
             ],
             'worker' => [
                 'label' => 'Worker',
                 'description' => 'Minimal read access plus logging complaints and arrears requests. Front-desk payment recording is a separate per-user flag, not this role.',
-                'permissions' => self::workerPermissions(),
+                'permissions' => PermissionSplits::derive(self::workerPermissions()),
             ],
         ];
     }
@@ -108,7 +109,8 @@ class DefaultRolesSeeder extends Seeder
      */
     private static function adminPermissions(): array
     {
-        return array_values(array_diff(Permission::values(), [Permission::OpeningBalancesApprove->value]));
+        // Closing expenditure months was the owner's alone until it became a permission (2026-11-02).
+        return array_values(array_diff(Permission::values(), [Permission::OpeningBalancesApprove->value, Permission::ExpendituresCloseMonths->value]));
     }
 
     private static function managerPermissions(): array
@@ -216,7 +218,7 @@ class DefaultRolesSeeder extends Seeder
             Permission::ComplaintsCreate->value,
             Permission::ComplaintsNotifyTechnicians->value,
 
-            Permission::ArrearsView->value,
+            // Request only; seeing the adjustments queue is arrears.view (2026-11-02).
             Permission::ArrearsRequest->value,
 
             Permission::CashRemit->value,
@@ -276,7 +278,6 @@ class DefaultRolesSeeder extends Seeder
             Permission::ExpendituresView->value,
             Permission::ComplaintsView->value,
             Permission::ComplaintsCreate->value,
-            Permission::ArrearsView->value,
             Permission::ArrearsRequest->value,
             Permission::CompanyView->value,
         ];

@@ -18,7 +18,7 @@ use App\Support\TenantContext;
  *    bypass is refused again in RemittanceService). Repaying a shortage is
  *    also a receipt of cash, so it needs this too.
  *  - `cash.view`    — see every handover.
- *  - writing a shortage off is a loss decision: `vouchers.approve` (the
+ *  - writing a shortage off is a loss decision: `cash.write_off` (the
  *    managers who approve spending), never the cashier who counted it.
  */
 class RemittancePolicy
@@ -59,20 +59,20 @@ class RemittancePolicy
 
     /**
      * A MoMo / Orange / bank line not seen at the handover: found later or
-     * repaid in cash (`cash.receive`), or written off (`vouchers.approve`) —
+     * repaid in cash (`cash.receive`), or written off (`cash.write_off`) —
      * never by the collector who owes it (RemittanceService::settleLine()).
      */
     public function settleLine(User $user, Remittance $remittance, string $outcome): bool
     {
         return $remittance->isReceived()
             && $remittance->collector_user_id !== $user->id
-            && $this->context->can($outcome === RemittanceLine::OUTCOME_WRITTEN_OFF ? 'vouchers.approve' : 'cash.receive');
+            && $this->context->can($outcome === RemittanceLine::OUTCOME_WRITTEN_OFF ? 'cash.write_off' : 'cash.receive');
     }
 
     public function writeOffShortage(User $user, Remittance $remittance): bool
     {
         return $remittance->shortage_status === 'open'
-            && $this->context->can('vouchers.approve')
+            && $this->context->can('cash.write_off')
             && $remittance->collector_user_id !== $user->id;
     }
 }

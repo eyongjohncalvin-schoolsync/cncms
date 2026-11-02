@@ -146,7 +146,7 @@ class HandleInertiaRequests extends Middleware
             // The published service contract version the company has not
             // signed yet (App\Services\ContractService) — super/admin only,
             // drives the "please sign" strip linking to Settings → Contract.
-            'contractPending' => $context && ($context->isSuper() || $context->is('admin'))
+            'contractPending' => $context && $context->can('company.sign_contract')
                 ? fn (): ?int => app(ContractService::class)->awaitingSignature((string) tenant('id'))?->version
                 : null,
             // Set while a landlord is logged in as this user
@@ -170,7 +170,7 @@ class HandleInertiaRequests extends Middleware
         }
 
         $readOnly = $daysLeft < 0;
-        $isAdmin = $context->isSuper() || $context->is('admin');
+        $isAdmin = $context->can('company.sign_contract');
 
         if (! $readOnly && ($daysLeft > 30 || ! $isAdmin)) {
             return null;

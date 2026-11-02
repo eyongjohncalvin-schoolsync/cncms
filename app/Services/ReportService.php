@@ -137,7 +137,8 @@ class ReportService
      */
     private function applyRoleVisibility(array $payload): array
     {
-        if (! $this->context->isAnyOf('super', 'admin')) {
+        // "Profit and loss" — its own switch since 2026-11-02 (was super/admin by name).
+        if (! $this->context->can('reports.profit_and_loss')) {
             unset($payload['pnl']);
         }
 

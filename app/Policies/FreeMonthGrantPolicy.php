@@ -11,8 +11,8 @@ use App\Support\TenantContext;
 /**
  * Free months (docs/plans/installation-and-promotions.md, phase 2).
  *
- *  - create (compensation, D12) — `installations.manage`.
- *  - approve / reject — `installations.approve`, and never by whoever asked
+ *  - create (compensation, D12) — `compensation.request`.
+ *  - approve / reject — `compensation.approve`, and never by whoever asked
  *    (maker ≠ checker, D8), the owner excepted exactly like arrears
  *    adjustments and installation waivers. Acts on the whole request
  *    (all rows sharing the grant's group_uuid).
@@ -25,13 +25,13 @@ class FreeMonthGrantPolicy
 
     public function create(User $user): bool
     {
-        return $this->context->can('installations.manage');
+        return $this->context->can('compensation.request');
     }
 
     public function approve(User $user, FreeMonthGrant $grant): bool
     {
         return $grant->status === FreeMonthGrant::STATUS_PENDING_APPROVAL
-            && $this->context->can('installations.approve')
+            && $this->context->can('compensation.approve')
             && ($user->id !== $grant->requested_by || $this->context->isSuper());
     }
 

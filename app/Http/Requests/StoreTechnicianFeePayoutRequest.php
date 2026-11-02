@@ -10,13 +10,13 @@ use Illuminate\Foundation\Http\FormRequest;
  * POST /cash/technician-fees/payouts — the cashier pays collected technician
  * motivation fees to a named technician from their till (D13,
  * docs/plans/installation-and-promotions.md). Same gate as receiving
- * handovers into a till: `cash.receive`.
+ * handovers into a till — its own switch, `cash.pay_technician_fees` (2026-11-02).
  */
 class StoreTechnicianFeePayoutRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()->can('cash.receive');
+        return $this->user()->can('cash.pay_technician_fees');
     }
 
     /**

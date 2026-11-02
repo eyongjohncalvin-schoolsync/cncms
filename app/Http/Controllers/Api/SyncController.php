@@ -108,13 +108,10 @@ class SyncController extends Controller
 
     private function authorizeSync(): void
     {
-        // RBAC v2: this endpoint's audience (super/admin/manager/agent) is
-        // exactly the `manuscripts.view` role set, so it reuses that
-        // permission rather than a role list. Wave 4 (mobile) may split this
-        // out into a dedicated `mobile.sync` permission if the two ever need
-        // to diverge; not seeded now.
+        // "Use the phone app" — its own switch since 2026-11-02 (it borrowed
+        // manuscripts.view, so a technician had to see manuscripts to sync).
         abort_unless(
-            $this->context->can('manuscripts.view'),
+            $this->context->can('mobile.use_app'),
             403,
             'You do not have access to sync.',
         );

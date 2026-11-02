@@ -45,10 +45,10 @@ class SecurityPermissionGapsTest extends TestCase
         return TenantUser::query()->where('user_id', $user->id)->firstOrFail();
     }
 
-    /** A role that may sync (manuscripts.view) and nothing else that matters here. */
+    /** A role that may sync (mobile.use_app) and nothing else that matters here. */
     private function syncOnlyToken(): string
     {
-        Role::query()->create(['name' => 'observer', 'label' => 'Observer', 'is_system' => false])->syncPermissions(['manuscripts.view', 'customers.view']);
+        Role::query()->create(['name' => 'observer', 'label' => 'Observer', 'is_system' => false])->syncPermissions(['mobile.use_app', 'customers.view']);
 
         return $this->tokenForRole('observer');
     }

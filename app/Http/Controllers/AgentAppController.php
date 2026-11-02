@@ -30,11 +30,8 @@ class AgentAppController extends Controller
 
     public function show(Request $request): Response
     {
-        // RBAC v2: the app's audience (super/admin/manager/agent) is exactly
-        // the `manuscripts.view` role set, so this reuses that permission
-        // rather than a hardcoded role list. Wave 4 (mobile) may split this
-        // out into a dedicated `mobile.sync` permission if needed.
-        abort_unless($this->context->can('manuscripts.view'), 403);
+        // "Use the phone app" (2026-11-02; was manuscripts.view).
+        abort_unless($this->context->can('mobile.use_app'), 403);
 
         return Inertia::render('AgentApp/Index', [
             'android_url' => config('agent-app.android_url'),

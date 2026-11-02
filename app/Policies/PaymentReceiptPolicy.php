@@ -42,4 +42,10 @@ class PaymentReceiptPolicy
     {
         return $this->context->can('payments.issue_receipt');
     }
+
+    /** WhatsApp / email it to the customer — its own switch since 2026-11-02 (was payments.view). */
+    public function send(User $user): bool
+    {
+        return $this->context->can('payments.send_receipt');
+    }
 }

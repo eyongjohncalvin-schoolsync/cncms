@@ -139,11 +139,11 @@ const resourcesNavItem = { href: '/resources', labelKey: 'common.resources', ico
 const auditNavItem = { href: '/audit/logs', labelKey: 'common.audit_log', icon: IconHistory, accent: 'cyan' as const };
 
 // Arrears Adjustments review queue — ArrearsAdjustmentPolicy::review →
-// `arrears.approve` OR `audit.view` (it used to be an Audit Log sub-tab).
+// `arrears.view` (its own switch since 2026-11-02).
 const arrearsAdjustmentsNavItem = { href: '/arrears-adjustments', labelKey: 'common.arrears_adjustments', icon: IconScale, accent: 'purple' as const };
 
 // Compensation (free months for poor service, zone/branch-wide) —
-// CompensationBatchPolicy::viewAny → `installations.manage` or `installations.approve`.
+// CompensationBatchPolicy::viewAny → `compensation.view` (since 2026-11-02).
 const compensationNavItem = { href: '/compensation', labelKey: 'common.compensation', icon: IconGift, accent: 'pink' as const };
 
 // Opening balances — OpeningBalanceBatchPolicy::viewAny → any of the three
@@ -186,12 +186,9 @@ const eligibilityNavItem = { href: '/disconnections?eligible=1', labelKey: 'comm
 // ReportController::defaultTierForRole()) but not `expenditures.dashboard`.
 const reportsNavItem = { href: '/reports', labelKey: 'common.reports', icon: IconChartBar, accent: 'orange' as const };
 
-// "Get the Agent App" (/agent-app) — the mobile field app's install page.
-// AgentAppController checks the same S A M G set as ManuscriptPolicy::
-// viewAny, and there is no dedicated `mobile.sync`/`agent_app` permission
-// (deliberately deferred — see the plan's Wave 2 notes), so `manuscripts.view`
-// is the agreed proxy: it resolves to exactly that role set and
-// AgentAppController was migrated to it in Wave 2.
+// "Get the Agent App" (/agent-app) — the mobile field app's install page,
+// for whoever may use the app (`mobile.use_app`, its own switch since
+// 2026-11-02; AgentAppController checks the same).
 const agentAppNavItem = { href: '/agent-app', labelKey: 'common.agent_app', icon: IconDeviceMobile, accent: 'lime' as const };
 
 // "Users Control Center" (/users) — RBAC v2 Wave 3. Shown when the resolved
@@ -220,10 +217,10 @@ export function buildVisibleNavItems(permissions: string[] = [], branchFenced = 
         ...(can('customers.eligibility_board') && !can('customers.status_board') ? [eligibilityNavItem] : []),
         ...(canAny('payments.view', 'manuscripts.send_bill') ? [sendQueueNavItem] : []),
         ...(can('reports.view') ? [reportsNavItem] : []),
-        ...(can('manuscripts.view') ? [agentAppNavItem] : []),
+        ...(can('mobile.use_app') ? [agentAppNavItem] : []),
         ...(can('expenditures.dashboard') ? [resourcesNavItem] : []),
-        ...(canAny('arrears.approve', 'audit.view') ? [arrearsAdjustmentsNavItem] : []),
-        ...(canAny('installations.manage', 'installations.approve') ? [compensationNavItem] : []),
+        ...(can('arrears.view') ? [arrearsAdjustmentsNavItem] : []),
+        ...(can('compensation.view') ? [compensationNavItem] : []),
         ...(canAny('opening_balances.view', 'opening_balances.enter', 'opening_balances.approve') ? [openingBalancesNavItem] : []),
         ...(can('receipts.manage_stock') ? [receiptStockNavItem] : []),
         ...(canAny('cash.view', 'cash.receive') ? [cashBookNavItem] : []),

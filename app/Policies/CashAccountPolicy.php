@@ -14,10 +14,10 @@ use App\Support\TenantContext;
  *  - `cash.view`      — every account, balance and ledger.
  *  - `cash.receive`   — move money between accounts (deposits, transfers)
  *    and close one's OWN till; the owner (super) and a supervisor
- *    (`vouchers.approve`) may close an absent cashier's.
- *  - `company.update` — set up accounts (safe, bank, wallets) and their
+ *    (`cash.close_days`) may close an absent cashier's.
+ *  - `cash.manage_accounts` — set up accounts (safe, bank, wallets) and their
  *    opening balances: a configuration decision, like the voucher limits.
- *  - reopening a closed day is a supervisor's call: `vouchers.approve`.
+ *  - reopening a closed day is a supervisor's call: `cash.close_days`.
  */
 class CashAccountPolicy
 {
@@ -37,12 +37,12 @@ class CashAccountPolicy
 
     public function create(User $user): bool
     {
-        return $this->context->can('company.update');
+        return $this->context->can('cash.manage_accounts');
     }
 
     public function update(User $user, CashAccount $account): bool
     {
-        return $this->context->can('company.update');
+        return $this->context->can('cash.manage_accounts');
     }
 
     public function transfer(User $user): bool
@@ -51,7 +51,7 @@ class CashAccountPolicy
     }
 
     /**
-     * The holder counts their own till; a supervisor (`vouchers.approve`)
+     * The holder counts their own till; a supervisor (`cash.close_days`)
      * counts an absent cashier's — any shortfall is still the holder's
      * (owner, 2026-10-29).
      */
@@ -63,17 +63,17 @@ class CashAccountPolicy
 
         return ($account->holder_user_id === $user->id && $this->context->can('cash.receive'))
             || $this->context->isSuper()
-            || $this->context->can('vouchers.approve');
+            || $this->context->can('cash.close_days');
     }
 
-    /** A month's statement (bank, wallet) or count (safe): whoever sees the cash book. */
+    /** A month's statement (bank, wallet) or count (safe): whoever reconciles the accounts (cash.reconcile). */
     public function countStatement(User $user, CashAccount $account): bool
     {
-        return ! $account->isTill() && $this->context->can('cash.view');
+        return ! $account->isTill() && $this->context->can('cash.reconcile');
     }
 
     public function reopenDay(User $user, CashAccount $account): bool
     {
-        return $this->context->can('vouchers.approve');
+        return $this->context->can('cash.close_days');
     }
 }

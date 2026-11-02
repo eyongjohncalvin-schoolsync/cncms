@@ -90,12 +90,16 @@ enum Permission: string
      * (payments.create); a branch's own price for one is branches.settings.
      */
     case PaymentsOffers = 'payments.offers';
+    /** Send a receipt to the customer (WhatsApp / email) and work the "To send" queue — no longer just payments.view (2026-11-02). */
+    case PaymentsSendReceipt = 'payments.send_receipt';
 
     // ---- Manuscripts -------------------------------------------------
     case ManuscriptsView = 'manuscripts.view';
     case ManuscriptsExport = 'manuscripts.export';
     case ManuscriptsCalculate = 'manuscripts.calculate';
     case ManuscriptsSendBill = 'manuscripts.send_bill';
+    /** Generate, download, cancel and delete the printed bills — its own switch, not the register export (2026-11-02). */
+    case ManuscriptsPrintBills = 'manuscripts.print_bills';
 
     // ---- Zones ------------------------------------------------------
     case ZonesView = 'zones.view';
@@ -140,16 +144,26 @@ enum Permission: string
      * only; they never block a bon.
      */
     case BudgetsManage = 'budgets.manage';
+    /** Close and reopen an expenditure month — was the owner only (2026-11-02). */
+    case ExpendituresCloseMonths = 'expenditures.close_months';
 
     // ---- Reports -------------------------------------------------
     case ReportsView = 'reports.view';
     case ReportsExport = 'reports.export';
+    /** The profit-and-loss block in the monthly report — was super/admin by role name (2026-11-02). */
+    case ReportsProfitAndLoss = 'reports.profit_and_loss';
 
     // ---- Complaints --------------------------------------------
     case ComplaintsView = 'complaints.view';
     case ComplaintsCreate = 'complaints.create';
     /** resolve / reopen / linkDuplicate (the "not the submitter" identity check stays in the policy). */
     case ComplaintsResolve = 'complaints.resolve';
+    /**
+     * A technician: can be given complaints, takes and starts jobs, is rung
+     * for new ones — was "holds complaints.resolve" (2026-11-02), which made
+     * every office manager a technician too.
+     */
+    case ComplaintsTakeJobs = 'complaints.take_jobs';
     case ComplaintsAssign = 'complaints.assign';
     case ComplaintsNotifyInvestors = 'complaints.notify_investors';
     /**
@@ -170,6 +184,8 @@ enum Permission: string
     case ArrearsRequest = 'arrears.request';
     /** approve + reject (the stage machine + maker≠checker identity rules stay in the policy). */
     case ArrearsApprove = 'arrears.approve';
+    /** The second approval a large or repeated adjustment needs — was super/admin by role name (2026-11-02). */
+    case ArrearsApproveFinal = 'arrears.approve_final';
 
     // ---- Installations (docs/plans/installation-and-promotions.md) ----
     /**
@@ -190,6 +206,14 @@ enum Permission: string
      * (installations.manage); setting them is admin/owner (D8).
      */
     case InstallationsOffers = 'installations.offers';
+
+    // ---- Compensation & free months (2026-11-02: no longer installations.*) ----
+    /** See the compensation page and a customer's free months. */
+    case CompensationView = 'compensation.view';
+    /** Ask for free months — one customer's, or a zone's / branch's compensation. */
+    case CompensationRequest = 'compensation.request';
+    /** Approve or reject them, and set how many go through without approval. */
+    case CompensationApprove = 'compensation.approve';
     /**
      * Register a customer in the field, offline, with the installation (and
      * months paid upfront) money and field receipts (phase 3, D10). Only in
@@ -228,6 +252,16 @@ enum Permission: string
     case CashRemit = 'cash.remit';
     /** Receive remittances into a till, record deposits / transfers, close a till's day. */
     case CashReceive = 'cash.receive';
+    /** Add and edit tills, safes and bank accounts and their opening balances — was company.update (2026-11-02). */
+    case CashManageAccounts = 'cash.manage_accounts';
+    /** Close another person's till day, and reopen a closed day — was vouchers.approve (2026-11-02). */
+    case CashCloseDays = 'cash.close_days';
+    /** Write off a shortage or a missing payment, settle "says paid" — was vouchers.approve (2026-11-02). */
+    case CashWriteOff = 'cash.write_off';
+    /** Count a statement and confirm or refuse a bank deposit — was cash.view (2026-11-02). */
+    case CashReconcile = 'cash.reconcile';
+    /** Pay technicians' fees out of a till — was cash.receive (2026-11-02). */
+    case CashPayTechnicianFees = 'cash.pay_technician_fees';
 
     // ---- Vouchers / bons de caisse ---------------------------
     /** Request a voucher or a cash advance. */
@@ -249,6 +283,12 @@ enum Permission: string
     case CompanyView = 'company.view';
     /** Company info + notification settings update (CompanyPolicy::update / NotificationSettingPolicy::update). */
     case CompanyUpdate = 'company.update';
+    /** Sign the contract, accept new terms, see the demo / contract notices — was super/admin by role name (2026-11-02). */
+    case CompanySignContract = 'company.sign_contract';
+
+    // ---- Phone app --------------------------------------------
+    /** Sign in to the phone app and sync — was manuscripts.view (2026-11-02). */
+    case MobileUseApp = 'mobile.use_app';
     /**
      * The Settings -> Services catalogue (create / edit / activate /
      * deactivate / delete a service, "apply price to all subscribers") —
@@ -318,6 +358,8 @@ enum Permission: string
             'complaints' => 'Complaints',
             'arrears' => 'Arrears adjustments',
             'installations' => 'Installations',
+            'compensation' => 'Compensation & free months',
+            'mobile' => 'Phone app',
             'opening_balances' => 'Opening balances',
             'receipts', 'cash' => 'Cash & receipts',
             'vouchers' => 'Vouchers',

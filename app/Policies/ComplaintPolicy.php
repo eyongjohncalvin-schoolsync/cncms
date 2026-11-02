@@ -80,7 +80,7 @@ class ComplaintPolicy
         return $complaint->status === 'open'
             && $complaint->assigned_to === null
             && $complaint->submitted_by !== $user->id
-            && $this->context->can('complaints.resolve')
+            && $this->context->can('complaints.take_jobs')
             && app(TechnicianService::class)->canBeAssigned($user, $complaint->branch_id);
     }
 

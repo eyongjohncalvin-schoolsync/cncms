@@ -316,8 +316,8 @@ class CashTransferService
             throw ValidationException::withMessages(['deposit' => 'You made this deposit — someone else checks it against the bank.']);
         }
 
-        if (! app(TenantContext::class)->can('cash.view')) {
-            throw ValidationException::withMessages(['deposit' => 'Only someone who sees the cash book checks deposits.']);
+        if (! app(TenantContext::class)->can('cash.reconcile')) {
+            throw ValidationException::withMessages(['deposit' => 'Only someone who reconciles the accounts checks deposits.']);
         }
     }
 

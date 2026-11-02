@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Auth\Permission;
 use App\DataTransferObjects\ArrearsAdjustmentData;
 use App\DataTransferObjects\RejectArrearsAdjustmentData;
 use App\Jobs\RecalculateCustomerManuscriptsForwardJob;
@@ -318,7 +319,8 @@ class ArrearsAdjustmentService
         // Now waiting for the second, senior approval: tell who can give it.
         if ($result->status === 'pending_second_approval') {
             $this->actionAlerts->alert(
-                $this->actionAlerts->withRoles(['super', 'admin'], [(int) $result->requested_by, $actor->id]),
+                $this->actionAlerts->deciders(Permission::ArrearsApproveFinal->value, $result->customer?->branch_id)
+                    ->reject(fn (User $user): bool => in_array($user->id, [(int) $result->requested_by, $actor->id], true)),
                 'inbox.arrears',
                 'warning',
                 'Arrears adjustment needs a second approval',

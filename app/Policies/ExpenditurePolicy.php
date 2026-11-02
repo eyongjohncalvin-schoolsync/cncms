@@ -56,10 +56,10 @@ class ExpenditurePolicy
         return $this->context->can('budgets.manage');
     }
 
-    /** Reopen (or close again) a month — the owner only (E6). */
+    /** Reopen (or close again) a month (E6) — the owner, or a role given "Close months" (2026-11-02). */
     public function manageMonths(User $user): bool
     {
-        return $this->context->isSuper();
+        return $this->context->can('expenditures.close_months');
     }
 
     private function isRequester(User $user, Expenditure $expenditure): bool

@@ -67,7 +67,7 @@ class CashBookController extends Controller
                 'receive' => $canReceive,
                 'transfer' => $user->can('transfer', CashAccount::class),
                 'manage_accounts' => $user->can('create', CashAccount::class),
-                'reopen_day' => $this->context()->can('vouchers.approve'),
+                'reopen_day' => $this->context()->can('cash.close_days'),
                 // Branches v2: money between branches, once there is more than one.
                 'branch_transfers' => $user->can('transfer', CashAccount::class) && Branch::allMemoized()->count() > 1,
             ],
@@ -104,7 +104,7 @@ class CashBookController extends Controller
                     'note' => $shortage->note,
                     'created_at' => $shortage->created_at?->toIso8601String(),
                     'can_repay' => $shortage->owner_user_id !== $user->id && $canReceive,
-                    'can_write_off' => $shortage->owner_user_id !== $user->id && $this->context()->can('vouchers.approve'),
+                    'can_write_off' => $shortage->owner_user_id !== $user->id && $this->context()->can('cash.write_off'),
                 ])->values()->all(),
             'deposit_confirmations' => CashTransferService::confirmationsNeeded(),
             'denominations' => CashBookService::DENOMINATIONS,
