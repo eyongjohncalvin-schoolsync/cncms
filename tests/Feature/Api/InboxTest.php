@@ -182,6 +182,12 @@ class InboxTest extends TestCase
         Sanctum::actingAs($this->terence);
         $this->getJson("/api/v1/inbox/complaints/{$complaint->uuid}/technicians")->assertOk()->assertJsonStructure(['data']);
 
+        // Field agents may send technicians (owner, 2026-11-02); a cashier may not.
+        Sanctum::actingAs($this->kelvin);
+        $this->getJson("/api/v1/inbox/complaints/{$complaint->uuid}/technicians")->assertOk();
+
+        $this->withRole('kelvin@shalomtech.dev', 'cashier');
+        $this->app->make('auth')->forgetGuards();
         Sanctum::actingAs($this->kelvin);
         $this->getJson("/api/v1/inbox/complaints/{$complaint->uuid}/technicians")->assertForbidden();
     }

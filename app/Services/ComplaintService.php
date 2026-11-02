@@ -91,10 +91,12 @@ class ComplaintService
         ], (int) $branchId);
 
         // Nobody on it yet: whoever assigns technicians hears about it at
-        // once (manager inbox, wave 2) — an urgent complaint rings.
+        // once (manager inbox, wave 2) — an urgent complaint rings. Field
+        // agents may assign too (owner, 2026-11-02), but only those covering
+        // the complaint's zone are alerted, not every agent of the branch.
         if ($complaint->assigned_to === null) {
             $this->actionAlerts->alert(
-                $this->actionAlerts->deciders('complaints.assign', $complaint->branch_id, $submittedByUserId),
+                $this->actionAlerts->deciders('complaints.assign', $complaint->branch_id, $submittedByUserId, zoneOnly: true, zoneId: $complaint->zone_id),
                 'inbox.complaint',
                 $complaint->urgent ? 'urgent' : 'warning',
                 $complaint->urgent ? 'Urgent complaint to assign' : 'New complaint to assign',

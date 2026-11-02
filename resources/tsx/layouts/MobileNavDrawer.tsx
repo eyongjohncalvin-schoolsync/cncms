@@ -66,8 +66,10 @@ export function MobileNavDrawer({
                         className="fixed inset-y-0 left-0 flex w-64 max-w-[80vw] flex-col overflow-hidden border-r border-slate-200/70 bg-slate-50 shadow-xl shadow-slate-900/10"
                     >
                         {/* Same soft white → slate → blue-50 wash as the desktop
-                            <aside>, so the drawer reads as the same surface. */}
-                        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+                            <aside>, so the drawer reads as the same surface.
+                            Light mode only: the dark theme doesn't flip white,
+                            so in dark it washed the menu out. */}
+                        <div aria-hidden="true" className="pointer-events-none absolute inset-0 dark:hidden">
                             <div className="absolute inset-0 bg-gradient-to-b from-white via-slate-50 to-blue-50/50" />
                             <div className="absolute -top-16 left-1/2 h-52 w-52 -translate-x-1/2 rounded-full bg-blue-200/25 blur-3xl" />
                         </div>

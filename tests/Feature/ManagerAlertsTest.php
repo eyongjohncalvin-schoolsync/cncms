@@ -14,15 +14,18 @@ use App\Models\Notification;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Models\Voucher;
+use App\Models\Zone;
 use App\Services\ArrearsAdjustmentService;
 use App\Services\ComplaintEscalationService;
 use App\Services\ComplaintService;
 use App\Services\PaymentReversalRequestService;
+use Database\Factories\AgentFactory;
 use Database\Factories\ArrearsAdjustmentFactory;
 use Database\Factories\ComplaintFactory;
 use Database\Factories\CustomerFactory;
 use Database\Factories\ExpenseCategoryFactory;
 use Database\Factories\PaymentFactory;
+use Database\Factories\ZoneFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
@@ -155,6 +158,27 @@ class ManagerAlertsTest extends TestCase
 
         $this->assertContains($this->terence->id, $this->alertedUserIds('inbox.complaint', $complaint->uuid));
         $this->assertSame('urgent', Notification::query()->where('type', 'inbox.complaint')->where('source_uuid', $complaint->uuid)->value('severity'));
+    }
+
+    public function test_a_field_agent_is_alerted_to_assign_a_complaint_in_their_own_zone_only(): void
+    {
+        $theirs = ZoneFactory::new()->create();
+        $other = ZoneFactory::new()->create();
+        AgentFactory::new()->create(['zone_id' => $theirs->id, 'user_id' => $this->divine->id]);
+
+        $complaintIn = fn (Zone $zone) => app(ComplaintService::class)->create(
+            ComplaintData::fromArray(['category' => 'customer', 'customer_uuid' => CustomerFactory::new()->create(['zone_id' => $zone->id])->uuid, 'title' => 'No signal', 'description' => 'Since morning']),
+            $this->kelvin->id,
+        );
+
+        // Owner, 2026-11-02: field agents send technicians too — the agent of that zone hears at once.
+        $inTheirZone = $complaintIn($theirs);
+        $this->assertContains($this->divine->id, $this->alertedUserIds('inbox.complaint', $inTheirZone->uuid));
+        $this->assertContains($this->terence->id, $this->alertedUserIds('inbox.complaint', $inTheirZone->uuid));
+
+        $elsewhere = $complaintIn($other);
+        $this->assertNotContains($this->divine->id, $this->alertedUserIds('inbox.complaint', $elsewhere->uuid));
+        $this->assertContains($this->terence->id, $this->alertedUserIds('inbox.complaint', $elsewhere->uuid));
     }
 
     public function test_assigning_a_complaint_rings_the_technician_at_once_and_the_sweep_does_not_repeat_it(): void

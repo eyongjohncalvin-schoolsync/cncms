@@ -30,16 +30,17 @@ class ActionAlertService
     /**
      * Active members holding $permission who may act in $branchId (null =
      * company-wide item: everyone with the permission). $officeOnly leaves
-     * out collectors fenced to their own zones.
+     * out collectors fenced to their own zones; $zoneOnly keeps them only
+     * when $zoneId is one of theirs (a complaint in their own streets).
      *
      * @return Collection<int, User>
      */
-    public function deciders(string $permission, ?int $branchId = null, ?int $exceptUserId = null, bool $officeOnly = false): Collection
+    public function deciders(string $permission, ?int $branchId = null, ?int $exceptUserId = null, bool $officeOnly = false, bool $zoneOnly = false, ?int $zoneId = null): Collection
     {
         $members = TenantUser::query()
             ->where('tenant_id', (string) tenant()?->getTenantKey())
             ->get()
-            ->filter(function (TenantUser $member) use ($permission, $branchId, $exceptUserId, $officeOnly): bool {
+            ->filter(function (TenantUser $member) use ($permission, $branchId, $exceptUserId, $officeOnly, $zoneOnly, $zoneId): bool {
                 if ($member->user_id === $exceptUserId) {
                     return false;
                 }
@@ -48,6 +49,7 @@ class ActionAlertService
 
                 return $context->can($permission)
                     && ! ($officeOnly && $context->zoneIds !== null)
+                    && ! ($zoneOnly && $context->zoneIds !== null && ! in_array($zoneId, $context->zoneIds, true))
                     && ($context->branchId === null || $branchId === null || $context->branchId === $branchId);
             });
 

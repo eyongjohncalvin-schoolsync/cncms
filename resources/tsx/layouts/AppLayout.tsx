@@ -104,7 +104,8 @@ export function AppLayout({
                 MobileNavDrawer (opened by the header hamburger) takes over
                 with the exact same <AppNav> content. */}
             <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col overflow-y-auto border-r border-slate-200/70 bg-slate-50 md:flex">
-                <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-screen">
+                {/* Light mode only — the dark theme doesn't flip white, so in dark this wash blurred the menu out. */}
+                <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-screen dark:hidden">
                     <div className="absolute inset-0 bg-gradient-to-b from-white via-slate-50 to-blue-50/50" />
                     <div className="absolute -top-16 left-1/2 h-52 w-52 -translate-x-1/2 rounded-full bg-blue-200/25 blur-3xl" />
                 </div>

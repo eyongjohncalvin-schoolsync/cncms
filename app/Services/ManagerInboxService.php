@@ -103,6 +103,8 @@ class ManagerInboxService
             ->where('status', 'open')
             ->whereNull('duplicate_of_id')
             ->where(fn ($query) => $query->whereNull('assigned_to')->orWhereNotNull('escalated_at'))
+            // A field agent who may assign (owner, 2026-11-02) sees their own zones' complaints, like their alerts.
+            ->when($context->zoneIds !== null, fn ($query) => $query->whereIn('zone_id', $context->zoneIds))
             ->with(['customer:id,name', 'assignedTo:id,name'])
             ->latest()
             ->limit(self::LIMIT)
