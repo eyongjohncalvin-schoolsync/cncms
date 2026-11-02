@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use App\Models\TenantUser;
-use App\Rules\NotSuperForFencedUser;
+use App\Rules\OnlyOwnerGrantsOwner;
 use App\Support\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -32,7 +32,7 @@ class StoreTenantUserRequest extends FormRequest
             // rather than a hardcoded 5-value list. The DB CHECK constraint
             // that used to pin this column was dropped in
             // 2026_09_03_000000_relax_tenant_users_role_check.
-            'role' => ['required', 'string', Rule::exists('roles', 'name'), new NotSuperForFencedUser],
+            'role' => ['required', 'string', Rule::exists('roles', 'name'), new OnlyOwnerGrantsOwner],
             // Purely descriptive — see the tenant_users migration's doc block.
             // Deliberately free text (not Rule::in(...)): real operators will
             // have job titles this app hasn't anticipated.

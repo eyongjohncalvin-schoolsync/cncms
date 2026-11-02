@@ -115,7 +115,8 @@ class TodayAndStaffTest extends TestCase
 
         // Never your own role; never the last owner.
         $this->patchJson('/api/v1/staff/'.$this->member('patience@shalomtech.dev')->id.'/role', ['role' => 'manager'])->assertJsonValidationErrors('role');
-        $this->patchJson('/api/v1/staff/'.$this->member('kelvin@shalomtech.dev')->id.'/role', ['role' => 'manager'])->assertJsonValidationErrors('role');
+        // Only an owner changes an owner (2026-11-02): an admin is refused outright.
+        $this->patchJson('/api/v1/staff/'.$this->member('kelvin@shalomtech.dev')->id.'/role', ['role' => 'manager'])->assertForbidden();
         $this->patchJson("/api/v1/staff/{$divine->id}/role", ['role' => 'no-such-role'])->assertJsonValidationErrors('role');
 
         // A manager without users.manage can't.
@@ -133,7 +134,8 @@ class TodayAndStaffTest extends TestCase
 
         $this->phone('patience@shalomtech.dev');
         $this->postJson("/api/v1/staff/{$terence->id}/deactivate")->assertJsonValidationErrors('user');
-        $this->postJson('/api/v1/staff/'.$this->member('patience@shalomtech.dev')->id.'/deactivate')->assertStatus(422);
+        // Never yourself — now refused by the policy itself (2026-11-02), web and phone alike.
+        $this->postJson('/api/v1/staff/'.$this->member('patience@shalomtech.dev')->id.'/deactivate')->assertForbidden();
 
         $this->postJson("/api/v1/staff/{$divine->id}/deactivate")->assertOk();
         $this->assertSame('passive', $divine->user->fresh()->status);

@@ -6,7 +6,7 @@ namespace App\Http\Requests;
 
 use App\Models\Role;
 use App\Models\TenantUser;
-use App\Rules\NotSuperForFencedUser;
+use App\Rules\OnlyOwnerGrantsOwner;
 use App\Support\TenantContext;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
@@ -38,7 +38,7 @@ class UpdateTenantUserRequest extends FormRequest
             // with zero super users. Two guards: nobody changes their own
             // role, and the last super can't be moved off it.
             'role' => [
-                'sometimes', 'required', 'string', Rule::exists('roles', 'name'), new NotSuperForFencedUser,
+                'sometimes', 'required', 'string', Rule::exists('roles', 'name'), new OnlyOwnerGrantsOwner,
                 function (string $attribute, mixed $value, Closure $fail): void {
                     $tenantUser = $this->route('tenantUser');
 

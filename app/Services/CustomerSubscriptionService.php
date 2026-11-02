@@ -72,9 +72,6 @@ class CustomerSubscriptionService
 
         $services = Service::query()->whereIn('uuid', array_map(fn (CustomerServiceSelection $s): string => $s->serviceUuid, $bases))->get()->keyBy('uuid');
         $current = $customer === null ? collect() : $customer->subscriptions()->whereNull('service_variant_id')->pluck('price', 'service_id');
-        $prices = BranchPrices::for($branchId);
-        $context = app()->bound(TenantContext::class) ? app(TenantContext::class) : null;
-        $mayType = $context === null || $context->can(Permission::CustomersCustomPrice->value);
 
         foreach ($bases as $selection) {
             $service = $services->get($selection->serviceUuid);
@@ -83,32 +80,46 @@ class CustomerSubscriptionService
                 continue; // sync() reports an unknown service
             }
 
-            $price = $this->normalizePrice($selection->price);
+            $this->assertPriceAllowed($service, $current->has($service->id) ? (string) $current[$service->id] : null, $selection->price, $branchId);
+        }
+    }
 
-            if ($current->has($service->id) && $this->normalizePrice((string) $current[$service->id]) === $price) {
-                continue;
-            }
+    /**
+     * One base service's price under the rule above, for a caller that has
+     * the service and the current price loaded already (the bulk price
+     * change checks hundreds of customers without a query each).
+     *
+     * @throws ValidationException
+     */
+    public function assertPriceAllowed(Service $service, ?string $currentPrice, string $newPrice, ?int $branchId): void
+    {
+        $price = $this->normalizePrice($newPrice);
 
-            $choices = [$this->normalizePrice($prices->service($service)), ...$service->priceOptionAmounts()];
+        if ($currentPrice !== null && $this->normalizePrice($currentPrice) === $price) {
+            return;
+        }
 
-            if (in_array($price, $choices, true)) {
-                continue;
-            }
+        $choices = [$this->normalizePrice(BranchPrices::for($branchId)->service($service)), ...$service->priceOptionAmounts()];
 
-            if (! $mayType) {
-                $listed = array_unique($choices);
-                sort($listed, SORT_NUMERIC);
+        if (in_array($price, $choices, true)) {
+            return;
+        }
 
-                throw ValidationException::withMessages(['services' => [
-                    "Choose {$service->name}'s price from its options (".implode(' / ', array_map(fn (string $amount): string => number_format((float) $amount, 0, '.', ','), $listed)).' FCFA) — only a manager can set another amount.',
-                ]]);
-            }
+        $context = app()->bound(TenantContext::class) ? app(TenantContext::class) : null;
 
-            if ($service->min_price !== null && bccomp($price, (string) $service->min_price, 2) < 0) {
-                throw ValidationException::withMessages(['services' => [
-                    "{$service->name} can't be below its minimum of ".number_format((float) $service->min_price, 0, '.', ',').' FCFA.',
-                ]]);
-            }
+        if ($context !== null && ! $context->can(Permission::CustomersCustomPrice->value)) {
+            $listed = array_unique($choices);
+            sort($listed, SORT_NUMERIC);
+
+            throw ValidationException::withMessages(['services' => [
+                "Choose {$service->name}'s price from its options (".implode(' / ', array_map(fn (string $amount): string => number_format((float) $amount, 0, '.', ','), $listed)).' FCFA) — only a manager can set another amount.',
+            ]]);
+        }
+
+        if ($service->min_price !== null && bccomp($price, (string) $service->min_price, 2) < 0) {
+            throw ValidationException::withMessages(['services' => [
+                "{$service->name} can't be below its minimum of ".number_format((float) $service->min_price, 0, '.', ',').' FCFA.',
+            ]]);
         }
     }
 

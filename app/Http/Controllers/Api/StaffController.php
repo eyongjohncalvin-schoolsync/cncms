@@ -86,8 +86,8 @@ class StaffController extends Controller
 
     public function deactivate(Request $request, TenantUser $tenantUser): JsonResponse
     {
+        // TenantUserPolicy refuses your own account.
         $this->authorize('deactivate', $tenantUser);
-        abort_if($tenantUser->user_id === $request->user()->id, 422, 'You cannot deactivate yourself.');
 
         $this->accounts->deactivate($tenantUser);
 

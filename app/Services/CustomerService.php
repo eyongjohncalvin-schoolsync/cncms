@@ -522,7 +522,7 @@ class CustomerService
         // touched), same partial-success shape as an out-of-range bill.
         // The rows themselves (not just a count) are loaded so the commit
         // path can reuse them instead of re-querying per customer.
-        $customers->load('subscriptions');
+        $customers->load('subscriptions.service');
 
         return $customers->map(function (Customer $customer) use ($mode, $value): array {
             if ($customer->subscriptions->count() >= 2) {
@@ -537,6 +537,16 @@ class CustomerService
 
             try {
                 $this->assertValidBill($newBill);
+
+                // The same price rule as one customer's edit (security fix,
+                // 2026-11-02): an amount that isn't the default or a price
+                // option needs `customers.custom_price`, and never goes
+                // below the service's minimum.
+                $subscription = $customer->subscriptions->first();
+
+                if ($subscription?->service !== null) {
+                    $this->subscriptions->assertPriceAllowed($subscription->service, (string) $subscription->price, $newBill, $customer->branch_id);
+                }
 
                 return ['customer' => $customer, 'new_bill' => $newBill, 'reason' => null];
             } catch (ValidationException $e) {

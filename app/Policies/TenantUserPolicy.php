@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Policies;
 
 use App\Models\Agent;
+use App\Models\Role;
 use App\Models\TenantUser;
 use App\Models\User;
 use App\Support\TenantContext;
@@ -43,12 +44,26 @@ class TenantUserPolicy
 
     public function update(User $user, ?TenantUser $tenantUser = null): bool
     {
-        return $this->context->can('users.manage') && ($tenantUser === null || $this->worksInMyBranch($tenantUser));
+        return $this->context->can('users.manage')
+            && ($tenantUser === null || ($this->worksInMyBranch($tenantUser) && $this->mayTouchOwner($tenantUser)));
     }
 
+    /** Never your own account — someone else turns you off (the phone's staff screen already refused it). */
     public function deactivate(User $user, ?TenantUser $tenantUser = null): bool
     {
-        return $this->context->can('users.manage') && ($tenantUser === null || $this->worksInMyBranch($tenantUser));
+        return $this->context->can('users.manage')
+            && ($tenantUser === null || ($this->worksInMyBranch($tenantUser) && $this->mayTouchOwner($tenantUser) && $tenantUser->user_id !== $user->id));
+    }
+
+    /**
+     * An owner's account is changed, deactivated or deleted only by an owner
+     * (security fix, 2026-11-02): `users.manage` alone could lock the owner
+     * out or take the owner role away.
+     */
+    private function mayTouchOwner(TenantUser $tenantUser): bool
+    {
+        return $this->context->isSuper()
+            || ! Role::query()->where('name', $tenantUser->role)->where('is_super', true)->exists();
     }
 
     public function activate(User $user, ?TenantUser $tenantUser = null): bool

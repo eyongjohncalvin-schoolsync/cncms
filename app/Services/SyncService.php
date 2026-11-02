@@ -30,6 +30,7 @@ use App\Support\TenantContext;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -439,6 +440,19 @@ class SyncService
             ];
         }
 
+        // The same check as recording one on the web (security fix,
+        // 2026-11-02): before, any role that could sync could push payments.
+        if (Gate::denies('create', Payment::class)) {
+            $message = 'Your role may not record payments. Ask the office to record it.';
+
+            $this->recordSyncQueue($deviceId, 'payment', null, $localUuid, $item, 'failed', $message);
+
+            return [
+                ['local_uuid' => $localUuid, 'status' => 'failed', 'error' => $message],
+                ['entity_type' => 'payment', 'local_uuid' => $localUuid, 'message' => $message],
+            ];
+        }
+
         $customerUuid = $item['customer_uuid'] ?? null;
 
         // A customer disconnected since the money was taken is not refused:
@@ -717,6 +731,11 @@ class SyncService
         }
 
         try {
+            // Same check as logging one on the web (security fix, 2026-11-02).
+            if (Gate::forUser($actor)->denies('create', Complaint::class)) {
+                throw ValidationException::withMessages(['permission' => ['Your role may not log complaints.']]);
+            }
+
             $data = ComplaintData::fromArray([
                 'category' => $item['category'] ?? null,
                 'title' => $item['title'] ?? null,
@@ -1054,7 +1073,9 @@ class SyncService
                     ? ReceiptLeaf::query()->where('number', $item['receipt_number'])->first()
                     : null;
 
-                if ($leaf?->isUnused()) {
+                // Only the book's holder or a stock manager voids a number
+                // (ReceiptBlockPolicy::cancelLeaf — security fix, 2026-11-02).
+                if ($leaf?->isUnused() && $leaf->block !== null && Gate::forUser($actor)->allows('cancelLeaf', $leaf->block)) {
                     app(ReceiptStockService::class)->cancelLeaf($leaf, $reason, $actor);
                 }
 

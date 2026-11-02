@@ -177,8 +177,9 @@ class UsersControlCenterTest extends TestCase
         $onlySuper = $this->anotherTenantUser($user, 'super');
         TenantUser::query()->where('role', 'super')->whereKeyNot($onlySuper->id)->update(['role' => 'admin']);
 
+        // Only an owner changes an owner (2026-11-02), so an admin is refused outright.
         $this->patch("/users/{$onlySuper->id}", ['role' => 'manager'])
-            ->assertSessionHasErrors('role');
+            ->assertForbidden();
 
         $this->assertDatabaseHas('tenant_users', ['id' => $onlySuper->id, 'role' => 'super']);
     }
@@ -206,12 +207,16 @@ class UsersControlCenterTest extends TestCase
     public function test_super_can_deactivate_a_user(): void
     {
         $user = $this->actingAsRole('super');
-        $tenantUser = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
+        $other = $this->anotherTenantUser($user, 'agent');
 
-        $this->post("/users/{$tenantUser->id}/deactivate")
+        $this->post("/users/{$other->id}/deactivate")
             ->assertRedirect(route('users.index'));
 
-        $this->assertDatabaseHas('users', ['id' => $user->id, 'status' => 'passive'], 'pgsql');
+        $this->assertDatabaseHas('users', ['id' => $other->user_id, 'status' => 'passive'], 'pgsql');
+
+        // Never your own account (2026-11-02): someone else turns you off.
+        $mine = TenantUser::query()->where('user_id', $user->id)->firstOrFail();
+        $this->post("/users/{$mine->id}/deactivate")->assertForbidden();
     }
 
     /**
