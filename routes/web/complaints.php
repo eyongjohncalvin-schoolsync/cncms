@@ -13,5 +13,6 @@ Route::get('complaints/{complaint}', [ComplaintController::class, 'show'])->name
 Route::post('complaints/{complaint}/resolve', [ComplaintController::class, 'resolve'])->name('complaints.resolve');
 Route::post('complaints/{complaint}/reopen', [ComplaintController::class, 'reopen'])->name('complaints.reopen');
 Route::post('complaints/{complaint}/link-duplicate', [ComplaintController::class, 'linkDuplicate'])->name('complaints.link-duplicate');
+Route::post('complaints/{complaint}/take', [ComplaintController::class, 'take'])->name('complaints.take');
 Route::post('complaints/{complaint}/assign', [ComplaintController::class, 'assign'])->name('complaints.assign');
 Route::post('complaints/{complaint}/notify-investors', [ComplaintController::class, 'notifyInvestors'])->name('complaints.notify-investors');

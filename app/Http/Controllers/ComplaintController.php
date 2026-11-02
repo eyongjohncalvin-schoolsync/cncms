@@ -22,6 +22,7 @@ use App\Support\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -181,6 +182,8 @@ class ComplaintController extends Controller
             // those who work anywhere — each with their open complaints.
             'can_assign' => $canAssign = $this->context->can('complaints.assign') && $complaint->status !== 'resolved',
             'assignees' => $canAssign ? app(TechnicianService::class)->suggestionsFor($complaint) : [],
+            // A technician picks up an unassigned job themselves (same rule as the phone).
+            'can_take' => Gate::allows('take', $complaint),
         ]);
     }
 
@@ -215,6 +218,15 @@ class ComplaintController extends Controller
         $this->complaints->linkDuplicate($complaint, $request->validated('duplicate_of_uuid'));
 
         return back()->with('success', 'Marked as a duplicate.');
+    }
+
+    public function take(Request $request, Complaint $complaint): RedirectResponse
+    {
+        $this->authorize('take', $complaint);
+
+        $this->complaints->take($complaint, $request->user());
+
+        return back()->with('success', 'The job is yours.');
     }
 
     public function assign(AssignComplaintRequest $request, Complaint $complaint): RedirectResponse

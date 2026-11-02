@@ -27,6 +27,7 @@ use Database\Factories\PaymentFactory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
+use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Sanctum\Sanctum;
 use ReflectionMethod;
 use Tests\Feature\Api\Concerns\InteractsWithTenantRoles;
@@ -220,6 +221,29 @@ class ManagerAlertsTest extends TestCase
         $this->app->make('auth')->forgetGuards();
         Sanctum::actingAs($this->divine);
         $this->postJson("/api/v1/complaints/{$fresh->uuid}/take")->assertForbidden();
+    }
+
+    public function test_a_technician_takes_a_complaint_from_the_website(): void
+    {
+        $technician = $this->technician();
+        $complaint = ComplaintFactory::new()->submittedBy($this->divine->id)->create(['assigned_to' => null, 'status' => 'open']);
+
+        $this->actingAs($technician);
+        $this->get("/complaints/{$complaint->uuid}")->assertInertia(fn (Assert $page) => $page->where('can_take', true));
+        $this->post("/complaints/{$complaint->uuid}/take")->assertSessionHasNoErrors();
+
+        $this->assertSame($technician->id, $complaint->fresh()->assigned_to);
+        $this->get("/complaints/{$complaint->uuid}")->assertInertia(fn (Assert $page) => $page->where('can_take', false));
+    }
+
+    public function test_without_take_jobs_the_website_offers_no_take_button(): void
+    {
+        $complaint = ComplaintFactory::new()->submittedBy($this->kelvin->id)->create(['assigned_to' => null, 'status' => 'open']);
+
+        $this->actingAs($this->divine);
+        $this->get("/complaints/{$complaint->uuid}")->assertInertia(fn (Assert $page) => $page->where('can_take', false));
+        $this->post("/complaints/{$complaint->uuid}/take")->assertForbidden();
+        $this->assertNull($complaint->fresh()->assigned_to);
     }
 
     public function test_with_no_field_technician_the_office_is_rung(): void

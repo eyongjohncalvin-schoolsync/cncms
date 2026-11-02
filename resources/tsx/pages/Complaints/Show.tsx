@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { IconAlertTriangle, IconArrowLeft, IconLink, IconLock, IconLockOpen } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowLeft, IconHandGrab, IconLink, IconLock, IconLockOpen } from '@tabler/icons-react';
 import { AppLayout } from '@/layouts/AppLayout';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -23,6 +23,8 @@ interface ComplaintsShowProps {
     can_assign: boolean;
     /** Best first (App\Services\TechnicianService::suggestionsFor()). */
     assignees: ComplaintAssignee[];
+    /** Unassigned and this person may take field jobs (ComplaintPolicy::take()). */
+    can_take?: boolean;
 }
 
 interface ComplaintAssignee {
@@ -47,6 +49,7 @@ export default function ComplaintsShow({
     investor_notice_sent_at,
     can_assign = false,
     assignees = [],
+    can_take = false,
 }: ComplaintsShowProps) {
     return (
         <AppLayout title="Complaint Detail" breadcrumbs={[{ label: 'Complaints', href: '/complaints' }, { label: complaint.title }]}>
@@ -111,6 +114,14 @@ export default function ComplaintsShow({
                             )}
                         </CardBody>
                     </Card>
+
+                    {can_take && (
+                        <Card className="animate-fade-up" style={{ animationDelay: '160ms' }}>
+                            <CardBody>
+                                <TakeButton complaint={complaint} />
+                            </CardBody>
+                        </Card>
+                    )}
 
                     {can_assign && (
                         <Card className="animate-fade-up" style={{ animationDelay: '175ms' }}>
@@ -216,6 +227,29 @@ function ReopenButton({ complaint }: { complaint: Complaint }) {
             <Button type="button" variant="secondary" disabled={processing} onClick={reopen} className="rounded-lg px-4 py-2.5 text-sm font-semibold">
                 {processing ? <LoadingSpinner className="h-4 w-4" /> : <IconLockOpen size={16} stroke={2} />}
                 {processing ? 'Reopening…' : 'Reopen'}
+            </Button>
+        </div>
+    );
+}
+
+function TakeButton({ complaint }: { complaint: Complaint }) {
+    const [processing, setProcessing] = useState(false);
+
+    function take() {
+        // Plain router visit rather than useForm — this action has no body.
+        router.post(
+            `/complaints/${complaint.uuid}/take`,
+            {},
+            { preserveScroll: true, onStart: () => setProcessing(true), onFinish: () => setProcessing(false) },
+        );
+    }
+
+    return (
+        <div className="flex flex-col gap-2">
+            <p className="text-xs text-slate-500">Nobody has this job yet. Take it and the office and your team are told you are on it.</p>
+            <Button type="button" disabled={processing} onClick={take} className="self-start rounded-lg px-4 py-2.5 text-sm font-semibold">
+                {processing ? <LoadingSpinner className="h-4 w-4" /> : <IconHandGrab size={16} stroke={2} />}
+                {processing ? 'Taking…' : 'Take this job'}
             </Button>
         </div>
     );
